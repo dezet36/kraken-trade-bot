@@ -263,6 +263,60 @@ def generate_trade_chart(signal: dict, df_1h) -> str:
         except Exception as e:
             log(f"chart_generator: impulse markers — {e}")
 
+        # ── Impulse candle highlight (glow box + arrow on A and B) ──────────
+        try:
+            import matplotlib.patches as mpatches
+
+            for idx, candle_color, arrow_color in [
+                (a_idx, '#26A69A', '#26A69A'),
+                (b_idx, '#EF5350', '#EF5350'),
+            ]:
+                if idx < 0 or idx >= len(df):
+                    continue
+
+                c_lo = float(df.iloc[idx]['Low'])
+                c_hi = float(df.iloc[idx]['High'])
+
+                # Semi-transparent glow rectangle around the full candle (wick to wick)
+                box_lo = max(c_lo - y_rng * 0.005, y_min)
+                box_hi = min(c_hi + y_rng * 0.005, y_max)
+                rect = mpatches.Rectangle(
+                    (idx - 0.55, box_lo),
+                    1.10, box_hi - box_lo,
+                    linewidth=1.5,
+                    edgecolor=candle_color,
+                    facecolor=candle_color,
+                    alpha=0.18,
+                    zorder=3,
+                )
+                ax.add_patch(rect)
+
+                # Arrow: below candle A (LONG: A is LOW), above candle B (LONG: B is HIGH)
+                is_bottom = (is_long and idx == a_idx) or (not is_long and idx == b_idx)
+                if is_bottom:
+                    arrow_tail_y = max(c_lo - y_rng * 0.045, y_min + y_rng * 0.01)
+                    arrow_tip_y  = c_lo
+                    if arrow_tail_y < arrow_tip_y and arrow_tail_y >= y_min:
+                        ax.annotate('', xy=(idx, arrow_tip_y),
+                                    xytext=(idx, arrow_tail_y),
+                                    arrowprops=dict(arrowstyle='-|>',
+                                                    color=arrow_color, lw=1.8,
+                                                    mutation_scale=10),
+                                    zorder=14)
+                else:
+                    arrow_tail_y = min(c_hi + y_rng * 0.045, y_max - y_rng * 0.01)
+                    arrow_tip_y  = c_hi
+                    if arrow_tail_y > arrow_tip_y and arrow_tail_y <= y_max:
+                        ax.annotate('', xy=(idx, arrow_tip_y),
+                                    xytext=(idx, arrow_tail_y),
+                                    arrowprops=dict(arrowstyle='-|>',
+                                                    color=arrow_color, lw=1.8,
+                                                    mutation_scale=10),
+                                    zorder=14)
+
+        except Exception as e:
+            log(f"chart_generator: impulse candle highlight — {e}")
+
         # ── Zone shading ──────────────────────────────────────────────────────
         def _shade(zone, color, label):
             if zone is None:
