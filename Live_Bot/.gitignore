@@ -1,0 +1,7 @@
+.env
+*.log
+bot_log.txt
+trades.csv
+__pycache__/
+*.pyc
+*.pyo

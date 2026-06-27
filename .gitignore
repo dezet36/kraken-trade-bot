@@ -1,0 +1,58 @@
+# Claude Code служебные файлы
+.claude/
+
+# Секреты и конфиг с ключами — НИКОГДА не загружать в git!
+.env
+*.env
+Live_Bot/.env
+
+# Состояние бота (пересоздаётся при запуске)
+Live_Bot/cooldown_state.json
+Live_Bot/positions_state.json
+Live_Bot/pending_orders.json
+
+# Журналы и торговая история
+Live_Bot/trades_journal.csv
+Live_Bot/*.log
+logs/
+*.log
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Виртуальное окружение
+venv/
+env/
+.venv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Кэш бэктестов (большие бинарные файлы)
+backtest_cache/
+
+# Результаты бэктестов и логи
+backtest_*.csv
+bot_log.txt
+Live_Bot/bot_log.txt
+
+# Временные файлы
+*.tmp
+*.bak
+~$*
