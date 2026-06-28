@@ -20,7 +20,10 @@ Live_Bot/state/
 
 # Журналы и торговая история
 Live_Bot/trades_journal.csv
+trades.csv
+Live_Bot/trades.csv
 Live_Bot/*.log
+service_*.log
 logs/
 *.log
 
