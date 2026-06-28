@@ -728,11 +728,18 @@ class LiveTradeManager:
                 sz  = setup.get('size', 0)
                 inv = (ep - sz * config.ZONE_B_TOP if side == 'buy'
                        else ep + sz * config.ZONE_B_TOP)
+                # Bybit V5: прикрепляем стоп-лосс прямо к ордеру входа — позиция будет
+                # защищена в МОМЕНТ заполнения лимита, даже если бот не успеет отработать
+                # цикл регистрации. TP (частичные 50/50) ставятся reduce-only после заполнения.
+                limit_params = {'reduce_only': False, 'timeInForce': 'GTC'}
+                if getattr(self.exchange, 'id', '') == 'bybit':
+                    limit_params['stopLoss']    = str(round(params['stop_loss'], 8))
+                    limit_params['slTriggerBy'] = 'LastPrice'
                 try:
                     lim_order = self.exchange.create_order(
                         symbol=trading_pair, type='limit', side=side,
                         amount=position_size, price=limit_price,
-                        params={'reduce_only': False, 'timeInForce': 'GTC'},
+                        params=limit_params,
                     )
                     self._save_pending_order(
                         trading_pair, lim_order.get('id'), side, position_size,

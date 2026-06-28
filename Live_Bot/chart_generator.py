@@ -142,7 +142,7 @@ def generate_trade_chart(signal: dict, df_1h) -> str:
         dir_icon = "▲ LONG" if is_long else "▼ SHORT"
         vol_str  = f"  Vol {vol_ratio:.1f}×" if vol_ratio > 0 else ""
         htf_str  = f"  HTF: {htf}" if htf not in ('—', 'NEUTRAL', None) else ""
-        title    = f"{pair}  {dir_icon}  {zone_name}{htf_str}{vol_str}"
+        title    = f"{pair} · 1H  {dir_icon}  {zone_name}{htf_str}{vol_str}"
 
         fig, axes = mpf.plot(
             df,
