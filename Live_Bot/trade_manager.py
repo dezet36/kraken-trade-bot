@@ -372,7 +372,7 @@ class LiveTradeManager:
                 'signal':             self._serialize_for_json(signal),
                 'invalidation_price': invalidation_price,
             }
-            with open(PENDING_ORDERS_FILE, 'w') as f:
+            with open(self.pending_file, 'w') as f:
                 json.dump(pending, f, indent=2)
             log(f"💾 Pending ордер {pair} сохранён (до {max_valid.strftime('%H:%M')})")
         except Exception as e:
@@ -738,6 +738,11 @@ class LiveTradeManager:
                         trading_pair, lim_order.get('id'), side, position_size,
                         limit_price, params, signal, inv,
                     )
+                    # Защита от дублей: ставим кулдаун уже при ВЫСТАВЛЕНИИ лимита,
+                    # а не только при заполнении — даже если pending-файл не сохранится,
+                    # повторного входа по этой паре в этом окне не будет.
+                    self.last_trade_time[trading_pair] = datetime.now()
+                    self._save_cooldown_state()
                     log(f"⏳ GTC LIMIT @ ${_fmt_p(limit_price)} | ID: {lim_order.get('id')} | "
                         f"Инвалидация @ ${_fmt_p(inv)}")
                     tg.limit_order_placed(trading_pair, side, limit_price,
