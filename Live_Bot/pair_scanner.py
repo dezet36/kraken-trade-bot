@@ -5,7 +5,7 @@ In DEMO mode volume filter is skipped (exchange returns 0 volume).
 
 import config
 from exchange import fetch_ohlcv
-from strategy import find_recent_impulse, get_zones, price_in_zone, get_htf_trend
+from strategy import find_recent_impulse, get_zones, get_htf_trend
 from logger import log
 
 
@@ -80,7 +80,6 @@ def scan_for_setups(liquid_pairs, trade_manager):
                 continue
 
             zone_a, zone_b = get_zones(setup)
-            zones = [zone_a, zone_b]
 
             current_price = df_1h.iloc[-1]['close']
 
