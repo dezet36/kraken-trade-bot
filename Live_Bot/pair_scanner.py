@@ -45,7 +45,7 @@ def _score(setup):
     return min(size_pct / 30.0, 1.0) * 100  # normalise against 30% impulse
 
 
-def scan_for_setups(liquid_pairs, trade_manager):
+def scan_for_setups(liquid_pairs, trade_manager, client=None):
     """
     Loads 1H data for each liquid pair, checks for an active Fibonacci
     setup where price is currently inside a zone (pre-BoS filter).
@@ -55,6 +55,10 @@ def scan_for_setups(liquid_pairs, trade_manager):
 
     Only loads 5M data later (in bot.py) for the top candidates to
     minimise API calls.
+
+    client=None -> legacy single-user OHLCV (get_exchange). В мульти-тенант
+    режиме передаётся общий keyless market-client (make_market_client), чтобы
+    скан рынка делался ОДИН раз и не зависел от ключей конкретного юзера.
     """
     candidates = []
 
@@ -65,7 +69,7 @@ def scan_for_setups(liquid_pairs, trade_manager):
                 log(f"   {pair}: кулдаун активен, пропускаем")
                 continue
 
-            df_1h = fetch_ohlcv('1h', limit=config.LOOKBACK_CANDLES + 20, symbol=pair)
+            df_1h = fetch_ohlcv('1h', limit=config.LOOKBACK_CANDLES + 20, symbol=pair, client=client)
             if df_1h is None or len(df_1h) < config.LOOKBACK_CANDLES:
                 continue
 
@@ -116,7 +120,7 @@ def scan_for_setups(liquid_pairs, trade_manager):
             # ── HTF trend filter ─────────────────────────────────────────────
             df_4h = fetch_ohlcv(config.HTF_TIMEFRAME,
                                  limit=config.HTF_EMA_SLOW + 20,
-                                 symbol=pair)
+                                 symbol=pair, client=client)
             htf_trend = get_htf_trend(df_4h)
 
             setup_dir = setup['type']
