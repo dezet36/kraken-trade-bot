@@ -5,6 +5,41 @@
 
 ---
 
+## [2026-06-28] — W11: Стратегия «Фибо-лимит» (конфиг D3 по бэктесту)
+
+**Файлы:** `Live_Bot/config.py`, `Live_Bot/strategy.py`, `Live_Bot/pair_scanner.py`,
+`Live_Bot/trade_manager.py`, `Live_Bot/trade_journal.py`, `Live_Bot/telegram_notify.py`,
+`Live_Bot/chart_generator.py`, `Live_Bot/bot.py`, `Live_Bot/.env`, `backtest_campaign.py` (новый)
+
+**Контекст:** 6-мес бэктест по методичке «Чек лист по Фибоначчи». Старая логика (BoS-вход + лесенка
+TP1–TP4 до −100%) давала PF 0.5–0.74 (минус). Полная кампания с двумя входами и глубокой зоной B
+оказалась хрупкой. Победил простой конфиг D: первый лимит-вход в зону A. BoS-подтверждение основного
+входа ухудшало результат (PF 1.54 → 0.88). Финал: D3 (2 TP + безубыток@B), риск 0.5%, лимит 3 позиции
+→ +252% / DD 33% за 6 мес.
+
+**Что изменено:**
+- `config.py`: `RISK_PER_TRADE` дефолт 1.0→0.5; `MAX_ACTIVE_PAIRS` 5→3; новые флаги `ENTRY_MODE='ZONE_LIMIT'`,
+  `REQUIRE_BOS=False`, `USE_ZONE_B_ENTRY=False`, `BREAKEVEN_AT_B=True`; `TP_CLOSE_FRACTIONS=[0.5,0.5]`;
+  `TRAIL_AFTER_TP=99` (трейлинг отключён); убраны `TP3_LEVEL`/`TP4_LEVEL`.
+- `.env`: `RISK_PER_TRADE=0.5`, `MAX_ACTIVE_PAIRS=3`.
+- `strategy.py`: `analyze_market` — вход GTC-лимитом на 38.2%-границе зоны A БЕЗ ожидания BoS
+  (детект пред-входовой области: цена между границей зоны A и уровнем B). `calculate_trade_params`
+  переписан под 2 TP (−18%/−27%) + `be_level` (уровень B). Зона B как точка входа отключена.
+- `pair_scanner.py`: фильтр «цена в зоне» заменён на пред-входовую область зоны A; зона B убрана.
+- `trade_manager.py`: GTC-лимит ставится на границе зоны A; `_place_sl_tp_orders` — 2 TP по 50%;
+  `_check_tp_levels` — безубыток при пробое уровня B (0%), 2 TP; персистентность хранит `be_level`
+  вместо TP3/TP4; восстановление TP по долям 50%.
+- `trade_journal.py`/`telegram_notify.py`/`chart_generator.py`: устойчивы к отсутствию TP3/TP4,
+  сообщения/график обновлены под 2 TP + безубыток.
+- `bot.py`: убран лишний fetch 5M; лог-сообщения под лимит-вход.
+- `backtest_campaign.py`: новый симулятор кампании (машина состояний, портфельный лимит, сетка
+  риск×лимит) — инструмент валидации стратегии.
+
+**Зачем:** Привести бота к методичке Фибоначчи в варианте, который статистически прибылен (PF ~1.5),
+с контролируемой просадкой (риск 0.5% + лимит 3 позиции).
+
+---
+
 ## [2026-06-27] — W3: Фильтр микроценовых пар
 
 **Файлы:** `Live_Bot/config.py`, `Live_Bot/pair_scanner.py`, `Live_Bot/trade_manager.py`

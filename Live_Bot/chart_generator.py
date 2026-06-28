@@ -44,8 +44,8 @@ def generate_trade_chart(signal: dict, df_1h) -> str:
         sl       = float(params['stop_loss'])
         tp1      = float(params['take_profit_1'])
         tp2      = float(params['take_profit_2'])
-        tp3      = float(params['take_profit_3'])
-        tp4      = float(params['take_profit_4'])
+        tp3      = float(params['take_profit_3']) if params.get('take_profit_3') else None
+        tp4      = float(params['take_profit_4']) if params.get('take_profit_4') else None
         rr       = params.get('rr', 0)
 
         # A = impulse origin (LOW for LONG, HIGH for SHORT)
@@ -91,7 +91,7 @@ def generate_trade_chart(signal: dict, df_1h) -> str:
             y_min = min(sl, a_price - imp_size * 0.06)
             y_max = b_price + imp_size * 0.32   # covers TP1(+18%) and TP2(+27%)
             for tp in [tp3, tp4]:
-                if tp <= b_price + imp_size * 1.5:
+                if tp is not None and tp <= b_price + imp_size * 1.5:
                     y_max = max(y_max, tp)
             c_lo = float(df['Low'].min())
             c_hi = float(df['High'].max())
@@ -103,7 +103,7 @@ def generate_trade_chart(signal: dict, df_1h) -> str:
             y_max = max(sl, a_price + imp_size * 0.06)
             y_min = b_price - imp_size * 0.32
             for tp in [tp3, tp4]:
-                if tp >= b_price - imp_size * 1.5:
+                if tp is not None and tp >= b_price - imp_size * 1.5:
                     y_min = min(y_min, tp)
             c_lo = float(df['Low'].min())
             c_hi = float(df['High'].max())
@@ -197,9 +197,11 @@ def generate_trade_chart(signal: dict, df_1h) -> str:
             (entry, '#2196F3', '--', 1.8, f'Entry  ${_fp(entry)}'),
             (tp1,   '#4CAF50', '-',  1.3, f'TP1  ${_fp(tp1)}'),
             (tp2,   '#66BB6A', '-',  1.1, f'TP2  ${_fp(tp2)}'),
-            (tp3,   '#81C784', '-',  1.0, f'TP3  ${_fp(tp3)}'),
-            (tp4,   '#A5D6A7', '-',  1.3, f'TP4  ${_fp(tp4)}'),
         ]
+        if tp3 is not None:
+            key_lines.append((tp3, '#81C784', '-', 1.0, f'TP3  ${_fp(tp3)}'))
+        if tp4 is not None:
+            key_lines.append((tp4, '#A5D6A7', '-', 1.3, f'TP4  ${_fp(tp4)}'))
         if bos_level:
             _bl = float(bos_level)
             key_lines.insert(2, (_bl, '#FFD700', ':', 1.0, f'BoS  ${_fp(_bl)}'))
@@ -345,9 +347,9 @@ def generate_trade_chart(signal: dict, df_1h) -> str:
             f"──────────────────\n"
             f"TP1    ${_fp(tp1)}\n"
             f"TP2    ${_fp(tp2)}\n"
-            f"TP3    ${_fp(tp3)}\n"
-            f"TP4    ${_fp(tp4)}\n"
-            f"──────────────────\n"
+            + (f"TP3    ${_fp(tp3)}\n" if tp3 is not None else "")
+            + (f"TP4    ${_fp(tp4)}\n" if tp4 is not None else "")
+            + f"──────────────────\n"
             f"Risk   {risk_str}"
         )
         ax.text(

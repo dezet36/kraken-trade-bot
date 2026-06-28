@@ -116,14 +116,10 @@ def trading_cycle():
         if pair in open_pairs:
             continue
 
-        log(f"\nПроверяю BoS на 5M: {pair} ({candidate['setup']['type']} {candidate['zone']})")
+        log(f"\nПроверяю вход в зону A: {pair} ({candidate['setup']['type']} {candidate['zone']})")
 
         try:
-            df_5m = fetch_ohlcv('5m', limit=100, symbol=pair)
-            if df_5m is None:
-                continue
-
-            signal = analyze_market(candidate['df_1h'], df_5m, pair, balance)
+            signal = analyze_market(candidate['df_1h'], None, pair, balance)
 
             if signal:
                 signal['htf_trend'] = candidate.get('htf_trend', 'NEUTRAL')
@@ -133,7 +129,7 @@ def trading_cycle():
                     signals_found += 1
                     open_pairs.add(pair)
             else:
-                log(f"BoS не подтверждён на {pair}")
+                log(f"Цена не в пред-входовой области {pair}")
 
         except Exception as e:
             msg = f"Ошибка анализа {pair}: {e}"

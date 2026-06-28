@@ -25,7 +25,7 @@ TRADING_PAIRS_POOL = [
 TRADING_PAIRS = TRADING_PAIRS_POOL
 
 # Ограничения
-MAX_ACTIVE_PAIRS = int(os.getenv('MAX_ACTIVE_PAIRS', 5))   # макс. одновременных позиций
+MAX_ACTIVE_PAIRS = int(os.getenv('MAX_ACTIVE_PAIRS', 3))   # макс. одновременных позиций (W11: 3 по бэктесту)
 
 # API ключи
 BINGX_API_KEY = os.getenv('BINGX_API_KEY')
@@ -42,7 +42,7 @@ log(f"   BYBIT_SECRET_KEY: {'Загружен' if BYBIT_SECRET_KEY else 'НЕ З
 log(f"   BINGX_API_KEY: {'Загружен' if BINGX_API_KEY else 'НЕ ЗАГРУЖЕН!'}")
 
 # Риск-менеджмент
-RISK_PER_TRADE = float(os.getenv('RISK_PER_TRADE', 1.0))   # % баланса на одну сделку
+RISK_PER_TRADE = float(os.getenv('RISK_PER_TRADE', 0.5))   # % баланса на сделку (W11: 0.5% по бэктесту — DD ~33%)
 BALANCE = float(os.getenv('BALANCE', 10000))
 RISK_PER_PAIR = RISK_PER_TRADE  # риск фиксирован на сделку; макс. экспозиция = MAX_ACTIVE_PAIRS × RISK_PER_TRADE
 
@@ -77,8 +77,16 @@ HTF_EMA_FAST      = 50     # быстрая EMA
 HTF_EMA_SLOW      = 200    # медленная EMA
 HTF_ALLOW_NEUTRAL = True   # True = торговать оба направления при нейтральном тренде
 
-# ── Трейлинг-стоп ────────────────────────────────────────────────────────────
-TRAIL_AFTER_TP    = 2      # активировать трейлинг после N-го TP (2 = после TP2)
+# ── W11: Стратегия «Фибо-лимит» (по бэктесту конфиг D3) ──────────────────────
+# Вход — GTC-лимит на границе зоны A (38.2% уровень), БЕЗ ожидания BoS.
+# 2 тейка: TP1 -18% (50%), TP2 -27% (50%). Безубыток при пробое уровня B импульса.
+ENTRY_MODE          = 'ZONE_LIMIT'   # лимит в зоне A (не BoS-вход)
+REQUIRE_BOS         = False          # BoS-подтверждение основного входа ВРЕДНО (бэктест)
+USE_ZONE_B_ENTRY    = False          # глубокая зона B не окупается — отключена
+BREAKEVEN_AT_B      = True           # SL -> вход при пробое уровня B (0%, конец импульса)
+
+# ── Трейлинг-стоп (отключён в W11: модель = 2 TP + безубыток@B) ──────────────
+TRAIL_AFTER_TP    = 99     # 99 = трейлинг не активируется (только 2 TP)
 TRAIL_DISTANCE_K  = 1.0    # множитель начального SL-расстояния для трейла
 
 # Зоны интереса
@@ -89,15 +97,14 @@ ZONE_B_BOTTOM = 0.786
 
 # Стопы и тейки (уровни расширений от HIGH/LOW импульса)
 MIN_SL_PERCENT = 0.008
-SL_BUFFER = 0.003
-TP1_LEVEL = 0.18    # -18%  от вершины/основания (1-й таргет по PDF)
-TP2_LEVEL = 0.27    # -27%  (2-й таргет)
-TP3_LEVEL = 0.618   # -61.8% (большой таргет / 2-й вход)
-TP4_LEVEL = 1.0     # -100% (расширение 1:1)
-MIN_RR = 1.5
+SL_BUFFER = 0.010   # 1.0% от размера импульса — реальный буфер за зоной
+TP1_LEVEL = 0.18    # -18%  первый таргет (закрываем 50%)
+TP2_LEVEL = 0.27    # -27%  второй таргет (закрываем остаток 50%)
+TP_CLOSE_FRACTIONS = [0.5, 0.5]   # доли закрытия на TP1, TP2
+MIN_RR = 2.0        # минимальный RR ко входу (к TP1)
 
-# Volume confirmation для BoS
-VOLUME_CONFIRM_MULT = 1.2   # BoS-свеча должна иметь объём >= 1.2× EMA20 объёма на 5M
+# Volume confirmation (legacy, не используется при REQUIRE_BOS=False)
+VOLUME_CONFIRM_MULT = 1.2
 
 # Кулдаун
 COOLDOWN_HOURS = 12

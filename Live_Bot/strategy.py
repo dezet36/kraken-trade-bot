@@ -30,58 +30,76 @@ def get_htf_trend(df_4h):
 
 
 def find_recent_impulse(df, lookback_candles=48):
-    """Находит последний импульс за последние N свечей"""
+    """
+    Находит последний структурный импульс за последние N свечей.
+
+    Приоритет: свинговый метод (локальные экстремумы n=2) — ищет самый
+    свежий направленный ход между последним swing-low и swing-high.
+    Fallback: глобальный max/min за весь период (старый метод).
+
+    Дополнительные фильтры:
+    - Точка B (конец импульса) должна быть в последних 24 свечах (свежесть)
+    - Для импульсов >15 свечей: ≥60% свечей должны быть направленными
+    """
     if len(df) < lookback_candles:
         return None
 
     segment = df.tail(lookback_candles).reset_index(drop=True)
 
+    def _build_setup(direction, s_idx, e_idx, s_price, e_price):
+        size = abs(e_price - s_price)
+        if size <= 0:
+            return None
+        num = e_idx - s_idx + 1
+        if num > 15:
+            seg = segment.iloc[s_idx:e_idx + 1]
+            directional = (
+                (seg['close'] > seg['open']).sum() if direction == 'LONG'
+                else (seg['close'] < seg['open']).sum()
+            )
+            if directional / num < 0.60:
+                return None
+        return {
+            'type': direction,
+            'start_price': s_price,
+            'end_price': e_price,
+            'size': size,
+            'start_time': segment.loc[s_idx, 'timestamp'],
+            'end_time': segment.loc[e_idx, 'timestamp'],
+        }
+
+    # ── Свинговый метод: ищем последний чистый направленный ход ─────────────
+    local_highs, local_lows = find_local_extremes(segment, n=2)
+    if local_highs and local_lows:
+        last_high = local_highs[-1]
+        last_low  = local_lows[-1]
+
+        if last_low['index'] < last_high['index']:
+            direction = 'LONG'
+            s_idx, e_idx = last_low['index'], last_high['index']
+            s_price, e_price = last_low['price'], last_high['price']
+        else:
+            direction = 'SHORT'
+            s_idx, e_idx = last_high['index'], last_low['index']
+            s_price, e_price = last_high['price'], last_low['price']
+
+        # Проверка свежести: точка B в последних 24 свечах
+        if e_idx >= len(segment) - 24:
+            setup = _build_setup(direction, s_idx, e_idx, s_price, e_price)
+            if setup:
+                return setup
+
+    # ── Fallback: глобальный max/min (старый метод) ──────────────────────────
     max_idx = segment['high'].idxmax()
     min_idx = segment['low'].idxmin()
-
     max_price = segment.loc[max_idx, 'high']
     min_price = segment.loc[min_idx, 'low']
 
     if min_idx < max_idx:
-        direction = 'LONG'
-        impulse_start, impulse_end = min_idx, max_idx
+        return _build_setup('LONG', min_idx, max_idx, min_price, max_price)
     elif max_idx < min_idx:
-        direction = 'SHORT'
-        impulse_start, impulse_end = max_idx, min_idx
-    else:
-        return None
-
-    # Улучшение B: фильтр концентрации импульса.
-    # Медленный дрейф (>15 свечей) должен иметь ≥60% направленных свечей,
-    # иначе это боковик, а не настоящий импульс.
-    num_candles = impulse_end - impulse_start + 1
-    if num_candles > 15:
-        impulse_seg = segment.iloc[impulse_start:impulse_end + 1]
-        if direction == 'LONG':
-            directional = (impulse_seg['close'] > impulse_seg['open']).sum()
-        else:
-            directional = (impulse_seg['close'] < impulse_seg['open']).sum()
-        if directional / num_candles < 0.60:
-            return None
-
-    if direction == 'LONG':
-        return {
-            'type': 'LONG',
-            'start_price': min_price,
-            'end_price': max_price,
-            'size': max_price - min_price,
-            'start_time': segment.loc[min_idx, 'timestamp'],
-            'end_time': segment.loc[max_idx, 'timestamp']
-        }
-    else:
-        return {
-            'type': 'SHORT',
-            'start_price': max_price,
-            'end_price': min_price,
-            'size': max_price - min_price,
-            'start_time': segment.loc[max_idx, 'timestamp'],
-            'end_time': segment.loc[min_idx, 'timestamp']
-        }
+        return _build_setup('SHORT', max_idx, min_idx, max_price, min_price)
+    return None
 
 def get_zones(setup):
     """Рассчитывает зоны интереса"""
@@ -137,25 +155,31 @@ def find_local_extremes(df, n=2):
     return local_highs, local_lows
 
 def detect_break_of_structure(df_5m, setup, zones):
-    """Обнаруживает слом структуры (BoS)"""
+    """
+    Обнаруживает слом структуры (BoS) на 5M.
+
+    Изменения v2:
+    - Собирает ВСЕ валидные BoS-события, возвращает ПОСЛЕДНИЙ (самый свежий)
+    - Фильтр тела свечи: |close-open| > 30% диапазона (нет дожи/волчков)
+    - Минимальный пробой: закрытие > предыдущий свинг на 0.1% цены
+    - Проверка свежести: последний BoS должен быть в последних 24 свечах (2ч)
+    """
     if len(df_5m) < 10:
         return None
 
-    # Улучшение A: n=3 вместо n=2 — swing-уровень требует 3 свечи с каждой стороны.
     local_highs, local_lows = find_local_extremes(df_5m, n=3)
     if not local_highs or not local_lows:
         return None
 
-    # Улучшение D: окно 60 вместо 30 (5 часов вместо 2.5).
     recent_window = 60
     start_idx = max(0, len(df_5m) - recent_window)
 
-    # Volume confirmation: EMA20 объёма на 5M
     vol_ema = df_5m['volume'].ewm(span=20, adjust=False).mean()
     vol_mult = config.VOLUME_CONFIRM_MULT
 
     zone_visited = False
     active_zone = None
+    bos_events = []
 
     for i in range(start_idx, len(df_5m)):
         candle = df_5m.iloc[i]
@@ -172,152 +196,157 @@ def detect_break_of_structure(df_5m, setup, zones):
         if not zone_visited:
             continue
 
+        # Фильтр тела: исключаем дожи и волчки как BoS-свечи
+        body = abs(candle['close'] - candle['open'])
+        rng  = candle['high'] - candle['low']
+        if rng > 0 and body / rng < 0.30:
+            continue
+
         avg_vol = vol_ema.iloc[i]
 
         if setup['type'] == 'LONG':
             prev_highs = [h for h in local_highs if h['index'] < i]
-            if prev_highs and candle['close'] > prev_highs[-1]['price']:
-                if avg_vol > 0 and candle['volume'] < avg_vol * vol_mult:
-                    continue  # BoS на слабом объёме — ищем дальше
-                return {
-                    'type': 'LONG',
-                    'trigger_price': candle['close'],
-                    'trigger_time': candle['timestamp'],
-                    'bos_level': prev_highs[-1]['price'],
-                    'zone': active_zone['name'],
-                    'volume_ratio': round(candle['volume'] / avg_vol, 2) if avg_vol > 0 else 0,
-                }
+            if prev_highs:
+                swing_price = prev_highs[-1]['price']
+                if candle['close'] > swing_price:
+                    # Минимальный пробой: 0.1% от цены свинга
+                    if candle['close'] - swing_price < swing_price * 0.001:
+                        continue
+                    if avg_vol > 0 and candle['volume'] < avg_vol * vol_mult:
+                        continue
+                    bos_events.append({
+                        'type': 'LONG',
+                        'trigger_price': candle['close'],
+                        'trigger_time': candle['timestamp'],
+                        'bos_level': swing_price,
+                        'zone': active_zone['name'],
+                        'volume_ratio': round(candle['volume'] / avg_vol, 2) if avg_vol > 0 else 0,
+                        '_candle_idx': i,
+                    })
         else:
             prev_lows = [l for l in local_lows if l['index'] < i]
-            if prev_lows and candle['close'] < prev_lows[-1]['price']:
-                if avg_vol > 0 and candle['volume'] < avg_vol * vol_mult:
-                    continue  # BoS на слабом объёме — ищем дальше
-                return {
-                    'type': 'SHORT',
-                    'trigger_price': candle['close'],
-                    'trigger_time': candle['timestamp'],
-                    'bos_level': prev_lows[-1]['price'],
-                    'zone': active_zone['name'],
-                    'volume_ratio': round(candle['volume'] / avg_vol, 2) if avg_vol > 0 else 0,
-                }
+            if prev_lows:
+                swing_price = prev_lows[-1]['price']
+                if candle['close'] < swing_price:
+                    if swing_price - candle['close'] < swing_price * 0.001:
+                        continue
+                    if avg_vol > 0 and candle['volume'] < avg_vol * vol_mult:
+                        continue
+                    bos_events.append({
+                        'type': 'SHORT',
+                        'trigger_price': candle['close'],
+                        'trigger_time': candle['timestamp'],
+                        'bos_level': swing_price,
+                        'zone': active_zone['name'],
+                        'volume_ratio': round(candle['volume'] / avg_vol, 2) if avg_vol > 0 else 0,
+                        '_candle_idx': i,
+                    })
 
-    return None
+    if not bos_events:
+        return None
 
-def calculate_trade_params(setup, trigger, zone_name, balance):
-    """Рассчитывает параметры сделки"""
+    # Берём самый свежий BoS
+    last_bos = bos_events[-1]
+
+    # Проверка свежести: BoS должен быть в последних 24 свечах (2 часа)
+    if last_bos['_candle_idx'] < len(df_5m) - 24:
+        return None
+
+    last_bos.pop('_candle_idx', None)
+    return last_bos
+
+def calculate_trade_params(setup, entry_price, balance):
+    """
+    Параметры сделки для W11 (Фибо-лимит, конфиг D3):
+    - entry_price = граница зоны A (38.2% уровень)
+    - SL за уровнем 61.8% с буфером 1%
+    - TP1 = -18% (50%), TP2 = -27% (50%)
+    - be_level = уровень B импульса (0%, конец импульса) — для безубытка
+    """
     start_price = setup['start_price']
-    end_price = setup['end_price']
-    size = setup['size']
-    trigger_price = trigger['trigger_price']
-    
+    end_price   = setup['end_price']
+    size        = setup['size']
+
     if setup['type'] == 'LONG':
-        if zone_name == 'Zone_A':
-            # SL ниже зоны A: за уровень 61.8% (ZONE_A_BOTTOM от LOW)
-            sl_price = start_price + size * config.ZONE_A_BOTTOM - (size * config.SL_BUFFER)
-        else:
-            # SL ниже зоны B: за уровень 100% (ниже LOW)
-            sl_price = start_price - (size * config.SL_BUFFER)
-
-        min_sl = trigger_price * config.MIN_SL_PERCENT
-        if trigger_price - sl_price < min_sl:
-            sl_price = trigger_price - min_sl
-
-        # TP уровни: расширения вверх от HIGH (-18%, -27%, -61.8%, -100%)
-        tp1 = end_price + size * config.TP1_LEVEL
-        tp2 = end_price + size * config.TP2_LEVEL
-        tp3 = end_price + size * config.TP3_LEVEL
-        tp4 = end_price + size * config.TP4_LEVEL
-
+        # SL ниже зоны A: за уровень 61.8% (ZONE_A_BOTTOM от LOW)
+        sl_price = start_price + size * config.ZONE_A_BOTTOM - (size * config.SL_BUFFER)
+        min_sl = entry_price * config.MIN_SL_PERCENT
+        if entry_price - sl_price < min_sl:
+            sl_price = entry_price - min_sl
+        tp1 = end_price + size * config.TP1_LEVEL   # -18%
+        tp2 = end_price + size * config.TP2_LEVEL   # -27%
     else:
-        if zone_name == 'Zone_A':
-            # SL выше зоны A: за уровень 61.8% (ZONE_A_BOTTOM от HIGH)
-            sl_price = start_price - size * config.ZONE_A_BOTTOM + (size * config.SL_BUFFER)
-        else:
-            # SL выше зоны B: за уровень 100% (выше HIGH)
-            sl_price = start_price + (size * config.SL_BUFFER)
-
-        min_sl = trigger_price * config.MIN_SL_PERCENT
-        if sl_price - trigger_price < min_sl:
-            sl_price = trigger_price + min_sl
-
-        # TP уровни: расширения вниз от LOW (-18%, -27%, -61.8%, -100%)
+        # SL выше зоны A: за уровень 61.8% (ZONE_A_BOTTOM от HIGH)
+        sl_price = start_price - size * config.ZONE_A_BOTTOM + (size * config.SL_BUFFER)
+        min_sl = entry_price * config.MIN_SL_PERCENT
+        if sl_price - entry_price < min_sl:
+            sl_price = entry_price + min_sl
         tp1 = end_price - size * config.TP1_LEVEL
         tp2 = end_price - size * config.TP2_LEVEL
-        tp3 = end_price - size * config.TP3_LEVEL
-        tp4 = end_price - size * config.TP4_LEVEL
-    
-    sl_distance = abs(trigger_price - sl_price)
-    tp1_distance = abs(tp1 - trigger_price)
-    rr = tp1_distance / sl_distance if sl_distance > 0 else 0
-    
+
+    sl_distance = abs(entry_price - sl_price)
+    rr = abs(tp1 - entry_price) / sl_distance if sl_distance > 0 else 0
     if rr < config.MIN_RR:
         return None
-    
+
     risk_amount = balance * (config.RISK_PER_PAIR / 100)
     position_size = risk_amount / sl_distance
-    
+
     return {
-        'entry': trigger_price,
-        'stop_loss': sl_price,
+        'entry':         entry_price,
+        'stop_loss':     sl_price,
         'take_profit_1': tp1,
         'take_profit_2': tp2,
-        'take_profit_3': tp3,
-        'take_profit_4': tp4,
+        'be_level':      end_price,   # уровень B (0%) — пробой => SL в безубыток
         'position_size': position_size,
-        'risk_amount': risk_amount,
-        'rr': rr,
-        'sl_distance': sl_distance
+        'risk_amount':   risk_amount,
+        'rr':            rr,
+        'sl_distance':   sl_distance,
     }
 
 def analyze_market(df_1h, df_5m, trading_pair, balance):
-    """Основная функция анализа рынка"""
+    """
+    W11 (Фибо-лимит, конфиг D3): вход — GTC-лимит на границе зоны A (38.2%),
+    БЕЗ ожидания BoS. df_5m оставлен в сигнатуре для совместимости (не используется).
+    """
     setup = find_recent_impulse(df_1h, lookback_candles=config.LOOKBACK_CANDLES)
     if not setup:
         return None
-    
+
     zone_a, zone_b = get_zones(setup)
-    zones = [zone_a, zone_b]
-
     current_price = df_1h.iloc[-1]['close']
-
-    # Инвалидация: свеча закрылась ниже/выше уровня 88.6% → сетка недействительна
     end_price = setup['end_price']
     size = setup['size']
+
+    # Инвалидация: цена закрылась за уровнем 88.6% → сетка недействительна
     if setup['type'] == 'LONG':
-        invalidation_level = end_price - size * config.ZONE_B_TOP
-        if current_price < invalidation_level:
-            log(f"[{trading_pair}] Setup LONG инвалидирован: цена {current_price:.4f} < 88.6% ({invalidation_level:.4f})")
+        if current_price < end_price - size * config.ZONE_B_TOP:
             return None
     else:
-        invalidation_level = end_price + size * config.ZONE_B_TOP
-        if current_price > invalidation_level:
-            log(f"[{trading_pair}] Setup SHORT инвалидирован: цена {current_price:.4f} > 88.6% ({invalidation_level:.4f})")
+        if current_price > end_price + size * config.ZONE_B_TOP:
             return None
 
-    in_zone = False
-    for zone in zones:
-        if price_in_zone(current_price, zone):
-            in_zone = True
-            break
+    # Вход = лимит на 38.2%-границе зоны A. Лимит должен «отдыхать» по ходу коррекции:
+    #   LONG  — цена ещё ВЫШЕ границы (zone_a top) и не выше B
+    #   SHORT — цена ещё НИЖЕ границы (zone_a bottom) и не ниже B
+    if setup['type'] == 'LONG':
+        entry_price = zone_a['top']
+        if not (entry_price <= current_price <= end_price):
+            return None
+    else:
+        entry_price = zone_a['bottom']
+        if not (end_price <= current_price <= entry_price):
+            return None
 
-    if not in_zone:
-        return None
-    
-    trigger = detect_break_of_structure(df_5m, setup, zones)
-    if not trigger:
-        return None
-    
-    params = calculate_trade_params(setup, trigger, trigger['zone'], balance)
+    params = calculate_trade_params(setup, entry_price, balance)
     if not params:
         return None
-    
-    signal = {
+
+    return {
         'trading_pair': trading_pair,
-        'setup': setup,
-        'trigger': trigger,
-        'params': params,
-        'zone_a': zone_a,
-        'zone_b': zone_b
+        'setup':   setup,
+        'trigger': {'zone': 'Zone_A', 'entry_type': 'ZONE_LIMIT', 'trigger_price': entry_price},
+        'params':  params,
+        'zone_a':  zone_a,
+        'zone_b':  zone_b,
     }
-    
-    return signal

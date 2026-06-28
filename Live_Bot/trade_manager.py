@@ -14,8 +14,10 @@ COOLDOWN_FILE        = os.path.join(os.path.dirname(__file__), 'cooldown_state.j
 POSITIONS_FILE       = os.path.join(os.path.dirname(__file__), 'positions_state.json')
 PENDING_ORDERS_FILE  = os.path.join(os.path.dirname(__file__), 'pending_orders.json')
 
-# Доли закрытия на каждом TP уровне
-TP_CLOSE_FRACTIONS = [0.25, 0.25, 0.25, 0.25]  # TP1, TP2, TP3, TP4
+# Доли закрытия на каждом TP уровне (W11: 2 тейка по 50%)
+TP_CLOSE_FRACTIONS = getattr(config, 'TP_CLOSE_FRACTIONS', [0.5, 0.5])
+TP_KEYS = ['take_profit_1', 'take_profit_2']
+N_TP    = len(TP_KEYS)
 
 
 def _fmt_p(p: float) -> str:
@@ -91,8 +93,7 @@ class LiveTradeManager:
                 'stop_loss':     params['stop_loss'],
                 'take_profit_1': params['take_profit_1'],
                 'take_profit_2': params['take_profit_2'],
-                'take_profit_3': params['take_profit_3'],
-                'take_profit_4': params['take_profit_4'],
+                'be_level':      params.get('be_level'),
                 'position_size': params['position_size'],
                 'risk_amount':   params['risk_amount'],
                 'rr':            params.get('rr', 0),
@@ -125,10 +126,10 @@ class LiveTradeManager:
         direction   = saved['direction']
         is_long     = direction == 'LONG'
 
-        # Вычисляем количество сработавших TP по оставшемуся размеру
+        # Вычисляем количество сработавших TP по оставшемуся размеру (W11: 2 тейка по 50%)
         if orig_size > 0 and curr_size <= orig_size:
             fraction_remaining = curr_size / orig_size
-            tp_hit = max(0, min(4, round((1.0 - fraction_remaining) / 0.25)))
+            tp_hit = max(0, min(N_TP, round((1.0 - fraction_remaining) / 0.5)))
         else:
             tp_hit = 0
 
@@ -137,8 +138,7 @@ class LiveTradeManager:
             'stop_loss':     float(saved['stop_loss']),
             'take_profit_1': float(saved['take_profit_1']),
             'take_profit_2': float(saved['take_profit_2']),
-            'take_profit_3': float(saved['take_profit_3']),
-            'take_profit_4': float(saved['take_profit_4']),
+            'be_level':      float(saved['be_level']) if saved.get('be_level') is not None else None,
             'position_size': orig_size,
             'risk_amount':   float(saved.get('risk_amount', 0)),
             'rr':            float(saved.get('rr', 0)),
@@ -170,7 +170,7 @@ class LiveTradeManager:
                 'type':        direction,
                 'start_price': entry_price,
                 'end_price':   entry_price,
-                'size':        abs(float(saved.get('take_profit_4', entry_price)) - entry_price),
+                'size':        abs(float(saved.get('take_profit_2', entry_price)) - entry_price),
             },
             'trigger': {
                 'zone':         saved.get('zone', '—'),
@@ -593,12 +593,10 @@ class LiveTradeManager:
             else:
                 log(f"⚠️ SL не выставлен (программный SL активен): {e}")
 
-        # ── TP1-4: limit-ордера reduce_only по 25% ───────────────────────────
-        tp_keys  = ['take_profit_1', 'take_profit_2', 'take_profit_3', 'take_profit_4']
-        tp_size  = round(position_size * 0.25, 6)
-
-        for i, key in enumerate(tp_keys):
+        # ── W11: 2 TP — limit-ордера reduce_only по 50% каждый ───────────────
+        for i, key in enumerate(TP_KEYS):
             tp_price = params[key]
+            tp_size  = round(position_size * TP_CLOSE_FRACTIONS[i], 6)
             try:
                 order = self.exchange.create_order(
                     symbol=trading_pair,
@@ -674,8 +672,9 @@ class LiveTradeManager:
             htf = signal.get('htf_trend', 'N/A')
             log(f"Тип: {setup['type']}  |  Зона: {trigger['zone']}  |  HTF: {htf}")
             log(f"Вход: ${_fmt_p(params['entry'])}  |  Стоп: ${_fmt_p(params['stop_loss'])}")
-            log(f"TP1: ${_fmt_p(params['take_profit_1'])}  |  TP2: ${_fmt_p(params['take_profit_2'])}")
-            log(f"TP3: ${_fmt_p(params['take_profit_3'])}  |  TP4: ${_fmt_p(params['take_profit_4'])}")
+            log(f"TP1: ${_fmt_p(params['take_profit_1'])} (50%)  |  TP2: ${_fmt_p(params['take_profit_2'])} (50%)")
+            if params.get('be_level'):
+                log(f"Безубыток при пробое B: ${_fmt_p(params['be_level'])}")
             pos_value_usd = position_size * params['entry']
             log(f"Позиция: {position_size:.6f} (~${pos_value_usd:.2f})  |  Риск: ${risk_amount:.2f} ({config.RISK_PER_TRADE}%)  |  RR: 1:{params['rr']:.2f}")
 
@@ -698,13 +697,16 @@ class LiveTradeManager:
                     log(f"❌ {trading_pair} недоступен как фьючерс на этой бирже — пропускаем")
                     return False
 
-            # W9+: GTC лимитный ордер без блокирования (Вариант D)
+            # W9+/W11: GTC лимитный ордер на границе зоны A (вход = params['entry'])
             if config.USE_LIMIT_ENTRY:
-                offset      = config.LIMIT_ENTRY_OFFSET_PCT
-                limit_price = round(
-                    params['entry'] * (1 + offset) if side == 'buy'
-                    else params['entry'] * (1 - offset), 8
-                )
+                offset = config.LIMIT_ENTRY_OFFSET_PCT
+
+                # Вход уже равен 38.2%-границе зоны A. Небольшой offset гарантирует касание.
+                if side == 'buy':
+                    limit_price = round(params['entry'] * (1 + offset), 8)
+                else:
+                    limit_price = round(params['entry'] * (1 - offset), 8)
+
                 ep  = setup.get('end_price', params['entry'])
                 sz  = setup.get('size', 0)
                 inv = (ep - sz * config.ZONE_B_TOP if side == 'buy'
@@ -896,43 +898,32 @@ class LiveTradeManager:
     def _check_tp_levels(self, position, current_price, trading_pair):
         params  = position['params']
         setup   = position['signal']['setup']
-        tp_keys = ['take_profit_1', 'take_profit_2', 'take_profit_3', 'take_profit_4']
         tp_hit  = position['tp_hit']
         is_long = setup['type'] == 'LONG'
 
+        # ── 0. W11: Безубыток при пробое уровня B импульса (0%, конец импульса) ─
+        if getattr(config, 'BREAKEVEN_AT_B', True) and not position.get('breakeven_set'):
+            be_level = params.get('be_level')
+            if be_level:
+                crossed = (is_long and current_price >= be_level) or \
+                          (not is_long and current_price <= be_level)
+                if crossed:
+                    self._move_sl_to_breakeven(trading_pair, position)
+                    log(f"   Пробит уровень B ${_fmt_p(be_level)} — SL в безубыток")
+
         # ── 1. Software SL — всегда активен (биржевой SL дополнительный backup) ─
-        if not position.get('trailing_active'):
-            if is_long and current_price <= params['stop_loss']:
-                self._close_all(position, current_price, 'SL', trading_pair)
-                return
-            elif not is_long and current_price >= params['stop_loss']:
-                self._close_all(position, current_price, 'SL', trading_pair)
-                return
+        if is_long and current_price <= params['stop_loss']:
+            reason = 'BE' if position.get('breakeven_set') else 'SL'
+            self._close_all(position, current_price, reason, trading_pair)
+            return
+        elif not is_long and current_price >= params['stop_loss']:
+            reason = 'BE' if position.get('breakeven_set') else 'SL'
+            self._close_all(position, current_price, reason, trading_pair)
+            return
 
-        # ── 2. Трейлинг-стоп (активен после TRAIL_AFTER_TP) ─────────────────
-        if position.get('trailing_active') and position.get('trail_stop') is not None:
-            trail   = position['trail_stop']
-            dist    = position['trail_distance']
-            hit_trail = (is_long and current_price <= trail) or \
-                        (not is_long and current_price >= trail)
-            if hit_trail:
-                log(f"   Трейлинг стоп сработал @ ${current_price:.4f} (уровень ${trail:.4f})")
-                self._close_all(position, current_price, "TRAIL_SL", trading_pair)
-                return
-
-            # Подтягиваем трейл если цена продвинулась в нашу сторону
-            if is_long:
-                new_trail = current_price - dist
-                if new_trail > trail:
-                    self._update_trail_stop(trading_pair, position, new_trail)
-            else:
-                new_trail = current_price + dist
-                if new_trail < trail:
-                    self._update_trail_stop(trading_pair, position, new_trail)
-
-        # ── 3. Проверяем следующий TP ─────────────────────────────────────────
-        if tp_hit < 4:
-            tp_price  = params[tp_keys[tp_hit]]
+        # ── 2. Проверяем следующий TP (W11: 2 тейка по 50%) ────────────────────
+        if tp_hit < N_TP:
+            tp_price  = params[TP_KEYS[tp_hit]]
             tp_reached = (is_long and current_price >= tp_price) or \
                          (not is_long and current_price <= tp_price)
 
@@ -940,17 +931,16 @@ class LiveTradeManager:
                 tp_num = tp_hit + 1
                 log(f"TP{tp_num} достигнут @ ${current_price:.4f} (цель ${tp_price:.4f})")
 
-                if tp_hit < 3:
-                    # Биржевой limit-ордер закрывает 25% от НАЧАЛЬНОГО размера позиции.
-                    quarter = round(params['position_size'] * 0.25, 6)
+                if tp_hit < N_TP - 1:
+                    # Биржевой limit-ордер закрывает долю от НАЧАЛЬНОГО размера позиции.
+                    portion = round(params['position_size'] * TP_CLOSE_FRACTIONS[tp_hit], 6)
                     position['tp_hit'] += 1
-                    position['remaining_size'] = max(0.0, round(position['remaining_size'] - quarter, 6))
+                    position['remaining_size'] = max(0.0, round(position['remaining_size'] - portion, 6))
 
-                    # Учитываем реализованный PnL на этом TP
                     if is_long:
-                        partial_pnl = (tp_price - position['entry_price']) * quarter
+                        partial_pnl = (tp_price - position['entry_price']) * portion
                     else:
-                        partial_pnl = (position['entry_price'] - tp_price) * quarter
+                        partial_pnl = (position['entry_price'] - tp_price) * portion
                     position['realized_pnl'] = position.get('realized_pnl', 0.0) + partial_pnl
 
                     remaining_pct = int(round(position['remaining_size'] / params['position_size'] * 100))
@@ -958,23 +948,12 @@ class LiveTradeManager:
                     tg.tp_hit(trading_pair, tp_num, setup['type'], current_price,
                               remaining_pct, position['realized_pnl'])
 
-                    # После TP1 — стоп в безубыток
-                    if tp_hit == 0 and not position['breakeven_set']:
+                    # Подстраховка: после TP1 стоп в безубыток (если уровень B не сработал)
+                    if not position['breakeven_set']:
                         self._move_sl_to_breakeven(trading_pair, position)
-
-                    # После TRAIL_AFTER_TP — активируем трейлинг
-                    if tp_num == config.TRAIL_AFTER_TP and not position['trailing_active']:
-                        dist = position['trail_distance']
-                        initial_trail = (tp_price - dist) if is_long else (tp_price + dist)
-                        position['trailing_active'] = True
-                        self._update_trail_stop(trading_pair, position, initial_trail)
-                        log(f"   Трейлинг активирован после TP{tp_num}, "
-                            f"стартовый уровень ${initial_trail:.4f}")
-                        tg.trail_activated(trading_pair, setup['type'], initial_trail)
                 else:
-                    # TP4: биржевой limit-ордер закрывает последние 25%
-                    # _close_all как резерв на случай если ордер не прошёл
-                    self._close_all(position, current_price, 'TP4', trading_pair)
+                    # Последний TP: биржевой limit-ордер закрывает остаток
+                    self._close_all(position, current_price, f'TP{tp_num}', trading_pair)
 
     def _close_all(self, position, exit_price, reason, trading_pair):
         """Полностью закрывает позицию"""

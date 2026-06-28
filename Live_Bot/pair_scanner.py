@@ -102,10 +102,17 @@ def scan_for_setups(liquid_pairs, trade_manager):
                 if current_price > ep + sz * config.ZONE_B_TOP:
                     continue
 
-            # Price must be inside one of the zones right now
-            active_zone = next((z for z in zones if price_in_zone(current_price, z)), None)
-            if not active_zone:
-                continue
+            # W11: пред-входовая область — цена подходит к границе зоны A (38.2%) по ходу
+            # коррекции, лимит будет «отдыхать» ниже/выше рынка. Зона B отключена.
+            if setup['type'] == 'LONG':
+                entry_level = zone_a['top']
+                if not (entry_level <= current_price <= ep):
+                    continue
+            else:
+                entry_level = zone_a['bottom']
+                if not (ep <= current_price <= entry_level):
+                    continue
+            active_zone = zone_a
 
             # ── HTF trend filter ─────────────────────────────────────────────
             df_4h = fetch_ohlcv(config.HTF_TIMEFRAME,

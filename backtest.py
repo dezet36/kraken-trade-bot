@@ -46,6 +46,8 @@ def get_exchange():
 
 
 # ── DATA FETCH & CACHE ───────────────────────────────────────────────────────
+_TF_MS = {'5m': 5*60*1000, '15m': 15*60*1000, '1h': 60*60*1000, '4h': 4*60*60*1000}
+
 def fetch_ohlcv_full(exchange, symbol, timeframe, since_ms, label=''):
     cache_file = os.path.join(CACHE_DIR, f'{symbol}_{timeframe}.pkl')
     if os.path.exists(cache_file):
@@ -54,24 +56,36 @@ def fetch_ohlcv_full(exchange, symbol, timeframe, since_ms, label=''):
         print(f'  [cache] {symbol} {timeframe}: {len(data)} свечей')
         return data
 
+    tf_ms   = _TF_MS.get(timeframe, 60*60*1000)
+    now_ms  = int(time.time() * 1000) - tf_ms  # exclude current incomplete candle
+
     print(f'  [download] {label} {symbol} {timeframe}...', end='', flush=True)
+    seen     = set()
     all_candles = []
     cur = since_ms
-    while True:
+
+    while cur < now_ms:
         try:
             candles = exchange.fetch_ohlcv(symbol, timeframe, since=cur, limit=1000)
         except Exception as e:
-            print(f' ОШИБКА: {e}')
-            time.sleep(2)
+            print(f' RETRY({e})', end='', flush=True)
+            time.sleep(3)
             continue
         if not candles:
             break
-        all_candles.extend(candles)
-        if len(candles) < 1000:
+        added = 0
+        for c in candles:
+            if c[0] not in seen:
+                seen.add(c[0])
+                all_candles.append(c)
+                added += 1
+        if added == 0:
             break
-        cur = candles[-1][0] + 1
-        time.sleep(0.25)
+        # Always advance by exactly 1000 candle-widths to force forward progress
+        cur = candles[-1][0] + tf_ms
+        time.sleep(0.35)
 
+    all_candles.sort(key=lambda x: x[0])
     print(f' {len(all_candles)} свечей')
     with open(cache_file, 'wb') as f:
         pickle.dump(all_candles, f)
@@ -199,7 +213,9 @@ def find_extremes(df, n):
     return highs, lows
 
 
-def detect_bos(df_5m, setup, zones, n, window):
+def detect_bos(df_5m, setup, zones, n, window, body_filter=False, return_latest=False):
+    """BoS detection. body_filter=True: свеча-тело > 30% диапазона.
+    return_latest=True: возвращает ПОСЛЕДНИЙ BoS (не первый) + freshness 24 свечи."""
     if len(df_5m) < 10:
         return None
     highs, lows = find_extremes(df_5m, n)
@@ -209,6 +225,7 @@ def detect_bos(df_5m, setup, zones, n, window):
     start = max(0, len(df_5m) - window)
     zone_visited = False
     active_zone  = None
+    bos_events   = []
 
     for i in range(start, len(df_5m)):
         c = df_5m.iloc[i]
@@ -221,15 +238,41 @@ def detect_bos(df_5m, setup, zones, n, window):
         if not zone_visited:
             continue
 
+        if body_filter:
+            body = abs(c['close'] - c['open'])
+            rng  = c['high'] - c['low']
+            if rng > 0 and body / rng < 0.30:
+                continue
+
         if setup['type'] == 'LONG':
             prev = [h for h in highs if h['index'] < i]
             if prev and c['close'] > prev[-1]['price']:
-                return {'trigger_price': c['close'], 'zone': active_zone['name']}
+                # Минимальный пробой 0.1%
+                if body_filter and c['close'] - prev[-1]['price'] < prev[-1]['price'] * 0.001:
+                    continue
+                ev = {'trigger_price': c['close'], 'trigger_time': c['timestamp'],
+                      'zone': active_zone['name'], '_idx': i}
+                if not return_latest:
+                    return ev
+                bos_events.append(ev)
         else:
             prev = [l for l in lows if l['index'] < i]
             if prev and c['close'] < prev[-1]['price']:
-                return {'trigger_price': c['close'], 'zone': active_zone['name']}
-    return None
+                if body_filter and prev[-1]['price'] - c['close'] < prev[-1]['price'] * 0.001:
+                    continue
+                ev = {'trigger_price': c['close'], 'trigger_time': c['timestamp'],
+                      'zone': active_zone['name'], '_idx': i}
+                if not return_latest:
+                    return ev
+                bos_events.append(ev)
+
+    if not bos_events:
+        return None
+    last = bos_events[-1]
+    if return_latest and last['_idx'] < len(df_5m) - 24:
+        return None  # устаревший BoS
+    last.pop('_idx', None)
+    return last
 
 
 def old_signal(df_1h, df_5m, df_4h, balance):
@@ -266,40 +309,53 @@ def old_signal(df_1h, df_5m, df_4h, balance):
     if not params:
         return None
     params['htf'] = htf
+    params['trigger_time'] = bos.get('trigger_time', df_5m.iloc[-1]['timestamp'])
     return params
 
 
-# ── NEW STRATEGY ─────────────────────────────────────────────────────────────
+# ── NEW STRATEGY (W10 logic) ──────────────────────────────────────────────────
 def find_impulse_new(df, lookback=48):
+    """Swing-based impulse detection: finds most recent structural leg."""
     if len(df) < lookback:
         return None
     seg = df.tail(lookback).reset_index(drop=True)
+
+    def _build(direction, s_i, e_i, s_p, e_p):
+        size = abs(e_p - s_p)
+        if size <= 0:
+            return None
+        num = e_i - s_i + 1
+        if num > 15:
+            sub = seg.iloc[s_i:e_i + 1]
+            d_cnt = ((sub['close'] > sub['open']).sum() if direction == 'LONG'
+                     else (sub['close'] < sub['open']).sum())
+            if d_cnt / num < 0.60:
+                return None
+        return {'type': direction, 'start_price': s_p, 'end_price': e_p, 'size': size}
+
+    # Swing method: find_extremes with n=2
+    highs, lows = find_extremes(seg, n=2)
+    if highs and lows:
+        lh, ll = highs[-1], lows[-1]
+        if ll['index'] < lh['index']:
+            direction, s_i, e_i, s_p, e_p = 'LONG',  ll['index'], lh['index'], ll['price'], lh['price']
+        else:
+            direction, s_i, e_i, s_p, e_p = 'SHORT', lh['index'], ll['index'], lh['price'], ll['price']
+        # Freshness: B in last 24 candles
+        if e_i >= len(seg) - 24:
+            setup = _build(direction, s_i, e_i, s_p, e_p)
+            if setup:
+                return setup
+
+    # Fallback: global max/min
     max_i = seg['high'].idxmax()
     min_i = seg['low'].idxmin()
     mx, mn = seg.loc[max_i, 'high'], seg.loc[min_i, 'low']
-
     if min_i < max_i:
-        direction, i_start, i_end = 'LONG', min_i, max_i
+        return _build('LONG', min_i, max_i, mn, mx)
     elif max_i < min_i:
-        direction, i_start, i_end = 'SHORT', max_i, min_i
-    else:
-        return None
-
-    # Improvement B: concentration filter
-    num = i_end - i_start + 1
-    if num > 15:
-        seg2 = seg.iloc[i_start:i_end + 1]
-        if direction == 'LONG':
-            directional = (seg2['close'] > seg2['open']).sum()
-        else:
-            directional = (seg2['close'] < seg2['open']).sum()
-        if directional / num < 0.60:
-            return None
-
-    if direction == 'LONG':
-        return {'type': 'LONG',  'start_price': mn, 'end_price': mx, 'size': mx - mn}
-    else:
-        return {'type': 'SHORT', 'start_price': mx, 'end_price': mn, 'size': mx - mn}
+        return _build('SHORT', max_i, min_i, mx, mn)
+    return None
 
 
 def new_signal(df_1h, df_5m, df_4h, balance):
@@ -328,15 +384,25 @@ def new_signal(df_1h, df_5m, df_4h, balance):
     if htf == 'BEARISH' and setup['type'] == 'LONG':
         return None
 
-    # Improvement A+D: n=3, window=60
-    bos = detect_bos(df_5m, setup, [za, zb], n=3, window=60)
+    # W10: n=3, window=60, body_filter=True, return_latest=True
+    bos = detect_bos(df_5m, setup, [za, zb], n=3, window=60,
+                     body_filter=True, return_latest=True)
     if not bos:
         return None
 
+    # W10: SL_BUFFER=1%, MIN_RR=2.0
+    sl_buf_old = SL_BUFFER
+    min_rr_old = MIN_RR
+    globals()['SL_BUFFER'] = 0.010
+    globals()['MIN_RR']    = 2.0
     params = calc_trade_params(setup, bos['trigger_price'], bos['zone'], balance)
+    globals()['SL_BUFFER'] = sl_buf_old
+    globals()['MIN_RR']    = min_rr_old
+
     if not params:
         return None
     params['htf'] = htf
+    params['trigger_time'] = bos.get('trigger_time', df_5m.iloc[-1]['timestamp'])
     return params
 
 
@@ -451,8 +517,8 @@ def run_backtest(strategy_fn, data_1h, data_5m, label=''):
 
             params = strategy_fn(df1_window, df5_window, df4h_window, INITIAL_BALANCE)
             if params:
-                # Entry time = last 5M candle in window
-                entry_time = df5_window.iloc[-1]['timestamp']
+                # W10: используем время BoS-свечи, не конец окна
+                entry_time = params.pop('trigger_time', df5_window.iloc[-1]['timestamp'])
                 all_signals.append((entry_time, pair, params, df5, entry_time))
 
     print(f'[{label}] Signals found: {len(all_signals)} — simulating portfolio...', flush=True)
