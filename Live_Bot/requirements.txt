@@ -5,3 +5,4 @@ apscheduler>=3.10.0
 requests>=2.31.0
 matplotlib>=3.7.0
 mplfinance>=0.12.10b0
+cryptography>=42.0.0

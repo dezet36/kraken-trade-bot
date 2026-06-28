@@ -6,6 +6,12 @@
 *.env
 Live_Bot/.env
 
+# Платформенная БД (пользователи, ЗАШИФРОВАННЫЕ API-ключи, подписки) — НИКОГДА в git!
+*.db
+*.db-wal
+*.db-shm
+Live_Bot/platform.db
+
 # Состояние бота (пересоздаётся при запуске)
 Live_Bot/cooldown_state.json
 Live_Bot/positions_state.json

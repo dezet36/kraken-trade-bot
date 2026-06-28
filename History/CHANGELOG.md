@@ -5,6 +5,28 @@
 
 ---
 
+## [2026-06-28] — SaaS A1-A2: фундамент мульти-юзер платформы (шифрование + БД)
+
+**Файлы:** `Live_Bot/crypto_security.py` (новый), `Live_Bot/db.py` (новый),
+`Live_Bot/requirements.txt`, `.gitignore`
+
+**Контекст:** старт превращения одно-юзерного бота в платформу по подписке (копи-трейдинг).
+Этап A (мульти-тенант фундамент), первые изолированные модули.
+
+**Что добавлено:**
+- `crypto_security.py` — шифрование API-ключей пользователей в покое (Fernet), мастер-ключ
+  из env `PLATFORM_SECRET_KEY`. Тест round-trip 8/8.
+- `db.py` — SQLite-слой: таблицы users / payments / trades / settings; CRUD; триал и подписка
+  (`is_active`, `start_trial`, `extend_subscription`), идемпотентные платежи, журнал сделок
+  per-user, key-value настройки (trial_days/sub_price/sub_days). Тест 23/23.
+- `.gitignore` — платформенная БД (`*.db`, зашифрованные ключи) никогда не в git.
+- `cryptography` в requirements.
+
+**Зачем:** безопасное хранение чужих API-ключей и учёт пользователей/подписок — основа SaaS.
+Существующий бот не затронут (новые автономные модули).
+
+---
+
 ## [2026-06-28] — W12: Фильтр качества импульса (импульс, а не долгая торговля)
 
 **Файлы:** `Live_Bot/config.py`, `Live_Bot/strategy.py`, `backtest.py`
