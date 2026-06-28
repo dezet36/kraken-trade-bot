@@ -144,7 +144,9 @@ def upsert_user(telegram_id: int, username: str = None) -> dict:
         c.execute(
             "INSERT INTO users(telegram_id, username, joined_at, status) "
             "VALUES(?, ?, ?, 'active') "
-            "ON CONFLICT(telegram_id) DO UPDATE SET username=excluded.username",
+            # Не затираем существующий username, если при вызове он не передан (None)
+            "ON CONFLICT(telegram_id) DO UPDATE SET "
+            "username=COALESCE(excluded.username, users.username)",
             (telegram_id, username, _iso(_now())))
     return get_user(telegram_id)
 

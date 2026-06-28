@@ -12,7 +12,10 @@ PlatformManager — главный мульти-тенант цикл (копи-
 каждого юзера. Сбой одного юзера изолирован try/except и не роняет общий цикл.
 """
 
+import os
+import json
 import traceback
+from datetime import datetime, timezone
 
 import config
 import db
@@ -45,6 +48,13 @@ def _user_signal(sig: dict) -> dict:
     return s
 
 
+def _fmt_until_short(dt) -> str:
+    try:
+        return dt.astimezone(timezone.utc).strftime('%d.%m.%Y')
+    except Exception:
+        return str(dt)
+
+
 class PlatformManager:
     def __init__(self):
         db.init_db()
@@ -52,34 +62,86 @@ class PlatformManager:
         self._fingerprints = {}  # telegram_id -> (exchange, api_key_enc) для детекта смены ключей
         self.market_client = make_market_client(config.EXCHANGE_NAME)
 
-    # ── Реестр активных юзеров ────────────────────────────────────────────────
+    # ── Реестр юзеров (активные + «manage-only» с открытыми позициями) ────────
     def refresh_accounts(self):
-        """Синхронизирует реестр UserAccount со списком активных подписчиков из БД."""
-        active = db.list_active_users()
-        active_ids = set()
+        """Синхронизирует реестр UserAccount с БД.
 
-        for u in active:
+        В реестр попадают: (1) активные подписчики с ключами и (2) истёкшие/забаненные,
+        у кого ОСТАЛИСЬ открытые позиции — их ведём до TP/SL, но новые сделки им не
+        открываем (acc.active=False). Без доступа и без позиций — в реестр не берём.
+        """
+        keep_ids = set()
+
+        for u in db.list_users():
             tid = u['telegram_id']
-            active_ids.add(tid)
+            if not db.has_keys(u):
+                continue
+            active = db.is_active(u)
+            if not active and not self._has_open_positions(tid):
+                continue  # нет доступа и нечего доводить — пропускаем
+            keep_ids.add(tid)
+
             fp = (u.get('exchange'), u.get('api_key_enc'))
             cached = self.accounts.get(tid)
-
-            # Пересоздаём, если юзера ещё нет или он переподключил биржу/ключи
             if cached is None or self._fingerprints.get(tid) != fp:
                 acc = UserAccount(u)
                 if acc.ok:
+                    acc.active = active
                     self.accounts[tid] = acc
                     self._fingerprints[tid] = fp
                 else:
-                    # Не смогли построить клиент — выкидываем из активных
+                    keep_ids.discard(tid)
                     self.accounts.pop(tid, None)
                     self._fingerprints.pop(tid, None)
+            else:
+                cached.active = active   # обновляем статус подписки
 
-        # Убираем тех, кто больше не активен (истёк/забанен/отключил ключи)
+        # Убираем тех, кого больше не ведём (нет доступа и нет открытых позиций)
         for tid in list(self.accounts):
-            if tid not in active_ids:
+            if tid not in keep_ids:
                 self.accounts.pop(tid, None)
                 self._fingerprints.pop(tid, None)
+
+    @staticmethod
+    def _has_open_positions(telegram_id) -> bool:
+        """Есть ли у юзера сохранённые открытые позиции (state/<id>/positions_state.json)."""
+        path = os.path.join(os.path.dirname(__file__), 'state', str(telegram_id),
+                            'positions_state.json')
+        try:
+            with open(path, 'r') as f:
+                return bool(json.load(f))
+        except Exception:
+            return False
+
+    # ── Напоминания об окончании подписки ─────────────────────────────────────
+    def check_expiries(self):
+        """Раз в цикл: напоминание за N дней до конца и уведомление в момент истечения.
+        Идемпотентность — через users.last_reminded_at (не чаще раза в ~сутки)."""
+        reminder_days = db.get_int_setting('expiry_reminder_days', 3)
+        now = datetime.now(timezone.utc)
+        for u in db.list_users():
+            if not db.has_keys(u) or u.get('status') == 'banned':
+                continue
+            until = db.access_until(u)
+            if not until:
+                continue
+            tid  = u['telegram_id']
+            last = db._parse(u.get('last_reminded_at'))
+            try:
+                days_left = (until - now).days
+            except Exception:
+                continue
+
+            if until > now and 0 <= days_left <= reminder_days:
+                # Напоминаем не чаще раза в ~23ч
+                if last is None or (now - last).total_seconds() > 23 * 3600:
+                    tg.subscription_expiring(days_left, _fmt_until_short(until), telegram_id=tid)
+                    db.set_user_field(tid, 'last_reminded_at', now.isoformat())
+            elif until <= now:
+                # Один раз после фактического истечения
+                if last is None or last < until:
+                    tg.subscription_expired(telegram_id=tid)
+                    db.set_user_field(tid, 'last_reminded_at', now.isoformat())
 
     # ── Рыночный скан (один раз за цикл) ──────────────────────────────────────
     def scan_market(self):
@@ -100,18 +162,29 @@ class PlatformManager:
     # ── Один проход главного цикла ────────────────────────────────────────────
     def cycle(self):
         self.refresh_accounts()
-        n_active = len(self.accounts)
-        log(f"\n👥 Активных подписчиков с ключами: {n_active}")
-        if n_active == 0:
+        # Напоминания об окончании подписки (идемпотентно)
+        try:
+            self.check_expiries()
+        except Exception as e:
+            log(f"⚠️ Ошибка проверки подписок: {e}")
+
+        total = len(self.accounts)
+        n_active = sum(1 for a in self.accounts.values() if a.active)
+        log(f"\n👥 В реестре: {total} (активных: {n_active}, ведём-позиции: {total - n_active})")
+        if total == 0:
             return
 
-        # 1. Ведение позиций и pending каждого юзера (его ключами)
+        # 1. Ведение позиций и pending КАЖДОГО юзера в реестре (включая истёкших с позициями)
         for acc in list(self.accounts.values()):
             try:
                 acc.manage()
             except Exception as e:
                 log(f"⚠️ Юзер {acc.telegram_id}: ошибка ведения позиций — {e}")
                 log(traceback.format_exc())
+
+        # Новые входы возможны только если есть хоть один активный подписчик
+        if n_active == 0:
+            return
 
         # 2. Скан рынка ОДИН раз
         candidates = self.scan_market()
@@ -133,6 +206,8 @@ class PlatformManager:
 
             for acc in self.accounts.values():
                 try:
+                    if not acc.active:        # истёкшая подписка — новые сделки не открываем
+                        continue
                     if acc.is_paused():
                         continue
                     if not acc.has_free_slot():

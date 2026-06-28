@@ -357,3 +357,39 @@ def error_alert(message: str, telegram_id=None):
 
 def connection_restored():
     _send(f"✅ <b>Подключение восстановлено</b> — {_now()}")
+
+
+# ── Подписка (платформа) ───────────────────────────────────────────────────────
+
+def subscription_expiring(days: int, until_str: str, telegram_id=None):
+    """Напоминание за N дней до окончания доступа."""
+    _send(
+        f"⏳ <b>Подписка скоро истекает</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"Осталось: <b>{days} дн.</b> (до {until_str})\n"
+        f"Продли заранее, чтобы бот не перестал открывать новые сделки.\n"
+        f"Оплата: /pay  ·  Статус: /subscription",
+        chat_id=telegram_id,
+    )
+
+
+def subscription_expired(telegram_id=None):
+    """Уведомление в момент окончания доступа."""
+    _send(
+        f"⛔ <b>Подписка истекла</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"Новые сделки больше не открываются. Уже открытые позиции продолжают вестись\n"
+        f"до их TP/SL — принудительно не закрываем.\n"
+        f"Возобновить доступ: /pay",
+        chat_id=telegram_id,
+    )
+
+
+def subscription_extended(days_added: int, until_str: str, telegram_id=None):
+    """Уведомление о продлении подписки (оплата или админ-грант)."""
+    _send(
+        f"✅ <b>Подписка продлена</b> на {days_added} дн.\n"
+        f"Доступ до: <b>{until_str}</b>\n"
+        f"Спасибо! 🚀",
+        chat_id=telegram_id,
+    )

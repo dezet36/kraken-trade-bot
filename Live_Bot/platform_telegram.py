@@ -25,6 +25,7 @@ import config
 import db
 import crypto_security as crypto
 import exchange as ex
+import telegram_notify as tg
 from trade_manager import compute_stats
 from logger import log
 
@@ -161,6 +162,25 @@ class PlatformController:
             self._cmd_pause(user_id, chat_id, False)
         elif cmd in ("/subscription", "/sub"):
             self._cmd_subscription(user_id, chat_id)
+        # ── админ-команды ──
+        elif cmd == "/admin":
+            self._admin_overview(user_id, chat_id)
+        elif cmd == "/users":
+            self._admin_users(user_id, chat_id)
+        elif cmd == "/grant":
+            self._admin_grant(user_id, chat_id, args)
+        elif cmd == "/settrial":
+            self._admin_set(user_id, chat_id, 'trial_days', args, "Триал")
+        elif cmd == "/setprice":
+            self._admin_set(user_id, chat_id, 'sub_price_usd', args, "Цена подписки")
+        elif cmd == "/setsubdays":
+            self._admin_set(user_id, chat_id, 'sub_days', args, "Длительность подписки")
+        elif cmd == "/broadcast":
+            self._admin_broadcast(user_id, chat_id, args)
+        elif cmd == "/ban":
+            self._admin_ban(user_id, chat_id, args, True)
+        elif cmd == "/unban":
+            self._admin_ban(user_id, chat_id, args, False)
 
     def _handle_callback(self, data, user_id, chat_id, username):
         if data.startswith("connect_ex:"):
@@ -456,6 +476,129 @@ class PlatformController:
             f"Доступ до: <b>{_fmt_until(until)}</b> ({days} дн.)\n"
             f"Тариф: <b>${price}</b> / {sdays} дн.\n\n"
             f"Оплата: /pay  (скоро)")   # /pay включается в фазе D
+
+    # ── админ-команды ─────────────────────────────────────────────────────────
+    def _is_admin(self, user_id) -> bool:
+        return user_id in config.ADMIN_IDS
+
+    def _resolve_target(self, token: str):
+        """Находит telegram_id по '12345' или '@username'. None если не найден."""
+        token = token.strip()
+        if token.lstrip('-').isdigit():
+            return int(token)
+        if token.startswith('@'):
+            uname = token[1:].lower()
+            for u in db.list_users():
+                if (u.get('username') or '').lower() == uname:
+                    return u['telegram_id']
+        return None
+
+    def _admin_overview(self, user_id, chat_id):
+        if not self._is_admin(user_id):
+            return
+        users    = db.list_users()
+        with_keys = [u for u in users if db.has_keys(u)]
+        active    = [u for u in users if db.is_active(u) and db.has_keys(u)]
+        banned    = [u for u in users if u.get('status') == 'banned']
+        live      = len(self.platform.accounts) if self.platform else 0
+        self._send(chat_id,
+            f"<b>🛠 Админ-панель</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━━\n"
+            f"Всего юзеров:    <b>{len(users)}</b>\n"
+            f"С ключами:       <b>{len(with_keys)}</b>\n"
+            f"Активных:        <b>{len(active)}</b>\n"
+            f"В реестре (live):<b> {live}</b>\n"
+            f"Забанено:        <b>{len(banned)}</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━━\n"
+            f"Триал:    {db.get_int_setting('trial_days', 7)} дн.\n"
+            f"Подписка: ${db.get_int_setting('sub_price_usd', 30)} / "
+            f"{db.get_int_setting('sub_days', 30)} дн.\n"
+            f"Напоминание: за {db.get_int_setting('expiry_reminder_days', 3)} дн.\n"
+            f"━━━━━━━━━━━━━━━━━━━━\n"
+            f"/users · /grant ID ДНЕЙ · /settrial N · /setprice N\n"
+            f"/setsubdays N · /broadcast ТЕКСТ · /ban ID · /unban ID")
+
+    def _admin_users(self, user_id, chat_id):
+        if not self._is_admin(user_id):
+            return
+        users = db.list_users()
+        if not users:
+            self._send(chat_id, "Юзеров нет.")
+            return
+        lines = ["<b>👥 Пользователи</b>", "━━━━━━━━━━━━━━━━━━━━"]
+        for u in users[:50]:
+            tid    = u['telegram_id']
+            uname  = f"@{u['username']}" if u.get('username') else str(tid)
+            active = "✅" if db.is_active(u) else "⛔"
+            keys   = "🔑" if db.has_keys(u) else "—"
+            ban    = " 🚫" if u.get('status') == 'banned' else ""
+            until  = _fmt_until(db.access_until(u))
+            lines.append(f"{active}{keys} <code>{tid}</code> {uname} · до {until}{ban}")
+        if len(users) > 50:
+            lines.append(f"… и ещё {len(users) - 50}")
+        self._send(chat_id, "\n".join(lines))
+
+    def _admin_grant(self, user_id, chat_id, args):
+        if not self._is_admin(user_id):
+            return
+        if len(args) < 2:
+            self._send(chat_id, "Использование: /grant ID|@user ДНЕЙ")
+            return
+        target = self._resolve_target(args[0])
+        if target is None:
+            self._send(chat_id, f"Юзер <code>{args[0]}</code> не найден.")
+            return
+        try:
+            days = int(args[1])
+        except ValueError:
+            self._send(chat_id, "Дней должно быть целым числом.")
+            return
+        db.upsert_user(target)
+        db.extend_subscription(target, days)
+        u = db.get_user(target)
+        until = db.access_until(u)
+        self._send(chat_id, f"✅ Юзеру <code>{target}</code> добавлено {days} дн. Доступ до {_fmt_until(until)}.")
+        tg.subscription_extended(days, _fmt_until(until), telegram_id=target)
+
+    def _admin_set(self, user_id, chat_id, key, args, label):
+        if not self._is_admin(user_id):
+            return
+        if not args or not args[0].lstrip('-').isdigit():
+            self._send(chat_id, f"Использование: число. Текущее {label}: {db.get_int_setting(key)}")
+            return
+        db.set_setting(key, int(args[0]))
+        self._send(chat_id, f"✅ {label} = {args[0]}")
+
+    def _admin_broadcast(self, user_id, chat_id, args):
+        if not self._is_admin(user_id):
+            return
+        if not args:
+            self._send(chat_id, "Использование: /broadcast ТЕКСТ")
+            return
+        text = "📢 " + " ".join(args)
+        sent = 0
+        for u in db.list_users():
+            if u.get('status') == 'banned':
+                continue
+            self._send(u['telegram_id'], text)
+            sent += 1
+        self._send(chat_id, f"✅ Разослано {sent} юзерам.")
+
+    def _admin_ban(self, user_id, chat_id, args, ban: bool):
+        if not self._is_admin(user_id):
+            return
+        if not args:
+            self._send(chat_id, f"Использование: /{'ban' if ban else 'unban'} ID|@user")
+            return
+        target = self._resolve_target(args[0])
+        if target is None:
+            self._send(chat_id, f"Юзер <code>{args[0]}</code> не найден.")
+            return
+        db.set_user_field(target, 'status', 'banned' if ban else 'active')
+        if ban and self.platform:
+            self.platform.accounts.pop(target, None)
+            self.platform._fingerprints.pop(target, None)
+        self._send(chat_id, f"{'🚫 Забанен' if ban else '✅ Разбанен'}: <code>{target}</code>")
 
     # ── helpers: доступ к живому менеджеру / балансу ──────────────────────────
     def _live_manager(self, user_id):

@@ -25,6 +25,9 @@ class UserAccount:
         self.exchange_name = (user.get('exchange') or 'bybit').lower()
         self.manager       = None
         self.error         = None
+        # Подписка активна (обновляется PlatformManager.refresh_accounts на каждом цикле).
+        # active=False -> «manage-only»: ведём открытые позиции, но новые НЕ открываем.
+        self.active        = True
         self._build(user)
 
     def _build(self, user: dict):

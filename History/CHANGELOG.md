@@ -5,6 +5,36 @@
 
 ---
 
+## [2026-06-28] — SaaS C: подписки, триал-гейтинг, напоминания, админ-команды
+
+**Файлы:** `Live_Bot/platform_manager.py`, `Live_Bot/platform_telegram.py`,
+`Live_Bot/telegram_notify.py`, `Live_Bot/user_account.py`, `Live_Bot/config.py`,
+`Live_Bot/db.py`
+
+**Что добавлено:**
+- **Гейтинг подписки в цикле** (`platform_manager.py`): `refresh_accounts` теперь берёт в
+  реестр и истёкших/забаненных юзеров, у кого ОСТАЛИСЬ открытые позиции («manage-only»,
+  `acc.active=False`) — их позиции ведутся до TP/SL, но новые сделки НЕ открываются.
+  Без доступа и без позиций — в реестр не берём. `UserAccount.active` — флаг подписки.
+- **Напоминания** (`check_expiries`): за N дней (`expiry_reminder_days`) до конца — напоминание,
+  в момент истечения — уведомление; идемпотентно через `users.last_reminded_at` (≤ раз/сутки).
+  Новые функции в `telegram_notify.py`: `subscription_expiring/expired/extended`.
+- **Админ-команды** (`platform_telegram.py`, доступ по `config.ADMIN_IDS`): `/admin` (обзор),
+  `/users`, `/grant ID|@user ДНЕЙ` (продление + уведомление юзера), `/settrial`, `/setprice`,
+  `/setsubdays`, `/broadcast`, `/ban`, `/unban`. Резолв цели по id или @username.
+- `config.py` — `ADMIN_IDS` из env (через запятую).
+- **Багфикс** `db.upsert_user`: больше не затирает существующий `username`, если вызван без
+  него (`COALESCE(excluded.username, users.username)`) — иначе `/grant` обнулял ник.
+
+**Тесты:** подписки/гейтинг 11/11 (manage-only ведётся но не входит; напоминание+истечение
+идемпотентны), админ 17/17 (доступ только админам, grant/ban/settings/broadcast). Полный
+прогон: 8+23+30+9+10+4+8+25+11+17 = 145/145.
+
+**Зачем:** монетизация — доступ по подписке с честным ведением открытых позиций после
+истечения и инструментами управления для администратора.
+
+---
+
 ## [2026-06-28] — SaaS B2–B4: онбординг + команды юзера + связка панели
 
 **Файлы:** `Live_Bot/platform_telegram.py` (новый), `Live_Bot/platform_bot.py`,

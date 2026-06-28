@@ -116,3 +116,9 @@ COOLDOWN_HOURS = 12
 # Telegram
 TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
 TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
+
+# ── Платформа (мульти-юзер SaaS) ─────────────────────────────────────────────
+# ID администраторов (через запятую) — доступ к админ-командам платформы.
+ADMIN_IDS = [
+    int(x) for x in os.getenv('ADMIN_IDS', '').replace(' ', '').split(',') if x.strip().lstrip('-').isdigit()
+]
