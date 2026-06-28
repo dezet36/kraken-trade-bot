@@ -2,7 +2,7 @@ import config
 import telegram_notify as tg
 import trade_journal as journal
 from logger import log, log_trade
-from exchange import get_exchange, reset_exchange
+from exchange import get_exchange, reset_exchange, fetch_ohlcv
 from datetime import datetime
 from collections import defaultdict
 import traceback
@@ -493,7 +493,14 @@ class LiveTradeManager:
             )
             signal_for_tg = dict(signal)
             signal_for_tg['params'] = params
-            tg.trade_opened(signal_for_tg, telegram_id=self.telegram_id)   # без графика (df_1h не сохраняется в pending)
+            # Подгружаем свежие 1H-свечи, чтобы приложить график (df_1h не хранится в pending)
+            df_1h = None
+            try:
+                df_1h = fetch_ohlcv('1h', limit=config.LOOKBACK_CANDLES + 20,
+                                    symbol=pair, client=self.exchange)
+            except Exception as e:
+                log(f"⚠️ {pair}: не удалось загрузить свечи для графика — {e}")
+            tg.trade_opened(signal_for_tg, df_1h=df_1h, telegram_id=self.telegram_id)
 
             log(f"✅ {pair}: GTC лимит исполнен @ ${_fmt_p(actual_entry)} "
                 f"(ожидание {waited_min} мин) | Баланс: ${self.get_real_balance():.2f}")
@@ -894,6 +901,9 @@ class LiveTradeManager:
 
         log(f"\n📊 Активных позиций: {total_positions}")
 
+        # Реконсиляция: снимок открытых позиций на бирже (None = запрос не удался, пропускаем)
+        ex_sizes = self._fetch_exchange_sizes()
+
         for trading_pair, positions in self.active_positions.items():
             if not positions:
                 continue
@@ -906,10 +916,63 @@ class LiveTradeManager:
                 for position in positions[:]:
                     if position['status'] != 'OPEN':
                         continue
+                    # Позицию закрыли вне бота (руками/ликвидация/биржевой SL)?
+                    if self._is_closed_externally(trading_pair, position, ex_sizes):
+                        self._handle_external_close(position, current_price, trading_pair)
+                        continue
                     self._check_tp_levels(position, current_price, trading_pair)
 
             except Exception as e:
                 log(f"⚠️ Ошибка получения цены для {trading_pair}: {e}")
+
+    # ── Реконсиляция с биржей (ручное/внешнее закрытие) ──────────────────────
+
+    @staticmethod
+    def _norm_symbol(s: str) -> str:
+        """Приводит символ к сравнимому виду: 'BTC/USDT:USDT' и 'BTCUSDT' -> 'BTCUSDT'."""
+        return (s or '').replace('/', '').replace(':USDT', '').replace(':', '').upper()
+
+    def _fetch_exchange_sizes(self):
+        """Карта {нормализованный_символ: |contracts|} открытых позиций на бирже.
+        None — если запрос не удался (тогда реконсиляцию пропускаем, чтобы НЕ закрыть
+        позицию по ложному нулю)."""
+        try:
+            positions = self.exchange.fetch_positions()
+        except Exception as e:
+            log(f"⚠️ Реконсиляция: не удалось получить позиции с биржи — {e}")
+            return None
+        sizes = {}
+        for p in positions:
+            sym = self._norm_symbol(p.get('symbol', ''))
+            try:
+                sizes[sym] = sizes.get(sym, 0.0) + abs(float(p.get('contracts', 0) or 0))
+            except Exception:
+                continue
+        return sizes
+
+    def _is_closed_externally(self, trading_pair, position, ex_sizes) -> bool:
+        """True, если позиция фактически закрыта на бирже, а у нас ещё числится открытой."""
+        if ex_sizes is None:
+            return False
+        # Свежей позиции даём время появиться в выдаче биржи (избегаем ложного закрытия)
+        if (datetime.now() - position['entry_time']).total_seconds() < 120:
+            return False
+        remaining = position.get('remaining_size', 0.0) or 0.0
+        if remaining <= 0:
+            return False
+        size_on_ex = ex_sizes.get(self._norm_symbol(trading_pair), 0.0)
+        # Полное внешнее закрытие: на бирже осталось <10% от нашего остатка
+        return size_on_ex < remaining * 0.10
+
+    def _handle_external_close(self, position, exit_price, trading_pair):
+        """Позиция закрыта вне бота: отменяем наши SL/TP-ордера и фиксируем сделку
+        БЕЗ отправки рыночного закрытия (закрывать уже нечего)."""
+        log(f"🔔 {trading_pair}: позиция закрыта на бирже вне бота — синхронизируем")
+        self._cancel_order(trading_pair, position.get('sl_order_id'))
+        for tp_oid in position.get('tp_order_ids', []):
+            self._cancel_order(trading_pair, tp_oid)
+        position['status'] = 'CLOSED_BY_EXT'
+        self._finalize_trade(position, exit_price, 'EXT', trading_pair)
 
     def _check_tp_levels(self, position, current_price, trading_pair):
         params  = position['params']

@@ -294,6 +294,7 @@ def trade_closed(pair: str, direction: str, reason: str, pnl: float,
         "BE":       "⚖️ Безубыток",
         "TRAIL_SL": "🔄 Трейлинг стоп",
         "Manual":   "🖐 Закрыто вручную",
+        "EXT":      "🖐 Закрыто на бирже (вне бота)",
         "SL":       "🛑 Стоп-лосс",
     }
     reason_label = reason_labels.get(reason, f"❓ {reason}")
