@@ -5,6 +5,32 @@
 
 ---
 
+## [2026-06-28] — SaaS A3-A4: фабрика клиентов + параметризация менеджера под юзера
+
+**Файлы:** `Live_Bot/exchange.py`, `Live_Bot/trade_manager.py`, `Live_Bot/trade_journal.py`,
+`.gitignore`
+
+**Что изменено:**
+- `exchange.py` — фабрика `make_client(exchange, key, secret, mode)` под произвольные ключи
+  (Bybit + BingX); `make_market_client()` — общий keyless клиент для market-data сканера;
+  `validate_credentials()` — проверка ключей при онбординге (возвращает баланс/ошибку).
+  Legacy `get_exchange()/test_connection()` сохранены (работают как раньше).
+- `trade_manager.py` — `LiveTradeManager(exchange_client=None, telegram_id=None)`:
+  при `telegram_id` — свой exchange-клиент и СВОЁ состояние в `state/<id>/` (cooldown/positions/
+  pending), журнал и статистика per-user в БД. Без `telegram_id` — прежнее одно-юзер поведение.
+  Логика входа/выхода (W11/W12) не тронута.
+- `trade_journal.py` — `close_trade(..., telegram_id=None)`: при `telegram_id` пишет в БД
+  (`db.record_trade`), иначе в CSV; возвращает строку.
+- `.gitignore` — `Live_Bot/state/` (per-user операционное состояние).
+
+**Тесты:** регресс выхода 30/30 (legacy не сломан) + мульти-тенант 9/9 (per-user состояние,
+журнал в БД, изоляция между юзерами).
+
+**Зачем:** один и тот же проверенный движок исполнения теперь работает на счёте любого
+пользователя его ключами, с изолированным состоянием и статистикой.
+
+---
+
 ## [2026-06-28] — SaaS A1-A2: фундамент мульти-юзер платформы (шифрование + БД)
 
 **Файлы:** `Live_Bot/crypto_security.py` (новый), `Live_Bot/db.py` (новый),

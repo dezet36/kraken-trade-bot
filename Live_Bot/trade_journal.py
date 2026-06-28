@@ -99,11 +99,16 @@ def record_tp_hit(position: dict, tp_num: int, price: float):
 
 
 def close_trade(position: dict, exit_price: float, exit_reason: str,
-                pnl_usd: float, balance_after: float, import_config):
-    """Called when trade closes. Writes the full row to CSV."""
+                pnl_usd: float, balance_after: float, import_config, telegram_id=None):
+    """
+    Вызывается при закрытии сделки. Пишет полную строку:
+    - telegram_id задан (мульти-тенант) -> в БД (db.record_trade)
+    - иначе -> в общий CSV (legacy одно-юзер)
+    Возвращает построенную строку (dict) либо None.
+    """
     j = position.get('_journal')
     if not j:
-        return
+        return None
 
     open_dt  = datetime.fromisoformat(j['open_time'])
     close_dt = datetime.now()
@@ -171,9 +176,14 @@ def close_trade(position: dict, exit_price: float, exit_reason: str,
         'setup_notes':  notes,
     }
 
-    write_header = not os.path.exists(JOURNAL_FILE) or os.path.getsize(JOURNAL_FILE) == 0
-    with open(JOURNAL_FILE, 'a', encoding='utf-8', newline='') as f:
-        writer = csv.DictWriter(f, fieldnames=COLUMNS)
-        if write_header:
-            writer.writeheader()
-        writer.writerow(row)
+    if telegram_id is not None:
+        import db
+        db.record_trade(telegram_id, row)
+    else:
+        write_header = not os.path.exists(JOURNAL_FILE) or os.path.getsize(JOURNAL_FILE) == 0
+        with open(JOURNAL_FILE, 'a', encoding='utf-8', newline='') as f:
+            writer = csv.DictWriter(f, fieldnames=COLUMNS)
+            if write_header:
+                writer.writeheader()
+            writer.writerow(row)
+    return row

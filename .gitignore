@@ -16,6 +16,7 @@ Live_Bot/platform.db
 Live_Bot/cooldown_state.json
 Live_Bot/positions_state.json
 Live_Bot/pending_orders.json
+Live_Bot/state/
 
 # Журналы и торговая история
 Live_Bot/trades_journal.csv

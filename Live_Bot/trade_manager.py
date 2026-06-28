@@ -30,8 +30,23 @@ def _fmt_p(p: float) -> str:
 
 
 class LiveTradeManager:
-    def __init__(self):
-        self.exchange = get_exchange()
+    def __init__(self, exchange_client=None, telegram_id=None):
+        # Мульти-тенант: свой клиент и своё состояние на пользователя.
+        # Legacy (telegram_id=None): клиент из .env, файлы состояния в модульной папке.
+        self.telegram_id = telegram_id
+        self.exchange = exchange_client if exchange_client is not None else get_exchange()
+
+        if telegram_id is not None:
+            state_dir = os.path.join(os.path.dirname(__file__), 'state', str(telegram_id))
+            os.makedirs(state_dir, exist_ok=True)
+            self.cooldown_file = os.path.join(state_dir, 'cooldown_state.json')
+            self.positions_file = os.path.join(state_dir, 'positions_state.json')
+            self.pending_file  = os.path.join(state_dir, 'pending_orders.json')
+        else:
+            self.cooldown_file = COOLDOWN_FILE
+            self.positions_file = POSITIONS_FILE
+            self.pending_file  = PENDING_ORDERS_FILE
+
         self.active_positions = defaultdict(list)
         self.last_trade_time = self._load_cooldown_state()
         self.trade_history = []
@@ -44,8 +59,8 @@ class LiveTradeManager:
         """Загружает время последней сделки по парам из файла (сохраняется между перезапусками)."""
         state = defaultdict(lambda: None)
         try:
-            if os.path.exists(COOLDOWN_FILE):
-                with open(COOLDOWN_FILE, 'r') as f:
+            if os.path.exists(self.cooldown_file):
+                with open(self.cooldown_file, 'r') as f:
                     data = json.load(f)
                 for pair, ts in data.items():
                     state[pair] = datetime.fromisoformat(ts)
@@ -62,7 +77,7 @@ class LiveTradeManager:
                 for pair, ts in self.last_trade_time.items()
                 if ts is not None
             }
-            with open(COOLDOWN_FILE, 'w') as f:
+            with open(self.cooldown_file, 'w') as f:
                 json.dump(data, f)
         except Exception as e:
             log(f"⚠️ Не удалось сохранить кулдаун: {e}")
@@ -72,8 +87,8 @@ class LiveTradeManager:
     def _load_positions_state(self):
         """Загружает сохранённое состояние открытых позиций из JSON."""
         try:
-            if os.path.exists(POSITIONS_FILE):
-                with open(POSITIONS_FILE, 'r') as f:
+            if os.path.exists(self.positions_file):
+                with open(self.positions_file, 'r') as f:
                     return json.load(f)
         except Exception as e:
             log(f"⚠️ Не удалось загрузить positions_state.json: {e}")
@@ -101,7 +116,7 @@ class LiveTradeManager:
                 'trail_distance': position.get('trail_distance', 0),
                 'leverage':      params.get('leverage', config.LEVERAGE),
             }
-            with open(POSITIONS_FILE, 'w') as f:
+            with open(self.positions_file, 'w') as f:
                 json.dump(state, f, indent=2)
         except Exception as e:
             log(f"⚠️ Не удалось сохранить состояние позиции {trading_pair}: {e}")
@@ -112,7 +127,7 @@ class LiveTradeManager:
             state = self._load_positions_state()
             if trading_pair in state:
                 del state[trading_pair]
-                with open(POSITIONS_FILE, 'w') as f:
+                with open(self.positions_file, 'w') as f:
                     json.dump(state, f, indent=2)
         except Exception as e:
             log(f"⚠️ Не удалось обновить positions_state.json: {e}")
@@ -331,8 +346,8 @@ class LiveTradeManager:
 
     def _load_pending_orders(self) -> dict:
         try:
-            if os.path.exists(PENDING_ORDERS_FILE):
-                with open(PENDING_ORDERS_FILE, 'r') as f:
+            if os.path.exists(self.pending_file):
+                with open(self.pending_file, 'r') as f:
                     return json.load(f)
         except Exception as e:
             log(f"⚠️ Не удалось загрузить pending_orders.json: {e}")
@@ -368,7 +383,7 @@ class LiveTradeManager:
             pending = self._load_pending_orders()
             if pair in pending:
                 del pending[pair]
-                with open(PENDING_ORDERS_FILE, 'w') as f:
+                with open(self.pending_file, 'w') as f:
                     json.dump(pending, f, indent=2)
         except Exception as e:
             log(f"⚠️ Не удалось удалить pending ордер {pair}: {e}")
@@ -1009,9 +1024,10 @@ class LiveTradeManager:
         log_trade(trade_data)
         log(f"📝 Сделка завершена ({reason}). PnL: ${pnl:+.4f} | Дневной PnL: ${self.daily_pnl:+.4f}")
 
-        # Записываем в журнал
+        # Записываем в журнал (БД per-user при мульти-тенант, иначе CSV)
         balance_after = self.get_real_balance()
-        journal.close_trade(position, exit_price, reason, pnl, balance_after, config)
+        journal.close_trade(position, exit_price, reason, pnl, balance_after, config,
+                            telegram_id=self.telegram_id)
         self._remove_position_state(trading_pair)  # W7: удаляем из файла состояния
 
         duration_min = int((position['exit_time'] - position['entry_time']).total_seconds() / 60)
@@ -1044,15 +1060,19 @@ class LiveTradeManager:
         return False, 0.0
 
     def get_stats_dict(self) -> dict:
-        """Читает статистику из CSV-журнала. Возвращает None если данных нет."""
-        jf = journal.JOURNAL_FILE
-        if not os.path.exists(jf):
-            return None
-        try:
-            with open(jf, 'r', encoding='utf-8') as f:
-                trades = list(csv.DictReader(f))
-        except Exception:
-            return None
+        """Статистика юзера: из БД (мульти-тенант) или CSV-журнала (legacy). None если пусто."""
+        if self.telegram_id is not None:
+            import db
+            trades = db.get_user_trades(self.telegram_id)
+        else:
+            jf = journal.JOURNAL_FILE
+            if not os.path.exists(jf):
+                return None
+            try:
+                with open(jf, 'r', encoding='utf-8') as f:
+                    trades = list(csv.DictReader(f))
+            except Exception:
+                return None
         if not trades:
             return None
 
