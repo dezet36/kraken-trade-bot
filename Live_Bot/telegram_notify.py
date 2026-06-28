@@ -136,18 +136,30 @@ def positions_restored(recovered: list, telegram_id=None):
 
 
 def limit_order_placed(pair: str, side: str, limit_price: float, stop_loss: float,
-                       max_hours: float, telegram_id=None):
-    """W9+: GTC лимитный ордер выставлен, мониторинг до N часов."""
+                       max_hours: float, telegram_id=None, signal: dict = None, df_1h=None):
+    """W9+: GTC лимитный ордер выставлен, мониторинг до N часов.
+    Если переданы signal+df_1h — прикладывает график сетапа (импульс, зоны, вход/SL/TP)."""
     dir_s = "LONG" if side == 'buy' else "SHORT"
-    _send(
+    text = (
         f"<b>⏳ GTC Лимит выставлен — {pair} {dir_s}</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
         f"Лимит: <code>${_fmt_p(limit_price)}</code>\n"
         f"Стоп:  <code>${_fmt_p(stop_loss)}</code>\n"
         f"Ждём заполнения до {max_hours:.0f}ч (без market fallback)\n"
-        f"⏰ {_now()}",
-        chat_id=telegram_id,
+        f"⏰ {_now()}"
     )
+
+    # График сетапа прямо в момент постановки лимита (df_1h уже есть в execute_trade)
+    if signal is not None and df_1h is not None:
+        try:
+            from chart_generator import generate_trade_chart
+            chart_path = generate_trade_chart(signal, df_1h)
+            if chart_path and _send_photo(chart_path, caption=text, chat_id=telegram_id):
+                return
+        except Exception as e:
+            log(f"limit_order_placed: ошибка графика — {e}")
+
+    _send(text, chat_id=telegram_id)
 
 
 def bot_stopped(trade_count: int, daily_pnl: float, balance: float):

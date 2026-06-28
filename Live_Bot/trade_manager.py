@@ -2,7 +2,7 @@ import config
 import telegram_notify as tg
 import trade_journal as journal
 from logger import log, log_trade
-from exchange import get_exchange, reset_exchange, fetch_ohlcv
+from exchange import get_exchange, reset_exchange
 from datetime import datetime
 from collections import defaultdict
 import traceback
@@ -493,14 +493,9 @@ class LiveTradeManager:
             )
             signal_for_tg = dict(signal)
             signal_for_tg['params'] = params
-            # Подгружаем свежие 1H-свечи, чтобы приложить график (df_1h не хранится в pending)
-            df_1h = None
-            try:
-                df_1h = fetch_ohlcv('1h', limit=config.LOOKBACK_CANDLES + 20,
-                                    symbol=pair, client=self.exchange)
-            except Exception as e:
-                log(f"⚠️ {pair}: не удалось загрузить свечи для графика — {e}")
-            tg.trade_opened(signal_for_tg, df_1h=df_1h, telegram_id=self.telegram_id)
+            # График сетапа уже был отправлен при постановке лимита — здесь краткое
+            # подтверждение заполнения без второго графика.
+            tg.trade_opened(signal_for_tg, df_1h=None, telegram_id=self.telegram_id)
 
             log(f"✅ {pair}: GTC лимит исполнен @ ${_fmt_p(actual_entry)} "
                 f"(ожидание {waited_min} мин) | Баланс: ${self.get_real_balance():.2f}")
@@ -747,7 +742,8 @@ class LiveTradeManager:
                         f"Инвалидация @ ${_fmt_p(inv)}")
                     tg.limit_order_placed(trading_pair, side, limit_price,
                                           params['stop_loss'], config.PENDING_ORDER_MAX_HOURS,
-                                          telegram_id=self.telegram_id)
+                                          telegram_id=self.telegram_id,
+                                          signal=signal, df_1h=df_1h)
                     return True
                 except Exception as e:
                     log(f"⚠️ GTC LIMIT не удался: {e} — fallback на MARKET")
