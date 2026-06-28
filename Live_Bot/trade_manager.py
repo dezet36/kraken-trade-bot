@@ -235,7 +235,7 @@ class LiveTradeManager:
                     exch_map[sym] = ep
         except Exception as e:
             log(f"⚠️ W7: не удалось загрузить позиции с биржи — {e}")
-            tg.error_alert(f"W7 ошибка восстановления: {e}")
+            tg.error_alert(f"W7 ошибка восстановления: {e}", telegram_id=self.telegram_id)
             return
 
         recovered = []
@@ -264,7 +264,7 @@ class LiveTradeManager:
                 log(f"W7: ❌ ошибка восстановления {pair}: {e}")
 
         if recovered:
-            tg.positions_restored(recovered)
+            tg.positions_restored(recovered, telegram_id=self.telegram_id)
             log(f"W7: восстановлено {len(recovered)} позиций")
         else:
             log("W7: ни одну позицию не удалось восстановить")
@@ -493,7 +493,7 @@ class LiveTradeManager:
             )
             signal_for_tg = dict(signal)
             signal_for_tg['params'] = params
-            tg.trade_opened(signal_for_tg)   # без графика (df_1h не сохраняется в pending)
+            tg.trade_opened(signal_for_tg, telegram_id=self.telegram_id)   # без графика (df_1h не сохраняется в pending)
 
             log(f"✅ {pair}: GTC лимит исполнен @ ${_fmt_p(actual_entry)} "
                 f"(ожидание {waited_min} мин) | Баланс: ${self.get_real_balance():.2f}")
@@ -739,7 +739,8 @@ class LiveTradeManager:
                     log(f"⏳ GTC LIMIT @ ${_fmt_p(limit_price)} | ID: {lim_order.get('id')} | "
                         f"Инвалидация @ ${_fmt_p(inv)}")
                     tg.limit_order_placed(trading_pair, side, limit_price,
-                                          params['stop_loss'], config.PENDING_ORDER_MAX_HOURS)
+                                          params['stop_loss'], config.PENDING_ORDER_MAX_HOURS,
+                                          telegram_id=self.telegram_id)
                     return True
                 except Exception as e:
                     log(f"⚠️ GTC LIMIT не удался: {e} — fallback на MARKET")
@@ -807,7 +808,7 @@ class LiveTradeManager:
             self.last_trade_time[trading_pair] = datetime.now()
             self._save_cooldown_state()
 
-            tg.trade_opened(signal, df_1h=df_1h)
+            tg.trade_opened(signal, df_1h=df_1h, telegram_id=self.telegram_id)
             log(f"💰 Баланс после открытия: ${self.get_real_balance():.2f}")
             return True
 
@@ -961,7 +962,8 @@ class LiveTradeManager:
                     remaining_pct = int(round(position['remaining_size'] / params['position_size'] * 100))
                     journal.record_tp_hit(position, tp_num, current_price)
                     tg.tp_hit(trading_pair, tp_num, setup['type'], current_price,
-                              remaining_pct, position['realized_pnl'])
+                              remaining_pct, position['realized_pnl'],
+                              telegram_id=self.telegram_id)
 
                     # Подстраховка: после TP1 стоп в безубыток (если уровень B не сработал)
                     if not position['breakeven_set']:
@@ -1042,6 +1044,7 @@ class LiveTradeManager:
             exit_price=exit_price,
             duration_min=duration_min,
             tps_hit=position.get('tp_hit', 0),
+            telegram_id=self.telegram_id,
         )
 
     def close_position_by_pair(self, trading_pair: str):

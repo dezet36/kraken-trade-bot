@@ -5,6 +5,27 @@
 
 ---
 
+## [2026-06-28] — SaaS B1: маршрутизация Telegram-уведомлений по telegram_id
+
+**Файлы:** `Live_Bot/telegram_notify.py`, `Live_Bot/trade_manager.py`
+
+**Что изменено:**
+- `telegram_notify.py` — `_send`/`_send_photo` принимают `chat_id` (None → legacy общий чат
+  `TELEGRAM_CHAT_ID`, иначе — telegram_id юзера). Публичные уведомления (`trade_opened`,
+  `tp_hit`, `trade_closed`, `limit_order_placed`, `positions_restored`, `error_alert`)
+  получили `telegram_id=None`. Глобальный mute теперь касается только legacy-чата.
+- `trade_manager.py` — все вызовы `tg.*` прокидывают `self.telegram_id` (в мульти-тенант
+  каждый юзер получает уведомления в свой чат; legacy без id — как раньше).
+- Исправлен устаревший user-facing текст: `tp_hit` показывает реальный закрытый % (было
+  хардкод «25%»); `trade_closed` — метки TP2/TP1/BE и «TP взято: n/2» (было «/4»).
+
+**Тесты:** маршрутизация 8/8 (telegram_id → чат юзера, без id → legacy, корректный %/метки).
+Регресс: system_test 30/30, мульти-тенант 9/9, platform 10/10.
+
+**Зачем:** в копи-трейдинге каждый подписчик должен видеть события ТОЛЬКО по своим сделкам.
+
+---
+
 ## [2026-06-28] — SaaS A6: точка входа платформенного цикла
 
 **Файл:** `Live_Bot/platform_bot.py` (новый)

@@ -12,20 +12,25 @@ from datetime import datetime
 
 # ── internal send ─────────────────────────────────────────────────────────────
 
-def _send(text: str) -> bool:
-    if not config.TELEGRAM_BOT_TOKEN or not config.TELEGRAM_CHAT_ID:
+def _send(text: str, chat_id=None) -> bool:
+    """Отправка сообщения. chat_id=None -> legacy общий чат (config.TELEGRAM_CHAT_ID);
+    в мульти-тенант режиме передаётся telegram_id конкретного юзера."""
+    target = chat_id if chat_id is not None else config.TELEGRAM_CHAT_ID
+    if not config.TELEGRAM_BOT_TOKEN or not target:
         return False
-    try:
-        from telegram_bot import controller
-        if controller.is_muted():
-            return False
-    except Exception:
-        pass
+    # Глобальный mute касается только legacy общего чата (per-user mute — фаза C)
+    if chat_id is None:
+        try:
+            from telegram_bot import controller
+            if controller.is_muted():
+                return False
+        except Exception:
+            pass
     try:
         url  = f"https://api.telegram.org/bot{config.TELEGRAM_BOT_TOKEN}/sendMessage"
         resp = requests.post(
             url,
-            json={"chat_id": config.TELEGRAM_CHAT_ID, "text": text, "parse_mode": "HTML"},
+            json={"chat_id": target, "text": text, "parse_mode": "HTML"},
             timeout=10,
         )
         if not resp.ok:
@@ -54,23 +59,26 @@ def _dur_str(minutes: int) -> str:
     return f"{h}ч {m}м" if h > 0 else f"{m}м"
 
 
-def _send_photo(photo_path: str, caption: str = "") -> bool:
-    """Send a photo file via Telegram sendPhoto. Deletes the file afterwards."""
-    if not config.TELEGRAM_BOT_TOKEN or not config.TELEGRAM_CHAT_ID:
+def _send_photo(photo_path: str, caption: str = "", chat_id=None) -> bool:
+    """Send a photo file via Telegram sendPhoto. Deletes the file afterwards.
+    chat_id=None -> legacy общий чат; иначе telegram_id конкретного юзера."""
+    target = chat_id if chat_id is not None else config.TELEGRAM_CHAT_ID
+    if not config.TELEGRAM_BOT_TOKEN or not target:
         return False
-    try:
-        from telegram_bot import controller
-        if controller.is_muted():
-            return False
-    except Exception:
-        pass
+    if chat_id is None:
+        try:
+            from telegram_bot import controller
+            if controller.is_muted():
+                return False
+        except Exception:
+            pass
     try:
         url = f"https://api.telegram.org/bot{config.TELEGRAM_BOT_TOKEN}/sendPhoto"
         with open(photo_path, 'rb') as f:
             resp = requests.post(
                 url,
                 data={
-                    "chat_id":    config.TELEGRAM_CHAT_ID,
+                    "chat_id":    target,
                     "caption":    caption[:1024],
                     "parse_mode": "HTML",
                 },
@@ -106,7 +114,7 @@ def bot_started(balance: float):
     )
 
 
-def positions_restored(recovered: list):
+def positions_restored(recovered: list, telegram_id=None):
     """W7: уведомление о восстановленных позициях после перезапуска."""
     if not recovered:
         return
@@ -122,11 +130,13 @@ def positions_restored(recovered: list):
         f"<b>🔄 Восстановлены позиции после перезапуска</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
         + "\n".join(lines) +
-        f"\n⏰ {_now()}"
+        f"\n⏰ {_now()}",
+        chat_id=telegram_id,
     )
 
 
-def limit_order_placed(pair: str, side: str, limit_price: float, stop_loss: float, max_hours: float):
+def limit_order_placed(pair: str, side: str, limit_price: float, stop_loss: float,
+                       max_hours: float, telegram_id=None):
     """W9+: GTC лимитный ордер выставлен, мониторинг до N часов."""
     dir_s = "LONG" if side == 'buy' else "SHORT"
     _send(
@@ -135,7 +145,8 @@ def limit_order_placed(pair: str, side: str, limit_price: float, stop_loss: floa
         f"Лимит: <code>${_fmt_p(limit_price)}</code>\n"
         f"Стоп:  <code>${_fmt_p(stop_loss)}</code>\n"
         f"Ждём заполнения до {max_hours:.0f}ч (без market fallback)\n"
-        f"⏰ {_now()}"
+        f"⏰ {_now()}",
+        chat_id=telegram_id,
     )
 
 
@@ -170,7 +181,7 @@ def _fmt_ts(ts) -> str:
             return '—'
 
 
-def trade_opened(signal: dict, df_1h=None):
+def trade_opened(signal: dict, df_1h=None, telegram_id=None):
     setup   = signal["setup"]
     trigger = signal["trigger"]
     params  = signal["params"]
@@ -236,27 +247,29 @@ def trade_opened(signal: dict, df_1h=None):
         try:
             from chart_generator import generate_trade_chart
             chart_path = generate_trade_chart(signal, df_1h)
-            if chart_path and _send_photo(chart_path, caption=text):
+            if chart_path and _send_photo(chart_path, caption=text, chat_id=telegram_id):
                 return  # photo sent — no need for plain text
         except Exception as e:
             log(f"trade_opened: ошибка графика — {e}")
 
     # Fallback: plain text message
-    _send(text)
+    _send(text, chat_id=telegram_id)
 
 
 def tp_hit(pair: str, tp_num: int, direction: str, price: float,
-           remaining_pct: int, realized_pnl: float = 0.0):
-    icons   = {1: "🎯", 2: "🎯🎯", 3: "🎯🎯🎯", 4: "🏆"}
+           remaining_pct: int, realized_pnl: float = 0.0, telegram_id=None):
+    icons   = {1: "🎯", 2: "🏆"}
     icon    = icons.get(tp_num, "🎯")
     dir_s   = "LONG" if direction == "LONG" else "SHORT"
     pnl_str = f"{_pnl_str(realized_pnl)}" if realized_pnl != 0 else "—"
+    closed_pct = 100 - remaining_pct
     _send(
         f"{icon} <b>TP{tp_num} — {pair} {dir_s}</b>\n"
         f"Цена:          <code>${price:.4f}</code>\n"
-        f"Закрыто:       25% позиции\n"
+        f"Закрыто:       {closed_pct}% позиции\n"
         f"Осталось:      {remaining_pct}%\n"
-        f"Зафиксировано: <b>{pnl_str}</b>"
+        f"Зафиксировано: <b>{pnl_str}</b>",
+        chat_id=telegram_id,
     )
 
 
@@ -272,11 +285,13 @@ def trail_activated(pair: str, direction: str, trail_level: float):
 def trade_closed(pair: str, direction: str, reason: str, pnl: float,
                  daily_pnl: float, balance: float,
                  entry: float = 0.0, exit_price: float = 0.0,
-                 duration_min: int = 0, tps_hit: int = 0):
+                 duration_min: int = 0, tps_hit: int = 0, telegram_id=None):
     dir_s = "LONG" if direction == "LONG" else "SHORT"
 
     reason_labels = {
-        "TP4":      "🏆 Полный таргет (TP4)",
+        "TP2":      "🏆 Полный таргет (TP2)",
+        "TP1":      "🎯 Частичный таргет (TP1)",
+        "BE":       "⚖️ Безубыток",
         "TRAIL_SL": "🔄 Трейлинг стоп",
         "Manual":   "🖐 Закрыто вручную",
         "SL":       "🛑 Стоп-лосс",
@@ -296,11 +311,12 @@ def trade_closed(pair: str, direction: str, reason: str, pnl: float,
         f"━━━━━━━━━━━━━━━━━━━━\n"
         f"PnL:         <b>{_pnl_str(pnl)}</b>\n"
         f"Время:       {_dur_str(duration_min)}\n"
-        f"TP взято:    {tps_hit}/4\n"
+        f"TP взято:    {tps_hit}/2\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
         f"Дневной PnL: <b>{_pnl_str(daily_pnl)}</b>\n"
         f"Баланс:      <b>${balance:,.2f}</b>\n"
-        f"⏰ {_now()}"
+        f"⏰ {_now()}",
+        chat_id=telegram_id,
     )
 
 
@@ -329,12 +345,13 @@ def scan_result(liquid: int, candidates: int, active_positions: int):
     )
 
 
-def error_alert(message: str):
+def error_alert(message: str, telegram_id=None):
     _send(
         f"⚠️ <b>ОШИБКА БОТА</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
         f"<code>{message[:400]}</code>\n"
-        f"⏰ {_now()}"
+        f"⏰ {_now()}",
+        chat_id=telegram_id,
     )
 
 
