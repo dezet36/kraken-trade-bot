@@ -259,6 +259,12 @@ def mark_payment_paid(invoice_id: str) -> bool:
         return True
 
 
+def set_payment_status(invoice_id: str, status: str):
+    """Принудительно меняет статус платежа (например, 'expired'/'failed' при опросе)."""
+    with _write_lock, _connect() as c:
+        c.execute("UPDATE payments SET status=? WHERE invoice_id=?", (status, invoice_id))
+
+
 def list_pending_payments():
     with _connect() as c:
         rows = c.execute("SELECT * FROM payments WHERE status='pending'").fetchall()

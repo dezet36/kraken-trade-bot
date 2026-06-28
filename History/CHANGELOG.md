@@ -5,6 +5,35 @@
 
 ---
 
+## [2026-06-28] — SaaS D: крипто-оплаты подписки (NOWPayments + опрос)
+
+**Файлы:** `Live_Bot/payments.py` (новый), `Live_Bot/db.py`, `Live_Bot/platform_telegram.py`,
+`Live_Bot/platform_bot.py`
+
+**Что добавлено:**
+- `payments.py` — провайдер-абстракция крипто-оплат. По умолчанию `nowpayments` (если задан
+  `NOWPAYMENTS_API_KEY`), иначе `mock` (создаёт счёт, но не подтверждает — для демо/тестов);
+  явный выбор через `PAYMENT_PROVIDER`. `create_invoice(tid)` → счёт в БД (pending) + ссылка;
+  `poll_invoices()` → опрос pending: при оплате **идемпотентно** (`mark_payment_paid`)
+  продлевает подписку на `sub_days` и шлёт уведомление; expired/failed помечает, чтобы не
+  опрашивать вечно. Опрос статуса (без публичного вебхука — проще для VPS).
+- `db.py` — `set_payment_status()` (пометка expired/failed при опросе).
+- `platform_telegram.py` — команда `/pay`: создаёт счёт и присылает кнопку оплаты; `/subscription`
+  теперь ведёт на `/pay`; `/pay` добавлена в меню команд.
+- `platform_bot.py` — отдельная задача планировщика `payment_poll_cycle` каждые
+  `PAYMENT_POLL_MINUTES` (деф. 2 мин), изолирована try/except.
+
+**Конфиг (env, задаёт владелец):** `PAYMENT_PROVIDER`, `NOWPAYMENTS_API_KEY`,
+`PAYMENT_CURRENCY` (деф. usdttrc20), `PAYMENT_POLL_MINUTES`.
+
+**Тесты:** платежи 19/19 (выбор провайдера, create_invoice, оплата→продление,
+идемпотентность повторного опроса, expired не выдаёт доступ, /pay шлёт кнопку).
+Полный прогон всех наборов: **164/164**.
+
+**Зачем:** автоматическое продление подписки за крипто-оплату — последний кусок MVP-платформы.
+
+---
+
 ## [2026-06-28] — SaaS C: подписки, триал-гейтинг, напоминания, админ-команды
 
 **Файлы:** `Live_Bot/platform_manager.py`, `Live_Bot/platform_telegram.py`,

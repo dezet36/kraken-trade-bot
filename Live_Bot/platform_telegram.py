@@ -162,6 +162,8 @@ class PlatformController:
             self._cmd_pause(user_id, chat_id, False)
         elif cmd in ("/subscription", "/sub"):
             self._cmd_subscription(user_id, chat_id)
+        elif cmd == "/pay":
+            self._cmd_pay(user_id, chat_id, username)
         # ── админ-команды ──
         elif cmd == "/admin":
             self._admin_overview(user_id, chat_id)
@@ -475,7 +477,32 @@ class PlatformController:
             f"━━━━━━━━━━━━━━━━━━━━\n"
             f"Доступ до: <b>{_fmt_until(until)}</b> ({days} дн.)\n"
             f"Тариф: <b>${price}</b> / {sdays} дн.\n\n"
-            f"Оплата: /pay  (скоро)")   # /pay включается в фазе D
+            f"Продлить: /pay")
+
+    def _cmd_pay(self, user_id, chat_id, username):
+        import payments
+        db.upsert_user(user_id, username)
+        try:
+            inv = payments.create_invoice(user_id)
+        except Exception as e:
+            log(f"create_invoice error {user_id}: {e}")
+            self._send(chat_id, "⚠️ Не удалось создать счёт. Попробуй позже или напиши в поддержку.")
+            return
+        price = inv['amount']
+        sdays = db.get_int_setting('sub_days', 30)
+        url   = inv.get('pay_url')
+        markup = None
+        if url:
+            markup = {"inline_keyboard": [[{"text": f"💳 Оплатить ${price}", "url": url}]]}
+        self._send(chat_id,
+            f"<b>💵 Оплата подписки</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━━\n"
+            f"Сумма: <b>${price}</b> за {sdays} дн.\n"
+            f"Актив: {inv['currency'].upper()}\n"
+            + (f"Ссылка для оплаты ниже 👇\n" if url else f"Счёт создан: <code>{inv['invoice_id']}</code>\n")
+            + f"\nПосле подтверждения сети подписка продлится автоматически "
+              f"(обычно в течение нескольких минут).",
+            reply_markup=markup)
 
     # ── админ-команды ─────────────────────────────────────────────────────────
     def _is_admin(self, user_id) -> bool:
@@ -663,6 +690,7 @@ class PlatformController:
             {"command": "pause",        "description": "Приостановить новые входы"},
             {"command": "resume",       "description": "Возобновить торговлю"},
             {"command": "subscription", "description": "Статус подписки"},
+            {"command": "pay",          "description": "Оплатить / продлить подписку"},
             {"command": "disconnect",   "description": "Отключить биржу"},
             {"command": "help",         "description": "Список команд"},
         ]

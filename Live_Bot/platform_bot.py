@@ -20,11 +20,13 @@ from apscheduler.schedulers.blocking import BlockingScheduler
 
 import config
 import db
+import payments
 from platform_manager import PlatformManager
 from platform_telegram import controller
 from logger import log
 
-CYCLE_MINUTES = int(os.getenv('PLATFORM_CYCLE_MINUTES', 5))
+CYCLE_MINUTES   = int(os.getenv('PLATFORM_CYCLE_MINUTES', 5))
+PAYMENT_POLL_MINUTES = int(os.getenv('PAYMENT_POLL_MINUTES', 2))
 
 platform = None
 
@@ -49,6 +51,16 @@ def platform_cycle():
         import traceback
         log(f"❌ Ошибка цикла платформы: {e}")
         log(traceback.format_exc())
+
+
+def payment_poll_cycle():
+    """Опрос статуса крипто-платежей; продлевает подписки при подтверждении оплаты."""
+    try:
+        n = payments.poll_invoices()
+        if n:
+            log(f"💰 Подтверждено оплат: {n}")
+    except Exception as e:
+        log(f"⚠️ Ошибка опроса платежей: {e}")
 
 
 def main():
@@ -83,7 +95,11 @@ def main():
     scheduler.add_job(
         platform_cycle, 'interval', minutes=CYCLE_MINUTES, next_run_time=datetime.now()
     )
+    scheduler.add_job(
+        payment_poll_cycle, 'interval', minutes=PAYMENT_POLL_MINUTES
+    )
 
+    log(f"Опрос платежей:  каждые {PAYMENT_POLL_MINUTES} мин ({payments.get_provider().name})")
     log("\nПлатформа запущена! Ctrl+C для остановки.\n")
     try:
         scheduler.start()
