@@ -56,6 +56,10 @@ MAX_SCAN_PAIRS = int(os.getenv('MAX_SCAN_PAIRS', 60))
 MIN_VOLUME_24H_USD = float(os.getenv('MIN_VOLUME_24H_USD', 50_000_000))  # $50M объём за 24ч
 MIN_IMPULSE_PCT    = float(os.getenv('MIN_IMPULSE_PCT', 3.0))            # мин. размер импульса, % от цены
 
+# ── W12: Фильтры качества импульса (импульс, а не долгая торговля) ───────────
+MAX_IMPULSE_CANDLES   = int(os.getenv('MAX_IMPULSE_CANDLES', 24))        # импульс не длиннее суток (1H)
+MIN_IMPULSE_VELOCITY  = float(os.getenv('MIN_IMPULSE_VELOCITY', 0.30))   # мин. скорость, % размера на свечу
+
 # ── W3: Фильтр микроценовых пар ──────────────────────────────────────────────
 MICRO_PRICE_BLACKLIST   = {'SHIBUSDT', 'BONKUSDT', 'FLOKIUSDT', 'PEPEUSDT'}
 MIN_ENTRY_PRICE         = float(os.getenv('MIN_ENTRY_PRICE', 0.001))     # пары ниже $0.001 исключаются

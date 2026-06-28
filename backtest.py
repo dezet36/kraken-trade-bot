@@ -29,6 +29,8 @@ MIN_SL_PCT     = 0.008
 SL_BUFFER      = 0.003
 MIN_RR         = 1.5
 MIN_IMPULSE_PCT = 3.0
+MAX_IMPULSE_CANDLES  = 24     # W12: импульс не длиннее суток
+MIN_IMPULSE_VELOCITY = 0.30   # W12: мин. скорость, % размера на свечу
 LOOKBACK_1H    = 48
 TP_FRACTIONS   = [0.25, 0.25, 0.25, 0.25]
 TP_LEVELS      = [0.18, 0.27, 0.618, 1.0]
@@ -325,6 +327,11 @@ def find_impulse_new(df, lookback=48):
         if size <= 0:
             return None
         num = e_i - s_i + 1
+        # W12: импульс, а не долгая торговля — лимит длительности и мин. скорость
+        if num > MAX_IMPULSE_CANDLES:
+            return None
+        if (size / e_p * 100) / num < MIN_IMPULSE_VELOCITY:
+            return None
         if num > 15:
             sub = seg.iloc[s_i:e_i + 1]
             d_cnt = ((sub['close'] > sub['open']).sum() if direction == 'LONG'

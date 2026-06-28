@@ -51,6 +51,12 @@ def find_recent_impulse(df, lookback_candles=48):
         if size <= 0:
             return None
         num = e_idx - s_idx + 1
+        # W12: импульс, а не долгая торговля — лимит длительности и мин. скорость
+        if num > config.MAX_IMPULSE_CANDLES:
+            return None
+        size_pct = size / e_price * 100
+        if size_pct / num < config.MIN_IMPULSE_VELOCITY:
+            return None
         if num > 15:
             seg = segment.iloc[s_idx:e_idx + 1]
             directional = (
