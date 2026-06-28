@@ -1076,49 +1076,7 @@ class LiveTradeManager:
                     trades = list(csv.DictReader(f))
             except Exception:
                 return None
-        if not trades:
-            return None
-
-        def _f(t, key): return float(t.get(key, 0) or 0)
-
-        total       = len(trades)
-        wins        = sum(1 for t in trades if t.get('result') == 'WIN')
-        total_pnl   = sum(_f(t, 'pnl_usd') for t in trades)
-        gross_profit = sum(_f(t, 'pnl_usd') for t in trades if _f(t, 'pnl_usd') > 0)
-        gross_loss   = abs(sum(_f(t, 'pnl_usd') for t in trades if _f(t, 'pnl_usd') < 0))
-
-        today_str   = datetime.now().strftime('%Y-%m-%d')
-        today_pnl   = sum(_f(t, 'pnl_usd') for t in trades
-                          if t.get('close_time', '').startswith(today_str))
-
-        pnls        = [(_f(t, 'pnl_usd'), t.get('pair', '?')) for t in trades]
-        best        = max(pnls, key=lambda x: x[0])
-        worst       = min(pnls, key=lambda x: x[0])
-
-        zone_a      = [t for t in trades if t.get('zone') == 'Zone_A']
-        zone_b      = [t for t in trades if t.get('zone') == 'Zone_B']
-        longs       = [t for t in trades if t.get('direction') == 'LONG']
-        shorts      = [t for t in trades if t.get('direction') == 'SHORT']
-
-        durations   = [int(t.get('duration_min', 0) or 0) for t in trades]
-        avg_duration = sum(durations) / len(durations) if durations else 0
-
-        return {
-            'total':         total,
-            'wins':          wins,
-            'losses':        total - wins,
-            'win_rate':      wins / total * 100 if total > 0 else 0,
-            'total_pnl':     total_pnl,
-            'today_pnl':     today_pnl,
-            'profit_factor': gross_profit / gross_loss if gross_loss > 0 else float('inf'),
-            'best':          best,
-            'worst':         worst,
-            'avg_duration':  avg_duration,
-            'zone_a':        (len(zone_a), sum(1 for t in zone_a if t.get('result') == 'WIN')),
-            'zone_b':        (len(zone_b), sum(1 for t in zone_b if t.get('result') == 'WIN')),
-            'longs':         (len(longs),  sum(1 for t in longs  if t.get('result') == 'WIN')),
-            'shorts':        (len(shorts), sum(1 for t in shorts if t.get('result') == 'WIN')),
-        }
+        return compute_stats(trades)
 
     def get_stats(self):
         if not self.trade_history:
@@ -1140,6 +1098,56 @@ class LiveTradeManager:
         log(f"Итоговый PnL:   ${total_pnl:+.4f}")
         log(f"Баланс:         ${self.get_real_balance():.2f}")
         log(f"{'='*60}")
+
+
+def compute_stats(trades) -> dict:
+    """Сводная статистика по списку сделок (строки журнала/БД). None если пусто.
+
+    Вынесено из метода get_stats_dict, чтобы Telegram-команды могли считать прямо
+    из БД (db.get_user_trades) без живого LiveTradeManager."""
+    if not trades:
+        return None
+
+    def _f(t, key): return float(t.get(key, 0) or 0)
+
+    total        = len(trades)
+    wins         = sum(1 for t in trades if t.get('result') == 'WIN')
+    total_pnl    = sum(_f(t, 'pnl_usd') for t in trades)
+    gross_profit = sum(_f(t, 'pnl_usd') for t in trades if _f(t, 'pnl_usd') > 0)
+    gross_loss   = abs(sum(_f(t, 'pnl_usd') for t in trades if _f(t, 'pnl_usd') < 0))
+
+    today_str = datetime.now().strftime('%Y-%m-%d')
+    today_pnl = sum(_f(t, 'pnl_usd') for t in trades
+                    if t.get('close_time', '').startswith(today_str))
+
+    pnls  = [(_f(t, 'pnl_usd'), t.get('pair', '?')) for t in trades]
+    best  = max(pnls, key=lambda x: x[0])
+    worst = min(pnls, key=lambda x: x[0])
+
+    zone_a = [t for t in trades if t.get('zone') == 'Zone_A']
+    zone_b = [t for t in trades if t.get('zone') == 'Zone_B']
+    longs  = [t for t in trades if t.get('direction') == 'LONG']
+    shorts = [t for t in trades if t.get('direction') == 'SHORT']
+
+    durations    = [int(t.get('duration_min', 0) or 0) for t in trades]
+    avg_duration = sum(durations) / len(durations) if durations else 0
+
+    return {
+        'total':         total,
+        'wins':          wins,
+        'losses':        total - wins,
+        'win_rate':      wins / total * 100 if total > 0 else 0,
+        'total_pnl':     total_pnl,
+        'today_pnl':     today_pnl,
+        'profit_factor': gross_profit / gross_loss if gross_loss > 0 else float('inf'),
+        'best':          best,
+        'worst':         worst,
+        'avg_duration':  avg_duration,
+        'zone_a':        (len(zone_a), sum(1 for t in zone_a if t.get('result') == 'WIN')),
+        'zone_b':        (len(zone_b), sum(1 for t in zone_b if t.get('result') == 'WIN')),
+        'longs':         (len(longs),  sum(1 for t in longs  if t.get('result') == 'WIN')),
+        'shorts':        (len(shorts), sum(1 for t in shorts if t.get('result') == 'WIN')),
+    }
 
 
 if __name__ == "__main__":

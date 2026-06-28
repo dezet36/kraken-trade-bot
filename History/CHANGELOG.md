@@ -5,6 +5,36 @@
 
 ---
 
+## [2026-06-28] — SaaS B2–B4: онбординг + команды юзера + связка панели
+
+**Файлы:** `Live_Bot/platform_telegram.py` (новый), `Live_Bot/platform_bot.py`,
+`Live_Bot/trade_manager.py`
+
+**Что добавлено:**
+- `platform_telegram.py` — `PlatformController`: мульти-юзерная Telegram-панель,
+  маршрутизация по `telegram_id` отправителя (каждый управляет только своим счётом).
+  - **Онбординг /connect:** выбор биржи (inline) → ввод API Key → ввод Secret →
+    `validate_credentials` на бирже → шифрование Fernet → `set_user_keys` → старт триала.
+    Сообщения с ключом и секретом немедленно удаляются из чата (`deleteMessage`).
+    Невалидные ключи отклоняются и НЕ сохраняются; plaintext стирается из памяти.
+  - **Команды юзера (scoped):** /start, /connect, /disconnect, /status, /positions,
+    /stats, /close PAIR, /pause, /resume, /subscription, /help. Баланс/позиции — из
+    живого менеджера активного юзера (или transient-клиент для баланса), статистика —
+    из БД по telegram_id.
+- `trade_manager.py` — расчёт статистики вынесен в модульную `compute_stats(trades)`
+  (команда /stats считает прямо из БД без живого менеджера); `get_stats_dict` зовёт её.
+- `platform_bot.py` — поднимает `PlatformController` (polling) и связывает с
+  `PlatformManager` (`controller.platform`) до старта планировщика.
+
+**Тесты:** онбординг+команды 25/25 (диалог /connect, удаление ключей, шифрование в БД,
+старт триала, scoped /status//stats//pause//disconnect, гейт «сначала /connect»).
+Регресс: 30/30 + 9/9 + 10/10 + 4/4 + 8/8.
+
+**Зачем:** пользователь самостоятельно подключает биржу, получает триал и управляет своей
+торговлей через Telegram — публичная часть платформы.
+
+---
+
 ## [2026-06-28] — SaaS B1: маршрутизация Telegram-уведомлений по telegram_id
 
 **Файлы:** `Live_Bot/telegram_notify.py`, `Live_Bot/trade_manager.py`

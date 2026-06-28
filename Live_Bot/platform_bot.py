@@ -21,6 +21,7 @@ from apscheduler.schedulers.blocking import BlockingScheduler
 import config
 import db
 from platform_manager import PlatformManager
+from platform_telegram import controller
 from logger import log
 
 CYCLE_MINUTES = int(os.getenv('PLATFORM_CYCLE_MINUTES', 5))
@@ -63,6 +64,10 @@ def main():
     db.init_db()
     platform = PlatformManager()
 
+    # Telegram-панель платформы: маршрутизация команд/онбординга по telegram_id
+    controller.platform = platform
+    controller.start()
+
     n_users  = len(db.list_users())
     n_active = len(db.list_active_users())
     log(f"\nПул пар:        {len(config.TRADING_PAIRS_POOL)} пар")
@@ -84,6 +89,7 @@ def main():
         scheduler.start()
     except KeyboardInterrupt:
         log("\n\nПлатформа остановлена пользователем")
+        controller.stop()
 
 
 if __name__ == "__main__":
