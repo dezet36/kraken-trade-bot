@@ -234,6 +234,13 @@ def trade_opened(signal: dict, df_1h=None, telegram_id=None):
         zone_desc = "Глубокая коррекция (78.6%–88.6%)"
         sl_ctx    = "ниже старта импульса" if is_long else "выше старта импульса"
 
+    n_tp = len(getattr(config, 'TP_CLOSE_FRACTIONS', [1.0]))
+    if n_tp == 1:
+        tp_block = f"🎯 Тейк (−18%):  <code>${_fmt_p(params['take_profit_1'])}</code>\n"
+    else:
+        tp_block = (f"🎯 TP1:  <code>${_fmt_p(params['take_profit_1'])}</code>  (+18%, 50%)\n"
+                    f"🎯 TP2:  <code>${_fmt_p(params['take_profit_2'])}</code>  (+27%, 50%)\n")
+
     text = (
         f"<b>{direction_icon} {pair}</b>  {zone_icon} {trigger['zone']}  {mode}\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
@@ -241,11 +248,9 @@ def trade_opened(signal: dict, df_1h=None, telegram_id=None):
         f"   {imp_line}\n"
         f"   {zone_desc}\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"📍 Вход:  <code>${_fmt_p(params['entry'])}</code>\n"
-        f"🛡 Стоп:  <code>${_fmt_p(params['stop_loss'])}</code>  ({sl_dir}{sl_dist_pct:.2f}%) — {sl_ctx}\n"
-        f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"🎯 TP1:  <code>${_fmt_p(params['take_profit_1'])}</code>  (+18% от B, 50%)\n"
-        f"🎯 TP2:  <code>${_fmt_p(params['take_profit_2'])}</code>  (+27%, 50%)\n"
+        f"📍 Точка входа:  <code>${_fmt_p(params['entry'])}</code>\n"
+        f"🛡 Стоп-лосс:    <code>${_fmt_p(params['stop_loss'])}</code>  ({sl_dir}{sl_dist_pct:.2f}%)\n"
+        f"{tp_block}"
         + (f"⚖️ Безубыток при пробое B: <code>${_fmt_p(params['be_level'])}</code>\n"
            if params.get('be_level') else "")
         + f"━━━━━━━━━━━━━━━━━━━━\n"

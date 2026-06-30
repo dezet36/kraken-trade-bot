@@ -123,8 +123,11 @@ class PlatformController:
                 args  = parts[1:]
                 self._handle_command(cmd, user_id, chat_id, username, args)
             elif user_id in self._conv:
-                # ввод в рамках онбординга (ключ/секрет)
+                # ввод в рамках диалога (ключ/секрет/депозит)
                 self._handle_conversation_input(user_id, chat_id, message_id, text)
+            else:
+                # нажатие кнопки постоянного нижнего меню (текст совпадает с подписью)
+                self._route_menu_text(text, user_id, chat_id, username)
 
         elif "callback_query" in update:
             cb      = update["callback_query"]
@@ -141,6 +144,10 @@ class PlatformController:
             self._cmd_start(user_id, chat_id, username)
         elif cmd == "/help":
             self._cmd_help(chat_id)
+        elif cmd == "/menu":
+            self._cmd_menu(user_id, chat_id, username)
+        elif cmd == "/setdeposit":
+            self._cmd_setdeposit(user_id, chat_id, args)
         elif cmd == "/connect":
             self._cmd_connect(user_id, chat_id, username)
         elif cmd == "/cancel":
@@ -184,6 +191,33 @@ class PlatformController:
         elif cmd == "/unban":
             self._admin_ban(user_id, chat_id, args, False)
 
+    # Карта действий: и для инлайн-кнопок (act:<action>), и для текста нижнего меню
+    def _do_action(self, action, user_id, chat_id, username, arg=None):
+        if   action == "status":       self._cmd_status(user_id, chat_id)
+        elif action == "positions":    self._cmd_positions(user_id, chat_id)
+        elif action == "stats":        self._cmd_stats(user_id, chat_id)
+        elif action in ("subscription", "sub"): self._cmd_subscription(user_id, chat_id)
+        elif action == "pay":          self._cmd_pay(user_id, chat_id, username)
+        elif action == "pause":        self._cmd_pause(user_id, chat_id, True)
+        elif action == "resume":       self._cmd_pause(user_id, chat_id, False)
+        elif action == "help":         self._cmd_help(chat_id)
+        elif action == "connect":      self._cmd_connect(user_id, chat_id, username)
+        elif action == "menu":         self._cmd_menu(user_id, chat_id, username)
+        elif action == "setdeposit":   self._start_deposit_dialog(user_id, chat_id)
+        elif action == "close" and arg: self._cmd_close(user_id, chat_id, [arg])
+
+    # Текст постоянного нижнего меню -> действие (label -> action)
+    _MENU = {
+        "📊 Статус": "status", "📋 Позиции": "positions", "📈 Статистика": "stats",
+        "💳 Подписка": "subscription", "⏸ Пауза": "pause", "▶️ Возобновить": "resume",
+        "💰 Депозит": "setdeposit", "❓ Помощь": "help", "🔌 Подключить биржу": "connect",
+    }
+
+    def _route_menu_text(self, text, user_id, chat_id, username):
+        action = self._MENU.get(text.strip())
+        if action:
+            self._do_action(action, user_id, chat_id, username)
+
     def _handle_callback(self, data, user_id, chat_id, username):
         if data.startswith("connect_ex:"):
             exch = data.split(":", 1)[1]
@@ -198,6 +232,11 @@ class PlatformController:
                 f"Отмена: /cancel")
         elif data == "do_connect":
             self._cmd_connect(user_id, chat_id, username)
+        elif data.startswith("act:"):
+            parts  = data.split(":", 2)   # act:<action>[:arg]
+            action = parts[1] if len(parts) > 1 else ""
+            arg    = parts[2] if len(parts) > 2 else None
+            self._do_action(action, user_id, chat_id, username, arg)
 
     # ── онбординг ─────────────────────────────────────────────────────────────
     def _cmd_connect(self, user_id, chat_id, username):
@@ -217,6 +256,11 @@ class PlatformController:
         if not conv:
             return
         state = conv.get("state")
+
+        if state == "await_deposit":
+            self._conv.pop(user_id, None)
+            self._apply_deposit(user_id, chat_id, text)
+            return
 
         if state == "await_key":
             conv["api_key"] = text
@@ -260,8 +304,9 @@ class PlatformController:
                 f"━━━━━━━━━━━━━━━━━━━━\n"
                 f"Бот начнёт копировать сигналы на твой счёт со следующего цикла.\n"
                 f"Риск: {config.RISK_PER_TRADE}% на сделку · до {config.MAX_ACTIVE_PAIRS} позиций.\n\n"
-                f"Управление: /status · /positions · /stats · /pause\n"
-                f"⚠️ Торговля сопряжена с риском убытка. Ты управляешь своими средствами сам.")
+                f"👇 Управляй кнопками меню внизу.\n"
+                f"⚠️ Торговля сопряжена с риском убытка. Ты управляешь своими средствами сам.",
+                reply_markup=self._main_menu())
 
     def _is_first_connection(self, user_id) -> bool:
         u = db.get_user(user_id)
@@ -282,6 +327,8 @@ class PlatformController:
         db.upsert_user(user_id, username)
         user = db.get_user(user_id)
         if db.has_keys(user):
+            self._send(chat_id, "С возвращением! 👇 Управляй кнопками меню.",
+                       reply_markup=self._main_menu())
             self._cmd_status(user_id, chat_id)
             return
         self._send(chat_id,
@@ -299,16 +346,77 @@ class PlatformController:
         self._send(chat_id,
             "<b>🤖 Команды</b>\n"
             "━━━━━━━━━━━━━━━━━━━━\n"
+            "Управляй кнопками меню внизу 👇 или командами:\n\n"
             "/connect       — подключить биржу (API-ключи)\n"
             "/disconnect    — отключить биржу\n"
             "/status        — подписка, баланс, позиции\n"
             "/positions     — открытые позиции с PnL\n"
             "/stats         — статистика по твоим сделкам\n"
             "/close BTCUSDT — закрыть позицию вручную\n"
-            "/pause         — приостановить новые входы\n"
-            "/resume        — возобновить торговлю\n"
-            "/subscription  — статус подписки\n"
-            "/help          — эта справка")
+            "/setdeposit N  — депозит для расчёта позиции ($, 0 = весь баланс)\n"
+            "/pause /resume — пауза / возобновить\n"
+            "/subscription /pay — подписка и оплата\n"
+            "/menu          — показать меню кнопок",
+            reply_markup=self._main_menu())
+
+    # ── меню на кнопках ────────────────────────────────────────────────────────
+    @staticmethod
+    def _main_menu():
+        """Постоянное нижнее меню (ReplyKeyboard) — всегда под рукой."""
+        return {
+            "keyboard": [
+                [{"text": "📊 Статус"}, {"text": "📋 Позиции"}],
+                [{"text": "📈 Статистика"}, {"text": "💳 Подписка"}],
+                [{"text": "💰 Депозит"}, {"text": "⏸ Пауза"}],
+                [{"text": "❓ Помощь"}],
+            ],
+            "resize_keyboard": True,
+        }
+
+    def _cmd_menu(self, user_id, chat_id, username):
+        db.upsert_user(user_id, username)
+        self._send(chat_id,
+            "<b>📲 Меню</b>\nВыбирай действие кнопками ниже 👇",
+            reply_markup=self._main_menu())
+
+    # ── депозит для расчёта позиции (п.3) ──────────────────────────────────────
+    def _cmd_setdeposit(self, user_id, chat_id, args):
+        if not self._require_connected(user_id, chat_id):
+            return
+        if not args:
+            self._start_deposit_dialog(user_id, chat_id)
+            return
+        self._apply_deposit(user_id, chat_id, args[0])
+
+    def _start_deposit_dialog(self, user_id, chat_id):
+        if not self._require_connected(user_id, chat_id):
+            return
+        self._conv[user_id] = {"state": "await_deposit"}
+        cur = (db.get_user(user_id) or {}).get("deposit_usd")
+        cur_s = f"${float(cur):,.0f}" if cur and float(cur) > 0 else "весь баланс"
+        self._send(chat_id,
+            f"💰 <b>Депозит для расчёта позиции</b>\n"
+            f"Текущий: {cur_s}\n\n"
+            f"Пришли сумму в USD (например <code>1000</code>). "
+            f"Размер сделки = депозит × {config.RISK_PER_TRADE}% риска.\n"
+            f"<code>0</code> — считать от всего баланса. Отмена: /cancel")
+
+    def _apply_deposit(self, user_id, chat_id, raw):
+        try:
+            val = float(str(raw).replace("$", "").replace(",", "").strip())
+            if val < 0:
+                raise ValueError
+        except ValueError:
+            self._send(chat_id, "Нужна сумма в USD числом, например 1000 (или 0 = весь баланс).")
+            return
+        db.set_user_field(user_id, "deposit_usd", val if val > 0 else None)
+        if val > 0:
+            self._send(chat_id, f"✅ Депозит установлен: <b>${val:,.0f}</b>. "
+                                f"Риск {config.RISK_PER_TRADE}% → ${val*config.RISK_PER_TRADE/100:,.2f} на сделку.",
+                       reply_markup=self._main_menu())
+        else:
+            self._send(chat_id, "✅ Сброшено — размер позиции считается от всего баланса.",
+                       reply_markup=self._main_menu())
 
     def _require_connected(self, user_id, chat_id):
         """Возвращает user-dict если ключи подключены, иначе шлёт подсказку и None."""
@@ -326,22 +434,25 @@ class PlatformController:
         until  = db.access_until(user)
         paused = bool(user.get("paused"))
         exch   = EXCHANGE_LABELS.get(user.get("exchange"), user.get("exchange") or "—")
+        dep    = user.get("deposit_usd")
 
-        mgr = self._live_manager(user_id)
-        if mgr is not None:
-            balance = mgr.get_real_balance()
-            open_n  = mgr.get_active_count()
-            pairs   = ", ".join(sorted(mgr.get_open_pairs())) or "—"
-        else:
-            balance = self._fetch_balance_only(user)
-            open_n  = "—"
-            pairs   = "—"
+        client    = self._user_client(user_id, user)
+        balance   = self._fetch_balance(client)
+        positions = self._fetch_open_positions(client)
+        open_n    = len(positions)
+        pairs     = ", ".join(sorted(self._norm(p.get("symbol", "")) for p in positions)) or "—"
 
         bal_str  = f"${balance:,.2f}" if isinstance(balance, (int, float)) else "—"
+        dep_str  = f"${float(dep):,.0f}" if dep and float(dep) > 0 else "весь баланс"
         sub_icon = "✅" if active else "⛔"
         st_icon  = "⏸ Пауза" if paused else ("▶️ Активен" if active else "⛔ Нет доступа")
         days     = _days_left(until)
 
+        markup = {"inline_keyboard": [[
+            {"text": "▶️ Возобновить" if paused else "⏸ Пауза",
+             "callback_data": "act:resume" if paused else "act:pause"},
+            {"text": "🔄 Обновить", "callback_data": "act:status"},
+        ]]}
         self._send(chat_id,
             f"<b>📊 Статус</b>\n"
             f"━━━━━━━━━━━━━━━━━━━━\n"
@@ -349,49 +460,52 @@ class PlatformController:
             f"Состояние:  {st_icon}\n"
             f"Подписка:   {sub_icon} до {_fmt_until(until)} ({days} дн.)\n"
             f"Баланс:     <b>{bal_str}</b>\n"
+            f"Депозит:    {dep_str}  (расчёт позиции)\n"
             f"Позиций:    {open_n}/{config.MAX_ACTIVE_PAIRS}\n"
             f"Пары:       {pairs}\n"
-            + ("" if active else "\n⚠️ Подписка истекла — новые сделки не открываются. /subscription"))
+            + ("" if active else "\n⚠️ Подписка истекла — новые сделки не открываются. /pay"),
+            reply_markup=markup)
 
     def _cmd_positions(self, user_id, chat_id):
         user = self._require_connected(user_id, chat_id)
         if not user:
             return
-        mgr = self._live_manager(user_id)
-        if mgr is None:
-            self._send(chat_id, "Активной торговой сессии нет (нет доступа или ещё не было цикла).")
+        client = self._user_client(user_id, user)
+        if client is None:
+            self._send(chat_id, "Не удалось подключиться к бирже. Попробуй позже.")
             return
-        open_positions = [
-            (pair, pos)
-            for pair, positions in mgr.active_positions.items()
-            for pos in positions
-            if pos["status"] == "OPEN"
-        ]
-        if not open_positions:
+        positions = self._fetch_open_positions(client)   # РЕАЛЬНЫЕ позиции с биржи
+        if not positions:
             self._send(chat_id, "📭 Открытых позиций нет.")
             return
 
-        lines = [f"<b>📋 Позиции ({len(open_positions)})</b>", "━━━━━━━━━━━━━━━━━━━━"]
-        for pair, pos in open_positions:
-            direction = pos["signal"]["setup"]["type"]
-            entry = pos["entry_price"]
-            sl    = pos["params"]["stop_loss"]
-            size  = pos["params"]["position_size"]
-            be    = " ➿" if pos.get("breakeven_set") else ""
-            dir_icon = "📈" if direction == "LONG" else "📉"
+        lines = [f"<b>📋 Позиции ({len(positions)})</b>", "━━━━━━━━━━━━━━━━━━━━"]
+        buttons = []
+        for p in positions:
+            pair = self._norm(p.get("symbol", ""))
+            side = str(p.get("side", "")).upper()           # LONG / SHORT
+            entry = float(p.get("entryPrice") or 0)
+            mark  = float(p.get("markPrice") or 0)
+            upnl  = p.get("unrealizedPnl")
+            info  = p.get("info", {}) or {}
+            sl    = info.get("stopLoss")  or "—"
+            tp    = info.get("takeProfit") or "—"
+            dir_icon = "📈" if side == "LONG" else "📉"
             pnl_str = ""
-            try:
-                cur = mgr.exchange.fetch_ticker(pair)["last"]
-                unreal = (cur - entry) * size if direction == "LONG" else (entry - cur) * size
-                pnl_icon = "🟢" if unreal >= 0 else "🔴"
-                pnl_str = f"  {pnl_icon} <b>${unreal:+.2f}</b> @ <code>${_fmt_p(cur)}</code>"
-            except Exception:
-                pass
+            if upnl is not None:
+                try:
+                    u = float(upnl); ic = "🟢" if u >= 0 else "🔴"
+                    pnl_str = f"  {ic} <b>${u:+.2f}</b>"
+                except Exception:
+                    pass
+            sl_s = f"${_fmt_p(float(sl))}" if str(sl) not in ("—", "", "0") else "—"
+            tp_s = f"${_fmt_p(float(tp))}" if str(tp) not in ("—", "", "0") else "—"
             lines.append(
-                f"\n{dir_icon} <b>{pair}</b> {direction}{be}{pnl_str}\n"
-                f"   Вход <code>${_fmt_p(entry)}</code> · SL <code>${_fmt_p(sl)}</code> · "
-                f"TP взято {pos.get('tp_hit', 0)}/2")
-        self._send(chat_id, "\n".join(lines))
+                f"\n{dir_icon} <b>{pair}</b> {side}{pnl_str}\n"
+                f"   Вход <code>${_fmt_p(entry)}</code> @ <code>${_fmt_p(mark)}</code>\n"
+                f"   🛡 SL <code>{sl_s}</code> · 🎯 TP <code>{tp_s}</code>")
+            buttons.append([{"text": f"❌ Закрыть {pair}", "callback_data": f"act:close:{pair}"}])
+        self._send(chat_id, "\n".join(lines), reply_markup={"inline_keyboard": buttons})
 
     def _cmd_stats(self, user_id, chat_id):
         user = self._require_connected(user_id, chat_id)
@@ -426,30 +540,61 @@ class PlatformController:
         user = self._require_connected(user_id, chat_id)
         if not user:
             return
-        mgr = self._live_manager(user_id)
-        if mgr is None:
-            self._send(chat_id, "Активной торговой сессии нет — закрывать нечего.")
+        client = self._user_client(user_id, user)
+        if client is None:
+            self._send(chat_id, "Не удалось подключиться к бирже. Попробуй позже.")
             return
         if not args:
-            open_pairs = sorted(mgr.get_open_pairs())
-            if open_pairs:
-                lst = "\n".join(f"  /close {p}" for p in open_pairs)
-                self._send(chat_id, f"Укажи пару:\n{lst}")
+            positions = self._fetch_open_positions(client)
+            if positions:
+                buttons = [[{"text": f"❌ Закрыть {self._norm(p.get('symbol',''))}",
+                             "callback_data": f"act:close:{self._norm(p.get('symbol',''))}"}]
+                           for p in positions]
+                self._send(chat_id, "Выбери позицию для закрытия:",
+                           reply_markup={"inline_keyboard": buttons})
             else:
-                self._send(chat_id, "Открытых позиций нет.")
+                self._send(chat_id, "📭 Открытых позиций нет.")
             return
         pair = args[0].upper()
         if not pair.endswith("USDT"):
             pair += "USDT"
-        if pair not in mgr.get_open_pairs():
-            self._send(chat_id, f"❓ Позиция <b>{pair}</b> не найдена.")
-            return
         self._send(chat_id, f"⏳ Закрываю <b>{pair}</b>...")
-        success, price = mgr.close_position_by_pair(pair)
+        # Через живой менеджер (журнал/уведомления) или напрямую с биржи (untracked)
+        mgr = self._live_manager(user_id)
+        if mgr is not None:
+            success, price = mgr.close_position_by_pair(pair)
+        else:
+            success, price = self._raw_close(client, pair)
         if success:
             self._send(chat_id, f"✅ <b>{pair}</b> закрыта @ <code>${_fmt_p(price)}</code>")
         else:
-            self._send(chat_id, f"⚠️ Не удалось закрыть <b>{pair}</b>.")
+            self._send(chat_id, f"⚠️ <b>{pair}</b> не найдена или не удалось закрыть.")
+
+    def _raw_close(self, client, pair):
+        """Закрытие позиции напрямую через клиент (нет live-менеджера / untracked)."""
+        try:
+            target = None
+            for p in client.fetch_positions():
+                if self._norm(p.get("symbol", "")) == self._norm(pair) and \
+                   abs(float(p.get("contracts", 0) or 0)) > 0:
+                    target = p
+                    break
+            if not target:
+                return False, 0.0
+            size = abs(float(target.get("contracts", 0) or 0))
+            is_long = str(target.get("side", "")).lower() == "long"
+            side = "sell" if is_long else "buy"
+            try:
+                client.cancel_all_orders(pair)
+            except Exception:
+                pass
+            client.create_order(symbol=pair, type="market", side=side, amount=size,
+                                params={"reduce_only": True})
+            price = client.fetch_ticker(pair)["last"]
+            return True, price
+        except Exception as e:
+            log(f"raw close {pair}: {e}")
+            return False, 0.0
 
     def _cmd_pause(self, user_id, chat_id, pause: bool):
         user = self._require_connected(user_id, chat_id)
@@ -476,8 +621,9 @@ class PlatformController:
             f"<b>{head}</b>\n"
             f"━━━━━━━━━━━━━━━━━━━━\n"
             f"Доступ до: <b>{_fmt_until(until)}</b> ({days} дн.)\n"
-            f"Тариф: <b>${price}</b> / {sdays} дн.\n\n"
-            f"Продлить: /pay")
+            f"Тариф: <b>${price}</b> / {sdays} дн.",
+            reply_markup={"inline_keyboard": [[
+                {"text": f"💳 Оплатить ${price}", "callback_data": "act:pay"}]]})
 
     def _cmd_pay(self, user_id, chat_id, username):
         import payments
@@ -627,7 +773,12 @@ class PlatformController:
             self.platform._fingerprints.pop(target, None)
         self._send(chat_id, f"{'🚫 Забанен' if ban else '✅ Разбанен'}: <code>{target}</code>")
 
-    # ── helpers: доступ к живому менеджеру / балансу ──────────────────────────
+    # ── helpers: доступ к бирже (источник истины для статуса/позиций) ─────────
+    @staticmethod
+    def _norm(symbol: str) -> str:
+        """'BTC/USDT:USDT' и 'BTCUSDT' -> 'BTCUSDT'."""
+        return (symbol or "").replace("/", "").replace(":USDT", "").replace(":", "").upper()
+
     def _live_manager(self, user_id):
         if self.platform:
             acc = self.platform.get_account(user_id)
@@ -635,18 +786,43 @@ class PlatformController:
                 return acc.manager
         return None
 
-    def _fetch_balance_only(self, user):
+    def _user_client(self, user_id, user):
+        """ccxt-клиент юзера: из живого менеджера, иначе временный (для запросов к бирже)."""
+        mgr = self._live_manager(user_id)
+        if mgr is not None:
+            return mgr.exchange
         try:
             key = crypto.decrypt(user.get("api_key_enc") or "")
             sec = crypto.decrypt(user.get("api_secret_enc") or "")
             if not key or not sec:
                 return None
-            client = ex.make_client(user.get("exchange") or "bybit", key, sec, config.TRADING_MODE)
+            return ex.make_client(user.get("exchange") or "bybit", key, sec, config.TRADING_MODE)
+        except Exception as e:
+            log(f"client build error {user.get('telegram_id')}: {e}")
+            return None
+
+    def _fetch_balance(self, client):
+        if client is None:
+            return None
+        try:
             bal = client.fetch_balance()
             return bal.get("USDT", {}).get("total", 0) or 0
         except Exception as e:
-            log(f"balance fetch error {user.get('telegram_id')}: {e}")
+            log(f"balance fetch error: {e}")
             return None
+
+    def _fetch_open_positions(self, client):
+        """Реальные открытые позиции с биржи (contracts>0) — источник истины."""
+        if client is None:
+            return []
+        out = []
+        try:
+            for p in client.fetch_positions():
+                if abs(float(p.get("contracts", 0) or 0)) > 0:
+                    out.append(p)
+        except Exception as e:
+            log(f"fetch_positions error: {e}")
+        return out
 
     # ── low-level HTTP ────────────────────────────────────────────────────────
     def _send(self, chat_id, text, reply_markup=None):
@@ -691,6 +867,8 @@ class PlatformController:
             {"command": "resume",       "description": "Возобновить торговлю"},
             {"command": "subscription", "description": "Статус подписки"},
             {"command": "pay",          "description": "Оплатить / продлить подписку"},
+            {"command": "setdeposit",   "description": "Депозит для расчёта позиции ($)"},
+            {"command": "menu",         "description": "Показать меню кнопок"},
             {"command": "disconnect",   "description": "Отключить биржу"},
             {"command": "help",         "description": "Список команд"},
         ]

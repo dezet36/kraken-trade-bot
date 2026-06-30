@@ -61,8 +61,8 @@ class UserAccount:
         return self.manager.get_active_count() < config.MAX_ACTIVE_PAIRS
 
     def holds_pair(self, pair: str) -> bool:
-        """Уже есть открытая/ожидающая позиция по паре."""
-        return self.ok and pair in self.manager.get_open_pairs()
+        """Уже есть открытая/ожидающая позиция/ордер по паре (по реальному состоянию биржи)."""
+        return self.ok and self.manager.has_position_or_order(pair)
 
     # ── Делегаты для управления (используются циклом и командами Telegram) ────
     def manage(self):

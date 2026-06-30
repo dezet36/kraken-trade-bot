@@ -9,14 +9,16 @@ import traceback
 import json
 import os
 import csv
+import time
 
 COOLDOWN_FILE        = os.path.join(os.path.dirname(__file__), 'cooldown_state.json')
 POSITIONS_FILE       = os.path.join(os.path.dirname(__file__), 'positions_state.json')
 PENDING_ORDERS_FILE  = os.path.join(os.path.dirname(__file__), 'pending_orders.json')
 
-# Доли закрытия на каждом TP уровне (W11: 2 тейка по 50%)
-TP_CLOSE_FRACTIONS = getattr(config, 'TP_CLOSE_FRACTIONS', [0.5, 0.5])
-TP_KEYS = ['take_profit_1', 'take_profit_2']
+# Доли закрытия на каждом TP уровне (по умолчанию ОДИН тейк -18% = [1.0]).
+# TP_KEYS выводятся из числа долей: [1.0] -> 1 тейк, [0.5,0.5] -> 2 тейка (совместимость).
+TP_CLOSE_FRACTIONS = getattr(config, 'TP_CLOSE_FRACTIONS', [1.0])
+TP_KEYS = ['take_profit_1', 'take_profit_2'][:len(TP_CLOSE_FRACTIONS)]
 N_TP    = len(TP_KEYS)
 
 
@@ -52,6 +54,8 @@ class LiveTradeManager:
         self.trade_history = []
         self.daily_pnl = 0.0
         self.daily_date = datetime.now().date()
+        self._ex_snapshot = None        # кэш снимка биржи (позиции+ордера) на цикл
+        self._ex_snapshot_ts = 0.0
         self._restore_positions()       # W7: восстанавливаем позиции после перезапуска
         self._restore_pending_orders()  # W9+: восстанавливаем GTC ордера после перезапуска
 
@@ -287,21 +291,59 @@ class LiveTradeManager:
         hours_since_last = (datetime.now() - self.last_trade_time[trading_pair]).total_seconds() / 3600
         return hours_since_last >= config.COOLDOWN_HOURS
 
+    # ── Снимок реального состояния на бирже (источник истины) ────────────────
+    def sync_exchange_state(self, max_age: float = 15.0):
+        """Тянет с биржи реальные позиции (+ открытые ордера), кэширует на ~цикл.
+
+        Возвращает {'positions': {норм_символ: pos}, 'pos_ok': bool, 'order_pairs': set}.
+        pos_ok=False — биржа недоступна (тогда вызывающий код не должен считать «всё закрыто»)."""
+        now = time.time()
+        if self._ex_snapshot is not None and (now - self._ex_snapshot_ts) < max_age:
+            return self._ex_snapshot
+
+        pos_map, pos_ok = {}, True
+        try:
+            for p in self.exchange.fetch_positions():
+                sz = abs(float(p.get('contracts', 0) or 0))
+                if sz > 0:
+                    pos_map[self._norm_symbol(p.get('symbol', ''))] = p
+        except Exception as e:
+            pos_ok = False
+            log(f"⚠️ sync: не удалось получить позиции — {e}")
+
+        order_pairs = set()
+        try:   # best-effort: наши лимиты дополнительно покрыты pending-файлом
+            for o in self.exchange.fetch_open_orders(params={'settleCoin': 'USDT'}):
+                order_pairs.add(self._norm_symbol(o.get('symbol', '')))
+        except Exception:
+            pass
+
+        self._ex_snapshot = {'positions': pos_map, 'pos_ok': pos_ok, 'order_pairs': order_pairs}
+        self._ex_snapshot_ts = now
+        return self._ex_snapshot
+
     def get_active_count(self):
-        """Количество пар с открытыми или pending позициями."""
-        active = sum(
-            1 for positions in self.active_positions.values()
-            if any(p['status'] == 'OPEN' for p in positions)
-        )
-        return active + len(self._load_pending_orders())
+        """Количество занятых слотов — по РЕАЛЬНОМУ состоянию биржи + наши pending-лимиты."""
+        return len(self.get_open_pairs())
 
     def get_open_pairs(self):
-        """Множество пар с открытыми или pending позициями."""
-        active_pairs = {
-            pair for pair, positions in self.active_positions.items()
-            if any(p['status'] == 'OPEN' for p in positions)
-        }
-        return active_pairs | set(self._load_pending_orders().keys())
+        """Пары с реальной открытой позицией/ордером на бирже + наши pending-лимиты.
+        Биржа — источник истины (чинит рассинхрон: дубли, «бот не видит позицию»)."""
+        snap = self.sync_exchange_state()
+        pairs = set()
+        if snap['pos_ok']:
+            pairs |= set(snap['positions'].keys())
+        else:
+            # биржа недоступна — падаем на in-memory, чтобы не открыть дубль
+            pairs |= {self._norm_symbol(pair) for pair, ps in self.active_positions.items()
+                      if any(p['status'] == 'OPEN' for p in ps)}
+        pairs |= snap['order_pairs']
+        pairs |= {self._norm_symbol(p) for p in self._load_pending_orders().keys()}
+        return pairs
+
+    def has_position_or_order(self, trading_pair) -> bool:
+        """Есть ли на бирже позиция/ордер ИЛИ наш pending-лимит по паре (защита от дублей)."""
+        return self._norm_symbol(trading_pair) in self.get_open_pairs()
 
     def get_real_balance(self):
         try:
@@ -309,6 +351,20 @@ class LiveTradeManager:
             return balance.get('USDT', {}).get('total', 0) or 0
         except Exception:
             return 0
+
+    def get_trading_balance(self):
+        """База для расчёта размера позиции. Если юзер задал свой депозит (deposit_usd>0) —
+        используем ЕГО «как есть» (по решению пользователя), иначе реальный баланс счёта."""
+        if self.telegram_id is not None:
+            try:
+                import db
+                user = db.get_user(self.telegram_id)
+                dep = (user or {}).get('deposit_usd')
+                if dep and float(dep) > 0:
+                    return float(dep)
+            except Exception:
+                pass
+        return self.get_real_balance()
 
     # ── W9: Рыночный вход (fallback) ─────────────────────────────────────────
 
@@ -580,9 +636,10 @@ class LiveTradeManager:
     def _place_sl_tp_orders(self, trading_pair, side, position_size, params):
         """
         SL — через position trading-stop (Bybit V5, уровень позиции).
-        TP1-4 — четыре limit-ордера reduce_only по 25% каждый.
-        Биржевой TP через PositionTradingStop закрывает 100% — не подходит.
-        Limit reduce_only позволяет делать частичные фиксации без ограничений.
+        TP при одном тейке (-18%, 100%) — тоже на уровне позиции (закрывает всё).
+        При нескольких TP (legacy) — limit reduce_only по долям для частичных фиксаций.
+        Во всех случаях софт-монитор (_check_tp_levels) — первичный механизм закрытия,
+        биржевой SL/TP — резервный (если бот не успел отработать цикл).
         """
         is_long     = (side == 'buy')
         sl_price    = params['stop_loss']
@@ -610,24 +667,49 @@ class LiveTradeManager:
             else:
                 log(f"⚠️ SL не выставлен (программный SL активен): {e}")
 
-        # ── W11: 2 TP — limit-ордера reduce_only по 50% каждый ───────────────
-        for i, key in enumerate(TP_KEYS):
-            tp_price = params[key]
-            tp_size  = round(position_size * TP_CLOSE_FRACTIONS[i], 6)
+        # ── TP ───────────────────────────────────────────────────────────────
+        if N_TP == 1:
+            # Один тейк -18% закрывает 100% — ведём на уровне позиции (Bybit V5).
+            # Идемпотентно с TP, прикреплённым к ордеру входа: повторная установка
+            # того же уровня => "not modified". Без дублирующего limit reduce_only.
+            tp_price = params[TP_KEYS[0]]
             try:
-                order = self.exchange.create_order(
-                    symbol=trading_pair,
-                    type='limit',
-                    side=close_side,
-                    amount=tp_size,
-                    price=round(tp_price, 8),
-                    params={'reduce_only': True, 'category': 'linear'},
-                )
-                tp_orders.append(order)
-                log(f"TP{i+1} limit @ ${tp_price:.4f} | размер: {tp_size:.6f}")
+                self.exchange.privatePostV5PositionTradingStop({
+                    'category':    'linear',
+                    'symbol':      trading_pair,
+                    'takeProfit':  str(round(tp_price, 8)),
+                    'tpTriggerBy': 'LastPrice',
+                    'positionIdx': 0,
+                })
+                tp_orders.append({'id': 'position_tp'})
+                log(f"TP выставлен @ ${tp_price:.4f} (закрывает 100%)")
             except Exception as e:
-                tp_orders.append(None)
-                log(f"⚠️ TP{i+1} ордер не выставлен: {e}")
+                err = str(e)
+                if '34040' in err or 'not modified' in err:
+                    tp_orders.append({'id': 'position_tp'})
+                    log(f"TP уже выставлен @ ${tp_price:.4f}")
+                else:
+                    tp_orders.append(None)
+                    log(f"⚠️ TP не выставлен (программный TP активен): {e}")
+        else:
+            # Legacy (W11): несколько TP — limit reduce_only по долям
+            for i, key in enumerate(TP_KEYS):
+                tp_price = params[key]
+                tp_size  = round(position_size * TP_CLOSE_FRACTIONS[i], 6)
+                try:
+                    order = self.exchange.create_order(
+                        symbol=trading_pair,
+                        type='limit',
+                        side=close_side,
+                        amount=tp_size,
+                        price=round(tp_price, 8),
+                        params={'reduce_only': True, 'category': 'linear'},
+                    )
+                    tp_orders.append(order)
+                    log(f"TP{i+1} limit @ ${tp_price:.4f} | размер: {tp_size:.6f}")
+                except Exception as e:
+                    tp_orders.append(None)
+                    log(f"⚠️ TP{i+1} ордер не выставлен: {e}")
 
         return sl_order, tp_orders
 
@@ -641,9 +723,9 @@ class LiveTradeManager:
             log(f"⏳ Кулдаун для {trading_pair}. Осталось {hours_left:.1f} ч")
             return False
 
-        # Не ставим второй ордер если pending уже есть для этой пары
-        if trading_pair in self._load_pending_orders():
-            log(f"⏳ {trading_pair}: GTC ордер уже ожидает заполнения — пропускаем")
+        # Защита от дублей: на бирже уже есть позиция/ордер по паре ИЛИ наш pending-лимит
+        if self.has_position_or_order(trading_pair):
+            log(f"⏳ {trading_pair}: позиция/ордер уже есть на бирже — пропускаем (без дубля)")
             return False
 
         self._reset_daily_pnl_if_needed()
@@ -651,10 +733,12 @@ class LiveTradeManager:
         setup   = signal['setup']
         trigger = signal['trigger']
 
-        # ── Пересчёт размера позиции по ТЕКУЩЕМУ балансу (не по балансу на момент скана) ──
-        balance = self.get_real_balance()
-        if balance <= 0:
-            log(f"❌ Баланс недоступен (${balance:.2f})")
+        # ── Расчёт размера: РИСК считаем от торгового депозита (свой депозит юзера или
+        #    реальный баланс), а контроль маржи — по РЕАЛЬНОМУ балансу счёта. ──
+        sizing_balance = self.get_trading_balance()   # база для риска (может быть задана юзером)
+        real_balance   = self.get_real_balance()      # фактические средства на счёте
+        if sizing_balance <= 0:
+            log(f"❌ Депозит/баланс недоступен (${sizing_balance:.2f})")
             return False
 
         sig_sl_dist = abs(signal['params']['entry'] - signal['params']['stop_loss'])
@@ -662,7 +746,7 @@ class LiveTradeManager:
             log(f"❌ SL дистанция = 0 — пропускаем")
             return False
 
-        risk_amount   = balance * (config.RISK_PER_TRADE / 100)
+        risk_amount   = sizing_balance * (config.RISK_PER_TRADE / 100)
         position_size = risk_amount / sig_sl_dist
 
         # W3: cap на максимальное количество юнитов (страховка от микроценовых пар)
@@ -670,8 +754,8 @@ class LiveTradeManager:
             log(f"⚠️ Position size {position_size:.0f} > max {config.MAX_POSITION_SIZE_UNITS:.0f} — cap applied")
             position_size = config.MAX_POSITION_SIZE_UNITS
 
-        if balance < risk_amount * 2:
-            log(f"❌ Недостаточно средств! Баланс: ${balance:.2f}, риск: ${risk_amount:.2f}")
+        if real_balance < risk_amount * 2:
+            log(f"❌ Недостаточно средств! Баланс: ${real_balance:.2f}, риск: ${risk_amount:.2f}")
             return False
 
         # Копируем params и обновляем размер/риск под текущий баланс
@@ -689,14 +773,17 @@ class LiveTradeManager:
             htf = signal.get('htf_trend', 'N/A')
             log(f"Тип: {setup['type']}  |  Зона: {trigger['zone']}  |  HTF: {htf}")
             log(f"Вход: ${_fmt_p(params['entry'])}  |  Стоп: ${_fmt_p(params['stop_loss'])}")
-            log(f"TP1: ${_fmt_p(params['take_profit_1'])} (50%)  |  TP2: ${_fmt_p(params['take_profit_2'])} (50%)")
+            if N_TP == 1:
+                log(f"TP: ${_fmt_p(params['take_profit_1'])} (-18%, закрывает 100%)")
+            else:
+                log(f"TP1: ${_fmt_p(params['take_profit_1'])} (50%)  |  TP2: ${_fmt_p(params['take_profit_2'])} (50%)")
             if params.get('be_level'):
                 log(f"Безубыток при пробое B: ${_fmt_p(params['be_level'])}")
             pos_value_usd = position_size * params['entry']
             log(f"Позиция: {position_size:.6f} (~${pos_value_usd:.2f})  |  Риск: ${risk_amount:.2f} ({config.RISK_PER_TRADE}%)  |  RR: 1:{params['rr']:.2f}")
 
-            # Sanity check: position USD value must not exceed balance × leverage
-            max_pos_usd = balance * config.LEVERAGE
+            # Sanity check: position USD value must not exceed REAL balance × leverage
+            max_pos_usd = real_balance * config.LEVERAGE
             if pos_value_usd > max_pos_usd:
                 log(f"❌ Позиция ${pos_value_usd:.2f} > баланс×плечо ${max_pos_usd:.2f} — пропускаем {trading_pair}")
                 return False
@@ -728,13 +815,16 @@ class LiveTradeManager:
                 sz  = setup.get('size', 0)
                 inv = (ep - sz * config.ZONE_B_TOP if side == 'buy'
                        else ep + sz * config.ZONE_B_TOP)
-                # Bybit V5: прикрепляем стоп-лосс прямо к ордеру входа — позиция будет
-                # защищена в МОМЕНТ заполнения лимита, даже если бот не успеет отработать
-                # цикл регистрации. TP (частичные 50/50) ставятся reduce-only после заполнения.
+                # Bybit V5: прикрепляем стоп-лосс И тейк-профит прямо к ордеру входа —
+                # позиция защищена и ведётся биржей в МОМЕНТ заполнения лимита, даже если бот
+                # не успеет отработать цикл регистрации. Один TP -18% закрывает 100%.
                 limit_params = {'reduce_only': False, 'timeInForce': 'GTC'}
                 if getattr(self.exchange, 'id', '') == 'bybit':
                     limit_params['stopLoss']    = str(round(params['stop_loss'], 8))
                     limit_params['slTriggerBy'] = 'LastPrice'
+                    if N_TP == 1:   # одиночный TP — биржа закроет всю позицию по нему
+                        limit_params['takeProfit']  = str(round(params['take_profit_1'], 8))
+                        limit_params['tpTriggerBy']  = 'LastPrice'
                 try:
                     lim_order = self.exchange.create_order(
                         symbol=trading_pair, type='limit', side=side,
@@ -788,8 +878,9 @@ class LiveTradeManager:
 
             # Контроль фактического риска
             actual_risk = actual_filled * actual_sl_dist
+            _base = sizing_balance if sizing_balance > 0 else 1
             log(f"Риск-контроль: цель ${risk_amount:.2f} ({config.RISK_PER_TRADE}%) | "
-                f"фактически ${actual_risk:.2f} ({actual_risk / balance * 100:.2f}%)")
+                f"фактически ${actual_risk:.2f} ({actual_risk / _base * 100:.2f}%)")
 
             # Выставляем SL + TP1-4 на бирже
             sl_order, tp_orders = self._place_sl_tp_orders(
@@ -909,7 +1000,8 @@ class LiveTradeManager:
 
         log(f"\n📊 Активных позиций: {total_positions}")
 
-        # Реконсиляция: снимок открытых позиций на бирже (None = запрос не удался, пропускаем)
+        # Свежий снимок биржи на этот цикл (источник истины для реконсиляции/слотов)
+        self._ex_snapshot = None
         ex_sizes = self._fetch_exchange_sizes()
 
         for trading_pair, positions in self.active_positions.items():
@@ -941,19 +1033,16 @@ class LiveTradeManager:
         return (s or '').replace('/', '').replace(':USDT', '').replace(':', '').upper()
 
     def _fetch_exchange_sizes(self):
-        """Карта {нормализованный_символ: |contracts|} открытых позиций на бирже.
-        None — если запрос не удался (тогда реконсиляцию пропускаем, чтобы НЕ закрыть
+        """Карта {нормализованный_символ: |contracts|} открытых позиций на бирже (из снимка).
+        None — если биржа недоступна (тогда реконсиляцию пропускаем, чтобы НЕ закрыть
         позицию по ложному нулю)."""
-        try:
-            positions = self.exchange.fetch_positions()
-        except Exception as e:
-            log(f"⚠️ Реконсиляция: не удалось получить позиции с биржи — {e}")
+        snap = self.sync_exchange_state()
+        if not snap['pos_ok']:
             return None
         sizes = {}
-        for p in positions:
-            sym = self._norm_symbol(p.get('symbol', ''))
+        for sym, p in snap['positions'].items():
             try:
-                sizes[sym] = sizes.get(sym, 0.0) + abs(float(p.get('contracts', 0) or 0))
+                sizes[sym] = abs(float(p.get('contracts', 0) or 0))
             except Exception:
                 continue
         return sizes
@@ -1119,19 +1208,45 @@ class LiveTradeManager:
         )
 
     def close_position_by_pair(self, trading_pair: str):
-        """Вручную закрывает позицию по паре. Возвращает (success, price)."""
-        positions = self.active_positions.get(trading_pair, [])
-        for position in positions:
+        """Вручную закрывает позицию по паре. Возвращает (success, price).
+        Работает и для позиций, которых нет в памяти бота, но есть на бирже (рассинхрон)."""
+        # 1) Есть отслеживаемая позиция — закрываем штатно (журнал/уведомления/отмена ордеров)
+        for position in self.active_positions.get(trading_pair, []):
             if position['status'] == 'OPEN':
                 try:
-                    ticker = self.exchange.fetch_ticker(trading_pair)
-                    current_price = ticker['last']
+                    current_price = self.exchange.fetch_ticker(trading_pair)['last']
                     self._close_all(position, current_price, 'Manual', trading_pair)
+                    self._ex_snapshot = None
                     return True, current_price
                 except Exception as e:
                     log(f"Ошибка ручного закрытия {trading_pair}: {e}")
                     return False, 0.0
-        return False, 0.0
+
+        # 2) Позиции в памяти нет — закрываем «сырую» позицию прямо с биржи (untracked)
+        try:
+            snap = self.sync_exchange_state(max_age=0)
+            pos  = snap['positions'].get(self._norm_symbol(trading_pair))
+            if not pos:
+                return False, 0.0
+            size = abs(float(pos.get('contracts', 0) or 0))
+            if size <= 0:
+                return False, 0.0
+            is_long = (str(pos.get('side', '')).lower() == 'long')
+            close_side = 'sell' if is_long else 'buy'
+            # Отменяем висящие ордера и закрываем позицию рыночным reduce_only
+            try:
+                self.exchange.cancel_all_orders(trading_pair)
+            except Exception:
+                pass
+            self.exchange.create_order(symbol=trading_pair, type='market', side=close_side,
+                                       amount=size, params={'reduce_only': True})
+            current_price = self.exchange.fetch_ticker(trading_pair)['last']
+            self._ex_snapshot = None
+            log(f"🖐 {trading_pair}: закрыта untracked-позиция вручную @ ${_fmt_p(current_price)}")
+            return True, current_price
+        except Exception as e:
+            log(f"Ошибка закрытия untracked {trading_pair}: {e}")
+            return False, 0.0
 
     def get_stats_dict(self) -> dict:
         """Статистика юзера: из БД (мульти-тенант) или CSV-журнала (legacy). None если пусто."""

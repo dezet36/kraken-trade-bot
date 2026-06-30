@@ -112,6 +112,11 @@ def init_db():
         """)
         for k, v in DEFAULT_SETTINGS.items():
             c.execute("INSERT OR IGNORE INTO settings(key, value) VALUES(?, ?)", (k, v))
+        # ── Миграции (идемпотентно: добавляем новые колонки в существующие БД) ──
+        cols = {r['name'] for r in c.execute("PRAGMA table_info(users)").fetchall()}
+        if 'deposit_usd' not in cols:
+            # Депозит для расчёта размера позиции (NULL/0 => считать от реального баланса)
+            c.execute("ALTER TABLE users ADD COLUMN deposit_usd REAL")
 
 
 # ── Настройки (key-value, админ-редактируемые) ───────────────────────────────
@@ -159,7 +164,7 @@ def get_user(telegram_id: int):
 
 def set_user_field(telegram_id: int, field: str, value):
     allowed = {'username', 'status', 'exchange', 'api_key_enc', 'api_secret_enc',
-               'paused', 'trial_until', 'paid_until', 'last_reminded_at'}
+               'paused', 'trial_until', 'paid_until', 'last_reminded_at', 'deposit_usd'}
     if field not in allowed:
         raise ValueError(f"Поле {field} нельзя менять")
     with _write_lock, _connect() as c:
