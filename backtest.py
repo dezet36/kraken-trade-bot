@@ -39,6 +39,12 @@ ZONE_A_BOTTOM  = 0.382
 ZONE_B_TOP     = 0.886
 ZONE_B_BOTTOM  = 0.786
 
+# ── Ручки детекции импульса v2.1 (дефолты = текущее live-поведение) ──────────
+IMP_ANCHOR_SNAP     = 0      # >0: доснэпить якоря A/B к истинным экстремумам (окно, свечей)
+IMP_SOFT_FRACTALS   = False  # True: нестрогое сравнение справа (равные вершины видны)
+IMP_FRESH_FALLBACK  = False  # True: свежесть B (последние 24) и для fallback-ветки
+IMP_MAX_LEG_RETRACE = None   # доля размера: макс. внутренний откат ноги A->B (None = выкл)
+
 os.makedirs(CACHE_DIR, exist_ok=True)
 
 
@@ -212,13 +218,26 @@ def find_impulse_old(df, lookback=48):
 
 
 def find_extremes(df, n):
+    """Фрактальные экстремумы. IMP_SOFT_FRACTALS=True: строгое сравнение слева,
+    нестрогое справа — первая из равных вершин остаётся фракталом (v1 strict
+    слеп к двойным вершинам с точно равными high)."""
     highs, lows = [], []
+    hs = df['high'].values
+    ls = df['low'].values
     for i in range(n, len(df) - n):
-        h = df.iloc[i]['high']
-        if all(h > df.iloc[i-j]['high'] and h > df.iloc[i+j]['high'] for j in range(1, n+1)):
+        h = hs[i]
+        if IMP_SOFT_FRACTALS:
+            ok_h = all(h > hs[i-j] for j in range(1, n+1)) and all(h >= hs[i+j] for j in range(1, n+1))
+        else:
+            ok_h = all(h > hs[i-j] and h > hs[i+j] for j in range(1, n+1))
+        if ok_h:
             highs.append({'index': i, 'price': h})
-        l = df.iloc[i]['low']
-        if all(l < df.iloc[i-j]['low'] and l < df.iloc[i+j]['low'] for j in range(1, n+1)):
+        l = ls[i]
+        if IMP_SOFT_FRACTALS:
+            ok_l = all(l < ls[i-j] for j in range(1, n+1)) and all(l <= ls[i+j] for j in range(1, n+1))
+        else:
+            ok_l = all(l < ls[i-j] and l < ls[i+j] for j in range(1, n+1))
+        if ok_l:
             lows.append({'index': i, 'price': l})
     return highs, lows
 
@@ -325,10 +344,31 @@ def old_signal(df_1h, df_5m, df_4h, balance):
 
 # ── NEW STRATEGY (W10 logic) ──────────────────────────────────────────────────
 def find_impulse_new(df, lookback=48):
-    """Swing-based impulse detection: finds most recent structural leg."""
+    """Swing-based impulse detection: finds most recent structural leg.
+    Ручки v2.1: IMP_ANCHOR_SNAP / IMP_SOFT_FRACTALS / IMP_FRESH_FALLBACK /
+    IMP_MAX_LEG_RETRACE (дефолты = поведение v1)."""
     if len(df) < lookback:
         return None
     seg = df.tail(lookback).reset_index(drop=True)
+    sh = seg['high'].values
+    sl_ = seg['low'].values
+
+    def _snap(direction, s_i, e_i):
+        """Доснэп якорей к истинным экстремумам: A — экстремум чуть раньше/внутри
+        ноги, B — экстремум ноги и чуть после фрактала (V-дно без фрактала,
+        равные вершины, экстремум в несфрактализованном хвосте)."""
+        w = IMP_ANCHOR_SNAP
+        s2 = max(0, s_i - w)
+        if direction == 'LONG':
+            a_i = s2 + int(sl_[s2:e_i].argmin())
+            e2 = min(len(seg) - 1, e_i + w)
+            b_i = a_i + 1 + int(sh[a_i + 1:e2 + 1].argmax())
+            return a_i, b_i, sl_[a_i], sh[b_i]
+        else:
+            a_i = s2 + int(sh[s2:e_i].argmax())
+            e2 = min(len(seg) - 1, e_i + w)
+            b_i = a_i + 1 + int(sl_[a_i + 1:e2 + 1].argmin())
+            return a_i, b_i, sh[a_i], sl_[b_i]
 
     def _build(direction, s_i, e_i, s_p, e_p):
         size = abs(e_p - s_p)
@@ -346,6 +386,15 @@ def find_impulse_new(df, lookback=48):
                      else (sub['close'] < sub['open']).sum())
             if d_cnt / num < 0.60:
                 return None
+        if IMP_MAX_LEG_RETRACE:
+            # чистота ноги: макс. внутренний откат против направления <= доли размера
+            leg_h, leg_l = sh[s_i:e_i + 1], sl_[s_i:e_i + 1]
+            if direction == 'LONG':
+                max_dd = (np.maximum.accumulate(leg_h) - leg_l).max()
+            else:
+                max_dd = (leg_h - np.minimum.accumulate(leg_l)).max()
+            if max_dd > IMP_MAX_LEG_RETRACE * size:
+                return None
         return {'type': direction, 'start_price': s_p, 'end_price': e_p, 'size': size}
 
     # Swing method: find_extremes with n=2
@@ -356,6 +405,8 @@ def find_impulse_new(df, lookback=48):
             direction, s_i, e_i, s_p, e_p = 'LONG',  ll['index'], lh['index'], ll['price'], lh['price']
         else:
             direction, s_i, e_i, s_p, e_p = 'SHORT', lh['index'], ll['index'], lh['price'], ll['price']
+        if IMP_ANCHOR_SNAP:
+            s_i, e_i, s_p, e_p = _snap(direction, s_i, e_i)
         # Freshness: B in last 24 candles
         if e_i >= len(seg) - 24:
             setup = _build(direction, s_i, e_i, s_p, e_p)
@@ -363,14 +414,18 @@ def find_impulse_new(df, lookback=48):
                 return setup
 
     # Fallback: global max/min
-    max_i = seg['high'].idxmax()
-    min_i = seg['low'].idxmin()
+    max_i = int(seg['high'].idxmax())
+    min_i = int(seg['low'].idxmin())
     mx, mn = seg.loc[max_i, 'high'], seg.loc[min_i, 'low']
     if min_i < max_i:
-        return _build('LONG', min_i, max_i, mn, mx)
+        direction, s_i, e_i, s_p, e_p = 'LONG', min_i, max_i, mn, mx
     elif max_i < min_i:
-        return _build('SHORT', max_i, min_i, mx, mn)
-    return None
+        direction, s_i, e_i, s_p, e_p = 'SHORT', max_i, min_i, mx, mn
+    else:
+        return None
+    if IMP_FRESH_FALLBACK and e_i < len(seg) - 24:
+        return None   # протухший fallback-импульс (v1 торговал без проверки свежести)
+    return _build(direction, s_i, e_i, s_p, e_p)
 
 
 def new_signal(df_1h, df_5m, df_4h, balance):

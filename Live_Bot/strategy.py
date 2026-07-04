@@ -174,10 +174,10 @@ def find_local_extremes(df, n=2):
 
 def calculate_trade_params(setup, entry_price, balance, trading_pair=None, log_reject=True):
     """
-    Параметры сделки для текущего конфига (Фибо-лимит):
-    - entry_price = граница зоны A (38.2% уровень)
-    - SL за уровнем 61.8% с буфером 1%
-    - TP1 = -18% (единственный тейк, закрывает 100%)
+    Параметры сделки (геометрия v2, 2026-07-05):
+    - entry_price = граница зоны A (38.2% уровень коррекции)
+    - SL за уровнем config.SL_LEVEL_R (0.886 = инвалидация сетапа) с буфером 1%
+    - TP1 = -TP1_LEVEL за B (-25%, единственный тейк, закрывает 100%)
     - be_level = уровень B импульса (0%, конец импульса) — для безубытка
     """
     start_price = setup['start_price']
@@ -185,16 +185,16 @@ def calculate_trade_params(setup, entry_price, balance, trading_pair=None, log_r
     size        = setup['size']
 
     if setup['type'] == 'LONG':
-        # SL ниже зоны A: за уровень 61.8% (ZONE_A_BOTTOM от LOW)
-        sl_price = start_price + size * config.ZONE_A_BOTTOM - (size * config.SL_BUFFER)
+        # SL ниже: за уровнем SL_LEVEL_R коррекции от B (0.886 = инвалидация)
+        sl_price = end_price - size * config.SL_LEVEL_R - (size * config.SL_BUFFER)
         min_sl = entry_price * config.MIN_SL_PERCENT
         if entry_price - sl_price < min_sl:
             sl_price = entry_price - min_sl
-        tp1 = end_price + size * config.TP1_LEVEL   # -18%
-        tp2 = end_price + size * config.TP2_LEVEL   # -27%
+        tp1 = end_price + size * config.TP1_LEVEL   # -25% расширение за B
+        tp2 = end_price + size * config.TP2_LEVEL   # (мёртвое поле, совместимость)
     else:
-        # SL выше зоны A: за уровень 61.8% (ZONE_A_BOTTOM от HIGH)
-        sl_price = start_price - size * config.ZONE_A_BOTTOM + (size * config.SL_BUFFER)
+        # SL выше: за уровнем SL_LEVEL_R коррекции от B
+        sl_price = end_price + size * config.SL_LEVEL_R + (size * config.SL_BUFFER)
         min_sl = entry_price * config.MIN_SL_PERCENT
         if sl_price - entry_price < min_sl:
             sl_price = entry_price + min_sl

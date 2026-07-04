@@ -70,6 +70,11 @@ HTF_STRICT        = False         # True = блокировать кампани
 BLOCK_FILL_HOURS  = frozenset()   # часы UTC, в которые лимит НЕ заполняется (сессионный фильтр)
 BLOCK_BIRTH_HOURS = frozenset()   # часы UTC, в которые кампании НЕ рождаются
 DIR_CAP           = None          # макс. активных позиций в ОДНУ сторону (None/0 = выкл)
+# ── Ручки v2 (пересмотр геометрии; дефолты = текущее поведение v1) ───────────
+SL_R_E1A          = None          # уровень стопа E1_A как retracement-доля: None = ZONE['L618']
+                                  # (0.618); 0.786 / 0.886 (=инвалидация) / 1.0 (за начало импульса)
+TRAIL_AFTER_BE_K  = None          # None = фикс-TP (v1); K>0 = после взведения BE стоп трейлится
+                                  # на K × исходную SL-дистанцию от экстремума, TP отменяется
 
 
 def fib_price(setup, r):
@@ -176,14 +181,19 @@ def simulate_pair_campaign(df1, df5, df4h, pair, cfg):
         return None
 
     def sl_for(setup, sl_kind):
-        """SL за указанным уровнем с буфером."""
+        """SL за указанным уровнем с буфером. Для E1_A ('618') уровень
+        параметризуем ручкой SL_R_E1A (v2): 0.618 (дефолт) / 0.786 / 0.886 / 1.0."""
         sz = setup['size']
         if setup['type'] == 'LONG':
-            if sl_kind == '618':  return fib_price(setup, ZONE['L618']) - sz * SL_BUFFER
+            if sl_kind == '618':
+                r = SL_R_E1A if SL_R_E1A is not None else ZONE['L618']
+                return fib_price(setup, r) - sz * SL_BUFFER
             if sl_kind == '100':  return setup['start_price']            - sz * SL_BUFFER
             if sl_kind == '382':  return fib_price(setup, ZONE['L382']) - sz * SL_BUFFER
         else:
-            if sl_kind == '618':  return fib_price(setup, ZONE['L618']) + sz * SL_BUFFER
+            if sl_kind == '618':
+                r = SL_R_E1A if SL_R_E1A is not None else ZONE['L618']
+                return fib_price(setup, r) + sz * SL_BUFFER
             if sl_kind == '100':  return setup['start_price']            + sz * SL_BUFFER
             if sl_kind == '382':  return fib_price(setup, ZONE['L382']) + sz * SL_BUFFER
         return None
@@ -284,8 +294,11 @@ def simulate_pair_campaign(df1, df5, df4h, pair, cfg):
                     pos['sl'] = pos['entry']
                     pos['be_done'] = True
 
+            trail_on = bool(TRAIL_AFTER_BE_K) and pos['be_done']
             sl  = pos['sl']
-            tgt = pos['targets'][pos['tp_idx']] if pos['tp_idx'] < len(pos['targets']) else None
+            # v2 trail-режим: после BE фикс-TP отменяется, выходим только по трейл-стопу
+            tgt = (None if trail_on else
+                   (pos['targets'][pos['tp_idx']] if pos['tp_idx'] < len(pos['targets']) else None))
             sl_hit = (is_long and l5[i] <= sl) or (not is_long and h5[i] >= sl)
             tp_hit = tgt is not None and ((is_long and h5[i] >= tgt) or (not is_long and l5[i] <= tgt))
             if sl_hit and tp_hit:   # оба на свече — ближе к open
@@ -294,8 +307,20 @@ def simulate_pair_campaign(df1, df5, df4h, pair, cfg):
                 else:
                     sl_hit = False
 
+            if not sl_hit and trail_on:
+                # обновляем трейл ПО ЗАКРЫТИИ бара (действует со следующего — без lookahead)
+                if is_long:
+                    pos['trail_ext'] = max(pos.get('trail_ext', h5[i]), h5[i])
+                    pos['sl'] = max(pos['sl'], pos['trail_ext'] - TRAIL_AFTER_BE_K * pos['sl_dist'])
+                else:
+                    pos['trail_ext'] = min(pos.get('trail_ext', l5[i]), l5[i])
+                    pos['sl'] = min(pos['sl'], pos['trail_ext'] + TRAIL_AFTER_BE_K * pos['sl_dist'])
+
             if sl_hit:
-                reason = ('BE_' if pos['be_done'] else 'SL_') + pos['tag']
+                if trail_on and pos['sl'] != pos['entry']:
+                    reason = 'TRAIL_' + pos['tag']
+                else:
+                    reason = ('BE_' if pos['be_done'] else 'SL_') + pos['tag']
                 close_pos(pos, sl, reason, i)
                 tag = pos['tag']; pos = None
                 if tag == 'E1_A' and cfg['e1b'] and reason.startswith('SL'):
