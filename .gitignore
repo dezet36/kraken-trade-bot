@@ -59,6 +59,7 @@ backtest_cache/
 
 # Результаты бэктестов и логи
 backtest_*.csv
+missed_window_report.csv
 bot_log.txt
 Live_Bot/bot_log.txt
 

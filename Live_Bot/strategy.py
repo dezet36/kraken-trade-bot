@@ -3,16 +3,19 @@ import config
 from logger import log
 
 
-def get_htf_trend(df_4h):
+def get_htf_trend(df_4h, return_strength=False):
     """
     Определяет направление тренда на 4H по EMA50/EMA200.
 
     BULLISH  — цена выше EMA50 И EMA50 выше EMA200 (восходящий тренд)
     BEARISH  — цена ниже EMA50 И EMA50 ниже EMA200 (нисходящий тренд)
     NEUTRAL  — смешанные сигналы (боковик или переходная фаза)
+
+    return_strength=True -> возвращает (trend, strength), где strength =
+    |EMA50-EMA200|/EMA200 (нормированное расстояние — для скоринга кандидатов).
     """
     if df_4h is None or len(df_4h) < config.HTF_EMA_SLOW + 10:
-        return 'NEUTRAL'
+        return ('NEUTRAL', 0.0) if return_strength else 'NEUTRAL'
 
     close = df_4h['close']
     ema_fast = close.ewm(span=config.HTF_EMA_FAST, adjust=False).mean()
@@ -23,10 +26,16 @@ def get_htf_trend(df_4h):
     last_ema_slow = ema_slow.iloc[-1]
 
     if last_close > last_ema_fast and last_ema_fast > last_ema_slow:
-        return 'BULLISH'
-    if last_close < last_ema_fast and last_ema_fast < last_ema_slow:
-        return 'BEARISH'
-    return 'NEUTRAL'
+        trend = 'BULLISH'
+    elif last_close < last_ema_fast and last_ema_fast < last_ema_slow:
+        trend = 'BEARISH'
+    else:
+        trend = 'NEUTRAL'
+
+    if not return_strength:
+        return trend
+    strength = abs(last_ema_fast - last_ema_slow) / last_ema_slow if last_ema_slow else 0.0
+    return trend, strength
 
 
 def find_recent_impulse(df, lookback_candles=48):
@@ -163,12 +172,12 @@ def find_local_extremes(df, n=2):
 # detect_break_of_structure удалён в W11: основной вход — лимит в зоне A без BoS
 # (бэктест показал, что BoS-подтверждение основного входа ухудшает результат).
 
-def calculate_trade_params(setup, entry_price, balance):
+def calculate_trade_params(setup, entry_price, balance, trading_pair=None, log_reject=True):
     """
-    Параметры сделки для W11 (Фибо-лимит, конфиг D3):
+    Параметры сделки для текущего конфига (Фибо-лимит):
     - entry_price = граница зоны A (38.2% уровень)
     - SL за уровнем 61.8% с буфером 1%
-    - TP1 = -18% (50%), TP2 = -27% (50%)
+    - TP1 = -18% (единственный тейк, закрывает 100%)
     - be_level = уровень B импульса (0%, конец импульса) — для безубытка
     """
     start_price = setup['start_price']
@@ -195,6 +204,9 @@ def calculate_trade_params(setup, entry_price, balance):
     sl_distance = abs(entry_price - sl_price)
     rr = abs(tp1 - entry_price) / sl_distance if sl_distance > 0 else 0
     if rr < config.MIN_RR:
+        if log_reject:
+            tag = f"{trading_pair}: " if trading_pair else ""
+            log(f"   {tag}нет сигнала — RR {rr:.2f} < MIN_RR {config.MIN_RR} (entry ${entry_price:.6f})")
         return None
 
     risk_amount = balance * (config.RISK_PER_PAIR / 100)
@@ -214,11 +226,12 @@ def calculate_trade_params(setup, entry_price, balance):
 
 def analyze_market(df_1h, df_5m, trading_pair, balance):
     """
-    W11 (Фибо-лимит, конфиг D3): вход — GTC-лимит на границе зоны A (38.2%),
+    Текущий конфиг (Фибо-лимит): вход — GTC-лимит на границе зоны A (38.2%),
     БЕЗ ожидания BoS. df_5m оставлен в сигнатуре для совместимости (не используется).
     """
     setup = find_recent_impulse(df_1h, lookback_candles=config.LOOKBACK_CANDLES)
     if not setup:
+        log(f"   {trading_pair}: нет сигнала — импульс не найден")
         return None
 
     zone_a, zone_b = get_zones(setup)
@@ -228,10 +241,16 @@ def analyze_market(df_1h, df_5m, trading_pair, balance):
 
     # Инвалидация: цена закрылась за уровнем 88.6% → сетка недействительна
     if setup['type'] == 'LONG':
-        if current_price < end_price - size * config.ZONE_B_TOP:
+        inv_level = end_price - size * config.ZONE_B_TOP
+        if current_price < inv_level:
+            log(f"   {trading_pair}: нет сигнала — инвалидация (цена {current_price:.6f} "
+                f"< 88.6%-уровня {inv_level:.6f})")
             return None
     else:
-        if current_price > end_price + size * config.ZONE_B_TOP:
+        inv_level = end_price + size * config.ZONE_B_TOP
+        if current_price > inv_level:
+            log(f"   {trading_pair}: нет сигнала — инвалидация (цена {current_price:.6f} "
+                f"> 88.6%-уровня {inv_level:.6f})")
             return None
 
     # Вход = лимит на 38.2%-границе зоны A. Лимит должен «отдыхать» по ходу коррекции:
@@ -240,15 +259,19 @@ def analyze_market(df_1h, df_5m, trading_pair, balance):
     if setup['type'] == 'LONG':
         entry_price = zone_a['top']
         if not (entry_price <= current_price <= end_price):
+            log(f"   {trading_pair}: нет сигнала — цена {current_price:.6f} вне окна входа "
+                f"[{entry_price:.6f}, {end_price:.6f}]")
             return None
     else:
         entry_price = zone_a['bottom']
         if not (end_price <= current_price <= entry_price):
+            log(f"   {trading_pair}: нет сигнала — цена {current_price:.6f} вне окна входа "
+                f"[{end_price:.6f}, {entry_price:.6f}]")
             return None
 
-    params = calculate_trade_params(setup, entry_price, balance)
+    params = calculate_trade_params(setup, entry_price, balance, trading_pair=trading_pair)
     if not params:
-        return None
+        return None   # причина (RR < MIN_RR) уже залогирована внутри calculate_trade_params
 
     return {
         'trading_pair': trading_pair,

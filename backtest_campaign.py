@@ -41,8 +41,9 @@ import backtest as bt   # переиспуем загрузку данных + �
 RISK_PCT        = 1.0
 INITIAL_BALANCE = 10_000.0
 SL_BUFFER       = 0.010     # буфер за уровнем (доля размера импульса)
+MIN_SL_PCT      = 0.008     # пол дистанции SL, % от entry (синхронизировано с Live_Bot/config.py:MIN_SL_PERCENT)
 MIN_IMPULSE_PCT = 3.0
-MIN_RR_E1       = 1.8       # мин RR для первого входа
+MIN_RR_E1       = 2.0       # мин RR для первого входа (синхронизировано с Live_Bot/config.py:MIN_RR)
 MIN_RR_E2       = 1.2       # мин RR для второго (континуация, допускаем ниже)
 LOOKBACK_1H     = 48
 STALE_HOURS     = 72        # макс. время ожидания заполнения входа в кампании
@@ -212,7 +213,14 @@ def simulate_pair_campaign(df1, df5, df4h, pair, cfg):
         return None
 
     def open_entry(setup, entry_price, sl_price, targets, fracs, be_level, min_rr, tag, i):
+        # Пол дистанции SL (как в live strategy.py:calculate_trade_params) — без него
+        # геометрия импульса иногда даёт entry~=sl (SL-дистанция около нуля), что
+        # взрывает R-мультипликатор на много порядков на одной случайной сделке.
+        min_sl_dist = entry_price * MIN_SL_PCT
         sl_dist = abs(entry_price - sl_price)
+        if sl_dist < min_sl_dist:
+            sl_price = (entry_price - min_sl_dist) if long(setup) else (entry_price + min_sl_dist)
+            sl_dist = min_sl_dist
         if sl_dist <= 0:
             return None
         rr = abs(targets[0] - entry_price) / sl_dist   # RR к первому TP
@@ -483,24 +491,27 @@ def stats(trades, curve, label='FIBONACCI CAMPAIGN'):
     print('=' * 60 + '\n')
 
 
-def run_config(data_1h, data_5m, cfg, label, save_csv=False):
+def run_config(data_1h, data_5m, cfg, label, save_csv=False,
+               risk_pct=None, cap=None, csv_path=r'D:\Bot trade\backtest_campaign.csv'):
     all_trades = []
     for pair in bt.BACKTEST_PAIRS:
         tr = simulate_pair_campaign(data_1h[pair], data_5m[pair],
                                     data_1h.get(pair + '_4h'), pair, cfg)
         all_trades.extend(tr)
 
-    sumR     = sum(t['R'] for t in all_trades)
-    max_conc = measure_max_concurrency(all_trades)
-    capped, mc, dropped = portfolio_filter(all_trades)
-    capped, curve, _ = build_equity(capped)
-    print(f'\n  Портфельный фильтр (лимит {MAX_CONCURRENT}): всего {len(all_trades)} | '
-          f'flat-edge {sumR:+.0f}R/{sumR:+.0f}% | макс.одновр {max_conc} | '
-          f'принято {len(capped)}, отброшено {dropped}')
+    sumR        = sum(t['R'] for t in all_trades)
+    max_conc    = measure_max_concurrency(all_trades)
+    n_campaigns = len(set(t['cid'] for t in all_trades))
+    eff_cap     = MAX_CONCURRENT if cap is None else cap
+    capped, mc, dropped = portfolio_filter(all_trades, cap=cap)
+    capped, curve, ruined = build_equity(capped, risk_pct=risk_pct)
+    print(f'\n  Портфельный фильтр (лимит {eff_cap}): всего {len(all_trades)} сделок / '
+          f'{n_campaigns} кампаний | flat-edge {sumR:+.0f}R | макс.одновр {max_conc} | '
+          f'принято {len(capped)}, отброшено {dropped}' + (' | RUIN' if ruined else ''))
     stats(capped, curve, label=label)
     if save_csv and capped:
-        pd.DataFrame(capped).to_csv(r'D:\Bot trade\backtest_campaign.csv', index=False)
-        print('Детальный лог (capped): backtest_campaign.csv')
+        pd.DataFrame(capped).to_csv(csv_path, index=False)
+        print(f'Детальный лог (capped): {csv_path}')
     return capped, curve
 
 
@@ -528,16 +539,30 @@ if __name__ == '__main__':
 
     grid_configs = [
         ({'e1b': False, 'e2': False, 'bos': False, 'ntp': 1, 'be': False}, 'D1 (1 TP -18%)'),
+        ({'e1b': False, 'e2': False, 'bos': False, 'ntp': 1, 'be': True},  'D1B (1 TP + безуб@B)'),   # = точный live-конфиг
         ({'e1b': False, 'e2': False, 'bos': False, 'ntp': 2, 'be': True},  'D3 (2 TP + безуб@B)'),
     ]
     risks = (0.5, 1.0, 1.5, 2.0, 3.0)
     caps  = (5, 4, 3, 2)
+    grid_rows = []
+
+    DEPLOY_RISK, DEPLOY_CAP = 0.5, 3   # точка реального деплоя — детальный CSV на переиспользованных trd
 
     for cfg, cname in grid_configs:
         trd = []
         for pair in bt.BACKTEST_PAIRS:
             trd.extend(simulate_pair_campaign(
                 data_1h[pair], data_5m[pair], data_1h.get(pair + '_4h'), pair, cfg))
+
+        # Детальный CSV на точке деплоя — без повторного вызова simulate_pair_campaign
+        tag = cname.split()[0]
+        deploy_capped, _, _ = portfolio_filter(trd, cap=DEPLOY_CAP)
+        deploy_capped, deploy_curve, _ = build_equity(deploy_capped, risk_pct=DEPLOY_RISK)
+        if deploy_capped:
+            pd.DataFrame(deploy_capped).to_csv(
+                rf'D:\Bot trade\backtest_campaign_{tag}_r05_c3.csv', index=False)
+            print(f'Детальный CSV @ risk={DEPLOY_RISK}%/cap={DEPLOY_CAP}: '
+                  f'backtest_campaign_{tag}_r05_c3.csv ({len(deploy_capped)} сделок)')
 
         print('\n' + '=' * 80)
         print(f'  СЕТКА РИСК × ЛИМИТ ПОЗИЦИЙ — {cname}')
@@ -550,11 +575,23 @@ if __name__ == '__main__':
             for cap in caps:
                 capped, _, _ = portfolio_filter(trd, cap=cap)
                 capped, curve, ruined = build_equity(capped, risk_pct=risk)
-                _, _, pnl, dd, _ = compute_metrics(capped, curve)
+                wr, pf, pnl, dd, avg_r = compute_metrics(capped, curve)
+                grid_rows.append({
+                    'config': cname, 'risk_pct': risk, 'cap': cap,
+                    'n_trades': len(capped), 'wr_pct': round(wr, 1),
+                    'pf': round(pf, 3) if math.isfinite(pf) else None,
+                    'pnl_pct': round(pnl, 1), 'max_dd_pct': round(dd, 1),
+                    'avg_R': round(avg_r, 3), 'ruined': ruined,
+                    'final_balance': round(curve[-1], 2) if capped else None,
+                })
                 cells.append(f'{"RUIN":>16}' if ruined
                              else f'{pnl:>+8.0f}%/{dd:>3.0f}%'.rjust(16))
             print(f'  {risk:>5.1f}%     │' + ''.join(cells))
         print('=' * 80)
 
     print('  Подсказка: ищем макс. доход при просадке, которую готов терпеть (обычно < 35-40%).')
+
+    grid_df = pd.DataFrame(grid_rows)
+    grid_df.to_csv(r'D:\Bot trade\backtest_campaign_grid.csv', index=False)
+    print(f'\nСетка сохранена: backtest_campaign_grid.csv ({len(grid_df)} строк)')
     print(f'\nВремя: {(time.time()-t0)/60:.1f} мин')

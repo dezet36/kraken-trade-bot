@@ -128,8 +128,7 @@ def trading_cycle():
                 if success:
                     signals_found += 1
                     open_pairs.add(pair)
-            else:
-                log(f"Цена не в пред-входовой области {pair}")
+            # else: причина отказа уже залогирована внутри analyze_market
 
         except Exception as e:
             msg = f"Ошибка анализа {pair}: {e}"
