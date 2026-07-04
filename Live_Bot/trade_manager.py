@@ -345,6 +345,31 @@ class LiveTradeManager:
         """Есть ли на бирже позиция/ордер ИЛИ наш pending-лимит по паре (защита от дублей)."""
         return self._norm_symbol(trading_pair) in self.get_open_pairs()
 
+    def get_direction_counts(self):
+        """{'LONG': n, 'SHORT': n} — реальные позиции биржи + наши pending-лимиты.
+        Биржа недоступна (pos_ok=False) — считаем по in-memory позициям (та же
+        деградация, что в get_open_pairs: кэп — мягкий риск-шейпер, не инвариант)."""
+        snap = self.sync_exchange_state()
+        counts, seen = {'LONG': 0, 'SHORT': 0}, set()
+        if snap['pos_ok']:
+            for sym, p in snap['positions'].items():
+                side = str(p.get('side', '')).lower()
+                if side in ('long', 'short'):
+                    counts[side.upper()] += 1
+                    seen.add(sym)
+        else:
+            log("⚠️ dir-cap: биржа недоступна — направления по in-memory состоянию")
+            for pair, ps in self.active_positions.items():
+                open_ps = [p for p in ps if p['status'] == 'OPEN']
+                if open_ps:
+                    counts[open_ps[-1]['signal']['setup']['type']] += 1
+                    seen.add(self._norm_symbol(pair))
+        for pair, po in self._load_pending_orders().items():
+            sym = self._norm_symbol(pair)
+            if sym not in seen:   # дедуп: pending мог уже стать позицией
+                counts['LONG' if po.get('side') == 'buy' else 'SHORT'] += 1
+        return counts
+
     def get_real_balance(self):
         try:
             balance = self.exchange.fetch_balance()
@@ -727,6 +752,16 @@ class LiveTradeManager:
         if self.has_position_or_order(trading_pair):
             log(f"⏳ {trading_pair}: позиция/ордер уже есть на бирже — пропускаем (без дубля)")
             return False
+
+        # Направленный кэп: не более MAX_SAME_DIRECTION позиций/ордеров в одну сторону
+        # (снимок биржи уже прогрет проверкой выше — доп. API-запросов нет)
+        if getattr(config, 'MAX_SAME_DIRECTION', 0) > 0:
+            sig_dir = signal['setup']['type']            # 'LONG' / 'SHORT'
+            dcnt = self.get_direction_counts()
+            if dcnt.get(sig_dir, 0) >= config.MAX_SAME_DIRECTION:
+                log(f"⛔ {trading_pair}: направление {sig_dir} занято "
+                    f"{dcnt[sig_dir]}/{config.MAX_SAME_DIRECTION} — направленный кэп")
+                return False
 
         self._reset_daily_pnl_if_needed()
 

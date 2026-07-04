@@ -11,14 +11,17 @@ TRADING_MODE = os.getenv('TRADING_MODE', 'DEMO')
 EXCHANGE_NAME = os.getenv('EXCHANGE', 'bybit')
 
 # ── Пул пар для сканирования ─────────────────────────────────────────────────
+# Решение 2026-07-04 (12-мес walk-forward, вариант утверждён пользователем):
+# 10 валидированных пар при cap=3 — лучший баланс (модель года: +100.7%, DD 23.6%,
+# 26.6 сд/нед, WR 29.5%; подтверждено на out-of-sample половине). Широкие пулы при
+# cap=3 проигрывают кратно: слоты — дефицит, среднее качество занятого слота падает
+# (27 пар: −27%/DD 46%). Прежний 34-парный пул содержал 5 НЕсуществующих на Bybit
+# linear тикеров (PEPE/SHIB/BONK/FLOKI/PUMP — реальные контракты 1000PEPE и т.п.).
+# Агрессивная опция в запасе (НЕ деплоена): 18 positive-edge пар + cap=5 —
+# модель +139%/DD 31%/55 сд/нед, но отбор по знаку на одном годе (см. CHANGELOG).
 TRADING_PAIRS_POOL = [
     'BTCUSDT',  'ETHUSDT',  'SOLUSDT',  'XRPUSDT',  'BNBUSDT',
-    'DOGEUSDT', 'ADAUSDT',  'AVAXUSDT', 'DOTUSDT',  'LINKUSDT',
-    'LTCUSDT',  'BCHUSDT',  'TRXUSDT',  'XLMUSDT',  'UNIUSDT',
-    'APTUSDT',  'SUIUSDT',  'ARBUSDT',  'OPUSDT',   'TIAUSDT',
-    'TAOUSDT',  'HYPEUSDT', 'JUPUSDT',  'WIFUSDT',  'LDOUSDT',
-    'PEPEUSDT', 'SHIBUSDT', 'BONKUSDT', 'FLOKIUSDT','XMRUSDT',
-    'ZECUSDT',  'LITUSDT',  'PUMPUSDT', 'ASTERUSDT',
+    'DOGEUSDT', 'ADAUSDT',  'AVAXUSDT', 'LINKUSDT', 'LTCUSDT',
 ]
 
 # Пары для торговли (legacy — используется в логах и confirm_live_mode)
@@ -125,6 +128,12 @@ VOLUME_CONFIRM_MULT = 1.2
 
 # Кулдаун
 COOLDOWN_HOURS = 12
+
+# ── Направленный кэп: макс. позиций/ордеров в ОДНУ сторону (0/пусто = выкл) ──
+# Защита от однонаправленной корреляции (LONG на BTC+ETH+SOL = фактический риск
+# ~3x номинального). Значение включается после бэктест-вердикта walk_forward.py.
+_msd = os.getenv('MAX_SAME_DIRECTION', '0').strip()
+MAX_SAME_DIRECTION = int(_msd) if _msd else 0
 
 # ── Сессионный фильтр входов (бэктест 2026-07-04, 6 мес / 10 пар) ────────────
 # Сетапы, РОЖДЁННЫЕ в 12-16 UTC (американская сессия), убыточны в 5 из 6 месяцев

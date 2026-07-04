@@ -69,6 +69,7 @@ BE_EXT            = 0.0           # взведение безубытка на f
 HTF_STRICT        = False         # True = блокировать кампании при HTF NEUTRAL (только по тренду)
 BLOCK_FILL_HOURS  = frozenset()   # часы UTC, в которые лимит НЕ заполняется (сессионный фильтр)
 BLOCK_BIRTH_HOURS = frozenset()   # часы UTC, в которые кампании НЕ рождаются
+DIR_CAP           = None          # макс. активных позиций в ОДНУ сторону (None/0 = выкл)
 
 
 def fib_price(setup, r):
@@ -259,6 +260,7 @@ def simulate_pair_campaign(df1, df5, df4h, pair, cfg):
         cooldown_until = i + COOLDOWN_H * 12               # кулдаун перед новой кампанией
         trades.append({
             'pair': pair, 'cid': camp.get('cid', pair), 'dir': camp['setup']['type'], 'tag': p['tag'],
+            'birth_time': ts5[camp['born_idx']],   # рождение кампании (для сессионной диагностики)
             'entry_time': p['entry_time'], 'exit_time': ts5[i],
             'entry': p['entry'], 'sl': p['sl'], 'target': p['target'],
             'rr': round(p['rr'], 2), 'exit_reason': reason, 'R': total_R,
@@ -403,23 +405,28 @@ def simulate_pair_campaign(df1, df5, df4h, pair, cfg):
 
 
 # ── Портфельный фильтр: лимит одновременных позиций (с учётом связки кампании) ─
-def portfolio_filter(trades, cap=None):
+def portfolio_filter(trades, cap=None, dir_cap=None):
+    """cap — общий лимит позиций; dir_cap — макс. позиций в ОДНУ сторону (None/0 = выкл)."""
     cap = MAX_CONCURRENT if cap is None else cap
+    dir_cap = DIR_CAP if dir_cap is None else dir_cap
     ts = sorted(trades, key=lambda t: pd.Timestamp(t['entry_time']))
-    active = {}            # pair -> exit_time
+    active = {}            # pair -> (exit_time, dir)
     dropped_cids = set()
     accepted = []
     max_conc = 0
     for t in ts:
         et = pd.Timestamp(t['entry_time'])
         xt = pd.Timestamp(t['exit_time'])
-        active = {p: x for p, x in active.items() if x > et}   # освобождаем закрытые
+        active = {p: v for p, v in active.items() if v[0] > et}   # освобождаем закрытые
         if t['cid'] in dropped_cids:
             continue
         if t['pair'] in active or len(active) >= cap:
             dropped_cids.add(t['cid'])     # дропаем всю цепочку кампании
             continue
-        active[t['pair']] = xt
+        if dir_cap and sum(1 for v in active.values() if v[1] == t['dir']) >= dir_cap:
+            dropped_cids.add(t['cid'])     # направление занято — дроп всей кампании
+            continue
+        active[t['pair']] = (xt, t['dir'])
         max_conc = max(max_conc, len(active))
         accepted.append(t)
     return accepted, max_conc, len(ts) - len(accepted)

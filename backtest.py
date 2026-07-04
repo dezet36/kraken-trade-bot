@@ -50,7 +50,7 @@ def get_exchange():
 # ── DATA FETCH & CACHE ───────────────────────────────────────────────────────
 _TF_MS = {'5m': 5*60*1000, '15m': 15*60*1000, '1h': 60*60*1000, '4h': 4*60*60*1000}
 
-def fetch_ohlcv_full(exchange, symbol, timeframe, since_ms, label=''):
+def fetch_ohlcv_full(exchange, symbol, timeframe, since_ms, label='', max_retries=8):
     cache_file = os.path.join(CACHE_DIR, f'{symbol}_{timeframe}.pkl')
     if os.path.exists(cache_file):
         with open(cache_file, 'rb') as f:
@@ -65,11 +65,19 @@ def fetch_ohlcv_full(exchange, symbol, timeframe, since_ms, label=''):
     seen     = set()
     all_candles = []
     cur = since_ms
+    fails = 0
 
     while cur < now_ms:
         try:
             candles = exchange.fetch_ohlcv(symbol, timeframe, since=cur, limit=1000)
+            fails = 0
+        except ccxt.BadSymbol as e:
+            # символа нет на бирже — retry бессмысленен, сразу наружу
+            raise RuntimeError(f'{symbol}: символа нет на бирже ({e})')
         except Exception as e:
+            fails += 1
+            if max_retries is not None and fails > max_retries:
+                raise RuntimeError(f'{symbol} {timeframe}: {fails} ошибок подряд ({e})')
             print(f' RETRY({e})', end='', flush=True)
             time.sleep(3)
             continue

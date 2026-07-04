@@ -56,6 +56,7 @@ desktop.ini
 
 # Кэш бэктестов (большие бинарные файлы)
 backtest_cache/
+backtest_cache_12m/
 
 # Результаты бэктестов и логи
 backtest_*.csv
