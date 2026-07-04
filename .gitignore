@@ -60,6 +60,8 @@ backtest_cache/
 # Результаты бэктестов и логи
 backtest_*.csv
 missed_window_report.csv
+exp_*.json
+tp1_sensitivity_sweep.csv
 bot_log.txt
 Live_Bot/bot_log.txt
 

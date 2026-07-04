@@ -1,5 +1,5 @@
 import sys
-from datetime import datetime, date, timedelta
+from datetime import datetime, date, timedelta, timezone
 from apscheduler.schedulers.blocking import BlockingScheduler
 
 import config
@@ -74,6 +74,14 @@ def trading_cycle():
 
     if available <= 0:
         log("Все слоты заняты — новые входы пропускаем")
+        return
+
+    # ── Сессионный фильтр: в блок-часы UTC новые сетапы не открываем ──────
+    # (позиции и pending уже обслужены выше — блокируется только скан/вход)
+    cur_hour_utc = datetime.now(timezone.utc).hour
+    if cur_hour_utc in config.BLOCK_ENTRY_HOURS_UTC:
+        log(f"⏰ Сессионный фильтр: {cur_hour_utc:02d}:xx UTC в блок-листе "
+            f"({sorted(config.BLOCK_ENTRY_HOURS_UTC)}) — новые входы пропускаем")
         return
 
     # ── Сканирование пула ─────────────────────────────────────────────────

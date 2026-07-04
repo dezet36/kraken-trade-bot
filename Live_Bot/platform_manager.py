@@ -186,6 +186,14 @@ class PlatformManager:
         if n_active == 0:
             return
 
+        # Сессионный фильтр: в блок-часы UTC новые сетапы не открываем
+        # (позиции/pending всех юзеров уже обслужены выше в acc.manage())
+        cur_hour_utc = datetime.now(timezone.utc).hour
+        if cur_hour_utc in config.BLOCK_ENTRY_HOURS_UTC:
+            log(f"⏰ Сессионный фильтр: {cur_hour_utc:02d}:xx UTC в блок-листе "
+                f"({sorted(config.BLOCK_ENTRY_HOURS_UTC)}) — новые входы пропускаем")
+            return
+
         # 2. Скан рынка ОДИН раз
         candidates = self.scan_market()
         log(f"🔍 Кандидатов после скана: {len(candidates)}")

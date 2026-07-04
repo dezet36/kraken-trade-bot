@@ -126,6 +126,17 @@ VOLUME_CONFIRM_MULT = 1.2
 # Кулдаун
 COOLDOWN_HOURS = 12
 
+# ── Сессионный фильтр входов (бэктест 2026-07-04, 6 мес / 10 пар) ────────────
+# Сетапы, РОЖДЁННЫЕ в 12-16 UTC (американская сессия), убыточны в 5 из 6 месяцев
+# и в обеих половинах периода. Блок рождения новых сетапов в эти часы:
+# WR 29.0%->30.7%, PF 1.094->1.229, +23.5%->+53.7% за 6 мес, частота лишь -6.7%.
+# Управление ОТКРЫТЫМИ позициями и pending-ордерами НЕ блокируется.
+# Пустая строка в env (BLOCK_ENTRY_HOURS_UTC='') полностью выключает фильтр.
+BLOCK_ENTRY_HOURS_UTC = frozenset(
+    int(h) for h in os.getenv('BLOCK_ENTRY_HOURS_UTC', '12,13,14,15,16').split(',')
+    if h.strip() != ''
+)
+
 # Telegram
 TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
 TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')

@@ -62,6 +62,14 @@ ZONE = {
     'L382':  0.382, 'L618': 0.618,    # ключевые уровни для SL
 }
 
+# ── Экспериментальные ручки (дефолты = текущее поведение; меняются setattr'ом
+#    из exp_runner.py, живой бот их не видит) ─────────────────────────────────
+ENTRY_R_E1A       = None          # None = ZONE['A_top'] (0.382); напр. 0.50 = лимит на 50%-уровне
+BE_EXT            = 0.0           # взведение безубытка на fib_price(setup, -BE_EXT); 0.0 = уровень B
+HTF_STRICT        = False         # True = блокировать кампании при HTF NEUTRAL (только по тренду)
+BLOCK_FILL_HOURS  = frozenset()   # часы UTC, в которые лимит НЕ заполняется (сессионный фильтр)
+BLOCK_BIRTH_HOURS = frozenset()   # часы UTC, в которые кампании НЕ рождаются
+
 
 def fib_price(setup, r):
     """Цена уровня r (доля коррекции): r=0 -> B (конец импульса), r=1 -> A (начало).
@@ -81,6 +89,7 @@ def simulate_pair_campaign(df1, df5, df4h, pair, cfg):
     l5  = df5['low'].values.astype(float)
     c5  = df5['close'].values.astype(float)
     n5  = len(df5)
+    hr5 = pd.DatetimeIndex(df5['timestamp']).hour.values   # час UTC каждой 5м-свечи (для сессионных ручек)
 
     # Целочисленные ns-таймстампы для быстрого searchsorted (без tz-конфликтов)
     ts5i = df5['timestamp'].values.astype('datetime64[ns]').astype('int64')
@@ -97,6 +106,8 @@ def simulate_pair_campaign(df1, df5, df4h, pair, cfg):
 
     def build_campaign(end5_idx):
         """Пытается зафиксировать свежий импульс по 1H на момент времени 5M-свечи."""
+        if BLOCK_BIRTH_HOURS and hr5[end5_idx] in BLOCK_BIRTH_HOURS:
+            return None
         cur_i = ts5i[end5_idx]
         pos1  = int(np.searchsorted(ts1i, cur_i, side='right'))
         if pos1 < LOOKBACK_1H:
@@ -117,6 +128,8 @@ def simulate_pair_campaign(df1, df5, df4h, pair, cfg):
             if htf == 'BULLISH' and setup['type'] == 'SHORT':
                 return None
             if htf == 'BEARISH' and setup['type'] == 'LONG':
+                return None
+            if HTF_STRICT and htf == 'NEUTRAL':
                 return None
 
         cur_price = c5[end5_idx]
@@ -144,7 +157,7 @@ def simulate_pair_campaign(df1, df5, df4h, pair, cfg):
     def zone_limit(setup, kind):
         """Лимит-цена входа = первая (мелкая) граница зоны, куда цена заходит при откате."""
         if kind == 'A':
-            return fib_price(setup, ZONE['A_top'])   # 38.2 уровень
+            return fib_price(setup, ENTRY_R_E1A if ENTRY_R_E1A is not None else ZONE['A_top'])
         if kind == 'B':
             return fib_price(setup, ZONE['B_top'])   # 78.6 уровень
         if kind == 'C':
@@ -194,6 +207,8 @@ def simulate_pair_campaign(df1, df5, df4h, pair, cfg):
         """Вход в зону. cfg['bos']=False -> лимит на границе зоны.
         cfg['bos']=True -> после касания зоны ждём слом структуры на 5M
         (закрытие за экстремум последних BOS_W свечей телом в сторону входа)."""
+        if BLOCK_FILL_HOURS and hr5[i] in BLOCK_FILL_HOURS:
+            return None
         lim = zone_limit(setup, kind)
         if not cfg.get('bos'):
             return try_fill(setup, lim, i)
@@ -331,7 +346,7 @@ def simulate_pair_campaign(df1, df5, df4h, pair, cfg):
                     else:
                         tgts = [fib_price(setup, -TP1_EXT)]
                         frs  = [1.0]
-                    be_lvl = setup['end_price'] if cfg.get('be') else None
+                    be_lvl = fib_price(setup, -BE_EXT) if cfg.get('be') else None   # BE_EXT=0.0 -> уровень B
                     p = open_entry(setup, fp, sl_for(setup, '618'),
                                    tgts, frs, be_lvl, MIN_RR_E1, 'E1_A', i)
                     if p: pos = p
