@@ -69,12 +69,16 @@ BE_EXT            = 0.0           # взведение безубытка на f
 HTF_STRICT        = False         # True = блокировать кампании при HTF NEUTRAL (только по тренду)
 BLOCK_FILL_HOURS  = frozenset()   # часы UTC, в которые лимит НЕ заполняется (сессионный фильтр)
 BLOCK_BIRTH_HOURS = frozenset()   # часы UTC, в которые кампании НЕ рождаются
+BLOCK_BIRTH_DOW   = frozenset()   # дни недели (0=Пн..6=Вс), в которые кампании НЕ рождаются
 DIR_CAP           = None          # макс. активных позиций в ОДНУ сторону (None/0 = выкл)
 # ── Ручки v2 (пересмотр геометрии; дефолты = текущее поведение v1) ───────────
 SL_R_E1A          = None          # уровень стопа E1_A как retracement-доля: None = ZONE['L618']
                                   # (0.618); 0.786 / 0.886 (=инвалидация) / 1.0 (за начало импульса)
 TRAIL_AFTER_BE_K  = None          # None = фикс-TP (v1); K>0 = после взведения BE стоп трейлится
                                   # на K × исходную SL-дистанцию от экстремума, TP отменяется
+MAX_HOLD_H        = None          # тайм-стоп: макс. время жизни позиции в часах (None = без лимита).
+                                  # КРИТИЧНО для широких стопов: без него позиция (особенно после BE,
+                                  # стоп=entry) может застрять в коридоре НАВЕЧНО и заблокировать пару.
 
 
 def fib_price(setup, r):
@@ -96,6 +100,7 @@ def simulate_pair_campaign(df1, df5, df4h, pair, cfg):
     c5  = df5['close'].values.astype(float)
     n5  = len(df5)
     hr5 = pd.DatetimeIndex(df5['timestamp']).hour.values   # час UTC каждой 5м-свечи (для сессионных ручек)
+    dw5 = pd.DatetimeIndex(df5['timestamp']).dayofweek.values   # день недели (0=Пн) каждой 5м-свечи
 
     # Целочисленные ns-таймстампы для быстрого searchsorted (без tz-конфликтов)
     ts5i = df5['timestamp'].values.astype('datetime64[ns]').astype('int64')
@@ -113,6 +118,8 @@ def simulate_pair_campaign(df1, df5, df4h, pair, cfg):
     def build_campaign(end5_idx):
         """Пытается зафиксировать свежий импульс по 1H на момент времени 5M-свечи."""
         if BLOCK_BIRTH_HOURS and hr5[end5_idx] in BLOCK_BIRTH_HOURS:
+            return None
+        if BLOCK_BIRTH_DOW and dw5[end5_idx] in BLOCK_BIRTH_DOW:
             return None
         cur_i = ts5i[end5_idx]
         pos1  = int(np.searchsorted(ts1i, cur_i, side='right'))
@@ -286,6 +293,13 @@ def simulate_pair_campaign(df1, df5, df4h, pair, cfg):
 
         # 1) Управление открытой позицией
         if pos is not None:
+            # Тайм-стоп: позиция старше MAX_HOLD_H часов -> рыночное закрытие по close
+            if MAX_HOLD_H and (i - pos['entry_idx']) > MAX_HOLD_H * 12:
+                close_pos(pos, c5[i], 'TIME_' + pos['tag'], i)
+                pos = None
+                camp = None
+                i += 1
+                continue
             # Безубыток: цена пробила уровень B импульса (0%, конец импульса) -> SL=вход
             if not pos['be_done'] and pos['be_level'] is not None:
                 crossed = ((is_long and h5[i] >= pos['be_level']) or
@@ -425,6 +439,11 @@ def simulate_pair_campaign(df1, df5, df4h, pair, cfg):
                     camp_seq += 1
                     camp['cid'] = f'{pair}#{camp_seq}'
         i += 1
+
+    # Позиция, открытая на конец данных, ОБЯЗАНА попасть в учёт (иначе широкие
+    # стопы «прячут» застрявшие месяцами позиции и их нереализованный PnL)
+    if pos is not None:
+        close_pos(pos, c5[n5 - 1], 'EOD_' + pos['tag'], n5 - 1)
 
     return trades
 

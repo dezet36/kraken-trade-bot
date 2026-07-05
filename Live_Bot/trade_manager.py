@@ -1112,6 +1112,16 @@ class LiveTradeManager:
         tp_hit  = position['tp_hit']
         is_long = setup['type'] == 'LONG'
 
+        # ── Тайм-стоп (v3): позиция старше лимита -> рыночное закрытие ────────
+        # (широкий стоп v2 без лимита может держать пару заблокированной месяцами)
+        max_hold = getattr(config, 'MAX_POSITION_HOLD_HOURS', 0)
+        if max_hold:
+            age_h = (datetime.now() - position['entry_time']).total_seconds() / 3600
+            if age_h > max_hold:
+                log(f"⏱ {trading_pair}: позиция старше {max_hold:.0f}ч ({age_h:.0f}ч) — тайм-стоп")
+                self._close_all(position, current_price, 'TIME', trading_pair)
+                return
+
         # ── 0. W11: Безубыток при пробое уровня B импульса (0%, конец импульса) ─
         if getattr(config, 'BREAKEVEN_AT_B', True) and not position.get('breakeven_set'):
             be_level = params.get('be_level')
