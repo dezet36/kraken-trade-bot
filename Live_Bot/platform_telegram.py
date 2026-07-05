@@ -16,6 +16,7 @@
 живым позициям/балансу активных подписчиков.
 """
 
+import os
 import threading
 import time
 import requests
@@ -146,6 +147,8 @@ class PlatformController:
             self._cmd_help(chat_id)
         elif cmd == "/menu":
             self._cmd_menu(user_id, chat_id, username)
+        elif cmd == "/export":
+            self._cmd_export(user_id, chat_id)
         elif cmd == "/setdeposit":
             self._cmd_setdeposit(user_id, chat_id, args)
         elif cmd == "/connect":
@@ -354,6 +357,7 @@ class PlatformController:
             "/stats         — статистика по твоим сделкам\n"
             "/close BTCUSDT — закрыть позицию вручную\n"
             "/setdeposit N  — депозит для расчёта позиции ($, 0 = весь баланс)\n"
+            "/export        — выгрузить журнал сделок файлом (для анализа)\n"
             "/pause /resume — пауза / возобновить\n"
             "/subscription /pay — подписка и оплата\n"
             "/menu          — показать меню кнопок",
@@ -858,7 +862,32 @@ class PlatformController:
             log(f"fetch_positions error: {e}")
         return out
 
+    def _cmd_export(self, user_id, chat_id):
+        """Шлёт юзеру ЕГО файл детального журнала сделок (state/<id>/trades_detail.jsonl)."""
+        path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                            'state', str(user_id), 'trades_detail.jsonl')
+        if not os.path.exists(path) or os.path.getsize(path) == 0:
+            self._send(chat_id, "📭 Журнал пока пуст — файл появится после первой закрытой сделки.")
+            return
+        if self._send_document(chat_id, path):
+            self._send(chat_id, "📎 Детальный журнал сделок выгружен (JSONL, 62 поля на сделку).")
+        else:
+            self._send(chat_id, "⚠️ Не удалось отправить файл. Попробуй позже.")
+
     # ── low-level HTTP ────────────────────────────────────────────────────────
+    def _send_document(self, chat_id, path) -> bool:
+        if not config.TELEGRAM_BOT_TOKEN:
+            return False
+        try:
+            url = f"https://api.telegram.org/bot{config.TELEGRAM_BOT_TOKEN}/sendDocument"
+            with open(path, 'rb') as f:
+                r = requests.post(url, data={"chat_id": chat_id},
+                                  files={"document": f}, timeout=60)
+            return bool(r.json().get('ok'))
+        except Exception as e:
+            log(f"Platform sendDocument error: {e}")
+            return False
+
     def _send(self, chat_id, text, reply_markup=None):
         if not config.TELEGRAM_BOT_TOKEN:
             return
@@ -903,6 +932,7 @@ class PlatformController:
             {"command": "pay",          "description": "Оплатить / продлить подписку"},
             {"command": "setdeposit",   "description": "Депозит для расчёта позиции ($)"},
             {"command": "menu",         "description": "Показать меню кнопок"},
+            {"command": "export",       "description": "Выгрузить журнал сделок (файл)"},
             {"command": "disconnect",   "description": "Отключить биржу"},
             {"command": "help",         "description": "Список команд"},
         ]

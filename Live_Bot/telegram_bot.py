@@ -144,6 +144,8 @@ class BotController:
             with self._lock:
                 self._muted = False
             self._send(chat_id, "🔔 <b>Уведомления включены</b>")
+        elif cmd == "/export":
+            self._send_export(chat_id)
         elif cmd == "/help":
             self._send_help(chat_id)
 
@@ -376,9 +378,39 @@ class BotController:
             "/resume         — возобновить торговлю\n"
             "/mute           — отключить уведомления\n"
             "/unmute         — включить уведомления\n"
+            "/export         — выгрузить журнал сделок файлами (для анализа)\n"
             "/help           — эта справка")
 
+    def _send_export(self, chat_id: str):
+        """Шлёт файлы журнала сделок документами в чат (для анализа)."""
+        import os
+        base = os.path.dirname(os.path.abspath(__file__))
+        files = [os.path.join(base, 'trades_detail.jsonl'),
+                 os.path.join(base, 'trades_journal.csv')]
+        sent = 0
+        for path in files:
+            if os.path.exists(path) and os.path.getsize(path) > 0:
+                if self._send_document(chat_id, path):
+                    sent += 1
+        if sent == 0:
+            self._send(chat_id, "📭 Журнал пока пуст — файлы появятся после первой закрытой сделки.")
+        else:
+            self._send(chat_id, f"📎 Выгружено файлов: {sent}. Передай их для анализа сделок.")
+
     # ── low-level HTTP ─────────────────────────────────────────────────────────
+
+    def _send_document(self, chat_id: str, path: str) -> bool:
+        if not config.TELEGRAM_BOT_TOKEN:
+            return False
+        try:
+            url = f"https://api.telegram.org/bot{config.TELEGRAM_BOT_TOKEN}/sendDocument"
+            with open(path, 'rb') as f:
+                r = requests.post(url, data={"chat_id": chat_id},
+                                  files={"document": f}, timeout=60)
+            return bool(r.json().get('ok'))
+        except Exception as e:
+            log(f"Telegram sendDocument error: {e}")
+            return False
 
     def _send(self, chat_id: str, text: str, reply_markup: dict = None):
         if not config.TELEGRAM_BOT_TOKEN:

@@ -5,6 +5,22 @@
 
 ---
 
+## [2026-07-05] — Команда /export: выгрузка журнала сделок файлом прямо в Telegram
+
+**Файлы:** `Live_Bot/telegram_bot.py`, `Live_Bot/platform_telegram.py`
+
+Для передачи журналов на анализ (см. запись о 62-полевом журнале):
+- Legacy-бот: `/export` шлёт документами `trades_detail.jsonl` + `trades_journal.csv`
+  (новый helper `_send_document` через sendDocument, таймаут 60с).
+- Платформа: `/export` шлёт юзеру ЕГО `state/<telegram_id>/trades_detail.jsonl`
+  (пустой журнал — вежливая подсказка). Команда зарегистрирована в меню бота и /help.
+- Сбой отправки не роняет поллинг (try/except + понятный ответ юзеру).
+
+**Тесты:** маршрутизация /export в обоих ботах; пустой журнал → подсказка, непустой →
+sendDocument; живая проверка — образец файла доставлен в чат (sendDocument OK).
+
+---
+
 ## [2026-07-05] — Журнал сделок: максимальная детализация для анализа (62 поля + JSONL)
 
 **Файлы:** `Live_Bot/trade_journal.py`, `Live_Bot/trade_manager.py`, `Live_Bot/bot.py`,
