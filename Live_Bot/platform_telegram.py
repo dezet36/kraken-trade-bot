@@ -148,7 +148,7 @@ class PlatformController:
         elif cmd == "/menu":
             self._cmd_menu(user_id, chat_id, username)
         elif cmd == "/export":
-            self._cmd_export(user_id, chat_id)
+            self._cmd_export(user_id, chat_id, args)
         elif cmd == "/setdeposit":
             self._cmd_setdeposit(user_id, chat_id, args)
         elif cmd == "/connect":
@@ -357,7 +357,6 @@ class PlatformController:
             "/stats         — статистика по твоим сделкам\n"
             "/close BTCUSDT — закрыть позицию вручную\n"
             "/setdeposit N  — депозит для расчёта позиции ($, 0 = весь баланс)\n"
-            "/export        — выгрузить журнал сделок файлом (для анализа)\n"
             "/pause /resume — пауза / возобновить\n"
             "/subscription /pay — подписка и оплата\n"
             "/menu          — показать меню кнопок",
@@ -862,17 +861,36 @@ class PlatformController:
             log(f"fetch_positions error: {e}")
         return out
 
-    def _cmd_export(self, user_id, chat_id):
-        """Шлёт юзеру ЕГО файл детального журнала сделок (state/<id>/trades_detail.jsonl)."""
-        path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                            'state', str(user_id), 'trades_detail.jsonl')
-        if not os.path.exists(path) or os.path.getsize(path) == 0:
-            self._send(chat_id, "📭 Журнал пока пуст — файл появится после первой закрытой сделки.")
+    def _cmd_export(self, user_id, chat_id, args=None):
+        """ТОЛЬКО АДМИН: выгрузка детальных журналов сделок файлами.
+        /export            — все существующие журналы (legacy + каждого юзера)
+        /export <tg_id>    — журнал конкретного пользователя."""
+        if not self._is_admin(user_id):
+            self._send(chat_id, "⛔ Команда доступна только администратору.")
             return
-        if self._send_document(chat_id, path):
-            self._send(chat_id, "📎 Детальный журнал сделок выгружен (JSONL, 62 поля на сделку).")
+        base = os.path.dirname(os.path.abspath(__file__))
+        targets = []   # (path, подпись)
+        if args:
+            tid = str(args[0]).strip()
+            targets.append((os.path.join(base, 'state', tid, 'trades_detail.jsonl'),
+                            f'юзер {tid}'))
         else:
-            self._send(chat_id, "⚠️ Не удалось отправить файл. Попробуй позже.")
+            targets.append((os.path.join(base, 'trades_detail.jsonl'), 'legacy'))
+            state_dir = os.path.join(base, 'state')
+            if os.path.isdir(state_dir):
+                for tid in sorted(os.listdir(state_dir)):
+                    targets.append((os.path.join(state_dir, tid, 'trades_detail.jsonl'),
+                                    f'юзер {tid}'))
+        sent = 0
+        for path, label in targets:
+            if os.path.exists(path) and os.path.getsize(path) > 0:
+                if self._send_document(chat_id, path):
+                    sent += 1
+                    self._send(chat_id, f"📎 Журнал: {label}")
+        if sent == 0:
+            self._send(chat_id, "📭 Журналы пока пусты — файлы появятся после первых закрытых сделок.")
+        else:
+            self._send(chat_id, f"✅ Выгружено журналов: {sent}.")
 
     # ── low-level HTTP ────────────────────────────────────────────────────────
     def _send_document(self, chat_id, path) -> bool:
@@ -932,7 +950,6 @@ class PlatformController:
             {"command": "pay",          "description": "Оплатить / продлить подписку"},
             {"command": "setdeposit",   "description": "Депозит для расчёта позиции ($)"},
             {"command": "menu",         "description": "Показать меню кнопок"},
-            {"command": "export",       "description": "Выгрузить журнал сделок (файл)"},
             {"command": "disconnect",   "description": "Отключить биржу"},
             {"command": "help",         "description": "Список команд"},
         ]
