@@ -10,6 +10,7 @@ import os
 import time
 import tempfile
 import pandas as pd
+import config
 from logger import log
 
 
@@ -41,8 +42,9 @@ def generate_trade_chart(signal: dict, df_1h) -> str:
 
         entry = float(params['entry'])
         sl    = float(params['stop_loss'])
-        tp    = float(params['take_profit_1'])     # один тейк -18%
+        tp    = float(params['take_profit_1'])     # единственный тейк (уровень config.TP1_LEVEL)
         rr    = params.get('rr', 0)
+        tp_pct = getattr(config, 'TP1_LEVEL', 0.25) * 100
 
         def _fp(p):
             if p >= 1000:   return f"{p:.2f}"
@@ -116,7 +118,7 @@ def generate_trade_chart(signal: dict, df_1h) -> str:
         levels = [
             (entry, '#2196F3', '--', f"Entry  ${_fp(entry)}"),
             (sl,    '#F44336', '-',  f"SL  ${_fp(sl)}  (-{sl_pct:.2f}%)"),
-            (tp,    '#4CAF50', '-',  f"TP  ${_fp(tp)}  (-18%)"),
+            (tp,    '#4CAF50', '-',  f"TP  ${_fp(tp)}  (-{tp_pct:.0f}%)"),
         ]
         for price, color, ls, label in levels:
             ax.axhline(y=price, color=color, linestyle=ls, linewidth=1.5, alpha=0.95, zorder=5)

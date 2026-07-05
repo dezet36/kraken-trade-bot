@@ -235,11 +235,13 @@ def trade_opened(signal: dict, df_1h=None, telegram_id=None):
         sl_ctx    = "ниже старта импульса" if is_long else "выше старта импульса"
 
     n_tp = len(getattr(config, 'TP_CLOSE_FRACTIONS', [1.0]))
+    tp1_pct = getattr(config, 'TP1_LEVEL', 0.25) * 100
     if n_tp == 1:
-        tp_block = f"🎯 Тейк (−18%):  <code>${_fmt_p(params['take_profit_1'])}</code>\n"
+        tp_block = f"🎯 Тейк (−{tp1_pct:.0f}%):  <code>${_fmt_p(params['take_profit_1'])}</code>\n"
     else:
-        tp_block = (f"🎯 TP1:  <code>${_fmt_p(params['take_profit_1'])}</code>  (+18%, 50%)\n"
-                    f"🎯 TP2:  <code>${_fmt_p(params['take_profit_2'])}</code>  (+27%, 50%)\n")
+        tp2_pct = getattr(config, 'TP2_LEVEL', 0.27) * 100
+        tp_block = (f"🎯 TP1:  <code>${_fmt_p(params['take_profit_1'])}</code>  (−{tp1_pct:.0f}%, 50%)\n"
+                    f"🎯 TP2:  <code>${_fmt_p(params['take_profit_2'])}</code>  (−{tp2_pct:.0f}%, 50%)\n")
 
     text = (
         f"<b>{direction_icon} {pair}</b>  {zone_icon} {trigger['zone']}  {mode}\n"
@@ -305,11 +307,13 @@ def trade_closed(pair: str, direction: str, reason: str, pnl: float,
                  duration_min: int = 0, tps_hit: int = 0, telegram_id=None):
     dir_s = "LONG" if direction == "LONG" else "SHORT"
 
+    n_tp = len(getattr(config, 'TP_CLOSE_FRACTIONS', [1.0]))
     reason_labels = {
         "TP2":      "🏆 Полный таргет (TP2)",
-        "TP1":      "🎯 Частичный таргет (TP1)",
+        "TP1":      ("🏆 Тейк-профит" if n_tp == 1 else "🎯 Частичный таргет (TP1)"),
         "BE":       "⚖️ Безубыток",
         "TRAIL_SL": "🔄 Трейлинг стоп",
+        "TIME":     "⏱ Тайм-стоп (лимит удержания)",
         "Manual":   "🖐 Закрыто вручную",
         "EXT":      "🖐 Закрыто на бирже (вне бота)",
         "SL":       "🛑 Стоп-лосс",
@@ -329,7 +333,7 @@ def trade_closed(pair: str, direction: str, reason: str, pnl: float,
         f"━━━━━━━━━━━━━━━━━━━━\n"
         f"PnL:         <b>{_pnl_str(pnl)}</b>\n"
         f"Время:       {_dur_str(duration_min)}\n"
-        f"TP взято:    {tps_hit}/2\n"
+        f"TP взято:    {tps_hit}/{n_tp}\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
         f"Дневной PnL: <b>{_pnl_str(daily_pnl)}</b>\n"
         f"Баланс:      <b>${balance:,.2f}</b>\n"

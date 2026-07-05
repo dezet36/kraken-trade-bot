@@ -218,12 +218,14 @@ class BotController:
             for pos in positions
             if pos['status'] == 'OPEN'
         ]
+        pending = tm._load_pending_orders()
 
-        if not open_positions:
-            self._send(chat_id, "📭 <b>Открытых позиций нет</b>")
+        if not open_positions and not pending:
+            self._send(chat_id, "📭 <b>Открытых позиций и ожидающих ордеров нет</b>")
             return
 
-        lines = [f"<b>📋 Открытые позиции ({len(open_positions)})</b>", "━━━━━━━━━━━━━━━━━━━━"]
+        lines = ([f"<b>📋 Открытые позиции ({len(open_positions)})</b>", "━━━━━━━━━━━━━━━━━━━━"]
+                 if open_positions else [])
         for pair, pos in open_positions:
             direction = pos['signal']['setup']['type']
             entry     = pos['entry_price']
@@ -256,13 +258,26 @@ class BotController:
             except Exception:
                 pass
 
+            n_tp = len(getattr(config, 'TP_CLOSE_FRACTIONS', [1.0]))
+            tp_line = (f"   TP:     <code>${tp1:.4f}</code>" if n_tp == 1 else
+                       f"   TP1:    <code>${tp1:.4f}</code>  TP2: <code>${tp2:.4f}</code>")
             lines.append(
                 f"\n{dir_icon} <b>{pair}</b> {direction}{trail_ico}{be_ico}  [{dur_str}]\n"
                 f"   Вход:   <code>${entry:.4f}</code>{pnl_str}\n"
                 f"   SL:     <code>${sl:.4f}</code>\n"
-                f"   TP1:    <code>${tp1:.4f}</code>  TP2: <code>${tp2:.4f}</code>\n"
-                f"   TP взято: {tps_hit}/4"
+                f"{tp_line}\n"
+                f"   TP взято: {tps_hit}/{n_tp}"
             )
+
+        if pending:
+            if lines:
+                lines.append("")
+            lines.append(f"<b>⏳ Ожидают заполнения ({len(pending)})</b>")
+            lines.append("━━━━━━━━━━━━━━━━━━━━")
+            for pair, po in pending.items():
+                side = "LONG" if po.get('side') == 'buy' else "SHORT"
+                lines.append(f"⏳ <b>{pair}</b> {side} — лимит "
+                             f"<code>${po.get('limit_price', 0):.4f}</code>")
 
         self._send(chat_id, "\n".join(lines))
 

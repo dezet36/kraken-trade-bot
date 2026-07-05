@@ -439,8 +439,10 @@ class PlatformController:
         client    = self._user_client(user_id, user)
         balance   = self._fetch_balance(client)
         positions = self._fetch_open_positions(client)
+        pending   = self._fetch_pending_orders(client)
         open_n    = len(positions)
         pairs     = ", ".join(sorted(self._norm(p.get("symbol", "")) for p in positions)) or "—"
+        pend_str  = f"  (+{len(pending)} ⏳ ждут)" if pending else ""
 
         bal_str  = f"${balance:,.2f}" if isinstance(balance, (int, float)) else "—"
         dep_str  = f"${float(dep):,.0f}" if dep and float(dep) > 0 else "весь баланс"
@@ -461,10 +463,23 @@ class PlatformController:
             f"Подписка:   {sub_icon} до {_fmt_until(until)} ({days} дн.)\n"
             f"Баланс:     <b>{bal_str}</b>\n"
             f"Депозит:    {dep_str}  (расчёт позиции)\n"
-            f"Позиций:    {open_n}/{config.MAX_ACTIVE_PAIRS}\n"
+            f"Позиций:    {open_n}/{config.MAX_ACTIVE_PAIRS}{pend_str}\n"
             f"Пары:       {pairs}\n"
             + ("" if active else "\n⚠️ Подписка истекла — новые сделки не открываются. /pay"),
             reply_markup=markup)
+
+    def _fetch_pending_orders(self, client):
+        """Открытые (не заполненные) лимит-ордера входа с биржи — GTC живёт до 72ч,
+        юзер должен видеть, что бот работает, даже когда позиций ещё нет."""
+        if client is None:
+            return []
+        try:
+            orders = client.fetch_open_orders(params={'settleCoin': 'USDT'})
+            return [o for o in orders if not o.get('reduceOnly')
+                    and str(o.get('type', '')).lower() == 'limit']
+        except Exception as e:
+            log(f"fetch_open_orders error: {e}")
+            return []
 
     def _cmd_positions(self, user_id, chat_id):
         user = self._require_connected(user_id, chat_id)
@@ -475,11 +490,14 @@ class PlatformController:
             self._send(chat_id, "Не удалось подключиться к бирже. Попробуй позже.")
             return
         positions = self._fetch_open_positions(client)   # РЕАЛЬНЫЕ позиции с биржи
-        if not positions:
-            self._send(chat_id, "📭 Открытых позиций нет.")
+        pending   = self._fetch_pending_orders(client)   # ожидающие GTC-лимиты входа
+
+        if not positions and not pending:
+            self._send(chat_id, "📭 Открытых позиций и ожидающих ордеров нет.")
             return
 
-        lines = [f"<b>📋 Позиции ({len(positions)})</b>", "━━━━━━━━━━━━━━━━━━━━"]
+        lines = ([f"<b>📋 Позиции ({len(positions)})</b>", "━━━━━━━━━━━━━━━━━━━━"]
+                 if positions else [])
         buttons = []
         for p in positions:
             pair = self._norm(p.get("symbol", ""))
@@ -505,7 +523,23 @@ class PlatformController:
                 f"   Вход <code>${_fmt_p(entry)}</code> @ <code>${_fmt_p(mark)}</code>\n"
                 f"   🛡 SL <code>{sl_s}</code> · 🎯 TP <code>{tp_s}</code>")
             buttons.append([{"text": f"❌ Закрыть {pair}", "callback_data": f"act:close:{pair}"}])
-        self._send(chat_id, "\n".join(lines), reply_markup={"inline_keyboard": buttons})
+
+        if pending:
+            if lines:
+                lines.append("")
+            lines.append(f"<b>⏳ Ожидают заполнения ({len(pending)})</b>")
+            lines.append("━━━━━━━━━━━━━━━━━━━━")
+            for o in pending:
+                pair = self._norm(o.get("symbol", ""))
+                side = "LONG" if str(o.get("side", "")).lower() == "buy" else "SHORT"
+                price = float(o.get("price") or 0)
+                lines.append(f"⏳ <b>{pair}</b> {side} — лимит <code>${_fmt_p(price)}</code>")
+            lines.append("<i>GTC-лимит ждёт касания цены (до "
+                         f"{config.PENDING_ORDER_MAX_HOURS:.0f}ч), отменится сам при "
+                         f"инвалидации сетапа.</i>")
+
+        self._send(chat_id, "\n".join(lines),
+                   reply_markup={"inline_keyboard": buttons} if buttons else None)
 
     def _cmd_stats(self, user_id, chat_id):
         user = self._require_connected(user_id, chat_id)
