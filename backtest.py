@@ -44,6 +44,7 @@ IMP_ANCHOR_SNAP     = 0      # >0: доснэпить якоря A/B к исти
 IMP_SOFT_FRACTALS   = False  # True: нестрогое сравнение справа (равные вершины видны)
 IMP_FRESH_FALLBACK  = False  # True: свежесть B (последние 24) и для fallback-ветки
 IMP_MAX_LEG_RETRACE = None   # доля размера: макс. внутренний откат ноги A->B (None = выкл)
+IMP_FRESH_N         = 24     # свежесть: точка B в последних N свечах окна (v1 хардкод = 24)
 
 os.makedirs(CACHE_DIR, exist_ok=True)
 
@@ -408,7 +409,7 @@ def find_impulse_new(df, lookback=48):
         if IMP_ANCHOR_SNAP:
             s_i, e_i, s_p, e_p = _snap(direction, s_i, e_i)
         # Freshness: B in last 24 candles
-        if e_i >= len(seg) - 24:
+        if e_i >= len(seg) - IMP_FRESH_N:
             setup = _build(direction, s_i, e_i, s_p, e_p)
             if setup:
                 return setup
@@ -423,7 +424,7 @@ def find_impulse_new(df, lookback=48):
         direction, s_i, e_i, s_p, e_p = 'SHORT', max_i, min_i, mx, mn
     else:
         return None
-    if IMP_FRESH_FALLBACK and e_i < len(seg) - 24:
+    if IMP_FRESH_FALLBACK and e_i < len(seg) - IMP_FRESH_N:
         return None   # протухший fallback-импульс (v1 торговал без проверки свежести)
     return _build(direction, s_i, e_i, s_p, e_p)
 

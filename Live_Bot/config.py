@@ -74,7 +74,11 @@ MAX_POSITION_SIZE_UNITS = float(os.getenv('MAX_POSITION_SIZE_UNITS', 1_000_000))
 # ── W9: Лимитный ордер на вход (GTC, без блокирования) ──────────────────────
 USE_LIMIT_ENTRY         = os.getenv('USE_LIMIT_ENTRY', 'true').lower() == 'true'
 LIMIT_ENTRY_OFFSET_PCT  = float(os.getenv('LIMIT_ENTRY_OFFSET_PCT', 0.001))  # 0.1% cap проскальзывания
-PENDING_ORDER_MAX_HOURS = float(os.getenv('PENDING_ORDER_MAX_HOURS', 4.0))   # GTC живёт до 4ч
+# GTC-лимит живёт до 72ч (v3-sweep 2026-07-05: обрезка ожидания филла монотонно
+# ухудшает модель: 4ч +170.2% / 12ч +180.5% / 24ч +186.6% / 72ч +197.6% —
+# прежние 4ч недобирали ~27пп годовых; инвалидация/TP-touch отменяют ордер раньше
+# независимо от срока, кулдаун 12ч истекает до отмены — ре-детекция как в модели)
+PENDING_ORDER_MAX_HOURS = float(os.getenv('PENDING_ORDER_MAX_HOURS', 72.0))
 
 # Таймфреймы
 TIMEFRAME_MAJOR = '1h'

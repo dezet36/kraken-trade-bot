@@ -79,6 +79,8 @@ TRAIL_AFTER_BE_K  = None          # None = фикс-TP (v1); K>0 = после в
 MAX_HOLD_H        = None          # тайм-стоп: макс. время жизни позиции в часах (None = без лимита).
                                   # КРИТИЧНО для широких стопов: без него позиция (особенно после BE,
                                   # стоп=entry) может застрять в коридоре НАВЕЧНО и заблокировать пару.
+MAX_IMPULSE_PCT   = None          # макс. размер импульса, % от цены (None = без лимита; v1 имел только MIN)
+HTF_FILTER        = True          # False = отключить HTF-блок контртренда (никогда не тестировалось)
 
 
 def fib_price(setup, r):
@@ -131,11 +133,14 @@ def simulate_pair_campaign(df1, df5, df4h, pair, cfg):
         setup = bt.find_impulse_new(df1w, lookback=LOOKBACK_1H)
         if not setup:
             return None
-        if setup['size'] / setup['end_price'] * 100 < MIN_IMPULSE_PCT:
+        size_pct = setup['size'] / setup['end_price'] * 100
+        if size_pct < MIN_IMPULSE_PCT:
+            return None
+        if MAX_IMPULSE_PCT and size_pct > MAX_IMPULSE_PCT:
             return None
 
         # HTF фильтр
-        if ts4i is not None:
+        if HTF_FILTER and ts4i is not None:
             pos4 = int(np.searchsorted(ts4i, cur_i, side='right'))
             htf = bt.get_htf_trend(df4h.iloc[max(0, pos4 - 220):pos4])
             if htf == 'BULLISH' and setup['type'] == 'SHORT':
@@ -453,7 +458,9 @@ def portfolio_filter(trades, cap=None, dir_cap=None):
     """cap — общий лимит позиций; dir_cap — макс. позиций в ОДНУ сторону (None/0 = выкл)."""
     cap = MAX_CONCURRENT if cap is None else cap
     dir_cap = DIR_CAP if dir_cap is None else dir_cap
-    ts = sorted(trades, key=lambda t: pd.Timestamp(t['entry_time']))
+    # tie-break по (pair, cid): при равных entry_time (5м-грид) результат не должен
+    # зависеть от порядка входного списка пар (воспроизводимость)
+    ts = sorted(trades, key=lambda t: (pd.Timestamp(t['entry_time']), t['pair'], str(t['cid'])))
     active = {}            # pair -> (exit_time, dir)
     dropped_cids = set()
     accepted = []
