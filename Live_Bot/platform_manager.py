@@ -211,6 +211,9 @@ class PlatformManager:
             if not signal:
                 continue
             signal['htf_trend'] = cand.get('htf_trend', 'NEUTRAL')
+            signal['scan'] = {k: cand.get(k) for k in
+                              ('score', 'score_legacy', 'rr_est', 'htf_strength',
+                               'proximity', 'size_pct')}
 
             for acc in self.accounts.values():
                 try:

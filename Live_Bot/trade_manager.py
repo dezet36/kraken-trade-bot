@@ -218,6 +218,9 @@ class LiveTradeManager:
             'trailing_active': trailing_active,
             'trail_stop':      trail_stop,
             'trail_distance':  trail_distance,
+            'mfe_price':       entry_price,
+            'mae_price':       entry_price,
+            '_lifecycle':      {'entry_mode': 'RECOVERED'},
             '_recovered':      True,
         }
 
@@ -539,6 +542,7 @@ class LiveTradeManager:
 
             sl_order, tp_orders = self._place_sl_tp_orders(pair, side, actual_filled, params)
 
+            lp = pending_order.get('limit_price') or actual_entry
             position = {
                 'order':           order_status,
                 'signal':          signal,
@@ -555,6 +559,15 @@ class LiveTradeManager:
                 'trailing_active': False,
                 'trail_stop':      None,
                 'trail_distance':  actual_sl_dist * config.TRAIL_DISTANCE_K,
+                'mfe_price':       actual_entry,
+                'mae_price':       actual_entry,
+                '_lifecycle': {   # для журнала: как именно вошли
+                    'entry_mode':   'GTC_LIMIT',
+                    'placed_at':    pending_order.get('placed_at'),
+                    'limit_price':  lp,
+                    'filled_at':    datetime.now().isoformat(timespec='seconds'),
+                    'slippage_pct': round((actual_entry - lp) / lp * 100, 4) if lp else 0.0,
+                },
             }
 
             balance_before = self.get_real_balance()
@@ -922,6 +935,7 @@ class LiveTradeManager:
                 trading_pair, side, actual_filled, params
             )
 
+            planned = signal['params']['entry']
             position = {
                 'order':         order,
                 'signal':        signal,
@@ -938,6 +952,15 @@ class LiveTradeManager:
                 'trailing_active': False,
                 'trail_stop':    None,
                 'trail_distance': actual_sl_dist * config.TRAIL_DISTANCE_K,
+                'mfe_price':     actual_entry,
+                'mae_price':     actual_entry,
+                '_lifecycle': {
+                    'entry_mode':   'MARKET',
+                    'placed_at':    datetime.now().isoformat(timespec='seconds'),
+                    'limit_price':  planned,
+                    'filled_at':    datetime.now().isoformat(timespec='seconds'),
+                    'slippage_pct': round((actual_entry - planned) / planned * 100, 4) if planned else 0.0,
+                },
             }
 
             # Журнал сделки — используем обновлённые params
@@ -1025,6 +1048,7 @@ class LiveTradeManager:
             if '34040' not in str(e) and 'not modified' not in str(e):
                 log(f"⚠️ Не удалось перенести стоп в безубыток: {e}")
         position['breakeven_set'] = True
+        position['be_time'] = datetime.now().isoformat(timespec='seconds')   # для журнала
         params = position['params']
         params['stop_loss'] = be_sl
 
@@ -1111,6 +1135,14 @@ class LiveTradeManager:
         setup   = position['signal']['setup']
         tp_hit  = position['tp_hit']
         is_long = setup['type'] == 'LONG'
+
+        # ── MFE/MAE: экстремумы цены за жизнь позиции (для анализа сделок) ────
+        if is_long:
+            position['mfe_price'] = max(position.get('mfe_price', current_price), current_price)
+            position['mae_price'] = min(position.get('mae_price', current_price), current_price)
+        else:
+            position['mfe_price'] = min(position.get('mfe_price', current_price), current_price)
+            position['mae_price'] = max(position.get('mae_price', current_price), current_price)
 
         # ── Тайм-стоп (v3): позиция старше лимита -> рыночное закрытие ────────
         # (широкий стоп v2 без лимита может держать пару заблокированной месяцами)

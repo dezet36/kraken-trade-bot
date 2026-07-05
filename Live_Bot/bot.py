@@ -131,6 +131,10 @@ def trading_cycle():
 
             if signal:
                 signal['htf_trend'] = candidate.get('htf_trend', 'NEUTRAL')
+                # Контекст скана — в журнал сделки («почему открылась»)
+                signal['scan'] = {k: candidate.get(k) for k in
+                                  ('score', 'score_legacy', 'rr_est', 'htf_strength',
+                                   'proximity', 'size_pct')}
                 log(f"СИГНАЛ на {pair}! HTF={signal['htf_trend']}")
                 success = trade_manager.execute_trade(signal, df_1h=candidate['df_1h'])
                 if success:
