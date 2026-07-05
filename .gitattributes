@@ -1,0 +1,6 @@
+# Серверные файлы обязаны иметь LF (CRLF ломает shebang/парсинг на Linux)
+*.sh            text eol=lf
+Dockerfile      text eol=lf
+.dockerignore   text eol=lf
+docker-compose.yml text eol=lf
+requirements.txt   text eol=lf

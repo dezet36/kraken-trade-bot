@@ -1,0 +1,54 @@
+# Kraken trading bot — запуск на сервере одним файлом:
+#   ./start_server.sh            (или: docker compose up -d --build kraken-trader)
+#
+# ДВА РЕЖИМА (НЕ запускать оба с одним TELEGRAM_BOT_TOKEN — Telegram даст 409):
+#   kraken-trader   — личная торговля (bot.py, legacy single-user) — ДЕФОЛТ
+#   kraken-platform — мульти-юзер платформа (platform_bot.py), включается профилем:
+#                     docker compose --profile platform up -d kraken-platform
+#
+# Соседство с другими ботами на сервере: контейнер изолирован (свои зависимости,
+# своя сеть, без открытых портов — только исходящие HTTPS), лимиты CPU/RAM ниже.
+# Второй бот ставится своим compose-проектом в своей папке — конфликтов нет,
+# если у него СВОЙ telegram-токен.
+
+services:
+  kraken-trader:
+    build: .
+    image: kraken-bot:latest
+    container_name: kraken-trader
+    working_dir: /app
+    command: ["python", "-u", "bot.py"]
+    volumes:
+      - ./Live_Bot:/app          # код + .env + state/журналы/БД — всё на хосте
+    environment:
+      - TZ=UTC                   # сессионный фильтр и так UTC-aware; логи — в UTC
+      - PYTHONIOENCODING=utf-8
+    restart: unless-stopped
+    mem_limit: 768m
+    cpus: 1.0
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
+
+  kraken-platform:
+    profiles: ["platform"]       # включается только явно (--profile platform)
+    build: .
+    image: kraken-bot:latest
+    container_name: kraken-platform
+    working_dir: /app
+    command: ["python", "-u", "platform_bot.py"]
+    volumes:
+      - ./Live_Bot:/app
+    environment:
+      - TZ=UTC
+      - PYTHONIOENCODING=utf-8
+    restart: unless-stopped
+    mem_limit: 768m
+    cpus: 1.0
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"

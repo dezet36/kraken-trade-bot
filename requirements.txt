@@ -1,0 +1,10 @@
+# Зависимости Kraken trading bot (пины = версии, проверенные в работе 2026-07-05)
+ccxt==4.5.59
+pandas==3.0.3
+numpy==2.5.0
+requests==2.34.2
+APScheduler==3.11.2
+python-dotenv==1.2.2
+cryptography==49.0.0
+matplotlib==3.11.0
+mplfinance==0.12.10b0
