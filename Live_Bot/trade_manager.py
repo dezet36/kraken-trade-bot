@@ -679,7 +679,7 @@ class LiveTradeManager:
     def _place_sl_tp_orders(self, trading_pair, side, position_size, params):
         """
         SL — через position trading-stop (Bybit V5, уровень позиции).
-        TP при одном тейке (-18%, 100%) — тоже на уровне позиции (закрывает всё).
+        TP при одном тейке (config.TP1_LEVEL, 100%) — тоже на уровне позиции (закрывает всё).
         При нескольких TP (legacy) — limit reduce_only по долям для частичных фиксаций.
         Во всех случаях софт-монитор (_check_tp_levels) — первичный механизм закрытия,
         биржевой SL/TP — резервный (если бот не успел отработать цикл).
@@ -827,7 +827,8 @@ class LiveTradeManager:
             log(f"Тип: {setup['type']}  |  Зона: {trigger['zone']}  |  HTF: {htf}")
             log(f"Вход: ${_fmt_p(params['entry'])}  |  Стоп: ${_fmt_p(params['stop_loss'])}")
             if N_TP == 1:
-                log(f"TP: ${_fmt_p(params['take_profit_1'])} (-18%, закрывает 100%)")
+                tp1_pct = getattr(config, 'TP1_LEVEL', 0.25) * 100
+                log(f"TP: ${_fmt_p(params['take_profit_1'])} (-{tp1_pct:.0f}%, закрывает 100%)")
             else:
                 log(f"TP1: ${_fmt_p(params['take_profit_1'])} (50%)  |  TP2: ${_fmt_p(params['take_profit_2'])} (50%)")
             if params.get('be_level'):
@@ -977,7 +978,9 @@ class LiveTradeManager:
             self.last_trade_time[trading_pair] = datetime.now()
             self._save_cooldown_state()
 
-            tg.trade_opened(signal, df_1h=df_1h, telegram_id=self.telegram_id)
+            # Уведомление с ФАКТИЧЕСКИМИ params (entry/SL могли скорректироваться из-за
+            # проскальзывания рынка) — signal сам по себе всё ещё хранит плановые.
+            tg.trade_opened({**signal, 'params': params}, df_1h=df_1h, telegram_id=self.telegram_id)
             log(f"💰 Баланс после открытия: ${self.get_real_balance():.2f}")
             return True
 
