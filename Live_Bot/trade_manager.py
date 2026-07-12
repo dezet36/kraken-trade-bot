@@ -221,7 +221,7 @@ class LiveTradeManager:
             'mfe_price':       entry_price,
             'mae_price':       entry_price,
             '_lifecycle':      {'entry_mode': 'RECOVERED'},
-            '_recovered':      True,
+            'recovered':       True,   # для журнала: impulse/zone-поля приближённые
         }
 
     def _restore_positions(self):
@@ -254,6 +254,11 @@ class LiveTradeManager:
                 continue
             try:
                 position = self._rebuild_position(exch_pos, saved)
+                # Регистрируем в журнале сразу — иначе close_trade() при закрытии
+                # тихо не запишет ничего (не было бы данных в /export, хотя
+                # сделка реально исполнилась на бирже). balance_before приближённо
+                # = текущий баланс (позиция уже была открыта до рестарта бота).
+                journal.open_trade(position, position['signal'], self.get_real_balance())
                 self.active_positions[pair].append(position)
                 tp_h   = position['tp_hit']
                 be_str = "✓" if position['breakeven_set'] else "✗"

@@ -155,7 +155,10 @@ def close_trade(position: dict, exit_price: float, exit_reason: str,
     htf       = j['htf_trend']
     imp       = j['impulse_pct']
     rr        = j['rr']
-    notes = (f"{direction} в {zone}, HTF={htf}, "
+    recovered = bool(position.get('recovered'))
+    notes = ((f"[ВОССТАНОВЛЕНО после рестарта бота — impulse/zone приближённые] "
+              if recovered else "") +
+             f"{direction} в {zone}, HTF={htf}, "
              f"импульс={imp}%, RR=1:{rr}, "
              f"выход={exit_reason}")
 
@@ -218,6 +221,7 @@ def close_trade(position: dict, exit_price: float, exit_reason: str,
         row['mae_r'] = round(sign * (mae - entry) / sl_dist, 3)   # макс. ход ПРОТИВ нас, в R
     row['be_time'] = position.get('be_time', '')
     row['breakeven_set'] = bool(position.get('breakeven_set'))
+    row['recovered'] = recovered
     for k, v in (position.get('_lifecycle') or {}).items():
         row[f'entry_{k}'] = v
     if row.get('entry_placed_at') and row.get('entry_filled_at'):
