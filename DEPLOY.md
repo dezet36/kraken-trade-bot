@@ -1,8 +1,13 @@
-# Деплой Kraken-бота на сервер (Docker)
+# Деплой Kraken-бота на сервер
 
-Бот упакован в контейнер: свои зависимости, без открытых портов (только исходящие
-HTTPS к Bybit и Telegram), лимиты CPU/RAM. Другие боты на том же сервере ему не
-мешают и он не мешает им — при одном условии: **у каждого бота свой Telegram-токен**.
+Два варианта в зависимости от сервера: **Docker** (Linux, рекомендуется — изоляция
+зависимостей, без открытых портов, лимиты CPU/RAM) или **нативный Python** (Windows
+Server без Docker). В обоих случаях действует одно правило бесконфликтности с другими
+ботами на том же сервере: **у каждого бота свой Telegram-токен**.
+
+---
+
+# Вариант А: Docker (Linux)
 
 ## Архитектура томов (важно!)
 
@@ -91,3 +96,75 @@ docker compose ps                                  # State = running
 docker compose logs --tail 50 kraken-trader        # цикл сканирует пары
 # в Telegram: /status должен ответить
 ```
+
+---
+
+# Вариант Б: Windows Server (без Docker)
+
+Если на сервере нет Docker (`docker --version` не распознан) — бот запускается
+напрямую через Python. Та же архитектура «код отдельно от данных»: `Live_Bot/`
+можно перезаписывать целиком, `bot_data/` и `venv/` — на уровень выше, копирование
+их не затрагивает.
+
+```
+<папка деплоя>\
+├── Live_Bot\      ← код, безопасно перезаписывать целиком
+├── bot_data\      ← .env, журнал, БД, state — НЕ трогается заменой Live_Bot
+├── venv\          ← своё окружение (изоляция от других ботов на сервере)
+└── requirements.txt
+```
+
+## Установка (один раз, от имени Администратора)
+
+```powershell
+# 1. Скопировать на сервер: Live_Bot\ целиком + requirements.txt из корня репо
+#    (сложить в одну папку деплоя, как в схеме выше)
+
+# 2. Поставить бота как задание планировщика (venv создастся сам, .env перенесётся
+#    из Live_Bot\ в bot_data\ автоматически, если он ещё внутри Live_Bot\):
+cd "<папка деплоя>\Live_Bot"
+powershell -ExecutionPolicy Bypass -File install_service.ps1 -Script bot.py
+#   ИЛИ для мульти-юзер платформы:
+powershell -ExecutionPolicy Bypass -File install_service.ps1 -Script platform_bot.py
+```
+
+Скрипт создаёт `venv\` и `bot_data\` рядом с `Live_Bot\`, ставит зависимости,
+регистрирует задание планировщика (`schtasks`, автозапуск при старте системы,
+перезапуск при падении раз в 15 сек через `run_bot.bat`), выставляет `BOT_DATA_DIR`
+на уровне машины и запускает бота сразу.
+
+## Ручной запуск (без службы, для разовой проверки)
+
+```powershell
+cd "<папка деплоя>\Live_Bot"
+start.bat            # bot.py, в текущем окне
+start_platform.bat   # platform_bot.py, в текущем окне
+```
+Если рядом с `Live_Bot\` уже есть `venv\` (после `install_service.ps1`) — эти
+скрипты используют его; иначе падают на системный `python`.
+
+## Обновление кода
+
+Просто скопировать новую `Live_Bot\` поверх старой целиком, без исключений —
+`bot_data\` и `venv\` не пострадают. Затем перезапустить задание:
+```powershell
+schtasks /end /tn KrakenBot          # или KrakenPlatformBot
+schtasks /run /tn KrakenBot
+```
+
+## Управление службой
+
+```powershell
+schtasks /query /tn KrakenBot /fo LIST   # статус
+schtasks /end /tn KrakenBot              # остановить
+schtasks /run /tn KrakenBot              # запустить
+schtasks /delete /tn KrakenBot /f        # удалить задание совсем
+```
+Логи: `bot_data\service_stdout.log`, `bot_data\service_stderr.log`.
+
+## Второй бот на том же Windows-сервере
+
+Своя папка деплоя (свой `Live_Bot\`/`venv\`/`bot_data\`), свой Telegram-токен,
+своё имя задания планировщика — конфликтов не будет: `install_service.ps1`
+регистрирует задание с именем `KrakenBot`/`KrakenPlatformBot`, которое не
+пересекается с чужим ботом, если у того другое имя.
