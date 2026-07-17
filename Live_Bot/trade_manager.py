@@ -11,9 +11,9 @@ import os
 import csv
 import time
 
-COOLDOWN_FILE        = os.path.join(os.path.dirname(__file__), 'cooldown_state.json')
-POSITIONS_FILE       = os.path.join(os.path.dirname(__file__), 'positions_state.json')
-PENDING_ORDERS_FILE  = os.path.join(os.path.dirname(__file__), 'pending_orders.json')
+COOLDOWN_FILE        = os.path.join(config.DATA_DIR, 'cooldown_state.json')
+POSITIONS_FILE       = os.path.join(config.DATA_DIR, 'positions_state.json')
+PENDING_ORDERS_FILE  = os.path.join(config.DATA_DIR, 'pending_orders.json')
 
 # Доли закрытия на каждом TP уровне (по умолчанию ОДИН тейк -18% = [1.0]).
 # TP_KEYS выводятся из числа долей: [1.0] -> 1 тейк, [0.5,0.5] -> 2 тейка (совместимость).
@@ -39,7 +39,7 @@ class LiveTradeManager:
         self.exchange = exchange_client if exchange_client is not None else get_exchange()
 
         if telegram_id is not None:
-            state_dir = os.path.join(os.path.dirname(__file__), 'state', str(telegram_id))
+            state_dir = os.path.join(config.DATA_DIR, 'state', str(telegram_id))
             os.makedirs(state_dir, exist_ok=True)
             self.cooldown_file = os.path.join(state_dir, 'cooldown_state.json')
             self.positions_file = os.path.join(state_dir, 'positions_state.json')

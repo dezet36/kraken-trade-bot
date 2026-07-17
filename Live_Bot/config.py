@@ -2,9 +2,25 @@ import os
 from dotenv import load_dotenv
 from logger import log
 
-# Загружаем .env
-env_loaded = load_dotenv()
-log(f"🔧 .env загружен: {env_loaded}")
+# ── DATA_DIR: каталог персистентных данных, ФИЗИЧЕСКИ отдельный от кода ──────
+# Проблема, которую это решает: если код деплоится ручным копированием папки
+# Live_Bot поверх старой (без git), любой файл ВНУТРИ Live_Bot/ (журнал сделок,
+# БД, состояние позиций, .env) стирается локальной версией при каждом обновлении.
+# BOT_DATA_DIR (реальная переменная окружения ОС, не строка внутри .env — иначе
+# курица-яйцо) указывает на каталог ВНЕ Live_Bot (в Docker — отдельный volume).
+# Не задан -> поведение как раньше (данные внутри Live_Bot, для локальной разработки).
+DATA_DIR = os.getenv('BOT_DATA_DIR') or os.path.dirname(os.path.abspath(__file__))
+os.makedirs(DATA_DIR, exist_ok=True)
+
+# .env читаем СНАЧАЛА из DATA_DIR (переживает перезапись Live_Bot/), иначе —
+# обычный поиск python-dotenv (Live_Bot/.env, как раньше).
+_env_in_data = os.path.join(DATA_DIR, '.env')
+if os.path.exists(_env_in_data):
+    env_loaded = load_dotenv(_env_in_data)
+    log(f"🔧 .env загружен из DATA_DIR ({_env_in_data}): {env_loaded}")
+else:
+    env_loaded = load_dotenv()
+    log(f"🔧 .env загружен: {env_loaded}")
 
 # Режим торговли и биржа
 TRADING_MODE = os.getenv('TRADING_MODE', 'DEMO')

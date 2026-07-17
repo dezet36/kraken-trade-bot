@@ -1,10 +1,14 @@
 import os
 from datetime import datetime
 
-# Абсолютные пути рядом с модулем — не зависят от рабочей директории запуска.
-_BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-LOG_FILE  = os.path.join(_BASE_DIR, "bot_log.txt")
-TRADES_CSV = os.path.join(_BASE_DIR, "trades.csv")
+# Персистентные файлы — в BOT_DATA_DIR, если задан (сервер: каталог ВНЕ кода,
+# переживает полную замену папки Live_Bot), иначе рядом с модулем (локальная
+# разработка — поведение как раньше). Не импортируем config (циклический импорт:
+# config.py сам импортирует log из этого модуля) — считаем env напрямую.
+_DATA_DIR = os.getenv('BOT_DATA_DIR') or os.path.dirname(os.path.abspath(__file__))
+os.makedirs(_DATA_DIR, exist_ok=True)
+LOG_FILE  = os.path.join(_DATA_DIR, "bot_log.txt")
+TRADES_CSV = os.path.join(_DATA_DIR, "trades.csv")
 
 
 def log(message, level="INFO"):

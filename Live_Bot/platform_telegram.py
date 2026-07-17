@@ -868,7 +868,7 @@ class PlatformController:
         if not self._is_admin(user_id):
             self._send(chat_id, "⛔ Команда доступна только администратору.")
             return
-        base = os.path.dirname(os.path.abspath(__file__))
+        base = config.DATA_DIR
         targets = []   # (path, подпись)
         if args:
             tid = str(args[0]).strip()

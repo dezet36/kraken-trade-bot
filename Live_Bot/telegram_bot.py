@@ -384,7 +384,7 @@ class BotController:
     def _send_export(self, chat_id: str):
         """Шлёт файлы журнала сделок документами в чат (для анализа)."""
         import os
-        base = os.path.dirname(os.path.abspath(__file__))
+        base = config.DATA_DIR
         files = [os.path.join(base, 'trades_detail.jsonl'),
                  os.path.join(base, 'trades_journal.csv')]
         sent = 0

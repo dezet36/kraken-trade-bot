@@ -17,8 +17,10 @@ import json
 import os
 from datetime import datetime, timezone
 
-JOURNAL_FILE  = os.path.join(os.path.dirname(__file__), 'trades_journal.csv')
-DETAIL_JSONL  = os.path.join(os.path.dirname(__file__), 'trades_detail.jsonl')
+import config
+
+JOURNAL_FILE  = os.path.join(config.DATA_DIR, 'trades_journal.csv')
+DETAIL_JSONL  = os.path.join(config.DATA_DIR, 'trades_detail.jsonl')
 
 COLUMNS = [
     # Идентификация
@@ -235,7 +237,7 @@ def close_trade(position: dict, exit_price: float, exit_reason: str,
     if telegram_id is not None:
         import db
         db.record_trade(telegram_id, row)   # полный row уходит в data-JSON
-        detail_path = os.path.join(os.path.dirname(__file__), 'state',
+        detail_path = os.path.join(config.DATA_DIR, 'state',
                                    str(telegram_id), 'trades_detail.jsonl')
     else:
         write_header = not os.path.exists(JOURNAL_FILE) or os.path.getsize(JOURNAL_FILE) == 0

@@ -13,7 +13,9 @@ import threading
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 
-DB_PATH = os.getenv('PLATFORM_DB', os.path.join(os.path.dirname(__file__), 'platform.db'))
+import config
+
+DB_PATH = os.getenv('PLATFORM_DB', os.path.join(config.DATA_DIR, 'platform.db'))
 
 _write_lock = threading.Lock()   # сериализуем записи (SQLite single-writer)
 

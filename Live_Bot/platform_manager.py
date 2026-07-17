@@ -105,7 +105,7 @@ class PlatformManager:
     @staticmethod
     def _has_open_positions(telegram_id) -> bool:
         """Есть ли у юзера сохранённые открытые позиции (state/<id>/positions_state.json)."""
-        path = os.path.join(os.path.dirname(__file__), 'state', str(telegram_id),
+        path = os.path.join(config.DATA_DIR, 'state', str(telegram_id),
                             'positions_state.json')
         try:
             with open(path, 'r') as f:

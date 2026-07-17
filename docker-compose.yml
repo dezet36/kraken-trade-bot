@@ -10,6 +10,15 @@
 # своя сеть, без открытых портов — только исходящие HTTPS), лимиты CPU/RAM ниже.
 # Второй бот ставится своим compose-проектом в своей папке — конфликтов нет,
 # если у него СВОЙ telegram-токен.
+#
+# ВАЖНО (2026-07-05): ДВА ОТДЕЛЬНЫХ тома — код и данные:
+#   ./Live_Bot -> /app   — ТОЛЬКО код. Безопасно перезаписывать целиком при
+#                          каждом обновлении (git pull ИЛИ ручное копирование
+#                          папки поверх) — данные это не затронет.
+#   ./bot_data -> /data  — .env, журнал сделок, БД, состояние позиций. НИКОГДА
+#                          не перезаписывается копированием Live_Bot — физически
+#                          отдельный каталог. Первоначальная настройка — см.
+#                          DEPLOY.md, раздел «Первый запуск».
 
 services:
   kraken-trader:
@@ -19,10 +28,12 @@ services:
     working_dir: /app
     command: ["python", "-u", "bot.py"]
     volumes:
-      - ./Live_Bot:/app          # код + .env + state/журналы/БД — всё на хосте
+      - ./Live_Bot:/app          # ТОЛЬКО код — безопасно перезаписывать целиком
+      - ./bot_data:/data         # .env/журналы/БД/state — НЕ трогается копированием кода
     environment:
       - TZ=UTC                   # сессионный фильтр и так UTC-aware; логи — в UTC
       - PYTHONIOENCODING=utf-8
+      - BOT_DATA_DIR=/data       # переключает все персистентные файлы в /data
     restart: unless-stopped
     mem_limit: 768m
     cpus: 1.0
@@ -41,9 +52,11 @@ services:
     command: ["python", "-u", "platform_bot.py"]
     volumes:
       - ./Live_Bot:/app
+      - ./bot_data:/data
     environment:
       - TZ=UTC
       - PYTHONIOENCODING=utf-8
+      - BOT_DATA_DIR=/data
     restart: unless-stopped
     mem_limit: 768m
     cpus: 1.0

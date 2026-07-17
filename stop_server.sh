@@ -3,4 +3,4 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 docker compose down
-echo "Остановлено. Состояние/журналы сохранены в Live_Bot/ (том на хосте)."
+echo "Остановлено. Состояние/журналы сохранены в bot_data/ (том на хосте)."
