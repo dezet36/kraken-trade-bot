@@ -111,7 +111,7 @@ def main():
            **m, 'ruined': ruined, **r,
            'raw_trades': len(trd), 'minutes': round((time.time() - t0) / 60, 1)}
 
-    with open(rf'D:\Bot trade\exp_{name}.json', 'w', encoding='utf-8') as f:
+    with open(rf'D:\Bot trade\research\results\exp_{name}.json', 'w', encoding='utf-8') as f:
         json.dump(out, f, ensure_ascii=False, indent=2)
 
     print(f'\n=== {name} ===')

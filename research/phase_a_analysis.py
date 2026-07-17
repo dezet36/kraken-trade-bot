@@ -7,7 +7,7 @@ phase_a_analysis.py — бесплатная разведка по готово�
 import sys
 import pandas as pd
 
-path = sys.argv[1] if len(sys.argv) > 1 else r'D:\Bot trade\backtest_campaign_D1B_r05_c3.csv'
+path = sys.argv[1] if len(sys.argv) > 1 else r'D:\Bot trade\research\results\backtest_campaign_D1B_r05_c3.csv'
 df = pd.read_csv(path)
 df['entry_time'] = pd.to_datetime(df['entry_time'])
 df['exit_time'] = pd.to_datetime(df['exit_time'])

@@ -19,7 +19,7 @@ BACKTEST_PAIRS = [
     'BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'XRPUSDT', 'BNBUSDT',
     'AVAXUSDT', 'DOGEUSDT', 'ADAUSDT', 'LINKUSDT', 'LTCUSDT',
 ]
-CACHE_DIR      = r'D:\Bot trade\backtest_cache'
+CACHE_DIR      = r'D:\Bot trade\research\backtest_cache'
 MONTHS_BACK    = 6
 INITIAL_BALANCE = 10_000.0
 MAX_POSITIONS  = 5
@@ -788,8 +788,8 @@ if __name__ == '__main__':
 
     # Save detailed trade logs
     if trades_old:
-        pd.DataFrame(trades_old).to_csv(r'D:\Bot trade\backtest_old.csv', index=False)
+        pd.DataFrame(trades_old).to_csv(r'D:\Bot trade\research\results\backtest_old.csv', index=False)
     if trades_new:
-        pd.DataFrame(trades_new).to_csv(r'D:\Bot trade\backtest_new.csv', index=False)
+        pd.DataFrame(trades_new).to_csv(r'D:\Bot trade\research\results\backtest_new.csv', index=False)
     print(f'Детальные логи: backtest_old.csv / backtest_new.csv')
     print(f'Время: {(time.time()-t0)/60:.1f} мин')

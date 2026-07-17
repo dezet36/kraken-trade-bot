@@ -58,11 +58,9 @@ env/
 Thumbs.db
 desktop.ini
 
-# Кэш бэктестов (большие бинарные файлы)
+# research/ — кэш и результаты бэктестов (большие/генерируемые, живут внутри research/)
 backtest_cache/
 backtest_cache_12m/
-
-# Результаты бэктестов и логи
 backtest_*.csv
 missed_window_report.csv
 exp_*.json

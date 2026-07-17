@@ -43,7 +43,7 @@ def main():
             trd.extend(bt12.sim_trades(p, data_1h[p], data_5m[p],
                                        data_1h.get(p + '_4h'), cfg, f'wr_{name}'))
         out = {'config': name, **evaluate(trd, T0, MID)}
-        with open(rf'D:\Bot trade\exp_wr_{name}.json', 'w', encoding='utf-8') as f:
+        with open(rf'D:\Bot trade\research\results\exp_wr_{name}.json', 'w', encoding='utf-8') as f:
             json.dump(out, f, ensure_ascii=False, indent=2)
         print(fmt(out))
     print(f'Время: {(time.time()-t0)/60:.1f} мин')

@@ -23,7 +23,7 @@ throttled раз в 1H (методологически согласовано с
 import sys
 import time
 
-sys.path.insert(0, r'D:\Bot trade')
+sys.path.insert(0, r'D:\Bot trade\research')
 sys.path.insert(0, r'D:\Bot trade\Live_Bot')
 
 import numpy as np
@@ -167,7 +167,7 @@ def run():
         return
 
     df = pd.DataFrame(all_windows).drop(columns=['armed_i'])
-    df.to_csv(r'D:\Bot trade\missed_window_report.csv', index=False)
+    df.to_csv(r'D:\Bot trade\research\results\missed_window_report.csv', index=False)
 
     total  = len(df)
     seen   = int((df['status'] == 'SEEN').sum())

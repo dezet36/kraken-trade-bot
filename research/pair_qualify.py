@@ -119,7 +119,7 @@ def run():
               f"h1={m['h1']:+7.1f} h2={m['h2']:+7.1f} -> {verdict}")
 
     df = pd.DataFrame(rows).sort_values('sumR', ascending=False)
-    df.to_csv(r'D:\Bot trade\backtest_pair_qual.csv', index=False)
+    df.to_csv(r'D:\Bot trade\research\results\backtest_pair_qual.csv', index=False)
 
     # ── Итоговый пул ──────────────────────────────────────────────────────────
     keep = [r['pair'] for r in rows if r['verdict'] in ('KEEP', 'PROBATION')]
@@ -150,7 +150,7 @@ def run():
         print(f"  dir_cap={dc}: n={fm['n']} WR={fm['wr']}% sumR={fm['sumR']:+.1f} "
               f"PnL={pnl:+.1f}% DD={mdd:.1f}%{' RUIN' if ruined else ''} (dropped {dropped})")
 
-    with open(r'D:\Bot trade\exp_pair_qual_pool.json', 'w', encoding='utf-8') as f:
+    with open(r'D:\Bot trade\research\results\exp_pair_qual_pool.json', 'w', encoding='utf-8') as f:
         json.dump({'new_pool': new_pool, 'add': add, 'remove_perf': rem_perf,
                    'remove_dead': bt12.DEAD_SYMBOLS}, f, ensure_ascii=False, indent=2)
     print(f'\nСохранено: backtest_pair_qual.csv, exp_pair_qual_pool.json | '

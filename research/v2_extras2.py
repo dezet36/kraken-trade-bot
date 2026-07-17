@@ -45,7 +45,7 @@ def main():
             trd.extend(bt12.sim_trades(p, data_1h[p], data_5m[p],
                                        data_1h.get(p + '_4h'), CFG, f'v2x_{name}'))
         out = {'config': name, **evaluate(trd, T0, MID)}
-        with open(rf'D:\Bot trade\exp_v2x_{name}.json', 'w', encoding='utf-8') as f:
+        with open(rf'D:\Bot trade\research\results\exp_v2x_{name}.json', 'w', encoding='utf-8') as f:
             json.dump(out, f, ensure_ascii=False, indent=2)
         print(f"{name:<12} n={out['n']:<5} WR={out['wr']:4.1f}% PF={out['pf_r'] or 0:5.3f} "
               f"PnL={out['pnl_pct']:+7.1f}% DD={out['max_dd_pct']:4.1f}% "

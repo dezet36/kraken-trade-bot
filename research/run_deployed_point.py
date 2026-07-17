@@ -8,7 +8,7 @@
 import sys
 import time
 
-sys.path.insert(0, r'D:\Bot trade')
+sys.path.insert(0, r'D:\Bot trade\research')
 import backtest as bt
 import backtest_campaign as camp
 
@@ -18,11 +18,11 @@ data_1h, data_5m = bt.load_all_data()
 RISK, CAP = 0.5, 3
 configs = [
     ({'e1b': False, 'e2': False, 'bos': False, 'ntp': 1, 'be': False}, 'D1',
-     r'D:\Bot trade\backtest_campaign_D1_r05_c3.csv'),
+     r'D:\Bot trade\research\results\backtest_campaign_D1_r05_c3.csv'),
     ({'e1b': False, 'e2': False, 'bos': False, 'ntp': 1, 'be': True},  'D1B',
-     r'D:\Bot trade\backtest_campaign_D1B_r05_c3.csv'),
+     r'D:\Bot trade\research\results\backtest_campaign_D1B_r05_c3.csv'),
     ({'e1b': False, 'e2': False, 'bos': False, 'ntp': 2, 'be': True},  'D3',
-     r'D:\Bot trade\backtest_campaign_D3_r05_c3.csv'),
+     r'D:\Bot trade\research\results\backtest_campaign_D3_r05_c3.csv'),
 ]
 
 for cfg, name, path in configs:

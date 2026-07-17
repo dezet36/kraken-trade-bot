@@ -94,7 +94,7 @@ def run():
         h2 = [t for t in capped if pd.Timestamp(t['entry_time']) >= MID]
         out[key] = {'full': eq_metrics(capped, curve), 'ruined': ruined,
                     'H1_oos': flat_metrics(h1), 'H2_ins': flat_metrics(h2)}
-        pd.DataFrame(capped).to_csv(rf'D:\Bot trade\backtest_wf_{key}.csv', index=False)
+        pd.DataFrame(capped).to_csv(rf'D:\Bot trade\research\results\backtest_wf_{key}.csv', index=False)
 
         f, a, b = out[key]['full'], out[key]['H1_oos'], out[key]['H2_ins']
         print(f"\n[{key}] full: n={f['n']} WR={f['wr']}% PF_R={f['pf_r']} "
@@ -146,7 +146,7 @@ def run():
     a2, _, _ = camp.portfolio_filter(trd_sess, cap=CAP, dir_cap=None)
     assert [id(t) for t in a1] == [id(t) for t in a2], 'portfolio_filter regression!'
 
-    with open(r'D:\Bot trade\exp_wf_verdict.json', 'w', encoding='utf-8') as f:
+    with open(r'D:\Bot trade\research\results\exp_wf_verdict.json', 'w', encoding='utf-8') as f:
         json.dump({'runs': out, 'session_verdict': verdict,
                    'dircap': dc_out, 'dircap_verdict': dc_verdict,
                    'T0': str(T0), 'MID': str(MID), 'T_END': str(t_end)},

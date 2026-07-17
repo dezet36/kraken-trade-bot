@@ -118,12 +118,12 @@ def main():
         T0, MID = bounds()
         rows = [base_row(T0, MID)]
         for name in CONFIGS:
-            f = rf'D:\Bot trade\exp_fs_{name}.json'
+            f = rf'D:\Bot trade\research\results\exp_fs_{name}.json'
             if os.path.exists(f):
                 rows.append(json.load(open(f, encoding='utf-8')))
         for o in rows:
             print(fmt(o))
-        pd.DataFrame(rows).to_csv(r'D:\Bot trade\backtest_funnel_sweep.csv', index=False)
+        pd.DataFrame(rows).to_csv(r'D:\Bot trade\research\results\backtest_funnel_sweep.csv', index=False)
         print('\nСохранено: backtest_funnel_sweep.csv')
         return
 
@@ -146,7 +146,7 @@ def main():
             trd.extend(bt12.sim_trades(p, data_1h[p], data_5m[p],
                                        data_1h.get(p + '_4h'), CFG, f'fs_{name}'))
         out = {'config': name, **evaluate(trd, T0, MID)}
-        with open(rf'D:\Bot trade\exp_fs_{name}.json', 'w', encoding='utf-8') as f:
+        with open(rf'D:\Bot trade\research\results\exp_fs_{name}.json', 'w', encoding='utf-8') as f:
             json.dump(out, f, ensure_ascii=False, indent=2)
         print(fmt(out))
     print(f'Партия из {len(names)}: {(time.time()-t0)/60:.1f} мин')

@@ -87,7 +87,7 @@ def run_one(name, data_1h, data_5m, T0, MID):
         trd.extend(bt12.sim_trades(p, data_1h[p], data_5m[p],
                                    data_1h.get(p + '_4h'), CFG, f'v21_{name}'))
     out = {'config': name, 'knobs': CONFIGS[name], **evaluate(trd, T0, MID)}
-    with open(rf'D:\Bot trade\exp_v21_{name}.json', 'w', encoding='utf-8') as f:
+    with open(rf'D:\Bot trade\research\results\exp_v21_{name}.json', 'w', encoding='utf-8') as f:
         json.dump(out, f, ensure_ascii=False, indent=2)
     print(f"{name:<14} n={out['n']:<5} WR={out['wr']:4.1f}% PF={out['pf_r'] or 0:5.3f} "
           f"PnL={out['pnl_pct']:+7.1f}% DD={out['max_dd_pct']:4.1f}% "
@@ -109,13 +109,13 @@ def report():
     T0, MID = bounds(data_5m)
     rows = [base_row(T0, MID)]
     for name in CONFIGS:
-        f = rf'D:\Bot trade\exp_v21_{name}.json'
+        f = rf'D:\Bot trade\research\results\exp_v21_{name}.json'
         if os.path.exists(f):
             rows.append(json.load(open(f, encoding='utf-8')))
     df = pd.DataFrame(rows)
     cols = ['config', 'n', 'wr', 'pf_r', 'pnl_pct', 'max_dd_pct', 'h1_sumR', 'h2_sumR']
     print(df[cols].to_string(index=False))
-    df.to_csv(r'D:\Bot trade\backtest_v21_det.csv', index=False)
+    df.to_csv(r'D:\Bot trade\research\results\backtest_v21_det.csv', index=False)
     print('\nСохранено: backtest_v21_det.csv')
 
 

@@ -19,7 +19,7 @@ from datetime import datetime, timezone, timedelta
 import backtest as bt
 import backtest_campaign as camp
 
-CACHE_12M    = r'D:\Bot trade\backtest_cache_12m'
+CACHE_12M    = r'D:\Bot trade\research\backtest_cache_12m'
 DAYS_HISTORY = 400
 EVAL_DAYS    = 360
 

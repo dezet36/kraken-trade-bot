@@ -79,7 +79,7 @@ def run():
         camp.TP1_EXT = ORIG_TP1_EXT   # не оставляем модуль пропатченным
 
     df = pd.DataFrame(rows)
-    df.to_csv(r'D:\Bot trade\tp1_sensitivity_sweep.csv', index=False)
+    df.to_csv(r'D:\Bot trade\research\results\tp1_sensitivity_sweep.csv', index=False)
     print(f'\nСохранено: tp1_sensitivity_sweep.csv ({len(df)} строк)')
 
     best_pf = df.loc[df['pf'].astype(float).idxmax()] if df['pf'].notna().any() else None

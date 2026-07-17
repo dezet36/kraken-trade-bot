@@ -5,7 +5,7 @@ pair_breakdown.py — sumR/WR/PF/concentration по парам из деталь
 import sys
 import pandas as pd
 
-path = sys.argv[1] if len(sys.argv) > 1 else r'D:\Bot trade\backtest_campaign.csv'
+path = sys.argv[1] if len(sys.argv) > 1 else r'D:\Bot trade\research\results\backtest_campaign.csv'
 df = pd.read_csv(path)
 
 

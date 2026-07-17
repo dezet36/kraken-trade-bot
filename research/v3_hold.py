@@ -51,7 +51,7 @@ def main():
         n_eod = sum(1 for t in trd if str(t.get('exit_reason', '')).startswith('EOD'))
         n_time = sum(1 for t in trd if str(t.get('exit_reason', '')).startswith('TIME'))
         out['n_eod'], out['n_time'] = n_eod, n_time
-        with open(rf'D:\Bot trade\exp_{name}.json', 'w', encoding='utf-8') as f:
+        with open(rf'D:\Bot trade\research\results\exp_{name}.json', 'w', encoding='utf-8') as f:
             json.dump(out, f, ensure_ascii=False, indent=2)
         print(f"{name:<14} n={out['n']:<5} WR={out['wr']:4.1f}% PF={out['pf_r'] or 0:5.3f} "
               f"PnL={out['pnl_pct']:+7.1f}% DD={out['max_dd_pct']:4.1f}% "

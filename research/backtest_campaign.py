@@ -565,7 +565,7 @@ def stats(trades, curve, label='FIBONACCI CAMPAIGN'):
 
 
 def run_config(data_1h, data_5m, cfg, label, save_csv=False,
-               risk_pct=None, cap=None, csv_path=r'D:\Bot trade\backtest_campaign.csv'):
+               risk_pct=None, cap=None, csv_path=r'D:\Bot trade\research\results\backtest_campaign.csv'):
     all_trades = []
     for pair in bt.BACKTEST_PAIRS:
         tr = simulate_pair_campaign(data_1h[pair], data_5m[pair],
@@ -633,7 +633,7 @@ if __name__ == '__main__':
         deploy_capped, deploy_curve, _ = build_equity(deploy_capped, risk_pct=DEPLOY_RISK)
         if deploy_capped:
             pd.DataFrame(deploy_capped).to_csv(
-                rf'D:\Bot trade\backtest_campaign_{tag}_r05_c3.csv', index=False)
+                rf'D:\Bot trade\research\results\backtest_campaign_{tag}_r05_c3.csv', index=False)
             print(f'Детальный CSV @ risk={DEPLOY_RISK}%/cap={DEPLOY_CAP}: '
                   f'backtest_campaign_{tag}_r05_c3.csv ({len(deploy_capped)} сделок)')
 
@@ -665,6 +665,6 @@ if __name__ == '__main__':
     print('  Подсказка: ищем макс. доход при просадке, которую готов терпеть (обычно < 35-40%).')
 
     grid_df = pd.DataFrame(grid_rows)
-    grid_df.to_csv(r'D:\Bot trade\backtest_campaign_grid.csv', index=False)
+    grid_df.to_csv(r'D:\Bot trade\research\results\backtest_campaign_grid.csv', index=False)
     print(f'\nСетка сохранена: backtest_campaign_grid.csv ({len(grid_df)} строк)')
     print(f'\nВремя: {(time.time()-t0)/60:.1f} мин')

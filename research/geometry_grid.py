@@ -88,7 +88,7 @@ def run_one(name, data_1h, data_5m, T0, MID):
            'avg_rr': avg_rr, 'ruined': ruined,
            'h1_sumR': h1['sumR'], 'h1_pf': h1['pf_r'], 'h1_n': h1['n'],
            'h2_sumR': h2['sumR'], 'h2_pf': h2['pf_r'], 'h2_n': h2['n']}
-    with open(rf'D:\Bot trade\exp_v2_{name}.json', 'w', encoding='utf-8') as f:
+    with open(rf'D:\Bot trade\research\results\exp_v2_{name}.json', 'w', encoding='utf-8') as f:
         json.dump(out, f, ensure_ascii=False, indent=2)
     print(f"{name:<20} n={fm['n']:<5} WR={fm['wr']:4.1f}% PF={fm['pf_r'] or 0:5.3f} "
           f"PnL={pnl:+7.1f}% DD={mdd:4.1f}% rr~{avg_rr:4.1f} "
@@ -99,7 +99,7 @@ def run_one(name, data_1h, data_5m, T0, MID):
 def report():
     rows = []
     for name in CONFIGS:
-        f = rf'D:\Bot trade\exp_v2_{name}.json'
+        f = rf'D:\Bot trade\research\results\exp_v2_{name}.json'
         if os.path.exists(f):
             rows.append(json.load(open(f, encoding='utf-8')))
     if not rows:
@@ -109,7 +109,7 @@ def report():
     cols = ['config', 'n', 'wr', 'pf_r', 'pnl_pct', 'max_dd_pct', 'avg_rr',
             'h1_sumR', 'h2_sumR', 'ruined']
     print(df[cols].to_string(index=False))
-    df.to_csv(r'D:\Bot trade\backtest_v2_grid.csv', index=False)
+    df.to_csv(r'D:\Bot trade\research\results\backtest_v2_grid.csv', index=False)
     print(f'\nСохранено: backtest_v2_grid.csv ({len(df)}/{len(CONFIGS)} конфигов) | '
           f'Ориентир v1 (D1B+сессия, RR-гейт 2.0): +100.7% / DD 23.6% / WR 29.5% / 26.6 сд-нед')
 
