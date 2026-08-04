@@ -1,0 +1,1338 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Сравнение стратегий — Kraken</title>
+<style>
+  :root {
+    color-scheme: light;
+    --surface-1: #fcfcfb;
+    --plane: #f4f4f1;
+    --raised: #ffffff;
+    --text-primary: #0b0b0b;
+    --text-secondary: #52514e;
+    --muted: #898781;
+    --grid: #e1e0d9;
+    --axis: #c3c2b7;
+    --border: rgba(11,11,11,0.10);
+    --wash: rgba(11,11,11,0.045);
+    --shadow: 0 1px 2px rgba(11,11,11,.05), 0 8px 24px -12px rgba(11,11,11,.18);
+    --fibo: #2a78d6;
+    --smc: #eb6834;
+    --good: #006300;
+    --bad: #d03b3b;
+    --ok: #0ca30c;
+    --warn: #fab219;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:where(:not([data-theme="light"])) {
+      color-scheme: dark;
+      --surface-1: #1a1a19; --plane: #0d0d0d; --raised: #222221;
+      --text-primary: #ffffff; --text-secondary: #c3c2b7; --muted: #898781;
+      --grid: #2c2c2a; --axis: #383835;
+      --border: rgba(255,255,255,0.10); --wash: rgba(255,255,255,0.055);
+      --shadow: 0 1px 2px rgba(0,0,0,.4), 0 8px 24px -12px rgba(0,0,0,.7);
+      --fibo: #3987e5; --smc: #d95926;
+      --good: #0ca30c; --bad: #e66767;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --surface-1: #1a1a19; --plane: #0d0d0d; --raised: #222221;
+    --text-primary: #ffffff; --text-secondary: #c3c2b7; --muted: #898781;
+    --grid: #2c2c2a; --axis: #383835;
+    --border: rgba(255,255,255,0.10); --wash: rgba(255,255,255,0.055);
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 8px 24px -12px rgba(0,0,0,.7);
+    --fibo: #3987e5; --smc: #d95926;
+    --good: #0ca30c; --bad: #e66767;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    background: var(--plane); color: var(--text-primary);
+    font: 14px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 1400px; margin: 0 auto; padding: 0 24px 48px; }
+
+  /* ── Шапка ───────────────────────────────────────────────────────────── */
+  .appbar {
+    position: sticky; top: 0; z-index: 20;
+    background: color-mix(in srgb, var(--plane) 88%, transparent);
+    backdrop-filter: blur(12px);
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 20px;
+  }
+  .appbar-in {
+    max-width: 1400px; margin: 0 auto; padding: 14px 24px;
+    display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+  }
+  .brand { font-size: 16px; font-weight: 650; letter-spacing: -.01em; margin-right: 2px; }
+  .badge {
+    font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase;
+    padding: 3px 9px; border-radius: 6px; border: 1px solid var(--border);
+    color: var(--text-secondary); background: var(--surface-1); white-space: nowrap;
+  }
+  .state { display: inline-flex; align-items: center; gap: 7px; font-size: 13px;
+           color: var(--text-secondary); }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex: none; }
+  .dot.run { background: var(--ok); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 22%, transparent); }
+  .dot.warn { background: var(--warn); }
+  .dot.err { background: var(--bad); box-shadow: 0 0 0 3px color-mix(in srgb, var(--bad) 22%, transparent); }
+  .spacer { flex: 1 1 auto; }
+  .stamp { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+  /* ── Фильтры: одна строка над всем, что они ограничивают ─────────────── */
+  .filters {
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    margin-bottom: 18px;
+  }
+  .fgroup { display: flex; align-items: center; gap: 8px; }
+  .flabel { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
+  .seg {
+    display: inline-flex; padding: 3px; gap: 2px;
+    background: var(--surface-1); border: 1px solid var(--border); border-radius: 9px;
+  }
+  .seg button {
+    font: inherit; font-size: 13px; color: var(--text-secondary);
+    background: none; border: 0; border-radius: 6px; padding: 5px 12px; cursor: pointer;
+    display: inline-flex; align-items: center; gap: 6px; white-space: nowrap;
+  }
+  .seg button:hover { background: var(--wash); }
+  .seg button[aria-pressed="true"] {
+    background: var(--raised); color: var(--text-primary); font-weight: 600;
+    box-shadow: 0 1px 2px rgba(0,0,0,.10);
+  }
+  .seg button .key { width: 9px; height: 9px; border-radius: 3px; flex: none; }
+  .count { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+  /* ── Секции ──────────────────────────────────────────────────────────── */
+  .sec { margin-bottom: 26px; }
+  .sec-head {
+    display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap;
+    margin: 0 0 12px 2px;
+  }
+  .sec-head h2 { font-size: 13px; font-weight: 650; margin: 0;
+                 text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+  .sec-head .hint { font-size: 12px; color: var(--muted); }
+  .card {
+    background: var(--surface-1); border: 1px solid var(--border);
+    border-radius: 14px; box-shadow: var(--shadow);
+  }
+  .card-pad { padding: 18px 20px; }
+  .cols { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); }
+
+  /* ── Карточка стратегии ──────────────────────────────────────────────── */
+  .stitle { display: flex; align-items: center; gap: 9px; margin-bottom: 14px; }
+  .stitle .key { width: 10px; height: 10px; border-radius: 3px; flex: none; }
+  .stitle .nm { font-size: 15px; font-weight: 650; }
+  .stitle .sub { font-size: 12px; color: var(--muted); margin-left: auto;
+                 font-variant-numeric: tabular-nums; }
+  .hero { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 4px; }
+  .hero .big { font-size: 38px; font-weight: 640; letter-spacing: -.02em; line-height: 1.05; }
+  .hero .side { font-size: 13px; color: var(--text-secondary); font-variant-numeric: tabular-nums; }
+  .kpis {
+    display: grid; gap: 10px 18px; margin-top: 16px; padding-top: 14px;
+    border-top: 1px solid var(--grid);
+    grid-template-columns: repeat(auto-fit, minmax(92px, 1fr));
+  }
+  .kpi .k { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
+  .kpi .v { font-size: 17px; font-weight: 600; font-variant-numeric: tabular-nums; margin-top: 1px; }
+  .kpi .n { font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+  .pos { color: var(--good); }
+  .neg { color: var(--bad); }
+
+  /* ── Таблицы ─────────────────────────────────────────────────────────── */
+  .scroll { overflow: auto; max-height: 520px; border-radius: 0 0 14px 14px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  thead th {
+    position: sticky; top: 0; z-index: 1;
+    text-align: left; font-weight: 500; font-size: 11px; color: var(--muted);
+    text-transform: uppercase; letter-spacing: .05em; padding: 10px 12px;
+    background: var(--surface-1); border-bottom: 1px solid var(--axis); white-space: nowrap;
+  }
+  td { padding: 9px 12px; border-bottom: 1px solid var(--grid);
+       font-variant-numeric: tabular-nums; white-space: nowrap; }
+  tbody tr:last-child td { border-bottom: none; }
+  tbody tr:hover { background: var(--wash); }
+  td.why { max-width: 260px; overflow: hidden; text-overflow: ellipsis;
+           color: var(--text-secondary); }
+  .pair { font-weight: 600; }
+  .side-l { color: var(--good); font-weight: 600; }
+  .side-s { color: var(--bad); font-weight: 600; }
+  .chip {
+    font-size: 11px; padding: 2px 8px; border-radius: 20px;
+    border: 1px solid var(--border); color: var(--text-secondary);
+  }
+  .skey { display: inline-flex; align-items: center; gap: 6px; }
+  .skey .key { width: 8px; height: 8px; border-radius: 2px; flex: none; }
+  .empty { color: var(--muted); padding: 32px 0; text-align: center; }
+
+  /* ── График ──────────────────────────────────────────────────────────── */
+  .legend { display: flex; gap: 16px; font-size: 12px; color: var(--text-secondary); }
+  .legend span { display: inline-flex; align-items: center; gap: 7px; }
+  .legend .line { width: 14px; height: 2px; border-radius: 2px; }
+  #plot { position: relative; }
+  #plot svg { display: block; width: 100%; height: auto; touch-action: none; }
+  #tip {
+    position: absolute; pointer-events: none; opacity: 0; transition: opacity .09s;
+    background: var(--raised); border: 1px solid var(--border); border-radius: 10px;
+    padding: 9px 11px; font-size: 12px; box-shadow: var(--shadow); z-index: 5;
+    min-width: 148px;
+  }
+  #tip .t-when { color: var(--muted); font-size: 11px; margin-bottom: 6px; }
+  #tip .t-row { display: flex; align-items: center; gap: 8px; margin-top: 3px; }
+  #tip .t-key { width: 12px; height: 2px; border-radius: 2px; flex: none; }
+  #tip .t-val { font-weight: 650; font-variant-numeric: tabular-nums; margin-left: auto; }
+  #tip .t-nm { color: var(--text-secondary); }
+
+  /* ── Журнал ──────────────────────────────────────────────────────────── */
+  details.card > summary {
+    padding: 14px 20px; cursor: pointer; font-size: 13px; font-weight: 600;
+    list-style: none; display: flex; align-items: center; gap: 10px;
+  }
+  details.card > summary::-webkit-details-marker { display: none; }
+  details.card > summary::before {
+    content: '▸'; color: var(--muted); transition: transform .15s;
+  }
+  details.card[open] > summary::before { transform: rotate(90deg); }
+  #log {
+    margin: 0; padding: 0 20px 18px; max-height: 340px; overflow: auto;
+    font: 12px/1.6 ui-monospace, "Cascadia Mono", Consolas, monospace;
+    color: var(--text-secondary); white-space: pre-wrap; word-break: break-word;
+  }
+  #log .l-err { color: var(--bad); }
+  #log .l-win { color: var(--good); }
+  #log .l-act { color: var(--text-primary); font-weight: 600; }
+
+  /* ── Карточки открытых позиций ───────────────────────────────────────── */
+  .poscols { display: grid; gap: 14px; grid-template-columns: repeat(auto-fill, minmax(410px, 1fr)); }
+  .pos-card {
+    background: var(--surface-1); border: 1px solid var(--border);
+    border-radius: 14px; box-shadow: var(--shadow); padding: 15px 17px;
+  }
+  .pos-top { display: flex; align-items: center; gap: 9px; margin-bottom: 1px; }
+  .pos-top .key { width: 9px; height: 9px; border-radius: 3px; flex: none; }
+  .pos-top .p { font-size: 15px; font-weight: 650; letter-spacing: -.01em; }
+  .pos-top .age { margin-left: auto; font-size: 12px; color: var(--muted);
+                  font-variant-numeric: tabular-nums; }
+  /* Название стратегии словом, а не только цветом: полагаться на подбор
+     цвета как на единственный признак нельзя. */
+  .pos-owner { font-size: 11.5px; color: var(--muted); margin: 0 0 6px 18px;
+               text-transform: uppercase; letter-spacing: .05em; }
+
+  /* Группа позиций одной стратегии */
+  .group { margin-bottom: 20px; }
+  .group:last-child { margin-bottom: 0; }
+  .group-head {
+    display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap;
+    margin: 0 0 10px 2px; padding-bottom: 7px; border-bottom: 1px solid var(--grid);
+  }
+  .group-head .key { width: 10px; height: 10px; border-radius: 3px; align-self: center; }
+  .group-head .nm { font-size: 13.5px; font-weight: 650; }
+  .group-head .cnt { font-size: 12px; color: var(--muted); }
+  .group-head .sum { margin-left: auto; font-size: 13px;
+                     font-variant-numeric: tabular-nums; font-weight: 600; }
+  .pos-money { display: flex; align-items: baseline; gap: 10px; margin: 6px 0 2px; }
+  .pos-money .v { font-size: 26px; font-weight: 640; letter-spacing: -.02em; }
+  .pos-money .r { font-size: 13px; font-variant-numeric: tabular-nums; }
+  .pos-split { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+  /* Шкала: где цена между стопом и последней целью */
+  .track { margin: 14px 0 8px; }
+  .track-bar {
+    position: relative; height: 6px; border-radius: 3px;
+    background: linear-gradient(to right,
+      color-mix(in srgb, var(--bad) 30%, transparent) 0%,
+      var(--grid) 42%, var(--grid) 58%,
+      color-mix(in srgb, var(--good) 30%, transparent) 100%);
+  }
+  .track-bar .entry {
+    position: absolute; top: -3px; width: 2px; height: 12px;
+    background: var(--text-secondary); border-radius: 1px;
+  }
+  .track-bar .tp {
+    position: absolute; top: -1px; width: 2px; height: 8px;
+    background: var(--good); opacity: .55; border-radius: 1px;
+  }
+  .track-bar .tp.done { opacity: 1; width: 3px; }
+  .track-bar .now {
+    position: absolute; top: -5px; width: 10px; height: 16px; margin-left: -5px;
+    border-radius: 3px; border: 2px solid var(--surface-1);
+  }
+  .track-ends {
+    display: flex; justify-content: space-between; margin-top: 6px;
+    font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums;
+  }
+  .pos-grid {
+    display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px 12px;
+    margin-top: 12px; padding-top: 11px; border-top: 1px solid var(--grid);
+  }
+  .pos-grid .k { font-size: 10.5px; color: var(--muted);
+                 text-transform: uppercase; letter-spacing: .05em; }
+  .pos-grid .v { font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .pos-why { margin-top: 11px; font-size: 12px; color: var(--text-secondary);
+             overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .flags { display: flex; gap: 5px; }
+  .flag { font-size: 10px; padding: 1px 6px; border-radius: 4px;
+          border: 1px solid var(--border); color: var(--muted); }
+  .flag.on { color: var(--good); border-color: color-mix(in srgb, var(--good) 40%, transparent); }
+
+  .totals {
+    display: flex; align-items: baseline; gap: 8px; font-size: 13px;
+    color: var(--text-secondary); font-variant-numeric: tabular-nums;
+  }
+  .totals b { font-size: 15px; }
+
+  /* ── Панель управления ───────────────────────────────────────────────── */
+  .ctl { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(330px, 1fr)); }
+  .ctl-card { border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; }
+  .ctl-head { display: flex; align-items: center; gap: 9px; margin-bottom: 12px; }
+  .ctl-head .key { width: 10px; height: 10px; border-radius: 3px; flex: none; }
+  .ctl-head .nm { font-size: 14px; font-weight: 650; }
+  .ctl-row { display: flex; align-items: center; gap: 10px; margin-bottom: 9px; }
+  .ctl-row label { font-size: 12.5px; color: var(--text-secondary); flex: 1; }
+  .ctl-row .unit { font-size: 12px; color: var(--muted); width: 14px; }
+  .ctl-row input[type=number] {
+    width: 96px; font: inherit; font-size: 13px; text-align: right;
+    padding: 5px 9px; border-radius: 7px; background: var(--plane);
+    border: 1px solid var(--border); color: var(--text-primary);
+    font-variant-numeric: tabular-nums;
+  }
+  .ctl-row input:focus { outline: 2px solid var(--fibo); outline-offset: -1px; }
+  .ctl-row input:disabled { opacity: .45; }
+  .toggle {
+    position: relative; width: 40px; height: 22px; border-radius: 11px;
+    border: 1px solid var(--border); background: var(--plane); cursor: pointer;
+    transition: background .14s; flex: none;
+  }
+  .toggle::after {
+    content: ''; position: absolute; top: 2px; left: 2px;
+    width: 16px; height: 16px; border-radius: 50%;
+    background: var(--muted); transition: transform .14s, background .14s;
+  }
+  .toggle[aria-pressed="true"] { background: color-mix(in srgb, var(--ok) 22%, transparent); }
+  .toggle[aria-pressed="true"]::after { transform: translateX(18px); background: var(--ok); }
+  .ctl-note { font-size: 11.5px; color: var(--muted); margin-top: 4px; line-height: 1.45; }
+  .ctl-foot { display: flex; align-items: center; gap: 12px; margin-top: 14px; }
+  .btn {
+    font: inherit; font-size: 13px; font-weight: 600; cursor: pointer;
+    padding: 8px 18px; border-radius: 9px; border: 1px solid transparent;
+    background: var(--fibo); color: #fff;
+  }
+  .btn:disabled { opacity: .45; cursor: default; }
+  .btn.ghost { background: var(--surface-1); color: var(--text-primary);
+               border-color: var(--border); }
+  .saved { font-size: 12.5px; color: var(--good); }
+  .warn-box {
+    font-size: 12.5px; color: var(--text-secondary); padding: 10px 12px;
+    border: 1px solid var(--border); border-radius: 9px; margin-bottom: 14px;
+    background: var(--wash);
+  }
+
+  .lnk {
+    font-size: 12px; text-decoration: none; color: var(--text-secondary);
+    border: 1px solid var(--border); border-radius: 8px; padding: 5px 11px;
+    background: var(--surface-1); white-space: nowrap;
+  }
+  .lnk:hover { background: var(--wash); color: var(--text-primary); }
+  .actions { display: flex; gap: 8px; margin-left: auto; }
+
+  /* Перерисовка не должна дёргать вёрстку: держим прошлый кадр приглушённым */
+  .stale { opacity: .55; transition: opacity .12s; }
+
+  @media (max-width: 720px) {
+    .wrap, .appbar-in { padding-left: 14px; padding-right: 14px; }
+    .hero .big { font-size: 30px; }
+  }
+</style>
+</head>
+<body>
+
+<header class="appbar">
+  <div class="appbar-in">
+    <span class="brand">Kraken</span>
+    <span class="badge" id="mode">—</span>
+    <span class="state" id="state"><span class="dot"></span>подключение…</span>
+    <span class="spacer"></span>
+    <span class="stamp" id="stamp"></span>
+  </div>
+</header>
+
+<div class="wrap">
+
+  <div class="filters">
+    <div class="fgroup">
+      <span class="flabel">Период</span>
+      <div class="seg" id="f-period" role="group" aria-label="Период"></div>
+    </div>
+    <div class="fgroup">
+      <span class="flabel">Стратегия</span>
+      <div class="seg" id="f-strategy" role="group" aria-label="Стратегия"></div>
+    </div>
+    <span class="count" id="f-count"></span>
+  </div>
+
+  <div id="body">
+
+    <details class="card sec" id="ctlbox">
+      <summary>Управление торговлей</summary>
+      <div id="controls" class="card-pad" style="padding-top:0"></div>
+    </details>
+
+    <section class="sec">
+      <div class="sec-head">
+        <h2>Итог</h2>
+        <span class="hint" id="sum-hint"></span>
+      </div>
+      <div class="cols" id="summary"></div>
+    </section>
+
+    <section class="sec">
+      <div class="sec-head">
+        <h2>Кривая доходности</h2>
+        <span class="hint" id="chart-hint"></span>
+        <div class="actions"><div class="legend" id="legend"></div></div>
+      </div>
+      <div class="card card-pad">
+        <div id="plot"><div id="tip"></div></div>
+      </div>
+    </section>
+
+    <section class="sec">
+      <div class="sec-head">
+        <h2>В работе</h2>
+        <span class="hint" id="open-hint"></span>
+        <div class="actions"><span class="totals" id="open-total"></span></div>
+      </div>
+      <div id="open"></div>
+    </section>
+
+    <section class="sec">
+      <div class="sec-head">
+        <h2>Ждут активации</h2>
+        <span class="hint" id="wait-hint"></span>
+      </div>
+      <div class="card"><div class="scroll" id="waiting"></div></div>
+    </section>
+
+    <section class="sec">
+      <div class="sec-head">
+        <h2>Закрытые сделки</h2>
+        <span class="hint" id="closed-hint"></span>
+        <div class="actions">
+          <a class="lnk" href="/api/export.csv" download>Выгрузить CSV</a>
+          <a class="lnk" href="/api/export.jsonl" download>Полный дамп JSONL</a>
+        </div>
+      </div>
+      <div class="card"><div class="scroll" id="closed"></div></div>
+    </section>
+
+    <details class="card sec" id="logbox">
+      <summary>Журнал работы</summary>
+      <pre id="log">…</pre>
+    </details>
+
+  </div>
+</div>
+
+<script>
+'use strict';
+
+const NAMES  = { FIBO: 'Фибоначчи', SMC: 'Smart Money' };
+// Цвет закреплён за стратегией, а не за местом в списке: при фильтрации
+// оставшаяся кривая не должна менять цвет — иначе читатель, запомнивший
+// «фибо синяя», будет введён в заблуждение.
+const COLOR  = { FIBO: 'var(--fibo)', SMC: 'var(--smc)' };
+const PERIODS = [
+  { id: 'today', label: 'Сегодня', days: 0 },
+  { id: '7d',    label: '7 дней',  days: 7 },
+  { id: '30d',   label: '30 дней', days: 30 },
+  { id: 'all',   label: 'Всё время', days: null },
+];
+
+let DATA = null;
+let PAPER = false;
+
+// Начальное состояние берём из адреса: так «SMC за 7 дней» можно сохранить в
+// закладку или переслать, и после перезагрузки окна выбор не теряется.
+const q = new URLSearchParams(location.search);
+let period = PERIODS.some(p => p.id === q.get('period')) ? q.get('period') : 'all';
+let strategy = ['ALL', 'FIBO', 'SMC'].includes(q.get('strategy')) ? q.get('strategy') : 'ALL';
+
+function syncUrl() {
+  const u = new URLSearchParams();
+  if (period !== 'all') u.set('period', period);
+  if (strategy !== 'ALL') u.set('strategy', strategy);
+  const s = u.toString();
+  history.replaceState(null, '', s ? '?' + s : location.pathname);
+}
+
+/* ── Формат ─────────────────────────────────────────────────────────────── */
+const money = v => (v >= 0 ? '+' : '−') + '$' + Math.abs(v).toFixed(2);
+const pct   = v => (v >= 0 ? '+' : '−') + Math.abs(v).toFixed(2) + '%';
+const cls   = v => v > 0 ? 'pos' : (v < 0 ? 'neg' : '');
+const price = v => v ? v.toLocaleString('ru', { maximumFractionDigits: 8 }) : '—';
+const usd   = v => '$' + Number(v || 0).toLocaleString('ru', { maximumFractionDigits: 0 });
+const esc   = s => String(s == null ? '' : s)
+  .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+// Время показываем в поясе зрителя. Метки приходят разные: часть в UTC со
+// смещением, часть — локальные без него. JS трактует их ровно так, как надо:
+// со смещением как абсолютный момент, без смещения как местное время.
+const when = s => {
+  if (!s) return '—';
+  const d = new Date(s);
+  return isNaN(d) ? String(s).replace('T', ' ').slice(5, 16)
+    : d.toLocaleString('ru', { day: '2-digit', month: '2-digit',
+                               hour: '2-digit', minute: '2-digit' });
+};
+const dur   = m => m >= 1440 ? (m / 1440).toFixed(1) + ' д'
+                : m >= 60 ? (m / 60).toFixed(1) + ' ч' : Math.round(m) + ' м';
+const ts    = s => { const d = new Date(s); return isNaN(d) ? 0 : d.getTime(); };
+// Время в позиции считаем от метки открытия: она приходит в UTC, как и всё
+// остальное, поэтому сравниваем с текущим моментом напрямую.
+const ago   = s => { const t = ts(s); return t ? dur((Date.now() - t) / 60000) : '—'; };
+// Расстояние до уровня в процентах: цифра «стоп 61 777» сама по себе ничего
+// не говорит, а «−2.0%» сразу показывает, насколько близко позиция к выходу.
+const dist  = (level, now) => (!level || !now) ? ''
+  : ` <span style="color:var(--muted);font-weight:400">${
+      ((level - now) / now * 100 >= 0 ? '+' : '−')}${
+      Math.abs((level - now) / now * 100).toFixed(2)}%</span>`;
+
+/* ── Фильтры ────────────────────────────────────────────────────────────── */
+function periodStart() {
+  const def = PERIODS.find(p => p.id === period);
+  if (!def || def.days === null) return 0;
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  return d.getTime() - def.days * 86400000;
+}
+
+function inWindow(row) {
+  const from = periodStart();
+  return from === 0 || ts(row.closed || row.opened) >= from;
+}
+
+function activeStrategies() {
+  const all = Object.keys((DATA && DATA.strategies) || {});
+  return strategy === 'ALL' ? all : all.filter(k => k === strategy);
+}
+
+function pick(rows) {
+  const keep = activeStrategies();
+  return (rows || []).filter(r => keep.includes(r.strategy) && inWindow(r));
+}
+
+function buildFilters() {
+  const pbox = document.getElementById('f-period');
+  pbox.innerHTML = PERIODS.map(p =>
+    `<button type="button" data-id="${p.id}" aria-pressed="${p.id === period}">${p.label}</button>`
+  ).join('');
+  pbox.onclick = e => {
+    const b = e.target.closest('button');
+    if (b) { period = b.dataset.id; syncUrl(); render(); }
+  };
+
+  const keys = Object.keys((DATA && DATA.strategies) || {});
+  const sbox = document.getElementById('f-strategy');
+  const opts = [{ id: 'ALL', label: 'Обе' }].concat(
+    keys.map(k => ({ id: k, label: NAMES[k] || k })));
+  sbox.innerHTML = opts.map(o => {
+    const key = o.id === 'ALL' ? ''
+      : `<span class="key" style="background:${COLOR[o.id] || 'var(--muted)'}"></span>`;
+    return `<button type="button" data-id="${o.id}" aria-pressed="${o.id === strategy}">${key}${o.label}</button>`;
+  }).join('');
+  sbox.onclick = e => {
+    const b = e.target.closest('button');
+    if (b) { strategy = b.dataset.id; syncUrl(); render(); }
+  };
+}
+
+/* ── Метрики выборки ────────────────────────────────────────────────────── */
+function summarise(rows) {
+  const wins = rows.filter(t => t.pnl > 0);
+  const losses = rows.filter(t => t.pnl <= 0);
+  const gw = wins.reduce((s, t) => s + t.pnl, 0);
+  const gl = Math.abs(losses.reduce((s, t) => s + t.pnl, 0));
+  const sumR = rows.reduce((s, t) =>
+    s + (t.pnl_r != null ? t.pnl_r : (t.risk ? t.pnl / t.risk : 0)), 0);
+  return {
+    trades: rows.length,
+    wins: wins.length,
+    winrate: rows.length ? wins.length / rows.length * 100 : 0,
+    pnl: rows.reduce((s, t) => s + t.pnl, 0),
+    pf: gl ? gw / gl : null,
+    sumR,
+    expectancy: rows.length ? sumR / rows.length : 0,
+    fees: rows.reduce((s, t) => s + (t.fees || 0) + (t.funding || 0), 0),
+  };
+}
+
+/** Кривая по выборке. База — баланс на входе в окно, иначе проценты соврут. */
+function curve(rows, startBalance) {
+  let bal = startBalance;
+  return rows.map(t => {
+    bal += t.pnl;
+    return [t.closed, bal, startBalance ? (bal / startBalance - 1) * 100 : 0];
+  });
+}
+
+function windowStartBalance(key, rows) {
+  const info = (DATA.strategies || {})[key] || {};
+  const start = info.start_balance || 0;
+  if (period === 'all' || !PAPER) return start;
+  // Баланс к началу окна = стартовый депозит плюс всё, что заработано ДО него.
+  const before = (DATA.closed || [])
+    .filter(t => t.strategy === key && !inWindow(t))
+    .reduce((s, t) => s + t.pnl, 0);
+  return start + before;
+}
+
+/* ── Отрисовка: карточки ────────────────────────────────────────────────── */
+function cards(byStrategy) {
+  const box = document.getElementById('summary');
+  const keys = activeStrategies();
+  if (!keys.length) { box.innerHTML = '<div class="empty">Нет данных</div>'; return; }
+
+  box.innerHTML = keys.map(key => {
+    const s = byStrategy[key];
+    const info = (DATA.strategies || {})[key] || {};
+    const base = windowStartBalance(key, s.rows);
+    const growth = base ? s.stats.pnl / base * 100 : 0;
+    const whole = period === 'all';
+
+    const heroValue = PAPER ? pct(growth) : money(s.stats.pnl);
+    const heroSide = PAPER
+      ? (whole
+        ? `${usd(info.equity)} из ${usd(info.start_balance)}`
+        : `${money(s.stats.pnl)} от ${usd(base)}`)
+      : `${s.stats.sumR >= 0 ? '+' : ''}${s.stats.sumR.toFixed(2)} R`;
+
+    const openNow = (DATA.open_positions || []).filter(p => p.strategy === key).length;
+    const pendingNow = (DATA.pending_orders || []).filter(p => p.strategy === key).length;
+    const waiting = pendingNow === 1 ? 'ждёт входа' : 'ждут входа';
+    const floating = (DATA.open_positions || [])
+      .filter(p => p.strategy === key)
+      .reduce((s, p) => s + (p.unrealised || 0), 0);
+
+    const kpi = (k, v, n, c) =>
+      `<div class="kpi"><div class="k">${k}</div>
+       <div class="v ${c || ''}">${v}</div><div class="n">${n || ''}</div></div>`;
+
+    return `<div class="card card-pad">
+      <div class="stitle">
+        <span class="key" style="background:${COLOR[key] || 'var(--muted)'}"></span>
+        <span class="nm">${esc(NAMES[key] || key)}</span>
+        <span class="sub">${openNow} в работе${pendingNow ? ` · ${pendingNow} ${waiting}` : ''}</span>
+      </div>
+      <div class="hero">
+        <span class="big ${cls(PAPER ? growth : s.stats.pnl)}">${heroValue}</span>
+        <span class="side">${heroSide}</span>
+      </div>
+      <div class="kpis">
+        ${kpi('Сделок', s.stats.trades, `${s.stats.wins} в плюс`)}
+        ${kpi('Винрейт', s.stats.winrate.toFixed(1) + '%', '')}
+        ${kpi('Profit factor', s.stats.pf === null ? '—' : s.stats.pf.toFixed(2),
+              s.stats.expectancy.toFixed(3) + ' R/сд')}
+        ${kpi('Сумма R', (s.stats.sumR >= 0 ? '+' : '') + s.stats.sumR.toFixed(1), '',
+              cls(s.stats.sumR))}
+        ${kpi('Просадка', maxDD(s.rows, base).toFixed(1) + '%', 'от пика')}
+        ${openNow ? kpi('В рынке', money(floating), 'плавающий', cls(floating)) : ''}
+        ${PAPER ? kpi('Издержки', '$' + s.stats.fees.toFixed(2), 'комиссии и фандинг') : ''}
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function maxDD(rows, startBalance) {
+  if (!rows.length || !startBalance) return 0;
+  let bal = startBalance, peak = startBalance, worst = 0;
+  for (const t of rows) {
+    bal += t.pnl;
+    peak = Math.max(peak, bal);
+    if (peak > 0) worst = Math.max(worst, (peak - bal) / peak * 100);
+  }
+  return worst;
+}
+
+/* ── Отрисовка: график с перекрестием ───────────────────────────────────── */
+let CHART = null;
+
+/**
+ * Засечки оси по круглым числам (1/2/5 × 10^n).
+ * Подписи 25.9% / 17.8% / 9.7% формально верны, но читаются плохо: ось
+ * существует ради быстрой прикидки значений, а не ради точности.
+ */
+function niceTicks(min, max, target = 5) {
+  if (!isFinite(min) || !isFinite(max)) return [0, 1];
+  min = Math.min(min, 0);          // ноль всегда в поле зрения: это база отсчёта
+  max = Math.max(max, 0);
+  if (min === max) { min -= 1; max += 1; }
+  const raw = (max - min) / (target - 1);
+  const mag = Math.pow(10, Math.floor(Math.log10(raw)));
+  const step = [1, 2, 2.5, 5, 10].find(m => m * mag >= raw) * mag;
+  const from = Math.floor(min / step) * step;
+  const to = Math.ceil(max / step) * step;
+  const out = [];
+  for (let v = from; v <= to + step / 2; v += step) {
+    out.push(Math.abs(v) < step / 1e6 ? 0 : +v.toFixed(10));
+  }
+  return out;
+}
+
+function chart(byStrategy) {
+  const box = document.getElementById('plot');
+  const tip = document.getElementById('tip');
+  const keys = activeStrategies().filter(k => byStrategy[k].curve.length);
+  const legend = document.getElementById('legend');
+
+  legend.innerHTML = keys.map(k =>
+    `<span><span class="line" style="background:${COLOR[k]}"></span>${esc(NAMES[k] || k)}</span>`
+  ).join('');
+
+  if (!keys.length) {
+    box.innerHTML = '<div class="empty">В выборке нет закрытых сделок</div>';
+    box.appendChild(tip); CHART = null; return;
+  }
+
+  const IX = PAPER ? 2 : 1;
+  const W = 1000, H = 320, P = { t: 16, r: 26, b: 30, l: 64 };
+  const pts = keys.map(k => byStrategy[k].curve);
+  const all = pts.flat();
+  const times = all.map(p => ts(p[0]));
+  const vals = all.map(p => p[IX]).concat([0]);
+  const t0 = Math.min(...times), t1 = Math.max(...times);
+  const ticks = niceTicks(Math.min(...vals), Math.max(...vals));
+  const lo = ticks[0], hi = ticks[ticks.length - 1];
+
+  const x = t => P.l + (t1 === t0 ? 0 : (t - t0) / (t1 - t0)) * (W - P.l - P.r);
+  const y = v => P.t + (1 - (v - lo) / (hi - lo)) * (H - P.t - P.b);
+  const fmtV = v => PAPER ? v.toFixed(1) + '%' : money(v);
+  const fmtTick = v => PAPER ? v.toFixed(v % 1 ? 1 : 0) + '%'
+    : Math.round(v).toLocaleString('ru');
+
+  let g = '';
+  for (const v of ticks) {
+    const yy = y(v);
+    g += `<line x1="${P.l}" y1="${yy}" x2="${W - P.r}" y2="${yy}" stroke="var(--grid)" stroke-width="1"/>`;
+    g += `<text x="${P.l - 10}" y="${yy + 4}" text-anchor="end" font-size="11" fill="var(--muted)">${
+      fmtTick(v)}</text>`;
+  }
+  // Ноль выделен: пересечение с ним — уход ниже стартового депозита
+  if (lo < 0 && hi > 0) {
+    g += `<line x1="${P.l}" y1="${y(0)}" x2="${W - P.r}" y2="${y(0)}" stroke="var(--axis)" stroke-width="1.5"/>`;
+  }
+
+  const paths = keys.map((k, i) => {
+    const d = pts[i].map((p, j) => (j ? 'L' : 'M') + x(ts(p[0])).toFixed(1)
+      + ' ' + y(p[IX]).toFixed(1)).join(' ');
+    return `<path d="${d}" fill="none" stroke="${COLOR[k]}" stroke-width="2"
+             stroke-linejoin="round" stroke-linecap="round"/>`;
+  }).join('');
+
+  const ends = keys.map((k, i) => {
+    const last = pts[i][pts[i].length - 1];
+    const cx = x(ts(last[0])), cy = y(last[IX]);
+    return `<circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="4.5" fill="${COLOR[k]}"
+              stroke="var(--surface-1)" stroke-width="2"/>
+            <text x="${(cx - 9).toFixed(1)}" y="${(cy - 11).toFixed(1)}" text-anchor="end"
+              font-size="12" font-weight="650" fill="var(--text-primary)">${fmtV(last[IX])}</text>`;
+  }).join('');
+
+  const day = d => new Date(d).toLocaleDateString('ru', { day: '2-digit', month: '2-digit' });
+  box.innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Доходность по стратегиям">
+    ${g}
+    <text x="${P.l}" y="${H - 8}" font-size="11" fill="var(--muted)">${day(t0)}</text>
+    <text x="${W - P.r}" y="${H - 8}" text-anchor="end" font-size="11" fill="var(--muted)">${day(t1)}</text>
+    ${paths}${ends}
+    <line id="cross" x1="0" y1="${P.t}" x2="0" y2="${H - P.b}" stroke="var(--axis)"
+      stroke-width="1" opacity="0"/>
+    <g id="hits"></g>
+    <rect x="${P.l}" y="${P.t}" width="${W - P.l - P.r}" height="${H - P.t - P.b}" fill="transparent"/>
+  </svg>`;
+  box.appendChild(tip);
+
+  CHART = { keys, pts, IX, W, H, P, x, y, t0, t1, fmtV, svg: box.querySelector('svg') };
+  bindHover();
+}
+
+function bindHover() {
+  const { svg, W, P, t0, t1, keys, pts, IX, x, y, fmtV } = CHART;
+  const tip = document.getElementById('tip');
+  const cross = svg.querySelector('#cross');
+  const hits = svg.querySelector('#hits');
+
+  const move = ev => {
+    const r = svg.getBoundingClientRect();
+    const px = (ev.clientX - r.left) / r.width * W;
+    if (px < P.l || px > W - P.r) return hide();
+    const t = t0 + (px - P.l) / (W - P.l - P.r) * (t1 - t0);
+
+    // Кривая депозита ступенчата: между сделками значение не меняется,
+    // поэтому берём последнюю точку НЕ ПОЗЖЕ курсора, а не ближайшую.
+    const rows = [];
+    let marks = '';
+    keys.forEach((k, i) => {
+      const series = pts[i];
+      let last = null;
+      for (const p of series) { if (ts(p[0]) <= t) last = p; else break; }
+      if (!last) return;
+      rows.push({ k, p: last });
+      marks += `<circle cx="${x(ts(last[0])).toFixed(1)}" cy="${y(last[IX]).toFixed(1)}"
+                  r="4" fill="${COLOR[k]}" stroke="var(--surface-1)" stroke-width="2"/>`;
+    });
+    if (!rows.length) return hide();
+
+    cross.setAttribute('x1', px); cross.setAttribute('x2', px);
+    cross.setAttribute('opacity', '1');
+    hits.innerHTML = marks;
+
+    const at = new Date(t).toLocaleString('ru',
+      { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+    tip.innerHTML = `<div class="t-when">${esc(at)}</div>` + rows.map(r =>
+      `<div class="t-row"><span class="t-key" style="background:${COLOR[r.k]}"></span>
+       <span class="t-nm">${esc(NAMES[r.k] || r.k)}</span>
+       <span class="t-val">${fmtV(r.p[IX])}</span></div>`).join('');
+
+    const box = svg.parentElement.getBoundingClientRect();
+    const left = ev.clientX - box.left;
+    tip.style.opacity = '1';
+    tip.style.left = Math.min(left + 16, box.width - tip.offsetWidth - 8) + 'px';
+    tip.style.top = Math.max(8, ev.clientY - box.top - tip.offsetHeight - 12) + 'px';
+  };
+
+  const hide = () => {
+    tip.style.opacity = '0';
+    cross.setAttribute('opacity', '0');
+    hits.innerHTML = '';
+  };
+
+  svg.addEventListener('pointermove', move);
+  svg.addEventListener('pointerleave', hide);
+}
+
+/* ── Отрисовка: таблицы ─────────────────────────────────────────────────── */
+const skey = k => `<span class="skey"><span class="key" style="background:${
+  COLOR[k] || 'var(--muted)'}"></span>${esc(NAMES[k] || k)}</span>`;
+const side = d => d === 'LONG'
+  ? '<span class="side-l">▲ LONG</span>' : '<span class="side-s">▼ SHORT</span>';
+
+/** Разбивает список по стратегиям, сохраняя их постоянный порядок. */
+function byOwner(rows) {
+  const order = Object.keys((DATA && DATA.strategies) || {});
+  const groups = [];
+  for (const key of order) {
+    const items = rows.filter(r => r.strategy === key);
+    if (items.length) groups.push({ key, items });
+  }
+  // Пары, чей владелец неизвестен (открыты до появления разметки стратегий)
+  const rest = rows.filter(r => !order.includes(r.strategy));
+  if (rest.length) groups.push({ key: rest[0].strategy || '—', items: rest });
+  return groups;
+}
+
+function groupHead(key, count, sum) {
+  const money_ = sum === null ? '' :
+    `<span class="sum ${cls(sum)}">${money(sum)}</span>`;
+  return `<div class="group-head">
+    <span class="key" style="background:${COLOR[key] || 'var(--muted)'}"></span>
+    <span class="nm">${esc(NAMES[key] || key)}</span>
+    <span class="cnt">${count} шт.</span>${money_}</div>`;
+}
+
+/** Позиция карточкой: сколько принесла и где цена между стопом и целями. */
+function openCards(rows) {
+  const box = document.getElementById('open');
+  const hint = document.getElementById('open-hint');
+  const total = document.getElementById('open-total');
+
+  hint.textContent = rows.length ? `${rows.length} шт.` : '';
+  if (!rows.length) {
+    total.textContent = '';
+    box.className = '';
+    box.innerHTML = '<div class="card card-pad empty">Открытых позиций нет</div>';
+    return;
+  }
+
+  const sum = rows.reduce((s, r) => s + (r.unrealised || 0), 0);
+  const sumR = rows.reduce((s, r) => s + (r.unrealised_r || 0), 0);
+  total.innerHTML = `Плавающий итог: <b class="${cls(sum)}">${money(sum)}</b>` +
+    `<span class="${cls(sumR)}">${sumR >= 0 ? '+' : ''}${sumR.toFixed(2)} R</span>`;
+
+  const groups = byOwner(rows);
+  box.className = '';
+  box.innerHTML = groups.map(g => {
+    const gsum = g.items.reduce((s, r) => s + (r.unrealised || 0), 0);
+    // Заголовок группы нужен, только когда стратегий на экране несколько:
+    // при фильтре по одной он повторял бы кнопку фильтра.
+    const head = groups.length > 1 ? groupHead(g.key, g.items.length, gsum) : '';
+    return `<div class="group">${head}<div class="poscols">${
+      posCards(g.items)}</div></div>`;
+  }).join('');
+}
+
+function posCards(rows) {
+  return rows.map(r => {
+    const color = COLOR[r.strategy] || 'var(--muted)';
+    const good = (r.unrealised || 0) >= 0;
+    const mark = good ? 'var(--good)' : 'var(--bad)';
+    const at = Math.round((r.progress || 0) * 100);
+
+    // Отметки целей на шкале «стоп -> последняя цель»
+    const targets = r.targets && r.targets.length ? r.targets : [r.tp1];
+    const span = Math.abs(targets[targets.length - 1] - r.stop) || 1;
+    const marks = targets.map((t, i) => {
+      const p = Math.min(100, Math.max(0, Math.abs(t - r.stop) / span * 100));
+      return `<span class="tp ${i < (r.tp_hit || 0) ? 'done' : ''}" style="left:${p}%"></span>`;
+    }).join('');
+    const entryAt = Math.min(100, Math.max(0, Math.abs(r.entry - r.stop) / span * 100));
+
+    const cell = (k, v, c) =>
+      `<div><div class="k">${k}</div><div class="v ${c || ''}">${v}</div></div>`;
+
+    const flags = [];
+    // Позиция есть на бирже, но бота о ней никто не уведомил: она идёт без
+    // ведения и не попадёт в журнал. Молчать об этом нельзя.
+    if (r.untracked) flags.push('<span class="flag" style="color:var(--bad);' +
+      'border-color:var(--bad)">бот не ведёт эту позицию</span>');
+    if (r.tp_hit) flags.push(`<span class="flag on">взято целей: ${r.tp_hit}</span>`);
+    if (r.breakeven) flags.push('<span class="flag on">безубыток</span>');
+    if (r.size_left_pct != null && r.size_left_pct < 100)
+      flags.push(`<span class="flag">осталось ${r.size_left_pct}%</span>`);
+
+    return `<div class="pos-card">
+      <div class="pos-top">
+        <span class="key" style="background:${color}"></span>
+        <span class="p">${esc(r.pair)}</span>
+        ${side(r.direction)}
+        <span class="age">${ago(r.opened)}</span>
+      </div>
+      <div class="pos-owner">${esc(NAMES[r.strategy] || r.strategy || '—')}</div>
+      <div class="pos-money">
+        <span class="v ${cls(r.unrealised)}">${money(r.unrealised)}</span>
+        <span class="r ${cls(r.unrealised_r)}">${r.unrealised_r >= 0 ? '+' : ''}${
+          (r.unrealised_r || 0).toFixed(2)} R</span>
+      </div>
+      <div class="pos-split">${
+        r.realized ? `зафиксировано ${money(r.realized)} · ` : ''}в рынке ${
+        money(r.floating || 0)}${r.costs ? ` · издержки $${r.costs.toFixed(2)}` : ''}</div>
+
+      <div class="track">
+        <div class="track-bar">
+          <span class="entry" style="left:${entryAt}%"></span>
+          ${marks}
+          <span class="now" style="left:${at}%; background:${mark}"></span>
+        </div>
+        <div class="track-ends">
+          <span>стоп ${price(r.stop)}</span>
+          <span>сейчас ${price(r.price)}</span>
+          <span>цель ${price(targets[targets.length - 1])}</span>
+        </div>
+      </div>
+
+      <div class="pos-grid">
+        ${cell('Вход', price(r.entry))}
+        ${cell('Стоп-лосс', price(r.stop) + dist(r.stop, r.price), 'neg')}
+        ${cell('Тейк-профит', price(targets[0]) + dist(targets[0], r.price), 'pos')}
+        ${cell('Риск', '$' + (r.risk || 0).toFixed(2))}
+        ${cell('RR', r.rr ? r.rr.toFixed(2) : '—')}
+        ${cell('Макс. ход', (r.mfe_r != null ? r.mfe_r.toFixed(2) : '—') + ' R')}
+        ${targets.length > 1
+          ? cell('Дальние цели', targets.slice(1).map(price).join(' · '), 'pos') : ''}
+      </div>
+      ${flags.length ? `<div class="flags" style="margin-top:10px">${flags.join('')}</div>` : ''}
+      <div class="pos-why" title="${esc(r.why)}">${esc(r.why) || '—'}</div>
+    </div>`;
+  }).join('');
+}
+
+/** Ордера, ожидающие активации: далеко ли до цены и сколько осталось жить. */
+function waitingTable(rows) {
+  const box = document.getElementById('waiting');
+  document.getElementById('wait-hint').textContent =
+    rows.length ? `${rows.length} шт.` : '';
+  if (!rows.length) {
+    box.innerHTML = '<div class="empty">Ожидающих ордеров нет</div>';
+    return;
+  }
+  // Сортируем по стратегии, затем по близости к цене: сверху то, что вот-вот
+  // исполнится. Строка-заголовок отделяет стратегии друг от друга.
+  const order = Object.keys((DATA && DATA.strategies) || {});
+  const sorted = rows.slice().sort((a, b) => {
+    const d = order.indexOf(a.strategy) - order.indexOf(b.strategy);
+    if (d) return d;
+    return (a.distance_pct ?? 99) - (b.distance_pct ?? 99);
+  });
+
+  const cols = 13;
+  let owner = null;
+  const body = sorted.map(r => {
+    let head = '';
+    if (order.length > 1 && r.strategy !== owner) {
+      owner = r.strategy;
+      const n = sorted.filter(x => x.strategy === owner).length;
+      head = `<tr><td colspan="${cols}" style="background:var(--wash);padding:7px 12px">
+        <span class="skey"><span class="key" style="background:${
+          COLOR[owner] || 'var(--muted)'}"></span><b>${esc(NAMES[owner] || owner)}</b>
+        <span style="color:var(--muted);font-weight:400"> · ${n} шт.</span></span></td></tr>`;
+    }
+    return head + orderRow(r);
+  }).join('');
+
+  box.innerHTML = `<table><thead><tr>
+    <th>Стратегия</th><th>Пара</th><th>Напр.</th><th>Цена входа</th><th>Рынок</th>
+    <th>До входа</th><th>Стоп</th><th>Цель</th><th>RR</th><th>Риск</th>
+    <th>Ждёт</th><th>Истечёт через</th><th>Почему</th>
+  </tr></thead><tbody>${body}</tbody></table>`;
+}
+
+function orderRow(r) {
+  return [r].map(r => {
+    // Чем ближе рынок к лимиту, тем вероятнее заполнение — выделяем близкие
+    const near = r.distance_pct != null && r.distance_pct < 0.5;
+    return `<tr>
+      <td>${skey(r.strategy)}</td>
+      <td class="pair">${esc(r.pair)}</td>
+      <td>${side(r.direction)}</td>
+      <td>${price(r.entry)}</td>
+      <td>${r.price ? price(r.price) : '—'}</td>
+      <td>${r.distance_pct == null ? '—'
+        : `<span class="chip"${near ? ' style="border-color:var(--good);color:var(--good)"' : ''}>${
+           r.distance_pct.toFixed(2)}%</span>`}</td>
+      <td class="neg">${price(r.stop)}</td>
+      <td class="pos">${price(r.tp1)}</td>
+      <td>${r.rr ? r.rr.toFixed(2) : '—'}</td>
+      <td>$${(r.risk || 0).toFixed(2)}</td>
+      <td>${dur(r.waiting_min || 0)}</td>
+      <td>${dur(r.expires_in_min || 0)}</td>
+      <td class="why" title="${esc(r.why)}">${esc(r.why) || '—'}</td></tr>`;
+  }).join('');
+}
+
+function closedTable(rows) {
+  const box = document.getElementById('closed');
+  document.getElementById('closed-hint').textContent =
+    rows.length ? `${rows.length} шт., новые сверху` : '';
+  if (!rows.length) { box.innerHTML = '<div class="empty">В выборке нет закрытых сделок</div>'; return; }
+
+  // Порядок задаём явно, а не полагаемся на порядок с сервера: он уже
+  // разворачивался выше по коду, и двойной разворот выдавал старые сверху.
+  const sorted = rows.slice().sort((a, b) => ts(b.closed) - ts(a.closed));
+
+  const extra = PAPER ? '<th>R</th><th>Издержки</th><th>MFE / MAE</th>' : '';
+  box.innerHTML = `<table><thead><tr>
+    <th>#</th><th>Стратегия</th><th>Пара</th><th>Напр.</th>
+    <th>Вход</th><th>Выход</th><th>Стоп</th><th>Итог</th><th>%</th>${extra}
+    <th>Причина</th><th>Держали</th><th>Закрыта</th><th>Почему открылась</th>
+  </tr></thead><tbody>${sorted.map(r => {
+    const cells = PAPER
+      ? `<td class="${cls(r.pnl_r)}">${(r.pnl_r >= 0 ? '+' : '') + (r.pnl_r || 0).toFixed(2)}</td>
+         <td>$${((r.fees || 0) + (r.funding || 0)).toFixed(2)}</td>
+         <td>${(r.mfe_r || 0).toFixed(2)} / ${(r.mae_r || 0).toFixed(2)}</td>`
+      : '';
+    return `<tr>
+      <td>${esc(r.id)}</td>
+      <td>${skey(r.strategy)}</td>
+      <td class="pair">${esc(r.pair)}</td>
+      <td>${side(r.direction)}</td>
+      <td>${price(r.entry)}</td>
+      <td>${price(r.exit)}</td>
+      <td>${price(r.stop)}</td>
+      <td class="${cls(r.pnl)}"><b>${money(r.pnl)}</b></td>
+      <td class="${cls(r.pnl)}">${(r.pnl_pct || 0).toFixed(2)}%</td>${cells}
+      <td><span class="chip">${esc(r.reason) || '—'}</span></td>
+      <td>${dur(r.duration_min || 0)}</td>
+      <td>${when(r.closed)}</td>
+      <td class="why" title="${esc(r.why)}">${esc(r.why) || '—'}</td></tr>`;
+  }).join('')}</tbody></table>`;
+}
+
+/* ── Управление торговлей ───────────────────────────────────────────────── */
+let SETTINGS = null;
+let LIMITS = null;
+let WRITABLE = false;
+
+const FIELDS = [
+  { id: 'risk_pct', label: 'Риск на сделку', unit: '%', step: 0.05,
+    note: 'Доля депозита, теряемая при срабатывании стопа.' },
+  { id: 'min_stop_pct', label: 'Минимальный стоп', unit: '%', step: 0.1,
+    note: 'Ближе этого расстояния стоп не ставится — защита от выноса шумом.' },
+  { id: 'max_slots', label: 'Одновременных позиций', unit: '', step: 1, note: '' },
+  { id: 'deposit', label: 'Стартовый депозит', unit: '$', step: 100, note: '' },
+];
+
+async function loadSettings() {
+  try {
+    const d = await (await fetch('/api/settings', { cache: 'no-store' })).json();
+    SETTINGS = d.settings; LIMITS = d.limits; WRITABLE = !!d.writable;
+    renderControls();
+  } catch (e) { /* панель просто не появится */ }
+}
+
+function renderControls() {
+  const box = document.getElementById('controls');
+  if (!SETTINGS) { box.innerHTML = ''; return; }
+
+  const lock = WRITABLE ? '' :
+    `<div class="warn-box">Изменение настроек отключено: дашборд слушает не
+     localhost, а пароля у него нет. Включить осознанно —
+     <code>DASHBOARD_ALLOW_CONTROL=true</code>.</div>`;
+
+  const cards = Object.keys(SETTINGS).map(key => {
+    const s = SETTINGS[key];
+    const live = ((DATA || {}).strategies || {})[key] || {};
+    // Депозит меняется свободно, только пока стратегия не начала торговать.
+    // Дальше — вместе с перезапуском отсчёта, иначе процент доходности
+    // считался бы от базы, которой в тех сделках не было.
+    const started = (live.trades || 0) > 0 || (live.open || 0) > 0
+                 || (live.pending || 0) > 0;
+
+    const rows = FIELDS.filter(f => f.id !== 'deposit' || PAPER).map(f => {
+      const lim = (LIMITS || {})[f.id] || [0, 1e9];
+      const note = f.id === 'deposit'
+        ? (started
+          ? `Стратегия уже торгует: ${live.trades || 0} сделок, ${
+             live.open || 0} позиций. Новый депозит применится только с
+             перезапуском отсчёта — прежние сделки останутся в журнале и в
+             выгрузке, но в статистику этой стратегии входить не будут.`
+          : 'Стратегия ещё не торговала — депозит меняется сразу.')
+        : f.note;
+      const extra = f.id === 'deposit'
+        ? `<button type="button" class="btn ghost" data-dep="${key}"
+             style="padding:5px 12px;font-size:12px"
+             ${WRITABLE ? '' : 'disabled'}>${started ? 'Начать заново' : 'Задать'}</button>`
+        : '';
+      return `<div class="ctl-row">
+        <label for="f-${key}-${f.id}">${f.label}</label>
+        <span class="unit">${f.unit}</span>
+        <input type="number" id="f-${key}-${f.id}" data-s="${key}" data-f="${f.id}"
+               value="${s[f.id]}" min="${lim[0]}" max="${lim[1]}" step="${f.step}"
+               ${WRITABLE ? '' : 'disabled'}>${extra}
+      </div>${note ? `<div class="ctl-note">${note}</div>` : ''}`;
+    }).join('');
+
+    return `<div class="ctl-card">
+      <div class="ctl-head">
+        <span class="key" style="background:${COLOR[key] || 'var(--muted)'}"></span>
+        <span class="nm">${esc(NAMES[key] || key)}</span>
+        <span style="margin-left:auto;font-size:12px;color:var(--text-secondary)"
+              id="lbl-${key}">${s.enabled ? 'торгует' : 'выключена'}</span>
+        <button type="button" class="toggle" data-s="${key}"
+                aria-pressed="${s.enabled}" aria-label="Включить ${esc(NAMES[key] || key)}"
+                ${WRITABLE ? '' : 'disabled'}></button>
+      </div>
+      ${rows}
+    </div>`;
+  }).join('');
+
+  box.innerHTML = lock + `<div class="ctl">${cards}</div>
+    <div class="ctl-foot">
+      <button type="button" class="btn" id="ctl-save" ${WRITABLE ? '' : 'disabled'}>Применить</button>
+      <button type="button" class="btn ghost" id="ctl-reset" ${WRITABLE ? '' : 'disabled'}>Отменить</button>
+      <span class="saved" id="ctl-msg"></span>
+    </div>
+    <div class="ctl-note">Изменения вступают в силу со следующего цикла.
+      Уже открытые позиции не трогаются: их размер и стоп посчитаны при входе.</div>`;
+
+  box.querySelectorAll('.toggle').forEach(btn => {
+    btn.onclick = () => {
+      const on = btn.getAttribute('aria-pressed') !== 'true';
+      btn.setAttribute('aria-pressed', String(on));
+      document.getElementById('lbl-' + btn.dataset.s).textContent =
+        on ? 'торгует' : 'выключена';
+    };
+  });
+  document.getElementById('ctl-save').onclick = saveSettings;
+  document.getElementById('ctl-reset').onclick = renderControls;
+  box.querySelectorAll('button[data-dep]').forEach(btn => {
+    btn.onclick = () => applyDeposit(btn);
+  });
+}
+
+/**
+ * Установка депозита. Перезапуск обнуляет отсчёт стратегии, поэтому просит
+ * подтверждения: одно нажатие такого не заслуживает.
+ */
+async function applyDeposit(btn) {
+  const key = btn.dataset.dep;
+  const value = parseFloat(document.getElementById(`f-${key}-deposit`).value);
+  const live = ((DATA || {}).strategies || {})[key] || {};
+  const started = (live.trades || 0) > 0 || (live.open || 0) > 0
+               || (live.pending || 0) > 0;
+
+  if (started && btn.dataset.armed !== '1') {
+    btn.dataset.armed = '1';
+    btn.textContent = `Точно? Отсчёт начнётся с нуля`;
+    btn.style.borderColor = 'var(--bad)';
+    btn.style.color = 'var(--bad)';
+    setTimeout(() => {
+      if (btn.dataset.armed === '1') { btn.dataset.armed = ''; renderControls(); }
+    }, 6000);
+    return;
+  }
+
+  const msg = document.getElementById('ctl-msg');
+  try {
+    const resp = await fetch('/api/deposit', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ strategy: key, deposit: value, restart: started }),
+    });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.error || resp.status);
+    msg.style.color = 'var(--good)';
+    msg.textContent = data.message;
+    await refresh();
+    await loadSettings();
+  } catch (e) {
+    msg.style.color = 'var(--bad)';
+    msg.textContent = 'Не применено: ' + e.message;
+  }
+}
+
+async function saveSettings() {
+  const payload = {};
+  document.querySelectorAll('#controls .toggle').forEach(btn => {
+    payload[btn.dataset.s] = { enabled: btn.getAttribute('aria-pressed') === 'true' };
+  });
+  document.querySelectorAll('#controls input[data-f]').forEach(inp => {
+    (payload[inp.dataset.s] = payload[inp.dataset.s] || {})[inp.dataset.f] =
+      parseFloat(inp.value);
+  });
+
+  const msg = document.getElementById('ctl-msg');
+  try {
+    const resp = await fetch('/api/settings', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (!resp.ok) throw new Error(await resp.text() || resp.status);
+    const d = await resp.json();
+    SETTINGS = d.settings;
+    renderControls();
+    // Сервер мог обрезать значение до допустимого — показываем то, что принято
+    document.getElementById('ctl-msg').textContent = 'Сохранено';
+    setTimeout(() => {
+      const m = document.getElementById('ctl-msg');
+      if (m) m.textContent = '';
+    }, 3000);
+  } catch (e) {
+    msg.style.color = 'var(--bad)';
+    msg.textContent = 'Не сохранено: ' + e.message;
+  }
+}
+
+/* ── Состояние и журнал ─────────────────────────────────────────────────── */
+const STATE_TEXT = {
+  starting: ['', 'запуск…'], running: ['run', 'бот работает'],
+  paused: ['warn', 'на паузе'], stopped: ['warn', 'остановлен'],
+  error: ['err', 'ошибка'],
+};
+
+function showState(status) {
+  const [c, text] = STATE_TEXT[status && status.state] || ['warn', (status && status.state) || '—'];
+  const detail = status && status.detail ? ' — ' + status.detail : '';
+  document.getElementById('state').innerHTML =
+    `<span class="dot ${c}"></span>${esc(text + detail)}`;
+}
+
+function logClass(line) {
+  if (/❌|⚠️|ошибк|Error|Traceback/i.test(line)) return 'l-err';
+  if (/🟢|✅|TP\d|ВХОД/.test(line)) return 'l-win';
+  if (/👻|ЦИКЛ|===/.test(line)) return 'l-act';
+  return '';
+}
+
+async function refreshLog() {
+  const box = document.getElementById('log');
+  if (!document.getElementById('logbox').open) return;
+  try {
+    const d = await (await fetch('/api/log', { cache: 'no-store' })).json();
+    const atEnd = box.scrollTop + box.clientHeight >= box.scrollHeight - 40;
+    box.innerHTML = (d.lines || [])
+      .map(l => `<span class="${logClass(l)}">${esc(l)}</span>`).join('\n');
+    if (atEnd) box.scrollTop = box.scrollHeight;
+    showState(d.status);
+  } catch (e) { showState({ state: 'error', detail: 'нет связи с ботом' }); }
+}
+
+/* ── Сборка кадра ───────────────────────────────────────────────────────── */
+function render() {
+  if (!DATA) return;
+  buildFilters();
+
+  const closed = pick(DATA.closed);
+  // Открытые позиции и ожидающие ордера существуют СЕЙЧАС: фильтр периода
+  // к ним не применяется, иначе «за сегодня» спрятал бы позицию, открытую
+  // вчера и до сих пор живую.
+  const keep = activeStrategies();
+  const open = (DATA.open_positions || []).filter(r => keep.includes(r.strategy));
+  const waiting = (DATA.pending_orders || []).filter(r => keep.includes(r.strategy));
+  const byStrategy = {};
+  for (const key of activeStrategies()) {
+    const rows = closed.filter(t => t.strategy === key).slice()
+      .sort((a, b) => ts(a.closed) - ts(b.closed));
+    byStrategy[key] = {
+      rows,
+      stats: summarise(rows),
+      curve: curve(rows, windowStartBalance(key, rows)),
+    };
+  }
+
+  const label = (PERIODS.find(p => p.id === period) || {}).label;
+  document.getElementById('f-count').textContent =
+    `${closed.length} закрытых · ${open.length} в работе · ${waiting.length} ждут`;
+  document.getElementById('sum-hint').textContent =
+    period === 'all' ? 'за всё время' : `за период: ${label.toLowerCase()}`;
+  document.getElementById('chart-hint').textContent =
+    PAPER ? '% от депозита на начало периода' : 'накопленный результат, $';
+
+  cards(byStrategy);
+  chart(byStrategy);
+  openCards(open);
+  waitingTable(waiting);
+  closedTable(closed);
+}
+
+async function refresh() {
+  const body = document.getElementById('body');
+  body.classList.add('stale');
+  try {
+    const d = await (await fetch('/api/data', { cache: 'no-store' })).json();
+    DATA = d;
+    PAPER = !!d.paper;
+    showState(d.status);
+
+    document.getElementById('mode').textContent =
+      PAPER ? '👻 фантом' : (d.mode || '—');
+    const c = d.costs;
+    document.getElementById('stamp').textContent =
+      (c ? `комиссии ${(c.maker * 100).toFixed(3)}/${(c.taker * 100).toFixed(3)}%, `
+         + `спорная свеча — против нас · ` : '')
+      + `обновлено ${when(d.generated)}`;
+
+    render();
+  } catch (e) {
+    showState({ state: 'error', detail: e.message });
+  } finally {
+    body.classList.remove('stale');
+  }
+}
+
+document.getElementById('logbox').addEventListener('toggle', refreshLog);
+// Настройки перечитываем при раскрытии панели, а не по таймеру: иначе фоновое
+// обновление затирало бы поле, которое оператор прямо сейчас правит.
+document.getElementById('ctlbox').addEventListener('toggle', function () {
+  if (this.open) loadSettings();
+});
+refresh();
+setInterval(refresh, 15000);
+// Журнал обновляем чаще: в окне приложения он заменяет консоль, и по нему
+// видно, что бот жив, даже когда сделок нет неделю.
+setInterval(refreshLog, 5000);
+</script>
+</body>
+</html>
