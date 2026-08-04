@@ -1,5 +1,6 @@
 import pandas as pd
 import config
+import settings_store as settings
 from logger import log
 
 
@@ -184,10 +185,15 @@ def calculate_trade_params(setup, entry_price, balance, trading_pair=None, log_r
     end_price   = setup['end_price']
     size        = setup['size']
 
+    # Минимальный стоп и риск берём из настроек: их меняют из дашборда на ходу,
+    # и перезапускать бота ради этого не нужно.
+    min_stop = settings.min_stop_pct('FIBO')
+    risk_pct = settings.risk_pct('FIBO')
+
     if setup['type'] == 'LONG':
         # SL ниже: за уровнем SL_LEVEL_R коррекции от B (0.886 = инвалидация)
         sl_price = end_price - size * config.SL_LEVEL_R - (size * config.SL_BUFFER)
-        min_sl = entry_price * config.MIN_SL_PERCENT
+        min_sl = entry_price * min_stop
         if entry_price - sl_price < min_sl:
             sl_price = entry_price - min_sl
         tp1 = end_price + size * config.TP1_LEVEL   # -25% расширение за B
@@ -195,7 +201,7 @@ def calculate_trade_params(setup, entry_price, balance, trading_pair=None, log_r
     else:
         # SL выше: за уровнем SL_LEVEL_R коррекции от B
         sl_price = end_price + size * config.SL_LEVEL_R + (size * config.SL_BUFFER)
-        min_sl = entry_price * config.MIN_SL_PERCENT
+        min_sl = entry_price * min_stop
         if sl_price - entry_price < min_sl:
             sl_price = entry_price + min_sl
         tp1 = end_price - size * config.TP1_LEVEL
@@ -209,7 +215,7 @@ def calculate_trade_params(setup, entry_price, balance, trading_pair=None, log_r
             log(f"   {tag}нет сигнала — RR {rr:.2f} < MIN_RR {config.MIN_RR} (entry ${entry_price:.6f})")
         return None
 
-    risk_amount = balance * (config.RISK_PER_PAIR / 100)
+    risk_amount = balance * (risk_pct / 100)
     position_size = risk_amount / sl_distance
 
     return {
@@ -222,6 +228,17 @@ def calculate_trade_params(setup, entry_price, balance, trading_pair=None, log_r
         'risk_amount':   risk_amount,
         'rr':            rr,
         'sl_distance':   sl_distance,
+        # ── План выхода едет ВМЕСТЕ с сигналом ───────────────────────────────
+        # Раньше исполнитель брал доли закрытия из глобального config, поэтому
+        # план одной стратегии молча применялся к другой. У фибо план простой:
+        # одна цель -25%, закрывает всю позицию.
+        'tp_targets':    [tp1],
+        'tp_fractions':  list(getattr(config, 'TP_CLOSE_FRACTIONS', [1.0]))[:1] or [1.0],
+        'breakeven_after_tp': bool(getattr(config, 'BREAKEVEN_AT_B', True)),
+        'max_same_direction': getattr(config, 'MAX_SAME_DIRECTION', 0),
+        # Процент риска едет с сигналом: исполнитель пересчитывает размер по
+        # своему балансу и обязан использовать ту же настройку, что и расчёт.
+        'risk_pct': risk_pct,
     }
 
 def analyze_market(df_1h, df_5m, trading_pair, balance):

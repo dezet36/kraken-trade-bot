@@ -24,6 +24,9 @@ DETAIL_JSONL  = os.path.join(config.DATA_DIR, 'trades_detail.jsonl')
 
 COLUMNS = [
     # Идентификация
+    # 'strategy' добавлена для параллельного A/B-режима: без неё сделки двух
+    # стратегий смешиваются в одну кучу и месячное сравнение невозможно.
+    # Колонка идёт в конце списка — старые CSV читаются без изменений.
     'trade_id', 'mode',
     # Открытие
     'open_time', 'pair', 'direction', 'zone', 'htf_trend',
@@ -42,6 +45,7 @@ COLUMNS = [
     # Итог
     'result',       # WIN / LOSS / BREAKEVEN
     'setup_notes',  # почему открылась (краткое описание)
+    'strategy',     # FIBO / SMC — какая стратегия открыла сделку
 ]
 
 
@@ -73,6 +77,7 @@ def open_trade(position: dict, signal: dict, balance_before: float) -> int:
     # Store journal metadata inside position for later use
     position['_journal'] = {
         'trade_id':     trade_id,
+        'strategy':     signal.get('strategy', 'FIBO'),
         'open_time':    datetime.now().isoformat(timespec='seconds'),
         'pair':         signal['trading_pair'],
         'direction':    setup['type'],

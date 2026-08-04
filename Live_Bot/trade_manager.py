@@ -1,6 +1,7 @@
 import config
 import telegram_notify as tg
 import trade_journal as journal
+from exit_plan import direction_cap, tp_plan, tps_completed, wants_breakeven
 from logger import log, log_trade
 from exchange import get_exchange, reset_exchange
 from datetime import datetime
@@ -15,8 +16,8 @@ COOLDOWN_FILE        = os.path.join(config.DATA_DIR, 'cooldown_state.json')
 POSITIONS_FILE       = os.path.join(config.DATA_DIR, 'positions_state.json')
 PENDING_ORDERS_FILE  = os.path.join(config.DATA_DIR, 'pending_orders.json')
 
-# Доли закрытия на каждом TP уровне (по умолчанию ОДИН тейк -18% = [1.0]).
-# TP_KEYS выводятся из числа долей: [1.0] -> 1 тейк, [0.5,0.5] -> 2 тейка (совместимость).
+# План выхода приходит с сигналом (см. exit_plan.py). Значения ниже остались
+# для обратной совместимости: на них смотрят Telegram-уведомления.
 TP_CLOSE_FRACTIONS = getattr(config, 'TP_CLOSE_FRACTIONS', [1.0])
 TP_KEYS = ['take_profit_1', 'take_profit_2'][:len(TP_CLOSE_FRACTIONS)]
 N_TP    = len(TP_KEYS)
@@ -49,6 +50,14 @@ class LiveTradeManager:
             self.positions_file = POSITIONS_FILE
             self.pending_file  = PENDING_ORDERS_FILE
 
+        # Карта «пара -> стратегия» для параллельной торговли двумя стратегиями.
+        # Живёт отдельным файлом и переживает рестарт: без неё после перезапуска
+        # непонятно, чья позиция чья, и месячное сравнение стратегий испортится.
+        # Биржа таких данных не хранит, восстановить их неоткуда.
+        state_root = os.path.dirname(self.positions_file)
+        self.strategy_file = os.path.join(state_root, 'pair_strategy.json')
+        self.pair_strategy = self._load_strategy_map()
+
         self.active_positions = defaultdict(list)
         self.last_trade_time = self._load_cooldown_state()
         self.trade_history = []
@@ -58,6 +67,57 @@ class LiveTradeManager:
         self._ex_snapshot_ts = 0.0
         self._restore_positions()       # W7: восстанавливаем позиции после перезапуска
         self._restore_pending_orders()  # W9+: восстанавливаем GTC ордера после перезапуска
+
+    # ── Разметка позиций по стратегиям (параллельный A/B-режим) ─────────────
+    def _load_strategy_map(self) -> dict:
+        try:
+            if os.path.exists(self.strategy_file):
+                with open(self.strategy_file, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+        except Exception as e:
+            log(f"⚠️ Не удалось загрузить pair_strategy.json: {e}")
+        return {}
+
+    def _save_strategy_map(self):
+        try:
+            with open(self.strategy_file, 'w', encoding='utf-8') as f:
+                json.dump(self.pair_strategy, f, indent=2)
+        except Exception as e:
+            log(f"⚠️ Не удалось сохранить pair_strategy.json: {e}")
+
+    def set_pair_strategy(self, trading_pair, strategy):
+        """Запоминает, какая стратегия открыла позицию по паре."""
+        if not strategy:
+            return
+        self.pair_strategy[self._norm_symbol(trading_pair)] = strategy
+        self._save_strategy_map()
+
+    def clear_pair_strategy(self, trading_pair):
+        """Освобождает пару после закрытия позиции."""
+        if self.pair_strategy.pop(self._norm_symbol(trading_pair), None) is not None:
+            self._save_strategy_map()
+
+    def get_pair_strategy(self, trading_pair):
+        return self.pair_strategy.get(self._norm_symbol(trading_pair))
+
+    def slots_used_by(self, strategy) -> int:
+        """
+        Сколько слотов занято конкретной стратегией.
+
+        Считаем по РЕАЛЬНО занятым парам (позиции и ордера на бирже), а не по
+        карте: карта может содержать записи о парах, позиция по которым уже
+        закрылась вне бота.
+
+        Пары без метки — это позиции, открытые до включения A/B-режима.
+        Относим их к FIBO: это стратегия, работавшая раньше. Не учитывать их
+        вовсе нельзя, иначе суммарное число позиций превысит лимит.
+        """
+        used = 0
+        for pair in self.get_open_pairs():
+            owner = self.pair_strategy.get(pair, 'FIBO')
+            if owner == strategy:
+                used += 1
+        return used
 
     def _load_cooldown_state(self):
         """Загружает время последней сделки по парам из файла (сохраняется между перезапусками)."""
@@ -119,6 +179,12 @@ class LiveTradeManager:
                 'sl_distance':   params.get('sl_distance', 0),
                 'trail_distance': position.get('trail_distance', 0),
                 'leverage':      params.get('leverage', config.LEVERAGE),
+                # План выхода сохраняем вместе с позицией: после рестарта бота
+                # его неоткуда взять — у стратегий он разный, а биржа его не хранит.
+                'tp_targets':    params.get('tp_targets') or [],
+                'tp_fractions':  params.get('tp_fractions') or [],
+                'breakeven_after_tp': params.get('breakeven_after_tp',
+                                                 getattr(config, 'BREAKEVEN_AT_B', True)),
             }
             with open(self.positions_file, 'w') as f:
                 json.dump(state, f, indent=2)
@@ -138,19 +204,14 @@ class LiveTradeManager:
 
     def _rebuild_position(self, exch_pos, saved):
         """Воссоздаёт position dict из данных биржи + сохранённого состояния."""
-        pair        = exch_pos.get('symbol', saved.get('pair', '?'))
+        # Работаем в биржевой нотации ('AVAXUSDT'), а не в ccxt-шной: под ней
+        # хранится состояние, ведётся карта стратегий и пишется журнал.
+        pair        = saved.get('pair') or self._norm_symbol(exch_pos.get('symbol', '?'))
         curr_size   = abs(float(exch_pos.get('contracts', 0) or 0))
         orig_size   = float(saved['position_size'])
         entry_price = float(saved['entry_price'])
         direction   = saved['direction']
         is_long     = direction == 'LONG'
-
-        # Вычисляем количество сработавших TP по оставшемуся размеру (W11: 2 тейка по 50%)
-        if orig_size > 0 and curr_size <= orig_size:
-            fraction_remaining = curr_size / orig_size
-            tp_hit = max(0, min(N_TP, round((1.0 - fraction_remaining) / 0.5)))
-        else:
-            tp_hit = 0
 
         params = {
             'entry':         entry_price,
@@ -163,7 +224,15 @@ class LiveTradeManager:
             'rr':            float(saved.get('rr', 0)),
             'sl_distance':   float(saved.get('sl_distance', 0)),
             'leverage':      saved.get('leverage', config.LEVERAGE),
+            'tp_targets':    saved.get('tp_targets') or [],
+            'tp_fractions':  saved.get('tp_fractions') or [],
+            'breakeven_after_tp': saved.get('breakeven_after_tp',
+                                            getattr(config, 'BREAKEVEN_AT_B', True)),
         }
+
+        # Сколько целей уже отработало — по накопленным долям плана ЭТОЙ позиции
+        _targets, _fractions = tp_plan(params)
+        tp_hit = tps_completed(curr_size, orig_size, _fractions)
 
         trail_distance  = float(saved.get('trail_distance', abs(entry_price - params['stop_loss'])))
         breakeven_set   = tp_hit >= 1
@@ -236,10 +305,15 @@ class LiveTradeManager:
             exch_positions = self.exchange.fetch_positions()
             exch_map = {}
             for ep in exch_positions:
-                sym       = ep.get('symbol', '')
+                # Символ ОБЯЗАТЕЛЬНО нормализуем: ccxt отдаёт 'AVAX/USDT:USDT',
+                # а состояние сохранено под 'AVAXUSDT'. Без приведения ни одна
+                # позиция не находилась, и восстановление считало их закрытыми —
+                # при каждом перезапуске бот стирал записи о ЖИВЫХ позициях,
+                # переставал ими управлять и терял их из журнала. На бирже они
+                # при этом оставались, защищённые только биржевым стопом.
                 contracts = abs(float(ep.get('contracts', 0) or 0))
                 if contracts > 0:
-                    exch_map[sym] = ep
+                    exch_map[self._norm_symbol(ep.get('symbol', ''))] = ep
         except Exception as e:
             log(f"⚠️ W7: не удалось загрузить позиции с биржи — {e}")
             tg.error_alert(f"W7 ошибка восстановления: {e}", telegram_id=self.telegram_id)
@@ -247,7 +321,7 @@ class LiveTradeManager:
 
         recovered = []
         for pair, saved in list(saved_state.items()):
-            exch_pos = exch_map.get(pair)
+            exch_pos = exch_map.get(self._norm_symbol(pair))
             if exch_pos is None:
                 log(f"W7: {pair} — позиция закрылась пока бот был выключен, удаляем запись")
                 self._remove_position_state(pair)
@@ -486,6 +560,58 @@ class LiveTradeManager:
         self._remove_pending_order(pair)
         log(f"🚫 Pending ордер {pair} отменён")
 
+    def _fetch_order_status(self, order_id, pair):
+        """
+        Статус ордера на бирже.
+
+        Bybit через ccxt отказывается отвечать на fetch_order без явного
+        подтверждения: «can only access an order if it is in last 500 orders».
+        Это предупреждение, а не отказ, но приходит оно исключением — и до
+        исправления РУШИЛО ВЕСЬ МЕХАНИЗМ отложенных ордеров: заполнение лимита
+        не определялось никогда, позиция оставалась на бирже неучтённой, без
+        записи в журнал и без ведения ботом. Спасал только стоп-лосс,
+        прикреплённый к самому ордеру входа.
+
+        Возвращает словарь ордера либо None, если статус узнать не удалось.
+        """
+        try:
+            return self.exchange.fetch_order(order_id, pair,
+                                             params={'acknowledged': True})
+        except Exception as first:
+            try:
+                return self.exchange.fetch_open_order(order_id, pair)
+            except Exception:
+                log(f"   {pair}: статус ордера недоступен — {first}")
+                return None
+
+    def _reconcile_pending(self, pair, pending_order):
+        """
+        Запасная сверка, когда биржа не отдала статус ордера.
+
+        Источник истины — фактическое состояние счёта: если по паре появилась
+        позиция, значит лимит заполнен; если нет ни позиции, ни висящего
+        ордера, значит он отменён или истёк. Без этой ветки один сбой API
+        оставлял бы позицию вне учёта до перезапуска бота.
+        """
+        snap = self.sync_exchange_state(max_age=0)
+        if not snap['pos_ok']:
+            return None
+        symbol = self._norm_symbol(pair)
+        position = snap['positions'].get(symbol)
+        if position:
+            size = abs(float(position.get('contracts', 0) or 0))
+            entry = float(position.get('entryPrice')
+                          or position.get('info', {}).get('avgPrice')
+                          or pending_order['limit_price'])
+            log(f"   {pair}: ордер не отвечает, но позиция на бирже есть — "
+                f"регистрируем по факту ({size} @ {_fmt_p(entry)})")
+            return {'status': 'closed', 'average': entry, 'filled': size,
+                    'id': pending_order['order_id']}
+        if symbol not in snap['order_pairs']:
+            log(f"   {pair}: ни позиции, ни ордера на бирже — считаем отменённым")
+            return {'status': 'canceled'}
+        return None
+
     def _restore_pending_orders(self):
         """При перезапуске: верифицируем GTC ордера с биржей, регистрируем заполненные."""
         pending = self._load_pending_orders()
@@ -500,7 +626,11 @@ class LiveTradeManager:
                     log(f"   {pair}: pending истёк — отменяем")
                     self._cancel_pending_order(pair, po['order_id'])
                     continue
-                status = self.exchange.fetch_order(po['order_id'], pair)
+                status = (self._fetch_order_status(po['order_id'], pair)
+                          or self._reconcile_pending(pair, po))
+                if status is None:
+                    log(f"   {pair}: статус ордера неизвестен — оставляем в ожидании")
+                    continue
                 s = status.get('status', '')
                 if s == 'closed':
                     log(f"   {pair}: ордер исполнен пока бот был выключен — регистрируем")
@@ -579,6 +709,7 @@ class LiveTradeManager:
             journal.open_trade(position, {**signal, 'params': params}, balance_before)
 
             self.active_positions[pair].append(position)
+            self.set_pair_strategy(pair, signal.get('strategy'))
             self._save_position_state(pair, position, params)  # W7
 
             self.last_trade_time[pair] = datetime.now()
@@ -659,7 +790,11 @@ class LiveTradeManager:
                     log(f"   {pair}: ошибка получения цены — {e}")
 
                 # 3. Проверяем статус ордера на бирже
-                status = self.exchange.fetch_order(order_id, pair)
+                status = (self._fetch_order_status(order_id, pair)
+                          or self._reconcile_pending(pair, po))
+                if status is None:
+                    log(f"   {pair}: статус неизвестен — проверим в следующем цикле")
+                    continue
                 s = status.get('status', '')
                 if s == 'closed':
                     log(f"   {pair}: ✅ GTC ордер ИСПОЛНЕН!")
@@ -687,9 +822,11 @@ class LiveTradeManager:
         is_long     = (side == 'buy')
         sl_price    = params['stop_loss']
         close_side  = 'sell' if is_long else 'buy'
+        targets, fractions = tp_plan(params)
+        n_tp = len(targets)
 
         sl_order  = None
-        tp_orders = []   # список из 4 TP ордеров
+        tp_orders = []
 
         # ── SL через position trading-stop ───────────────────────────────────
         try:
@@ -711,11 +848,11 @@ class LiveTradeManager:
                 log(f"⚠️ SL не выставлен (программный SL активен): {e}")
 
         # ── TP ───────────────────────────────────────────────────────────────
-        if N_TP == 1:
-            # Один тейк -18% закрывает 100% — ведём на уровне позиции (Bybit V5).
+        if n_tp == 1:
+            # Один тейк закрывает 100% — ведём на уровне позиции (Bybit V5).
             # Идемпотентно с TP, прикреплённым к ордеру входа: повторная установка
             # того же уровня => "not modified". Без дублирующего limit reduce_only.
-            tp_price = params[TP_KEYS[0]]
+            tp_price = targets[0]
             try:
                 self.exchange.privatePostV5PositionTradingStop({
                     'category':    'linear',
@@ -735,10 +872,9 @@ class LiveTradeManager:
                     tp_orders.append(None)
                     log(f"⚠️ TP не выставлен (программный TP активен): {e}")
         else:
-            # Legacy (W11): несколько TP — limit reduce_only по долям
-            for i, key in enumerate(TP_KEYS):
-                tp_price = params[key]
-                tp_size  = round(position_size * TP_CLOSE_FRACTIONS[i], 6)
+            # Несколько целей (план SMC 25/25/50) — limit reduce_only по долям
+            for i, tp_price in enumerate(targets):
+                tp_size  = round(position_size * fractions[i], 6)
                 try:
                     order = self.exchange.create_order(
                         symbol=trading_pair,
@@ -771,14 +907,18 @@ class LiveTradeManager:
             log(f"⏳ {trading_pair}: позиция/ордер уже есть на бирже — пропускаем (без дубля)")
             return False
 
-        # Направленный кэп: не более MAX_SAME_DIRECTION позиций/ордеров в одну сторону
+        # Направленный кэп берём из сигнала: у стратегий он разный.
+        # Считаем при этом ВЕСЬ счёт, а не позиции одной стратегии — на бирже
+        # книга общая, и корреляция лонгов бьёт по депозиту независимо от того,
+        # кто их открыл.
         # (снимок биржи уже прогрет проверкой выше — доп. API-запросов нет)
-        if getattr(config, 'MAX_SAME_DIRECTION', 0) > 0:
+        cap = direction_cap(signal.get('params', {}))
+        if cap > 0:
             sig_dir = signal['setup']['type']            # 'LONG' / 'SHORT'
             dcnt = self.get_direction_counts()
-            if dcnt.get(sig_dir, 0) >= config.MAX_SAME_DIRECTION:
+            if dcnt.get(sig_dir, 0) >= cap:
                 log(f"⛔ {trading_pair}: направление {sig_dir} занято "
-                    f"{dcnt[sig_dir]}/{config.MAX_SAME_DIRECTION} — направленный кэп")
+                    f"{dcnt[sig_dir]}/{cap} — направленный кэп")
                 return False
 
         self._reset_daily_pnl_if_needed()
@@ -799,7 +939,10 @@ class LiveTradeManager:
             log(f"❌ SL дистанция = 0 — пропускаем")
             return False
 
-        risk_amount   = sizing_balance * (config.RISK_PER_TRADE / 100)
+        # Процент риска — из сигнала: у стратегий он свой и меняется из
+        # дашборда на ходу. Глобальное значение остаётся запасным.
+        risk_pct      = float(signal['params'].get('risk_pct') or config.RISK_PER_TRADE)
+        risk_amount   = sizing_balance * (risk_pct / 100)
         position_size = risk_amount / sig_sl_dist
 
         # W3: cap на максимальное количество юнитов (страховка от микроценовых пар)
@@ -816,6 +959,7 @@ class LiveTradeManager:
         params['risk_amount']   = risk_amount
         params['position_size'] = position_size
         params['leverage']      = config.LEVERAGE
+        plan_targets, plan_fractions = tp_plan(params)
 
         try:
             mode_text = "🔴 LIVE (РЕАЛЬНЫЕ ДЕНЬГИ)" if config.TRADING_MODE == 'LIVE' else "🟢 DEMO"
@@ -826,15 +970,13 @@ class LiveTradeManager:
             htf = signal.get('htf_trend', 'N/A')
             log(f"Тип: {setup['type']}  |  Зона: {trigger['zone']}  |  HTF: {htf}")
             log(f"Вход: ${_fmt_p(params['entry'])}  |  Стоп: ${_fmt_p(params['stop_loss'])}")
-            if N_TP == 1:
-                tp1_pct = getattr(config, 'TP1_LEVEL', 0.25) * 100
-                log(f"TP: ${_fmt_p(params['take_profit_1'])} (-{tp1_pct:.0f}%, закрывает 100%)")
-            else:
-                log(f"TP1: ${_fmt_p(params['take_profit_1'])} (50%)  |  TP2: ${_fmt_p(params['take_profit_2'])} (50%)")
+            log("Цели: " + "  |  ".join(
+                f"TP{i + 1} ${_fmt_p(t)} ({f * 100:.0f}%)"
+                for i, (t, f) in enumerate(zip(plan_targets, plan_fractions))))
             if params.get('be_level'):
                 log(f"Безубыток при пробое B: ${_fmt_p(params['be_level'])}")
             pos_value_usd = position_size * params['entry']
-            log(f"Позиция: {position_size:.6f} (~${pos_value_usd:.2f})  |  Риск: ${risk_amount:.2f} ({config.RISK_PER_TRADE}%)  |  RR: 1:{params['rr']:.2f}")
+            log(f"Позиция: {position_size:.6f} (~${pos_value_usd:.2f})  |  Риск: ${risk_amount:.2f} ({risk_pct}%)  |  RR: 1:{params['rr']:.2f}")
 
             # Sanity check: position USD value must not exceed REAL balance × leverage
             max_pos_usd = real_balance * config.LEVERAGE
@@ -876,8 +1018,11 @@ class LiveTradeManager:
                 if getattr(self.exchange, 'id', '') == 'bybit':
                     limit_params['stopLoss']    = str(round(params['stop_loss'], 8))
                     limit_params['slTriggerBy'] = 'LastPrice'
-                    if N_TP == 1:   # одиночный TP — биржа закроет всю позицию по нему
-                        limit_params['takeProfit']  = str(round(params['take_profit_1'], 8))
+                    # Тейк вешаем на ордер входа ТОЛЬКО при единственной цели:
+                    # биржевой TP закрывает всю позицию, и при плане с
+                    # частичной фиксацией он обрубил бы дальние цели.
+                    if len(plan_targets) == 1:
+                        limit_params['takeProfit']  = str(round(plan_targets[0], 8))
                         limit_params['tpTriggerBy']  = 'LastPrice'
                 try:
                     lim_order = self.exchange.create_order(
@@ -933,7 +1078,7 @@ class LiveTradeManager:
             # Контроль фактического риска
             actual_risk = actual_filled * actual_sl_dist
             _base = sizing_balance if sizing_balance > 0 else 1
-            log(f"Риск-контроль: цель ${risk_amount:.2f} ({config.RISK_PER_TRADE}%) | "
+            log(f"Риск-контроль: цель ${risk_amount:.2f} ({risk_pct}%) | "
                 f"фактически ${actual_risk:.2f} ({actual_risk / _base * 100:.2f}%)")
 
             # Выставляем SL + TP1-4 на бирже
@@ -974,6 +1119,8 @@ class LiveTradeManager:
             journal.open_trade(position, {**signal, 'params': params}, balance_before)
 
             self.active_positions[trading_pair].append(position)
+            # Кто открыл — нужно для раздельного учёта слотов и разбора итогов
+            self.set_pair_strategy(trading_pair, signal.get('strategy'))
             self._save_position_state(trading_pair, position, params)  # W7: сохраняем для восстановления
             self.last_trade_time[trading_pair] = datetime.now()
             self._save_cooldown_state()
@@ -1143,6 +1290,8 @@ class LiveTradeManager:
         setup   = position['signal']['setup']
         tp_hit  = position['tp_hit']
         is_long = setup['type'] == 'LONG'
+        targets, fractions = tp_plan(params)
+        n_tp = len(targets)
 
         # ── MFE/MAE: экстремумы цены за жизнь позиции (для анализа сделок) ────
         if is_long:
@@ -1162,8 +1311,11 @@ class LiveTradeManager:
                 self._close_all(position, current_price, 'TIME', trading_pair)
                 return
 
-        # ── 0. W11: Безубыток при пробое уровня B импульса (0%, конец импульса) ─
-        if getattr(config, 'BREAKEVEN_AT_B', True) and not position.get('breakeven_set'):
+        # ── 0. Безубыток — только если стратегия его заказала ────────────────
+        # Раньше сюда смотрел глобальный config.BREAKEVEN_AT_B, откалиброванный
+        # под фибо. Для SMC безубыток вреден (по бэктесту +88.5% -> +54.2%):
+        # подтянутый стоп выбивает позицию шумом до дальних целей.
+        if wants_breakeven(params) and not position.get('breakeven_set'):
             be_level = params.get('be_level')
             if be_level:
                 crossed = (is_long and current_price >= be_level) or \
@@ -1182,9 +1334,9 @@ class LiveTradeManager:
             self._close_all(position, current_price, reason, trading_pair)
             return
 
-        # ── 2. Проверяем следующий TP (W11: 2 тейка по 50%) ────────────────────
-        if tp_hit < N_TP:
-            tp_price  = params[TP_KEYS[tp_hit]]
+        # ── 2. Следующая цель из плана ЭТОЙ позиции ───────────────────────────
+        if tp_hit < n_tp:
+            tp_price  = targets[tp_hit]
             tp_reached = (is_long and current_price >= tp_price) or \
                          (not is_long and current_price <= tp_price)
 
@@ -1192,9 +1344,9 @@ class LiveTradeManager:
                 tp_num = tp_hit + 1
                 log(f"TP{tp_num} достигнут @ ${current_price:.4f} (цель ${tp_price:.4f})")
 
-                if tp_hit < N_TP - 1:
+                if tp_hit < n_tp - 1:
                     # Биржевой limit-ордер закрывает долю от НАЧАЛЬНОГО размера позиции.
-                    portion = round(params['position_size'] * TP_CLOSE_FRACTIONS[tp_hit], 6)
+                    portion = round(params['position_size'] * fractions[tp_hit], 6)
                     position['tp_hit'] += 1
                     position['remaining_size'] = max(0.0, round(position['remaining_size'] - portion, 6))
 
@@ -1210,8 +1362,9 @@ class LiveTradeManager:
                               remaining_pct, position['realized_pnl'],
                               telegram_id=self.telegram_id)
 
-                    # Подстраховка: после TP1 стоп в безубыток (если уровень B не сработал)
-                    if not position['breakeven_set']:
+                    # Стоп в безубыток после частичной фиксации — тоже только по
+                    # заказу стратегии: для SMC это отнимает основную прибыль.
+                    if wants_breakeven(params) and not position['breakeven_set']:
                         self._move_sl_to_breakeven(trading_pair, position)
                 else:
                     # Последний TP: биржевой limit-ордер закрывает остаток
@@ -1276,6 +1429,7 @@ class LiveTradeManager:
         journal.close_trade(position, exit_price, reason, pnl, balance_after, config,
                             telegram_id=self.telegram_id)
         self._remove_position_state(trading_pair)  # W7: удаляем из файла состояния
+        self.clear_pair_strategy(trading_pair)     # освобождаем слот стратегии
 
         duration_min = int((position['exit_time'] - position['entry_time']).total_seconds() / 60)
         tg.trade_closed(

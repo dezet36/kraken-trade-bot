@@ -1,11 +1,16 @@
 import os
+import sys
 from datetime import datetime
 
 # Персистентные файлы — в BOT_DATA_DIR, если задан (сервер: каталог ВНЕ кода,
 # переживает полную замену папки Live_Bot), иначе рядом с модулем (локальная
 # разработка — поведение как раньше). Не импортируем config (циклический импорт:
 # config.py сам импортирует log из этого модуля) — считаем env напрямую.
-_DATA_DIR = os.getenv('BOT_DATA_DIR') or os.path.dirname(os.path.abspath(__file__))
+# У собранного .exe __file__ ведёт во временную папку распаковки, которая
+# удаляется при выходе, поэтому там точка отсчёта — папка самого .exe.
+_BASE_DIR = (os.path.dirname(sys.executable) if getattr(sys, 'frozen', False)
+             else os.path.dirname(os.path.abspath(__file__)))
+_DATA_DIR = os.getenv('BOT_DATA_DIR') or _BASE_DIR
 os.makedirs(_DATA_DIR, exist_ok=True)
 LOG_FILE  = os.path.join(_DATA_DIR, "bot_log.txt")
 TRADES_CSV = os.path.join(_DATA_DIR, "trades.csv")

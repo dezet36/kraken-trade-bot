@@ -7,6 +7,7 @@ Set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID in .env to enable.
 import os
 import requests
 import config
+from exit_plan import tp_plan
 from logger import log
 from datetime import datetime
 
@@ -234,14 +235,16 @@ def trade_opened(signal: dict, df_1h=None, telegram_id=None):
         zone_desc = "Глубокая коррекция (78.6%–88.6%)"
         sl_ctx    = "ниже старта импульса" if is_long else "выше старта импульса"
 
-    n_tp = len(getattr(config, 'TP_CLOSE_FRACTIONS', [1.0]))
-    tp1_pct = getattr(config, 'TP1_LEVEL', 0.25) * 100
-    if n_tp == 1:
-        tp_block = f"🎯 Тейк (−{tp1_pct:.0f}%):  <code>${_fmt_p(params['take_profit_1'])}</code>\n"
+    # Цели берём из плана ЭТОЙ сделки: у стратегий он разный, и глобальная
+    # настройка показывала бы SMC один тейк вместо трёх.
+    plan_targets, plan_fractions = tp_plan(params)
+    if len(plan_targets) == 1:
+        tp1_pct = getattr(config, 'TP1_LEVEL', 0.25) * 100
+        tp_block = f"🎯 Тейк (−{tp1_pct:.0f}%):  <code>${_fmt_p(plan_targets[0])}</code>\n"
     else:
-        tp2_pct = getattr(config, 'TP2_LEVEL', 0.27) * 100
-        tp_block = (f"🎯 TP1:  <code>${_fmt_p(params['take_profit_1'])}</code>  (−{tp1_pct:.0f}%, 50%)\n"
-                    f"🎯 TP2:  <code>${_fmt_p(params['take_profit_2'])}</code>  (−{tp2_pct:.0f}%, 50%)\n")
+        tp_block = ''.join(
+            f"🎯 TP{i + 1}:  <code>${_fmt_p(price)}</code>  ({frac * 100:.0f}%)\n"
+            for i, (price, frac) in enumerate(zip(plan_targets, plan_fractions)))
 
     text = (
         f"<b>{direction_icon} {pair}</b>  {zone_icon} {trigger['zone']}  {mode}\n"
