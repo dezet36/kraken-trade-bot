@@ -19,7 +19,19 @@ Live_Bot/platform.db
 Live_Bot/cooldown_state.json
 Live_Bot/positions_state.json
 Live_Bot/pending_orders.json
+Live_Bot/pair_strategy.json
+Live_Bot/runtime_settings.json
 Live_Bot/state/
+
+# Фантомный счёт: состояние и журнал сделок — данные, а не код
+Live_Bot/paper_state.json
+Live_Bot/paper_trades.csv
+Live_Bot/paper_trades.jsonl
+Live_Bot/paper_*.bak
+Live_Bot/*.bak
+
+# Профиль браузера окна приложения (создаётся при первом запуске, ~200 МБ)
+Live_Bot/app_window/
 
 # Журналы и торговая история
 Live_Bot/trades_journal.csv
@@ -59,8 +71,10 @@ Thumbs.db
 desktop.ini
 
 # research/ — кэш и результаты бэктестов (большие/генерируемые, живут внутри research/)
+# Кэши свечей качаются скриптами fetch_*: 100-300 МБ на период, в git им не место.
 backtest_cache/
 backtest_cache_12m/
+backtest_cache_bear/
 backtest_*.csv
 missed_window_report.csv
 exp_*.json
