@@ -943,6 +943,66 @@ class PaperBroker:
         }
         return row
 
+    # ── Действия оператора ───────────────────────────────────────────────────
+
+    def cancel_pending(self, strategy, pair):
+        """Снимает ожидающий ордер. Возвращает (получилось, сообщение)."""
+        pair = _norm(pair)
+        if pair not in self.pending(strategy):
+            return False, f'{pair}: ожидающего ордера нет'
+        self.state['pending'][strategy].pop(pair, None)
+        self._save_state()
+        log(f"🖐 [{strategy}] {pair}: ордер снят оператором")
+        return True, f'{pair}: ордер снят'
+
+    def move_to_breakeven(self, strategy, pair):
+        """
+        Переносит стоп во вход.
+
+        Действие только снижающее риск: стоп двигается ТОЛЬКО в сторону входа
+        и никогда от него. Отодвинуть стоп дальше через дашборд нельзя — это
+        увеличение риска, и странице без пароля такого делать не положено.
+        """
+        pair = _norm(pair)
+        pos = self.positions(strategy).get(pair)
+        if not pos:
+            return False, f'{pair}: позиции нет'
+
+        entry = pos['entry_price']
+        is_long = pos['direction'] == 'LONG'
+        # Двигаем, только если это ужимает риск
+        if (is_long and pos['stop_loss'] >= entry) or (not is_long and pos['stop_loss'] <= entry):
+            return False, f'{pair}: стоп уже в безубытке или ближе'
+
+        pos['stop_loss'] = entry
+        pos['breakeven_set'] = True
+        self._save_state()
+        log(f"🖐 [{strategy}] {pair}: стоп переведён в безубыток оператором")
+        return True, f'{pair}: стоп в безубытке'
+
+    def close_one(self, strategy, pair):
+        """Закрывает одну фантомную позицию по текущей цене."""
+        pair = _norm(pair)
+        pos = self.positions(strategy).get(pair)
+        if not pos:
+            return False, f'{pair}: позиции нет'
+        price = pos.get('last_price') or pos['entry_price']
+        self._close(strategy, pair, pos, _now_ms(), price, 'MANUAL', slip=True)
+        self._save_state()
+        return True, f'{pair}: позиция закрыта'
+
+    def close_all(self, strategy):
+        """Закрывает все позиции стратегии и снимает её ордера."""
+        closed = 0
+        for pair in list(self.positions(strategy)):
+            if self.close_one(strategy, pair)[0]:
+                closed += 1
+        cancelled = len(self.pending(strategy))
+        self.state['pending'][strategy] = {}
+        self._save_state()
+        log(f"🖐 [{strategy}]: закрыто позиций {closed}, снято ордеров {cancelled}")
+        return True, f'{strategy}: закрыто {closed}, снято {cancelled}'
+
     # ── Ручное закрытие (Telegram /close) ────────────────────────────────────
 
     def close_position_by_pair(self, trading_pair):

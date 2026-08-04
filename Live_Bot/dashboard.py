@@ -29,6 +29,7 @@ from datetime import datetime
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 import config
+import scan_report
 import settings_store
 from logger import log
 
@@ -528,7 +529,135 @@ def build_payload():
     """Полный набор данных для дашборда."""
     payload = _paper_payload() if (config.PAPER_MODE or _broker is not None) else _live_payload()
     payload['status'] = dict(_status)
+    # Воронка отсева: бот считает причины отказа на каждом цикле, но раньше
+    # они уходили только в лог. Это ответ на самый частый вопрос при
+    # наблюдении — «почему он ничего не делает».
+    payload['funnel'] = scan_report.snapshot()
+    payload['attention'] = _attention(payload)
     return payload
+
+
+def _attention(payload):
+    """
+    То, что требует реакции прямо сейчас.
+
+    Собирается в одном месте, потому что иначе это приходится вылавливать
+    глазами по трём разным таблицам и простыне лога.
+    """
+    items = []
+
+    status = payload.get('status') or {}
+    if status.get('state') == 'error':
+        items.append({'level': 'bad', 'text': 'Бот остановлен ошибкой',
+                      'detail': status.get('detail', '')})
+    elif status.get('state') == 'paused':
+        items.append({'level': 'warn', 'text': 'Бот на паузе — новые входы не открываются',
+                      'detail': ''})
+
+    untracked = [p for p in payload.get('open_positions') or [] if p.get('untracked')]
+    if untracked:
+        items.append({
+            'level': 'bad',
+            'text': f'{len(untracked)} позиций бот не ведёт',
+            'detail': ', '.join(p['pair'] for p in untracked) +
+                      ' — стоп стоит на бирже, но в журнал сделка не попадёт',
+        })
+
+    # Ордер, которому осталось меньше двух часов, скорее всего истечёт
+    expiring = [o for o in payload.get('pending_orders') or []
+                if 0 < (o.get('expires_in_min') or 0) <= 120]
+    if expiring:
+        items.append({
+            'level': 'warn',
+            'text': f'{len(expiring)} ордеров скоро истекут',
+            'detail': ', '.join(f"{o['pair']} ({o['expires_in_min']} мин)"
+                                for o in expiring[:4]),
+        })
+
+    errors = [line for line in read_log(120)
+              if '❌' in line or 'Traceback' in line or 'ошибк' in line.lower()]
+    if errors:
+        items.append({'level': 'warn', 'text': f'Ошибок в журнале: {len(errors)}',
+                      'detail': errors[-1][-140:]})
+
+    return items
+
+
+def _run_action(request):
+    """
+    Действия оператора над позициями и ордерами.
+
+    Разрешены ТОЛЬКО снижающие риск: закрыть, снять, перевести стоп в
+    безубыток, поставить на паузу. Ручного открытия и отодвигания стопа здесь
+    нет и не будет — у страницы нет ни пароля, ни HTTPS, и увеличивать
+    экспозицию отсюда нельзя.
+
+    Возвращает (получилось, сообщение).
+    """
+    action = str(request.get('action') or '')
+    pair = str(request.get('pair') or '')
+    strategy = str(request.get('strategy') or '')
+
+    if action in ('pause', 'resume'):
+        try:
+            from telegram_bot import controller
+            with controller._lock:
+                controller._paused = (action == 'pause')
+            state = 'на паузе' if action == 'pause' else 'возобновлён'
+            log(f"🖐 Бот {state} из дашборда")
+            set_status('paused' if action == 'pause' else 'running')
+            return True, f'Бот {state}'
+        except Exception as exc:
+            return False, f'Не удалось: {exc}'
+
+    if _broker is not None:
+        handlers = {
+            'close': lambda: _broker.close_one(strategy, pair),
+            'cancel': lambda: _broker.cancel_pending(strategy, pair),
+            'breakeven': lambda: _broker.move_to_breakeven(strategy, pair),
+            'close_all': lambda: _broker.close_all(strategy),
+        }
+        handler = handlers.get(action)
+        if handler is None:
+            return False, f'Неизвестное действие: {action}'
+        try:
+            return handler()
+        except Exception as exc:
+            log(f"⚠️ Действие {action} по {pair}: {exc}")
+            return False, str(exc)
+
+    if _trade_manager is None:
+        return False, 'Бот не запущен'
+
+    # Боевой счёт: те же действия, но через биржу
+    try:
+        if action == 'close':
+            ok, price = _trade_manager.close_position_by_pair(pair)
+            return (ok, f'{pair}: закрыто по {price}' if ok
+                    else f'{pair}: закрыть не удалось')
+        if action == 'cancel':
+            pending = _read_json(PENDING_FILE, {}).get(pair)
+            if not pending:
+                return False, f'{pair}: ожидающего ордера нет'
+            _trade_manager._cancel_pending_order(pair, pending.get('order_id'))
+            return True, f'{pair}: ордер снят'
+        if action == 'breakeven':
+            for position in _trade_manager.active_positions.get(pair, []):
+                if position['status'] == 'OPEN':
+                    _trade_manager._move_sl_to_breakeven(pair, position)
+                    return True, f'{pair}: стоп в безубытке'
+            return False, f'{pair}: позиция не отслеживается ботом'
+        if action == 'close_all':
+            closed = 0
+            for open_pair in list(_trade_manager.get_open_pairs()):
+                if _trade_manager.close_position_by_pair(open_pair)[0]:
+                    closed += 1
+            return True, f'Закрыто позиций: {closed}'
+    except Exception as exc:
+        log(f"⚠️ Действие {action} по {pair}: {exc}")
+        return False, str(exc)
+
+    return False, f'Неизвестное действие: {action}'
 
 
 def export_paths():
@@ -562,7 +691,7 @@ class _Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         path = self.path.split('?')[0]
-        if path not in ('/api/settings', '/api/deposit'):
+        if path not in ('/api/settings', '/api/deposit', '/api/action'):
             self.send_error(404)
             return
         if not _controls_allowed():
@@ -579,6 +708,14 @@ class _Handler(BaseHTTPRequestHandler):
                 raise ValueError('ожидается объект')
         except Exception as exc:
             self._fail(400, f'Неверные данные: {exc}')
+            return
+
+        if path == '/api/action':
+            ok, message = _run_action(changes)
+            if not ok:
+                self._fail(409, message)
+                return
+            self._send_json({'ok': True, 'message': message})
             return
 
         if path == '/api/deposit':

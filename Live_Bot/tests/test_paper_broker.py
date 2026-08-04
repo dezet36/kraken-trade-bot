@@ -527,6 +527,81 @@ class TestDeposit:
         assert broker.set_deposit('НЕТ ТАКОЙ', 1000)[0] is False
 
 
+class TestOperatorActions:
+    """
+    Действия оператора из дашборда. Принцип: отсюда можно только УМЕНЬШИТЬ
+    экспозицию. Страница не имеет ни пароля, ни HTTPS, и увеличивать риск с
+    неё нельзя — поэтому тесты проверяют не только что действие работает, но
+    и что обратное действие невозможно.
+    """
+
+    def test_cancel_removes_waiting_order(self, broker_env):
+        broker, _client, pb, _cfg = broker_env
+        pb._now_ms = lambda: 1_700_000_000_000
+        broker.open('SMC', signal(strategy='SMC'))
+
+        ok, _msg = broker.cancel_pending('SMC', 'BTCUSDT')
+
+        assert ok and not broker.pending('SMC')
+
+    def test_cancel_unknown_pair_is_reported(self, broker_env):
+        broker, _client, _pb, _cfg = broker_env
+        assert broker.cancel_pending('SMC', 'НЕТУ')[0] is False
+
+    def test_breakeven_moves_stop_to_entry(self, broker_env):
+        broker, client, pb, _cfg = broker_env
+        pb._now_ms = lambda: 1_700_000_000_000
+        broker.open('SMC', signal(strategy='SMC', entry=100.0, stop=90.0))
+        feed(broker, client, 'BTCUSDT', [(100, 100, 100)])
+
+        ok, _msg = broker.move_to_breakeven('SMC', 'BTCUSDT')
+        position = broker.positions('SMC')['BTCUSDT']
+
+        assert ok
+        assert position['stop_loss'] == position['entry_price']
+        assert position['breakeven_set']
+
+    def test_breakeven_never_widens_the_stop(self, broker_env):
+        """
+        Для шорта вход НИЖЕ стопа, и перенос «в безубыток» сузил бы риск.
+        Но если стоп уже ближе входа, повторное действие не должно его
+        отодвинуть: увеличивать риск из дашборда нельзя.
+        """
+        broker, client, pb, _cfg = broker_env
+        pb._now_ms = lambda: 1_700_000_000_000
+        broker.open('SMC', signal(strategy='SMC', entry=100.0, stop=90.0))
+        feed(broker, client, 'BTCUSDT', [(100, 100, 100)])
+        broker.move_to_breakeven('SMC', 'BTCUSDT')
+
+        ok, _msg = broker.move_to_breakeven('SMC', 'BTCUSDT')
+        assert ok is False
+        assert broker.positions('SMC')['BTCUSDT']['stop_loss'] == 100.0
+
+    def test_close_writes_the_trade_to_journal(self, broker_env):
+        broker, client, pb, _cfg = broker_env
+        pb._now_ms = lambda: 1_700_000_000_000
+        broker.open('SMC', signal(strategy='SMC'))
+        feed(broker, client, 'BTCUSDT', [(100, 100, 100)])
+
+        ok, _msg = broker.close_one('SMC', 'BTCUSDT')
+
+        assert ok and not broker.positions('SMC')
+        rows = pb.read_journal()
+        assert len(rows) == 1 and rows[0]['exit_reason'] == 'MANUAL'
+
+    def test_close_all_touches_only_its_strategy(self, broker_env):
+        broker, client, pb, _cfg = broker_env
+        pb._now_ms = lambda: 1_700_000_000_000
+        broker.open('SMC', signal(pair='BTCUSDT', strategy='SMC'))
+        broker.open('FIBO', signal(pair='ETHUSDT'))
+        feed(broker, client, 'BTCUSDT', [(100, 100, 100)])
+
+        broker.close_all('SMC')
+
+        assert not broker.positions('SMC') and not broker.pending('SMC')
+        assert broker.pending('FIBO')
+
+
 class TestSnapshot:
     def test_snapshot_shows_unrealised_and_reason(self, broker_env):
         broker, client, pb, _cfg = broker_env
