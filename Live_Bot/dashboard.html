@@ -5,439 +5,511 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Сравнение стратегий — Kraken</title>
 <style>
+  /* ── Токены оформления ───────────────────────────────────────────────
+     Оболочка в духе Apple: слоистые поверхности, волосяные разделители,
+     крупные радиусы, полупрозрачность с размытием, короткие переходы.
+
+     Цвета САМИХ ДАННЫХ (синий/оранжевый) при этом прежние: они проверены
+     на различимость при дальтонизме и на контраст к обеим темам. Яркая
+     системная палитра эти проверки не проходит, а на графике цвет несёт
+     смысл, а не украшает. */
   :root {
     color-scheme: light;
-    --surface-1: #fcfcfb;
-    --plane: #f4f4f1;
-    --raised: #ffffff;
-    --text-primary: #0b0b0b;
-    --text-secondary: #52514e;
-    --muted: #898781;
-    --grid: #e1e0d9;
-    --axis: #c3c2b7;
-    --border: rgba(11,11,11,0.10);
-    --wash: rgba(11,11,11,0.045);
-    --shadow: 0 1px 2px rgba(11,11,11,.05), 0 8px 24px -12px rgba(11,11,11,.18);
-    --fibo: #2a78d6;
-    --smc: #eb6834;
-    --good: #006300;
-    --bad: #d03b3b;
-    --ok: #0ca30c;
-    --warn: #fab219;
+    --bg:        #f2f2f7;
+    --surface:   #ffffff;
+    --surface-2: #fbfbfd;
+    --sidebar:   rgba(246,246,248,.72);
+    --hairline:  rgba(60,60,67,.14);
+    --hairline-2:rgba(60,60,67,.08);
+    --ink:       #1c1c1e;
+    --ink-2:     #3c3c43;
+    --ink-3:     rgba(60,60,67,.6);
+    --ink-4:     rgba(60,60,67,.32);
+    --accent:    #0a84ff;
+    --accent-soft: rgba(10,132,255,.12);
+    --good:      #248a3d;
+    --bad:       #d70015;
+    --warn:      #b25000;
+    --ok-dot:    #34c759;
+    --grid:      rgba(60,60,67,.10);
+    --axis:      rgba(60,60,67,.26);
+    --fibo:      #2a78d6;
+    --smc:       #eb6834;
+    --shadow:    0 1px 2px rgba(0,0,0,.04), 0 8px 28px -14px rgba(0,0,0,.18);
+    --r-lg: 16px; --r-md: 12px; --r-sm: 9px;
   }
   @media (prefers-color-scheme: dark) {
     :root:where(:not([data-theme="light"])) {
       color-scheme: dark;
-      --surface-1: #1a1a19; --plane: #0d0d0d; --raised: #222221;
-      --text-primary: #ffffff; --text-secondary: #c3c2b7; --muted: #898781;
-      --grid: #2c2c2a; --axis: #383835;
-      --border: rgba(255,255,255,0.10); --wash: rgba(255,255,255,0.055);
-      --shadow: 0 1px 2px rgba(0,0,0,.4), 0 8px 24px -12px rgba(0,0,0,.7);
+      --bg: #000000; --surface: #1c1c1e; --surface-2: #2c2c2e;
+      --sidebar: rgba(28,28,30,.72);
+      --hairline: rgba(235,235,245,.16); --hairline-2: rgba(235,235,245,.08);
+      --ink: #ffffff; --ink-2: #ebebf5;
+      --ink-3: rgba(235,235,245,.6); --ink-4: rgba(235,235,245,.3);
+      --accent: #0a84ff; --accent-soft: rgba(10,132,255,.22);
+      --good: #30d158; --bad: #ff453a; --warn: #ff9f0a; --ok-dot: #30d158;
+      --grid: rgba(235,235,245,.10); --axis: rgba(235,235,245,.26);
       --fibo: #3987e5; --smc: #d95926;
-      --good: #0ca30c; --bad: #e66767;
+      --shadow: 0 1px 2px rgba(0,0,0,.5), 0 8px 28px -14px rgba(0,0,0,.8);
     }
   }
   :root[data-theme="dark"] {
     color-scheme: dark;
-    --surface-1: #1a1a19; --plane: #0d0d0d; --raised: #222221;
-    --text-primary: #ffffff; --text-secondary: #c3c2b7; --muted: #898781;
-    --grid: #2c2c2a; --axis: #383835;
-    --border: rgba(255,255,255,0.10); --wash: rgba(255,255,255,0.055);
-    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 8px 24px -12px rgba(0,0,0,.7);
+    --bg: #000000; --surface: #1c1c1e; --surface-2: #2c2c2e;
+    --sidebar: rgba(28,28,30,.72);
+    --hairline: rgba(235,235,245,.16); --hairline-2: rgba(235,235,245,.08);
+    --ink: #ffffff; --ink-2: #ebebf5;
+    --ink-3: rgba(235,235,245,.6); --ink-4: rgba(235,235,245,.3);
+    --accent: #0a84ff; --accent-soft: rgba(10,132,255,.22);
+    --good: #30d158; --bad: #ff453a; --warn: #ff9f0a; --ok-dot: #30d158;
+    --grid: rgba(235,235,245,.10); --axis: rgba(235,235,245,.26);
     --fibo: #3987e5; --smc: #d95926;
-    --good: #0ca30c; --bad: #e66767;
   }
 
   * { box-sizing: border-box; }
-  html, body { height: 100%; }
+  html, body { height: 100%; margin: 0; }
   body {
-    margin: 0;
-    background: var(--plane); color: var(--text-primary);
-    font: 14px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif;
-    -webkit-font-smoothing: antialiased;
+    background: var(--bg); color: var(--ink);
+    font: 14px/1.47 -apple-system, BlinkMacSystemFont, "SF Pro Text",
+          system-ui, "Segoe UI", sans-serif;
+    -webkit-font-smoothing: antialiased; letter-spacing: -0.01em;
   }
-  .wrap { max-width: 1400px; margin: 0 auto; padding: 0 24px 48px; }
 
-  /* ── Шапка ───────────────────────────────────────────────────────────── */
-  .appbar {
-    position: sticky; top: 0; z-index: 20;
-    background: color-mix(in srgb, var(--plane) 88%, transparent);
-    backdrop-filter: blur(12px);
-    border-bottom: 1px solid var(--border);
-    margin-bottom: 20px;
+  /* ── Каркас ──────────────────────────────────────────────────────── */
+  .shell { display: flex; min-height: 100%; }
+  .sidebar {
+    width: 232px; flex: none; position: sticky; top: 0; align-self: flex-start;
+    height: 100vh; display: flex; flex-direction: column; gap: 4px;
+    padding: 18px 12px 14px; background: var(--sidebar);
+    backdrop-filter: saturate(180%) blur(20px);
+    border-right: 1px solid var(--hairline-2);
   }
-  .appbar-in {
-    max-width: 1400px; margin: 0 auto; padding: 14px 24px;
-    display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
-  }
-  .brand { font-size: 16px; font-weight: 650; letter-spacing: -.01em; margin-right: 2px; }
+  .sidebar-top { display: flex; align-items: center; gap: 8px; padding: 0 10px 14px; }
+  .brand { font-size: 17px; font-weight: 700; letter-spacing: -0.02em; }
   .badge {
-    font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase;
-    padding: 3px 9px; border-radius: 6px; border: 1px solid var(--border);
-    color: var(--text-secondary); background: var(--surface-1); white-space: nowrap;
+    font-size: 11px; font-weight: 590; padding: 2px 8px; border-radius: 6px;
+    background: var(--accent-soft); color: var(--accent); white-space: nowrap;
   }
-  .state { display: inline-flex; align-items: center; gap: 7px; font-size: 13px;
-           color: var(--text-secondary); }
-  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex: none; }
-  .dot.run { background: var(--ok); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 22%, transparent); }
-  .dot.warn { background: var(--warn); }
-  .dot.err { background: var(--bad); box-shadow: 0 0 0 3px color-mix(in srgb, var(--bad) 22%, transparent); }
-  .spacer { flex: 1 1 auto; }
-  .stamp { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  nav { display: flex; flex-direction: column; gap: 2px; }
+  nav button {
+    display: flex; align-items: center; gap: 10px; width: 100%;
+    font: inherit; font-size: 14px; font-weight: 500; color: var(--ink-2);
+    background: none; border: 0; border-radius: var(--r-sm);
+    padding: 8px 10px; cursor: pointer; text-align: left;
+    transition: background .15s ease, color .15s ease;
+  }
+  nav button:hover { background: var(--hairline-2); }
+  nav button[aria-current="true"] { background: var(--accent); color: #fff; font-weight: 600; }
+  nav button .ic { width: 18px; text-align: center; font-size: 15px; opacity: .9; }
+  nav button .tag {
+    margin-left: auto; font-size: 11px; font-weight: 600;
+    padding: 1px 6px; border-radius: 20px; background: var(--hairline);
+    color: var(--ink-3);
+  }
+  nav button[aria-current="true"] .tag { background: rgba(255,255,255,.24); color: #fff; }
+  .sidebar-foot {
+    margin-top: auto; padding: 12px 10px 0; border-top: 1px solid var(--hairline-2);
+    display: flex; flex-direction: column; gap: 3px;
+  }
 
-  /* ── Фильтры: одна строка над всем, что они ограничивают ─────────────── */
-  .filters {
-    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
-    margin-bottom: 18px;
+  .main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  .topbar {
+    position: sticky; top: 0; z-index: 5;
+    padding: 18px 28px 14px; background: color-mix(in srgb, var(--bg) 78%, transparent);
+    backdrop-filter: saturate(180%) blur(20px);
+    border-bottom: 1px solid var(--hairline-2);
+    display: flex; align-items: center; gap: 18px; flex-wrap: wrap;
   }
-  .fgroup { display: flex; align-items: center; gap: 8px; }
-  .flabel { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
+  .topbar h1 { font-size: 22px; font-weight: 700; letter-spacing: -0.03em; margin: 0; }
+  .content { padding: 22px 28px 56px; max-width: 1500px; }
+  .page { display: flex; flex-direction: column; gap: 22px; }
+  /* display перебивает атрибут hidden — без этого разделы не скрываются */
+  .page[hidden] { display: none; }
+
+  /* ── Управляющие элементы ────────────────────────────────────────── */
+  .filters { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-left: auto; }
   .seg {
-    display: inline-flex; padding: 3px; gap: 2px;
-    background: var(--surface-1); border: 1px solid var(--border); border-radius: 9px;
+    display: inline-flex; padding: 2px; gap: 2px; background: var(--hairline-2);
+    border-radius: var(--r-sm);
   }
   .seg button {
-    font: inherit; font-size: 13px; color: var(--text-secondary);
-    background: none; border: 0; border-radius: 6px; padding: 5px 12px; cursor: pointer;
-    display: inline-flex; align-items: center; gap: 6px; white-space: nowrap;
+    font: inherit; font-size: 13px; font-weight: 500; color: var(--ink-2);
+    background: none; border: 0; border-radius: 7px; padding: 5px 12px;
+    cursor: pointer; display: inline-flex; align-items: center; gap: 6px;
+    white-space: nowrap; transition: background .18s ease, box-shadow .18s ease;
   }
-  .seg button:hover { background: var(--wash); }
   .seg button[aria-pressed="true"] {
-    background: var(--raised); color: var(--text-primary); font-weight: 600;
-    box-shadow: 0 1px 2px rgba(0,0,0,.10);
+    background: var(--surface); color: var(--ink); font-weight: 600;
+    box-shadow: 0 1px 3px rgba(0,0,0,.12);
   }
-  .seg button .key { width: 9px; height: 9px; border-radius: 3px; flex: none; }
-  .count { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .seg button .key { width: 8px; height: 8px; border-radius: 2px; flex: none; }
+  .count { font-size: 12.5px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
 
-  /* ── Секции ──────────────────────────────────────────────────────────── */
-  .sec { margin-bottom: 26px; }
-  .sec-head {
+  .btn {
+    font: inherit; font-size: 13px; font-weight: 590; cursor: pointer;
+    padding: 7px 15px; border-radius: var(--r-sm); border: 0;
+    background: var(--accent); color: #fff; text-decoration: none;
+    display: inline-flex; align-items: center; gap: 6px;
+    transition: filter .15s ease, transform .06s ease;
+  }
+  .btn:hover { filter: brightness(1.08); }
+  .btn:active { transform: scale(.97); }
+  .btn:disabled { opacity: .4; cursor: default; }
+  .btn.ghost { background: var(--surface); color: var(--ink); border: 1px solid var(--hairline); }
+  .btn.ghost:hover { background: var(--surface-2); }
+  .btn.danger { background: var(--bad); }
+  .btn.sm { padding: 5px 11px; font-size: 12px; }
+  .row-end { display: flex; gap: 8px; margin-left: auto; }
+
+  .toggle {
+    position: relative; width: 51px; height: 31px; border-radius: 16px;
+    border: 0; background: var(--hairline); cursor: pointer; flex: none;
+    transition: background .22s ease;
+  }
+  .toggle::after {
+    content: ""; position: absolute; top: 2px; left: 2px; width: 27px; height: 27px;
+    border-radius: 50%; background: #fff; box-shadow: 0 2px 6px rgba(0,0,0,.2);
+    transition: transform .22s cubic-bezier(.3,1.4,.5,1);
+  }
+  .toggle[aria-pressed="true"] { background: var(--ok-dot); }
+  .toggle[aria-pressed="true"]::after { transform: translateX(20px); }
+  .toggle:disabled { opacity: .45; cursor: default; }
+
+  /* ── Панели ──────────────────────────────────────────────────────── */
+  .panel {
+    background: var(--surface); border-radius: var(--r-lg);
+    box-shadow: var(--shadow); overflow: hidden;
+  }
+  .panel-head {
     display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap;
-    margin: 0 0 12px 2px;
+    padding: 16px 20px 12px;
   }
-  .sec-head h2 { font-size: 13px; font-weight: 650; margin: 0;
-                 text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
-  .sec-head .hint { font-size: 12px; color: var(--muted); }
-  .card {
-    background: var(--surface-1); border: 1px solid var(--border);
-    border-radius: 14px; box-shadow: var(--shadow);
-  }
-  .card-pad { padding: 18px 20px; }
-  .cols { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); }
+  .panel-head.bare { padding: 0 4px 2px; }
+  .panel-head h2 { font-size: 15px; font-weight: 650; letter-spacing: -0.02em; margin: 0; }
+  .panel-head .hint { font-size: 12.5px; color: var(--ink-3); }
+  .panel-body { padding: 4px 20px 20px; }
+  .cols  { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); }
+  .cols2 { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); }
 
-  /* ── Карточка стратегии ──────────────────────────────────────────────── */
-  .stitle { display: flex; align-items: center; gap: 9px; margin-bottom: 14px; }
-  .stitle .key { width: 10px; height: 10px; border-radius: 3px; flex: none; }
-  .stitle .nm { font-size: 15px; font-weight: 650; }
-  .stitle .sub { font-size: 12px; color: var(--muted); margin-left: auto;
-                 font-variant-numeric: tabular-nums; }
-  .hero { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 4px; }
-  .hero .big { font-size: 38px; font-weight: 640; letter-spacing: -.02em; line-height: 1.05; }
-  .hero .side { font-size: 13px; color: var(--text-secondary); font-variant-numeric: tabular-nums; }
-  .kpis {
-    display: grid; gap: 10px 18px; margin-top: 16px; padding-top: 14px;
-    border-top: 1px solid var(--grid);
-    grid-template-columns: repeat(auto-fit, minmax(92px, 1fr));
+  /* ── Полоса внимания ─────────────────────────────────────────────── */
+  .att { display: flex; flex-direction: column; gap: 8px; margin-bottom: 20px; }
+  .att-row {
+    display: flex; align-items: flex-start; gap: 11px; padding: 12px 16px;
+    border-radius: var(--r-md); background: var(--surface); box-shadow: var(--shadow);
+    border-left: 3px solid var(--warn);
   }
-  .kpi .k { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
-  .kpi .v { font-size: 17px; font-weight: 600; font-variant-numeric: tabular-nums; margin-top: 1px; }
-  .kpi .n { font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .att-row.bad { border-left-color: var(--bad); }
+  .att-row .t { font-weight: 600; font-size: 13.5px; }
+  .att-row .d { font-size: 12.5px; color: var(--ink-3); margin-top: 1px; }
+
+  /* Полоса режима рынка: тише полосы внимания — это не требование
+     реакции, а объяснение уменьшенного размера позиции. */
+  .note {
+    display: flex; align-items: flex-start; gap: 10px; margin-bottom: 20px;
+    padding: 11px 16px; border-radius: var(--r-md);
+    background: var(--surface-2); border: 1px solid var(--hairline);
+    font-size: 12.5px; color: var(--ink-2); line-height: 1.5;
+  }
+  .note .dot { margin-top: 6px; }
+
+  /* ── Состояние ───────────────────────────────────────────────────── */
+  .state { display: inline-flex; align-items: center; gap: 7px; font-size: 12.5px;
+           color: var(--ink-3); }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ink-4); flex: none; }
+  .dot.run { background: var(--ok-dot); }
+  .dot.warn { background: var(--warn); }
+  .dot.err { background: var(--bad); }
+  .stamp { font-size: 11.5px; color: var(--ink-4); font-variant-numeric: tabular-nums; }
 
   .pos { color: var(--good); }
   .neg { color: var(--bad); }
 
-  /* ── Таблицы ─────────────────────────────────────────────────────────── */
-  .scroll { overflow: auto; max-height: 520px; border-radius: 0 0 14px 14px; }
+  /* ── Таблицы ─────────────────────────────────────────────────────── */
+  .scroll { overflow: auto; max-height: 560px; }
   table { width: 100%; border-collapse: collapse; font-size: 13px; }
   thead th {
-    position: sticky; top: 0; z-index: 1;
-    text-align: left; font-weight: 500; font-size: 11px; color: var(--muted);
-    text-transform: uppercase; letter-spacing: .05em; padding: 10px 12px;
-    background: var(--surface-1); border-bottom: 1px solid var(--axis); white-space: nowrap;
+    position: sticky; top: 0; z-index: 1; text-align: left;
+    font-weight: 590; font-size: 11.5px; color: var(--ink-3);
+    padding: 11px 14px; background: var(--surface);
+    border-bottom: 1px solid var(--hairline); white-space: nowrap;
   }
-  td { padding: 9px 12px; border-bottom: 1px solid var(--grid);
+  td { padding: 10px 14px; border-bottom: 1px solid var(--hairline-2);
        font-variant-numeric: tabular-nums; white-space: nowrap; }
   tbody tr:last-child td { border-bottom: none; }
-  tbody tr:hover { background: var(--wash); }
-  td.why { max-width: 260px; overflow: hidden; text-overflow: ellipsis;
-           color: var(--text-secondary); }
-  .pair { font-weight: 600; }
+  tbody tr:hover { background: var(--hairline-2); }
+  td.why { max-width: 260px; overflow: hidden; text-overflow: ellipsis; color: var(--ink-3); }
+  .pair { font-weight: 620; }
   .side-l { color: var(--good); font-weight: 600; }
   .side-s { color: var(--bad); font-weight: 600; }
-  .chip {
-    font-size: 11px; padding: 2px 8px; border-radius: 20px;
-    border: 1px solid var(--border); color: var(--text-secondary);
-  }
-  .skey { display: inline-flex; align-items: center; gap: 6px; }
+  .chip { font-size: 11px; padding: 2px 8px; border-radius: 20px;
+          background: var(--hairline-2); color: var(--ink-3); }
+  .skey { display: inline-flex; align-items: center; gap: 7px; }
   .skey .key { width: 8px; height: 8px; border-radius: 2px; flex: none; }
-  .empty { color: var(--muted); padding: 32px 0; text-align: center; }
+  .empty { color: var(--ink-4); padding: 40px 0; text-align: center; font-size: 13.5px; }
 
-  /* ── График ──────────────────────────────────────────────────────────── */
-  .legend { display: flex; gap: 16px; font-size: 12px; color: var(--text-secondary); }
-  .legend span { display: inline-flex; align-items: center; gap: 7px; }
-  .legend .line { width: 14px; height: 2px; border-radius: 2px; }
-  #plot { position: relative; }
-  #plot svg { display: block; width: 100%; height: auto; touch-action: none; }
-  #tip {
-    position: absolute; pointer-events: none; opacity: 0; transition: opacity .09s;
-    background: var(--raised); border: 1px solid var(--border); border-radius: 10px;
-    padding: 9px 11px; font-size: 12px; box-shadow: var(--shadow); z-index: 5;
-    min-width: 148px;
-  }
-  #tip .t-when { color: var(--muted); font-size: 11px; margin-bottom: 6px; }
-  #tip .t-row { display: flex; align-items: center; gap: 8px; margin-top: 3px; }
-  #tip .t-key { width: 12px; height: 2px; border-radius: 2px; flex: none; }
-  #tip .t-val { font-weight: 650; font-variant-numeric: tabular-nums; margin-left: auto; }
-  #tip .t-nm { color: var(--text-secondary); }
+  /* ── Карточка стратегии ──────────────────────────────────────────── */
+  .card-pad { padding: 18px 20px; }
+  .stitle { display: flex; align-items: center; gap: 9px; margin-bottom: 12px; }
+  .stitle .key { width: 10px; height: 10px; border-radius: 3px; flex: none; }
+  .stitle .nm { font-size: 15px; font-weight: 650; letter-spacing: -0.02em; }
+  .stitle .sub { font-size: 12px; color: var(--ink-3); margin-left: auto;
+                 font-variant-numeric: tabular-nums; }
+  .hero { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+  .hero .big { font-size: 40px; font-weight: 680; letter-spacing: -0.035em; line-height: 1.02; }
+  .hero .side { font-size: 13px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+  .kpis { display: grid; gap: 12px 18px; margin-top: 16px; padding-top: 14px;
+          border-top: 1px solid var(--hairline-2);
+          grid-template-columns: repeat(auto-fit, minmax(96px, 1fr)); }
+  .kpi .k { font-size: 11px; color: var(--ink-3); font-weight: 500; }
+  .kpi .v { font-size: 17px; font-weight: 620; font-variant-numeric: tabular-nums;
+            letter-spacing: -0.02em; margin-top: 2px; }
+  .kpi .n { font-size: 11px; color: var(--ink-4); font-variant-numeric: tabular-nums; }
 
-  /* ── Журнал ──────────────────────────────────────────────────────────── */
-  details.card > summary {
-    padding: 14px 20px; cursor: pointer; font-size: 13px; font-weight: 600;
-    list-style: none; display: flex; align-items: center; gap: 10px;
-  }
-  details.card > summary::-webkit-details-marker { display: none; }
-  details.card > summary::before {
-    content: '▸'; color: var(--muted); transition: transform .15s;
-  }
-  details.card[open] > summary::before { transform: rotate(90deg); }
-  #log {
-    margin: 0; padding: 0 20px 18px; max-height: 340px; overflow: auto;
-    font: 12px/1.6 ui-monospace, "Cascadia Mono", Consolas, monospace;
-    color: var(--text-secondary); white-space: pre-wrap; word-break: break-word;
-  }
-  #log .l-err { color: var(--bad); }
-  #log .l-win { color: var(--good); }
-  #log .l-act { color: var(--text-primary); font-weight: 600; }
-
-  /* ── Карточки открытых позиций ───────────────────────────────────────── */
-  .poscols { display: grid; gap: 14px; grid-template-columns: repeat(auto-fill, minmax(410px, 1fr)); }
-  .pos-card {
-    background: var(--surface-1); border: 1px solid var(--border);
-    border-radius: 14px; box-shadow: var(--shadow); padding: 15px 17px;
-  }
-  .pos-top { display: flex; align-items: center; gap: 9px; margin-bottom: 1px; }
+  /* ── Карточки позиций ────────────────────────────────────────────── */
+  .poscols { display: grid; gap: 14px; grid-template-columns: repeat(auto-fill, minmax(400px, 1fr)); }
+  .pos-card { background: var(--surface); border-radius: var(--r-lg);
+              box-shadow: var(--shadow); padding: 16px 18px; }
+  .pos-top { display: flex; align-items: center; gap: 9px; }
   .pos-top .key { width: 9px; height: 9px; border-radius: 3px; flex: none; }
-  .pos-top .p { font-size: 15px; font-weight: 650; letter-spacing: -.01em; }
-  .pos-top .age { margin-left: auto; font-size: 12px; color: var(--muted);
+  .pos-top .p { font-size: 15px; font-weight: 660; letter-spacing: -0.02em; }
+  .pos-top .age { margin-left: auto; font-size: 12px; color: var(--ink-4);
                   font-variant-numeric: tabular-nums; }
-  /* Название стратегии словом, а не только цветом: полагаться на подбор
-     цвета как на единственный признак нельзя. */
-  .pos-owner { font-size: 11.5px; color: var(--muted); margin: 0 0 6px 18px;
-               text-transform: uppercase; letter-spacing: .05em; }
-
-  /* Группа позиций одной стратегии */
-  .group { margin-bottom: 20px; }
-  .group:last-child { margin-bottom: 0; }
-  .group-head {
-    display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap;
-    margin: 0 0 10px 2px; padding-bottom: 7px; border-bottom: 1px solid var(--grid);
-  }
-  .group-head .key { width: 10px; height: 10px; border-radius: 3px; align-self: center; }
-  .group-head .nm { font-size: 13.5px; font-weight: 650; }
-  .group-head .cnt { font-size: 12px; color: var(--muted); }
-  .group-head .sum { margin-left: auto; font-size: 13px;
-                     font-variant-numeric: tabular-nums; font-weight: 600; }
-  .pos-money { display: flex; align-items: baseline; gap: 10px; margin: 6px 0 2px; }
-  .pos-money .v { font-size: 26px; font-weight: 640; letter-spacing: -.02em; }
+  .pos-owner { font-size: 11.5px; color: var(--ink-4); margin: 1px 0 8px 18px; }
+  .pos-money { display: flex; align-items: baseline; gap: 10px; margin: 2px 0; }
+  .pos-money .v { font-size: 28px; font-weight: 660; letter-spacing: -0.03em; }
   .pos-money .r { font-size: 13px; font-variant-numeric: tabular-nums; }
-  .pos-split { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
-
-  /* Шкала: где цена между стопом и последней целью */
-  .track { margin: 14px 0 8px; }
-  .track-bar {
-    position: relative; height: 6px; border-radius: 3px;
+  .pos-split { font-size: 12px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+  .track { margin: 15px 0 8px; }
+  .track-bar { position: relative; height: 5px; border-radius: 3px;
     background: linear-gradient(to right,
-      color-mix(in srgb, var(--bad) 30%, transparent) 0%,
-      var(--grid) 42%, var(--grid) 58%,
-      color-mix(in srgb, var(--good) 30%, transparent) 100%);
-  }
-  .track-bar .entry {
-    position: absolute; top: -3px; width: 2px; height: 12px;
-    background: var(--text-secondary); border-radius: 1px;
-  }
-  .track-bar .tp {
-    position: absolute; top: -1px; width: 2px; height: 8px;
-    background: var(--good); opacity: .55; border-radius: 1px;
-  }
+      color-mix(in srgb, var(--bad) 26%, transparent) 0%,
+      var(--grid) 44%, var(--grid) 56%,
+      color-mix(in srgb, var(--good) 26%, transparent) 100%); }
+  .track-bar .entry { position: absolute; top: -3px; width: 2px; height: 11px;
+                      background: var(--ink-3); border-radius: 1px; }
+  .track-bar .tp { position: absolute; top: -1px; width: 2px; height: 7px;
+                   background: var(--good); opacity: .5; border-radius: 1px; }
   .track-bar .tp.done { opacity: 1; width: 3px; }
-  .track-bar .now {
-    position: absolute; top: -5px; width: 10px; height: 16px; margin-left: -5px;
-    border-radius: 3px; border: 2px solid var(--surface-1);
-  }
-  .track-ends {
-    display: flex; justify-content: space-between; margin-top: 6px;
-    font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums;
-  }
-  .pos-grid {
-    display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px 12px;
-    margin-top: 12px; padding-top: 11px; border-top: 1px solid var(--grid);
-  }
-  .pos-grid .k { font-size: 10.5px; color: var(--muted);
-                 text-transform: uppercase; letter-spacing: .05em; }
-  .pos-grid .v { font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; }
-  .pos-why { margin-top: 11px; font-size: 12px; color: var(--text-secondary);
+  .track-bar .now { position: absolute; top: -5px; width: 10px; height: 15px;
+    margin-left: -5px; border-radius: 3px; border: 2px solid var(--surface);
+    box-shadow: 0 1px 4px rgba(0,0,0,.25); }
+  .track-ends { display: flex; justify-content: space-between; margin-top: 7px;
+                font-size: 11px; color: var(--ink-4); font-variant-numeric: tabular-nums; }
+  .pos-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px 14px;
+              margin-top: 13px; padding-top: 12px; border-top: 1px solid var(--hairline-2); }
+  .pos-grid .k { font-size: 10.5px; color: var(--ink-3); }
+  .pos-grid .v { font-size: 13.5px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .pos-why { margin-top: 11px; font-size: 12px; color: var(--ink-3);
              overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .flags { display: flex; gap: 5px; }
-  .flag { font-size: 10px; padding: 1px 6px; border-radius: 4px;
-          border: 1px solid var(--border); color: var(--muted); }
-  .flag.on { color: var(--good); border-color: color-mix(in srgb, var(--good) 40%, transparent); }
+  .flags { display: flex; gap: 5px; flex-wrap: wrap; }
+  .flag { font-size: 10.5px; padding: 2px 7px; border-radius: 5px;
+          background: var(--hairline-2); color: var(--ink-3); }
+  .flag.on { color: var(--good); background: color-mix(in srgb, var(--good) 12%, transparent); }
+  .pos-act { display: flex; gap: 7px; margin-top: 12px; padding-top: 12px;
+             border-top: 1px solid var(--hairline-2); }
 
-  .totals {
-    display: flex; align-items: baseline; gap: 8px; font-size: 13px;
-    color: var(--text-secondary); font-variant-numeric: tabular-nums;
-  }
+  .totals { display: flex; align-items: baseline; gap: 8px; font-size: 13px;
+            color: var(--ink-3); font-variant-numeric: tabular-nums; margin-left: auto; }
   .totals b { font-size: 15px; }
 
-  /* ── Панель управления ───────────────────────────────────────────────── */
-  .ctl { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(330px, 1fr)); }
-  .ctl-card { border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; }
-  .ctl-head { display: flex; align-items: center; gap: 9px; margin-bottom: 12px; }
+  /* ── Группы по стратегиям ────────────────────────────────────────── */
+  .group { margin-bottom: 22px; }
+  .group:last-child { margin-bottom: 0; }
+  .group-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+                margin: 0 0 11px 2px; }
+  .group-head .key { width: 10px; height: 10px; border-radius: 3px; }
+  .group-head .nm { font-size: 13.5px; font-weight: 650; }
+  .group-head .cnt { font-size: 12px; color: var(--ink-4); }
+  .group-head .sum { margin-left: auto; font-size: 13px; font-weight: 620;
+                     font-variant-numeric: tabular-nums; }
+
+  /* ── График ──────────────────────────────────────────────────────── */
+  .legend { display: flex; gap: 16px; font-size: 12.5px; color: var(--ink-3);
+            margin-left: auto; }
+  .legend span { display: inline-flex; align-items: center; gap: 7px; }
+  .legend .line { width: 14px; height: 2px; border-radius: 2px; }
+  #plot, #under, #hist, #exits, #funnel { position: relative; }
+  svg { display: block; width: 100%; height: auto; touch-action: none; }
+  #tip {
+    position: absolute; pointer-events: none; opacity: 0; transition: opacity .1s;
+    background: var(--surface); border-radius: var(--r-md);
+    border: 1px solid var(--hairline-2);
+    padding: 10px 12px; font-size: 12px; box-shadow: var(--shadow);
+    z-index: 5; min-width: 150px;
+  }
+  #tip .t-when { color: var(--ink-4); font-size: 11px; margin-bottom: 6px; }
+  #tip .t-row { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
+  #tip .t-key { width: 12px; height: 2px; border-radius: 2px; flex: none; }
+  #tip .t-val { font-weight: 650; font-variant-numeric: tabular-nums; margin-left: auto; }
+  #tip .t-nm { color: var(--ink-3); }
+
+  /* ── Панель управления ───────────────────────────────────────────── */
+  .ctl { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(350px, 1fr)); }
+  .ctl-head { display: flex; align-items: center; gap: 10px; padding: 16px 20px;
+              border-bottom: 1px solid var(--hairline-2); }
   .ctl-head .key { width: 10px; height: 10px; border-radius: 3px; flex: none; }
-  .ctl-head .nm { font-size: 14px; font-weight: 650; }
-  .ctl-row { display: flex; align-items: center; gap: 10px; margin-bottom: 9px; }
-  .ctl-row label { font-size: 12.5px; color: var(--text-secondary); flex: 1; }
-  .ctl-row .unit { font-size: 12px; color: var(--muted); width: 14px; }
+  .ctl-head .nm { font-size: 15px; font-weight: 650; }
+  .ctl-row { display: flex; align-items: center; gap: 12px; padding: 12px 20px;
+             border-bottom: 1px solid var(--hairline-2); }
+  .ctl-row:last-child { border-bottom: none; }
+  .ctl-row label { font-size: 13.5px; color: var(--ink); flex: 1; }
+  .ctl-row .unit { font-size: 12px; color: var(--ink-4); }
   .ctl-row input[type=number] {
-    width: 96px; font: inherit; font-size: 13px; text-align: right;
-    padding: 5px 9px; border-radius: 7px; background: var(--plane);
-    border: 1px solid var(--border); color: var(--text-primary);
+    width: 104px; font: inherit; font-size: 13.5px; text-align: right;
+    padding: 7px 11px; border-radius: var(--r-sm); background: var(--surface-2);
+    border: 1px solid var(--hairline-2); color: var(--ink);
     font-variant-numeric: tabular-nums;
   }
-  .ctl-row input:focus { outline: 2px solid var(--fibo); outline-offset: -1px; }
+  .ctl-row input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
   .ctl-row input:disabled { opacity: .45; }
-  .toggle {
-    position: relative; width: 40px; height: 22px; border-radius: 11px;
-    border: 1px solid var(--border); background: var(--plane); cursor: pointer;
-    transition: background .14s; flex: none;
-  }
-  .toggle::after {
-    content: ''; position: absolute; top: 2px; left: 2px;
-    width: 16px; height: 16px; border-radius: 50%;
-    background: var(--muted); transition: transform .14s, background .14s;
-  }
-  .toggle[aria-pressed="true"] { background: color-mix(in srgb, var(--ok) 22%, transparent); }
-  .toggle[aria-pressed="true"]::after { transform: translateX(18px); background: var(--ok); }
-  .ctl-note { font-size: 11.5px; color: var(--muted); margin-top: 4px; line-height: 1.45; }
-  .ctl-foot { display: flex; align-items: center; gap: 12px; margin-top: 14px; }
-  .btn {
-    font: inherit; font-size: 13px; font-weight: 600; cursor: pointer;
-    padding: 8px 18px; border-radius: 9px; border: 1px solid transparent;
-    background: var(--fibo); color: #fff;
-  }
-  .btn:disabled { opacity: .45; cursor: default; }
-  .btn.ghost { background: var(--surface-1); color: var(--text-primary);
-               border-color: var(--border); }
-  .saved { font-size: 12.5px; color: var(--good); }
-  .warn-box {
-    font-size: 12.5px; color: var(--text-secondary); padding: 10px 12px;
-    border: 1px solid var(--border); border-radius: 9px; margin-bottom: 14px;
-    background: var(--wash);
-  }
+  .ctl-note { font-size: 11.5px; color: var(--ink-4); padding: 0 20px 12px;
+              margin-top: -6px; line-height: 1.45; }
+  .ctl-foot { display: flex; align-items: center; gap: 12px; margin-top: 16px; }
+  .saved { font-size: 13px; color: var(--good); }
+  .warn-box { font-size: 12.5px; color: var(--ink-3); padding: 12px 16px;
+              border-radius: var(--r-md); background: var(--surface);
+              box-shadow: var(--shadow); margin-bottom: 16px; }
 
-  .lnk {
-    font-size: 12px; text-decoration: none; color: var(--text-secondary);
-    border: 1px solid var(--border); border-radius: 8px; padding: 5px 11px;
-    background: var(--surface-1); white-space: nowrap;
-  }
-  .lnk:hover { background: var(--wash); color: var(--text-primary); }
-  .actions { display: flex; gap: 8px; margin-left: auto; }
+  /* ── Журнал ──────────────────────────────────────────────────────── */
+  #log { margin: 0; padding: 18px 20px; max-height: 68vh; overflow: auto;
+    font: 12px/1.65 ui-monospace, "SF Mono", "Cascadia Mono", Consolas, monospace;
+    color: var(--ink-3); white-space: pre-wrap; word-break: break-word; }
+  #log .l-err { color: var(--bad); }
+  #log .l-win { color: var(--good); }
+  #log .l-act { color: var(--ink); font-weight: 600; }
 
-  /* Перерисовка не должна дёргать вёрстку: держим прошлый кадр приглушённым */
-  .stale { opacity: .55; transition: opacity .12s; }
+  .stale { opacity: .5; transition: opacity .15s ease; }
 
-  @media (max-width: 720px) {
-    .wrap, .appbar-in { padding-left: 14px; padding-right: 14px; }
-    .hero .big { font-size: 30px; }
+  @media (max-width: 900px) {
+    .shell { flex-direction: column; }
+    .sidebar { width: auto; height: auto; position: static; flex-direction: row;
+            align-items: center; gap: 10px; overflow-x: auto; }
+    .sidebar-top { padding: 0 6px 0 0; } .side-foot { display: none; }
+    nav { flex-direction: row; }
+    .topbar, .content { padding-left: 16px; padding-right: 16px; }
+    .hero .big { font-size: 32px; }
   }
 </style>
 </head>
 <body>
 
-<header class="appbar">
-  <div class="appbar-in">
-    <span class="brand">Kraken</span>
-    <span class="badge" id="mode">—</span>
-    <span class="state" id="state"><span class="dot"></span>подключение…</span>
-    <span class="spacer"></span>
-    <span class="stamp" id="stamp"></span>
-  </div>
-</header>
+<div class="shell">
 
-<div class="wrap">
-
-  <div class="filters">
-    <div class="fgroup">
-      <span class="flabel">Период</span>
-      <div class="seg" id="f-period" role="group" aria-label="Период"></div>
+  <!-- Боковое меню: разделы вместо одной длинной ленты. В ленту нельзя
+       добавить ещё шесть панелей, не превратив её в свиток. -->
+  <aside class="sidebar">
+    <div class="sidebar-top">
+      <span class="brand">Kraken</span>
+      <span class="badge" id="mode">—</span>
     </div>
-    <div class="fgroup">
-      <span class="flabel">Стратегия</span>
-      <div class="seg" id="f-strategy" role="group" aria-label="Стратегия"></div>
+    <nav id="nav"></nav>
+    <div class="sidebar-foot">
+      <span class="state" id="state"><span class="dot"></span>подключение…</span>
+      <span class="stamp" id="stamp"></span>
     </div>
-    <span class="count" id="f-count"></span>
-  </div>
+  </aside>
 
-  <div id="body">
-
-    <details class="card sec" id="ctlbox">
-      <summary>Управление торговлей</summary>
-      <div id="controls" class="card-pad" style="padding-top:0"></div>
-    </details>
-
-    <section class="sec">
-      <div class="sec-head">
-        <h2>Итог</h2>
-        <span class="hint" id="sum-hint"></span>
+  <main class="main">
+    <header class="topbar">
+      <h1 id="page-title">Обзор</h1>
+      <div class="filters">
+        <div class="seg" id="f-period" role="group" aria-label="Период"></div>
+        <div class="seg" id="f-strategy" role="group" aria-label="Стратегия"></div>
+        <span class="count" id="f-count"></span>
       </div>
-      <div class="cols" id="summary"></div>
-    </section>
+    </header>
 
-    <section class="sec">
-      <div class="sec-head">
-        <h2>Кривая доходности</h2>
-        <span class="hint" id="chart-hint"></span>
-        <div class="actions"><div class="legend" id="legend"></div></div>
-      </div>
-      <div class="card card-pad">
-        <div id="plot"><div id="tip"></div></div>
-      </div>
-    </section>
+    <div class="content" id="body">
+      <div id="attention"></div>
+      <div id="regime"></div>
 
-    <section class="sec">
-      <div class="sec-head">
-        <h2>В работе</h2>
-        <span class="hint" id="open-hint"></span>
-        <div class="actions"><span class="totals" id="open-total"></span></div>
-      </div>
-      <div id="open"></div>
-    </section>
+      <!-- ── Обзор ────────────────────────────────────────────────────── -->
+      <section class="page" data-page="overview">
+        <div class="panel-head bare"><h2>Итог</h2>
+          <span class="hint" id="sum-hint"></span></div>
+        <div class="cols" id="summary"></div>
 
-    <section class="sec">
-      <div class="sec-head">
-        <h2>Ждут активации</h2>
-        <span class="hint" id="wait-hint"></span>
-      </div>
-      <div class="card"><div class="scroll" id="waiting"></div></div>
-    </section>
-
-    <section class="sec">
-      <div class="sec-head">
-        <h2>Закрытые сделки</h2>
-        <span class="hint" id="closed-hint"></span>
-        <div class="actions">
-          <a class="lnk" href="/api/export.csv" download>Выгрузить CSV</a>
-          <a class="lnk" href="/api/export.jsonl" download>Полный дамп JSONL</a>
+        <div class="panel">
+          <div class="panel-head">
+            <h2>Кривая доходности</h2>
+            <span class="hint" id="chart-hint"></span>
+            <div class="legend" id="legend"></div>
+          </div>
+          <div class="panel-body"><div id="plot"><div id="tip"></div></div></div>
         </div>
-      </div>
-      <div class="card"><div class="scroll" id="closed"></div></div>
-    </section>
 
-    <details class="card sec" id="logbox">
-      <summary>Журнал работы</summary>
-      <pre id="log">…</pre>
-    </details>
+        <div class="panel">
+          <div class="panel-head"><h2>Под водой</h2>
+            <span class="hint">насколько глубоко и как долго счёт был ниже своего пика</span></div>
+          <div class="panel-body"><div id="under"></div></div>
+        </div>
+      </section>
 
-  </div>
+      <!-- ── Позиции ──────────────────────────────────────────────────── -->
+      <section class="page" data-page="positions" hidden>
+        <div class="panel-head bare">
+          <h2>В работе</h2><span class="hint" id="open-hint"></span>
+          <span class="totals" id="open-total"></span>
+        </div>
+        <div id="open"></div>
+
+        <div class="panel-head bare" style="margin-top:26px">
+          <h2>Ждут активации</h2><span class="hint" id="wait-hint"></span>
+        </div>
+        <div class="panel"><div class="scroll" id="waiting"></div></div>
+      </section>
+
+      <!-- ── История ──────────────────────────────────────────────────── -->
+      <section class="page" data-page="history" hidden>
+        <div class="panel-head bare">
+          <h2>Закрытые сделки</h2><span class="hint" id="closed-hint"></span>
+          <div class="row-end">
+            <a class="btn ghost sm" href="/api/export.csv" download>Выгрузить CSV</a>
+            <a class="btn ghost sm" href="/api/export.jsonl" download>Полный дамп</a>
+          </div>
+        </div>
+        <div class="panel"><div class="scroll" id="closed"></div></div>
+      </section>
+
+      <!-- ── Аналитика ────────────────────────────────────────────────── -->
+      <section class="page" data-page="analytics" hidden>
+        <div class="cols2">
+          <div class="panel">
+            <div class="panel-head"><h2>Распределение результата</h2>
+              <span class="hint">много мелких минусов, редкие крупные плюсы</span></div>
+            <div class="panel-body"><div id="hist"></div></div>
+          </div>
+          <div class="panel">
+            <div class="panel-head"><h2>Чем закончились</h2>
+              <span class="hint">стоп после взятой цели — не полный минус</span></div>
+            <div class="panel-body"><div id="exits"></div></div>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head"><h2>По парам</h2>
+            <span class="hint">кто приносит, кто забирает</span></div>
+          <div class="scroll" id="pairs"></div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head"><h2>Почему бот не торгует</h2>
+            <span class="hint">воронка отсева за последний цикл</span></div>
+          <div class="panel-body"><div id="funnel"></div></div>
+        </div>
+      </section>
+
+      <!-- ── Управление ───────────────────────────────────────────────── -->
+      <section class="page" data-page="control" hidden>
+        <div id="controls"></div>
+      </section>
+
+      <!-- ── Журнал ───────────────────────────────────────────────────── -->
+      <section class="page" data-page="log" hidden>
+        <div class="panel"><pre id="log">…</pre></div>
+      </section>
+    </div>
+  </main>
 </div>
 
 <script>
@@ -468,6 +540,7 @@ function syncUrl() {
   const u = new URLSearchParams();
   if (period !== 'all') u.set('period', period);
   if (strategy !== 'ALL') u.set('strategy', strategy);
+  if (page !== 'overview') u.set('page', page);
   const s = u.toString();
   history.replaceState(null, '', s ? '?' + s : location.pathname);
 }
@@ -493,6 +566,11 @@ const when = s => {
 const dur   = m => m >= 1440 ? (m / 1440).toFixed(1) + ' д'
                 : m >= 60 ? (m / 60).toFixed(1) + ' ч' : Math.round(m) + ' м';
 const ts    = s => { const d = new Date(s); return isNaN(d) ? 0 : d.getTime(); };
+// Разметка меняется чаще кода. Отсутствующий элемент не должен ронять всю
+// отрисовку — иначе одна переименованная секция гасит весь дашборд.
+const el    = id => document.getElementById(id);
+const setText = (id, text) => { const n = el(id); if (n) n.textContent = text; };
+const setHtml = (id, html) => { const n = el(id); if (n) n.innerHTML = html; };
 // Время в позиции считаем от метки открытия: она приходит в UTC, как и всё
 // остальное, поэтому сравниваем с текущим моментом напрямую.
 const ago   = s => { const t = ts(s); return t ? dur((Date.now() - t) / 60000) : '—'; };
@@ -623,7 +701,7 @@ function cards(byStrategy) {
       `<div class="kpi"><div class="k">${k}</div>
        <div class="v ${c || ''}">${v}</div><div class="n">${n || ''}</div></div>`;
 
-    return `<div class="card card-pad">
+    return `<div class="panel card-pad">
       <div class="stitle">
         <span class="key" style="background:${COLOR[key] || 'var(--muted)'}"></span>
         <span class="nm">${esc(NAMES[key] || key)}</span>
@@ -841,7 +919,9 @@ function groupHead(key, count, sum) {
   return `<div class="group-head">
     <span class="key" style="background:${COLOR[key] || 'var(--muted)'}"></span>
     <span class="nm">${esc(NAMES[key] || key)}</span>
-    <span class="cnt">${count} шт.</span>${money_}</div>`;
+    <span class="cnt">${count} шт.</span>${money_}
+    <button type="button" class="btn ghost sm" data-action="close_all"
+      data-strategy="${key}" data-pair="">Закрыть всё</button></div>`;
 }
 
 /** Позиция карточкой: сколько принесла и где цена между стопом и целями. */
@@ -854,7 +934,7 @@ function openCards(rows) {
   if (!rows.length) {
     total.textContent = '';
     box.className = '';
-    box.innerHTML = '<div class="card card-pad empty">Открытых позиций нет</div>';
+    box.innerHTML = '<div class="panel card-pad empty">Открытых позиций нет</div>';
     return;
   }
 
@@ -946,6 +1026,12 @@ function posCards(rows) {
       </div>
       ${flags.length ? `<div class="flags" style="margin-top:10px">${flags.join('')}</div>` : ''}
       <div class="pos-why" title="${esc(r.why)}">${esc(r.why) || '—'}</div>
+      <div class="pos-act">
+        <button type="button" class="btn ghost sm" data-action="breakeven"
+          data-strategy="${r.strategy}" data-pair="${esc(r.pair)}">В безубыток</button>
+        <button type="button" class="btn ghost sm" data-action="close"
+          data-strategy="${r.strategy}" data-pair="${esc(r.pair)}">Закрыть</button>
+      </div>
     </div>`;
   }).join('');
 }
@@ -953,8 +1039,7 @@ function posCards(rows) {
 /** Ордера, ожидающие активации: далеко ли до цены и сколько осталось жить. */
 function waitingTable(rows) {
   const box = document.getElementById('waiting');
-  document.getElementById('wait-hint').textContent =
-    rows.length ? `${rows.length} шт.` : '';
+  setText('wait-hint', rows.length ? `${rows.length} шт.` : '');
   if (!rows.length) {
     box.innerHTML = '<div class="empty">Ожидающих ордеров нет</div>';
     return;
@@ -968,7 +1053,7 @@ function waitingTable(rows) {
     return (a.distance_pct ?? 99) - (b.distance_pct ?? 99);
   });
 
-  const cols = 13;
+  const cols = 14;
   let owner = null;
   const body = sorted.map(r => {
     let head = '';
@@ -986,7 +1071,7 @@ function waitingTable(rows) {
   box.innerHTML = `<table><thead><tr>
     <th>Стратегия</th><th>Пара</th><th>Напр.</th><th>Цена входа</th><th>Рынок</th>
     <th>До входа</th><th>Стоп</th><th>Цель</th><th>RR</th><th>Риск</th>
-    <th>Ждёт</th><th>Истечёт через</th><th>Почему</th>
+    <th>Ждёт</th><th>Истечёт через</th><th>Почему</th><th></th>
   </tr></thead><tbody>${body}</tbody></table>`;
 }
 
@@ -1009,14 +1094,15 @@ function orderRow(r) {
       <td>$${(r.risk || 0).toFixed(2)}</td>
       <td>${dur(r.waiting_min || 0)}</td>
       <td>${dur(r.expires_in_min || 0)}</td>
-      <td class="why" title="${esc(r.why)}">${esc(r.why) || '—'}</td></tr>`;
+      <td class="why" title="${esc(r.why)}">${esc(r.why) || '—'}</td>
+      <td><button type="button" class="btn ghost sm" data-action="cancel"
+        data-strategy="${r.strategy}" data-pair="${esc(r.pair)}">Снять</button></td></tr>`;
   }).join('');
 }
 
 function closedTable(rows) {
   const box = document.getElementById('closed');
-  document.getElementById('closed-hint').textContent =
-    rows.length ? `${rows.length} шт., новые сверху` : '';
+  setText('closed-hint', rows.length ? `${rows.length} шт., новые сверху` : '');
   if (!rows.length) { box.innerHTML = '<div class="empty">В выборке нет закрытых сделок</div>'; return; }
 
   // Порядок задаём явно, а не полагаемся на порядок с сервера: он уже
@@ -1049,6 +1135,297 @@ function closedTable(rows) {
       <td>${when(r.closed)}</td>
       <td class="why" title="${esc(r.why)}">${esc(r.why) || '—'}</td></tr>`;
   }).join('')}</tbody></table>`;
+}
+
+
+/* ── Разделы ────────────────────────────────────────────────────────────── */
+const PAGES = [
+  { id: 'overview',  ic: '◎', title: 'Обзор' },
+  { id: 'positions', ic: '▤', title: 'Позиции' },
+  { id: 'history',   ic: '≡', title: 'История' },
+  { id: 'analytics', ic: '◨', title: 'Аналитика' },
+  { id: 'control',   ic: '⚙', title: 'Управление' },
+  { id: 'log',       ic: '⌘', title: 'Журнал' },
+];
+let page = PAGES.some(p => p.id === q.get('page')) ? q.get('page') : 'overview';
+
+function buildNav() {
+  const counts = {
+    positions: (DATA && (DATA.open_positions || []).length + (DATA.pending_orders || []).length) || 0,
+    history: (DATA && DATA.closed_total) || 0,
+  };
+  document.getElementById('nav').innerHTML = PAGES.map(p => {
+    const n = counts[p.id];
+    return `<button type="button" data-page="${p.id}" aria-current="${p.id === page}">
+      <span class="ic">${p.ic}</span>${p.title}
+      ${n ? `<span class="tag">${n}</span>` : ''}</button>`;
+  }).join('');
+  document.getElementById('nav').onclick = e => {
+    const b = e.target.closest('button');
+    if (!b) return;
+    page = b.dataset.page;
+    syncUrl();
+    showPage();
+    // Настройки и журнал грузятся по требованию: держать их в общем опросе
+    // значило бы затирать поле, которое оператор прямо сейчас правит.
+    if (page === 'control') loadSettings();
+    if (page === 'log') refreshLog();
+  };
+}
+
+function showPage() {
+  document.querySelectorAll('.page').forEach(s => {
+    s.hidden = s.dataset.page !== page;
+  });
+  const def = PAGES.find(p => p.id === page);
+  document.getElementById('page-title').textContent = def ? def.title : '';
+  buildNav();
+}
+
+/* ── Полоса внимания ────────────────────────────────────────────────────── */
+function attention(items) {
+  const box = document.getElementById('attention');
+  if (!items || !items.length) { box.innerHTML = ''; box.className = ''; return; }
+  box.className = 'att';
+  box.innerHTML = items.map(a => `<div class="att-row ${a.level === 'bad' ? 'bad' : ''}">
+    <div><div class="t">${esc(a.text)}</div>
+    ${a.detail ? `<div class="d">${esc(a.detail)}</div>` : ''}</div></div>`).join('');
+}
+
+/* ── Кривая просадки ────────────────────────────────────────────────────── */
+/**
+ * Одно число максимальной просадки не показывает, сколько времени счёт провёл
+ * ниже своего пика. Здесь видно и глубину, и длительность.
+ */
+function underwater(byStrategy) {
+  const box = document.getElementById('under');
+  const keys = activeStrategies().filter(k => byStrategy[k].curve.length);
+  if (!keys.length) { box.innerHTML = '<div class="empty">Сделок пока нет</div>'; return; }
+
+  const IX = PAPER ? 2 : 1;
+  const series = keys.map(k => {
+    let peak = -Infinity;
+    return byStrategy[k].curve.map(p => {
+      peak = Math.max(peak, p[IX]);
+      // В процентах просадка от пика; в долларах — отставание от пика
+      const dd = PAPER ? (p[IX] - peak) : (p[IX] - peak);
+      return [p[0], dd];
+    });
+  });
+
+  const W = 1000, H = 150, P = { t: 10, r: 26, b: 22, l: 62 };
+  const all = series.flat();
+  const times = all.map(p => ts(p[0]));
+  const t0 = Math.min(...times), t1 = Math.max(...times);
+  const worst = Math.min(...all.map(p => p[1]), -0.01);
+  const x = t => P.l + (t1 === t0 ? 0 : (t - t0) / (t1 - t0)) * (W - P.l - P.r);
+  const y = v => P.t + (v / worst) * (H - P.t - P.b);
+
+  const ticks = niceTicks(worst, 0, 4);
+  let g = '';
+  for (const v of ticks) {
+    if (v > 0) continue;
+    const yy = y(v);
+    g += `<line x1="${P.l}" y1="${yy}" x2="${W - P.r}" y2="${yy}" stroke="var(--grid)" stroke-width="1"/>`;
+    g += `<text x="${P.l - 10}" y="${yy + 4}" text-anchor="end" font-size="11" fill="var(--ink-4)">${
+      PAPER ? v.toFixed(0) + '%' : Math.round(v)}</text>`;
+  }
+
+  const areas = keys.map((k, i) => {
+    const pts = series[i];
+    const d = pts.map((p, j) => (j ? 'L' : 'M') + x(ts(p[0])).toFixed(1) + ' ' + y(p[1]).toFixed(1)).join(' ')
+      + ` L ${x(ts(pts[pts.length - 1][0])).toFixed(1)} ${y(0).toFixed(1)}`
+      + ` L ${x(ts(pts[0][0])).toFixed(1)} ${y(0).toFixed(1)} Z`;
+    return `<path d="${d}" fill="${COLOR[k]}" fill-opacity="0.10"/>
+            <path d="${pts.map((p, j) => (j ? 'L' : 'M') + x(ts(p[0])).toFixed(1) + ' ' + y(p[1]).toFixed(1)).join(' ')}"
+              fill="none" stroke="${COLOR[k]}" stroke-width="1.5"/>`;
+  }).join('');
+
+  box.innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Кривая просадки">
+    ${g}<line x1="${P.l}" y1="${y(0)}" x2="${W - P.r}" y2="${y(0)}" stroke="var(--axis)" stroke-width="1"/>
+    ${areas}</svg>`;
+}
+
+/* ── Гистограмма распределения R ────────────────────────────────────────── */
+function histogram(rows) {
+  const box = document.getElementById('hist');
+  const vals = rows.map(r => r.pnl_r != null ? r.pnl_r : (r.risk ? r.pnl / r.risk : 0))
+                   .filter(v => isFinite(v));
+  if (vals.length < 3) { box.innerHTML = '<div class="empty">Мало сделок</div>'; return; }
+
+  const edges = [-Infinity, -1.5, -1, -0.5, 0, 0.5, 1, 2, 3, 5, Infinity];
+  const labels = ['<−1.5', '−1.5…−1', '−1…−0.5', '−0.5…0', '0…0.5',
+                  '0.5…1', '1…2', '2…3', '3…5', '>5'];
+  const counts = labels.map((_, i) =>
+    vals.filter(v => v > edges[i] && v <= edges[i + 1]).length);
+  const max = Math.max(...counts, 1);
+
+  const W = 640, H = 200, P = { t: 12, r: 12, b: 44, l: 34 };
+  const bw = (W - P.l - P.r) / counts.length;
+  const bars = counts.map((c, i) => {
+    const h = (c / max) * (H - P.t - P.b);
+    const bx = P.l + i * bw + 2;
+    const by = H - P.b - h;
+    const colour = edges[i + 1] <= 0 ? 'var(--bad)' : 'var(--good)';
+    return `<rect x="${bx}" y="${by}" width="${bw - 4}" height="${Math.max(h, 1)}"
+              rx="4" fill="${colour}" fill-opacity="0.75"/>
+      ${c ? `<text x="${bx + (bw - 4) / 2}" y="${by - 5}" text-anchor="middle"
+              font-size="10.5" fill="var(--ink-3)">${c}</text>` : ''}
+      <text x="${bx + (bw - 4) / 2}" y="${H - P.b + 15}" text-anchor="middle"
+        font-size="9.5" fill="var(--ink-4)">${labels[i]}</text>`;
+  }).join('');
+
+  const mean = vals.reduce((a, b) => a + b, 0) / vals.length;
+  box.innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Распределение результата в R">
+    ${bars}</svg>
+    <div style="font-size:12.5px;color:var(--ink-3);margin-top:6px">
+      Средний результат <b style="color:var(--ink)">${mean >= 0 ? '+' : ''}${mean.toFixed(3)} R</b>
+      на ${vals.length} сделках. Хвост справа — то, ради чего терпятся минусы слева.</div>`;
+}
+
+/* ── Причины выхода ─────────────────────────────────────────────────────── */
+function exitBreakdown(rows) {
+  const box = document.getElementById('exits');
+  if (!rows.length) { box.innerHTML = '<div class="empty">Мало сделок</div>'; return; }
+
+  const by = {};
+  for (const r of rows) {
+    const key = r.reason_ru || r.reason || '—';
+    (by[key] = by[key] || { n: 0, r: 0 }).n++;
+    by[key].r += r.pnl_r != null ? r.pnl_r : (r.risk ? r.pnl / r.risk : 0);
+  }
+  const list = Object.entries(by).sort((a, b) => b[1].n - a[1].n);
+  const total = rows.length;
+
+  box.innerHTML = `<table><thead><tr>
+    <th>Чем закончилась</th><th>Сделок</th><th>Доля</th><th>Сумма R</th><th>Средний R</th>
+  </tr></thead><tbody>${list.map(([name, v]) => `<tr>
+    <td>${esc(name)}</td>
+    <td>${v.n}</td>
+    <td>${(v.n / total * 100).toFixed(0)}%</td>
+    <td class="${cls(v.r)}">${v.r >= 0 ? '+' : ''}${v.r.toFixed(1)}</td>
+    <td class="${cls(v.r)}">${(v.r / v.n) >= 0 ? '+' : ''}${(v.r / v.n).toFixed(2)}</td>
+  </tr>`).join('')}</tbody></table>`;
+}
+
+/* ── Разбивка по парам ──────────────────────────────────────────────────── */
+function pairBreakdown(rows) {
+  const box = document.getElementById('pairs');
+  if (!rows.length) { box.innerHTML = '<div class="empty">Мало сделок</div>'; return; }
+
+  const by = {};
+  for (const r of rows) {
+    const key = r.pair || '—';
+    const item = (by[key] = by[key] || { n: 0, wins: 0, pnl: 0, r: 0 });
+    item.n++;
+    item.pnl += r.pnl;
+    item.r += r.pnl_r != null ? r.pnl_r : (r.risk ? r.pnl / r.risk : 0);
+    if (r.pnl > 0) item.wins++;
+  }
+  const list = Object.entries(by).sort((a, b) => b[1].r - a[1].r);
+
+  box.innerHTML = `<table><thead><tr>
+    <th>Пара</th><th>Сделок</th><th>Винрейт</th><th>Результат</th><th>Сумма R</th><th>Средний R</th>
+  </tr></thead><tbody>${list.map(([pair, v]) => `<tr>
+    <td class="pair">${esc(pair)}</td>
+    <td>${v.n}</td>
+    <td>${(v.wins / v.n * 100).toFixed(0)}%</td>
+    <td class="${cls(v.pnl)}">${money(v.pnl)}</td>
+    <td class="${cls(v.r)}"><b>${v.r >= 0 ? '+' : ''}${v.r.toFixed(1)}</b></td>
+    <td class="${cls(v.r)}">${(v.r / v.n) >= 0 ? '+' : ''}${(v.r / v.n).toFixed(2)}</td>
+  </tr>`).join('')}</tbody></table>`;
+}
+
+/* ── Режим рынка ────────────────────────────────────────────────────────── */
+/* Полоса нужна ровно для одного: уменьшенный размер позиции без объяснения
+   выглядит как сбой. Когда размер полный, полосы нет — лишний элемент,
+   который всегда говорит одно и то же, перестают замечать. */
+function regimeView(regime) {
+  const box = el('regime');
+  if (!box) return;
+  if (!regime || !regime.reduced) { box.innerHTML = ''; return; }
+  box.innerHTML = `
+    <div class="note">
+      <span class="dot" style="background:var(--warn)"></span>
+      <span><b>Рынок направленный.</b> ${esc(regime.text)} —
+      размер позиции SMC уменьшен. В тренде цена не возвращается в зону
+      интереса, и преимущество стратегии там недоказуемо.</span>
+    </div>`;
+}
+
+/* ── Воронка отсева ─────────────────────────────────────────────────────── */
+function funnelView(funnel) {
+  const box = document.getElementById('funnel');
+  const keys = Object.keys(funnel || {}).filter(k => activeStrategies().includes(k));
+  if (!keys.length) {
+    box.innerHTML = '<div class="empty">Бот ещё не проходил цикл сканирования</div>';
+    return;
+  }
+  box.innerHTML = keys.map(key => {
+    const d = funnel[key];
+    const max = Math.max(...(d.reasons || []).map(r => r.count), 1);
+    const rows = (d.reasons || []).map(r => `
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:7px">
+        <div style="width:270px;font-size:12.5px;color:var(--ink-2)">${esc(r.reason)}</div>
+        <div style="flex:1;height:8px;border-radius:4px;background:var(--hairline-2)">
+          <div style="height:8px;border-radius:4px;width:${r.count / max * 100}%;
+            background:${COLOR[key] || 'var(--accent)'};opacity:.75"></div></div>
+        <div style="width:34px;text-align:right;font-size:12px;
+          font-variant-numeric:tabular-nums;color:var(--ink-3)">${r.count}</div>
+      </div>
+      ${r.example ? `<div style="font-size:11px;color:var(--ink-4);
+        margin:-3px 0 9px 280px">${esc(r.example)}</div>` : ''}`).join('');
+    return `<div style="margin-bottom:20px">
+      <div class="group-head"><span class="key" style="background:${COLOR[key] || 'var(--ink-4)'}"></span>
+        <span class="nm">${esc(NAMES[key] || key)}</span>
+        <span class="cnt">проверено ${d.pairs} пар · сигналов ${d.found}</span></div>
+      ${rows || '<div class="empty">Нет данных</div>'}</div>`;
+  }).join('');
+}
+
+/* ── Действия оператора ─────────────────────────────────────────────────── */
+/**
+ * Разрешены только снижающие риск. Опасные требуют подтверждения: кнопка
+ * сначала переспрашивает и через шесть секунд сама отменяется.
+ */
+async function act(btn) {
+  const { action, strategy, pair } = btn.dataset;
+  const risky = action === 'close' || action === 'close_all';
+
+  if (risky && btn.dataset.armed !== '1') {
+    btn.dataset.armed = '1';
+    btn.dataset.was = btn.textContent;
+    btn.textContent = 'Точно?';
+    btn.classList.add('danger');
+    setTimeout(() => {
+      if (btn.dataset.armed === '1') {
+        btn.dataset.armed = '';
+        btn.textContent = btn.dataset.was;
+        btn.classList.remove('danger');
+      }
+    }, 6000);
+    return;
+  }
+
+  btn.disabled = true;
+  try {
+    const resp = await fetch('/api/action', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action, strategy, pair }),
+    });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.error || resp.status);
+    await refresh();
+  } catch (e) {
+    btn.textContent = 'Не вышло';
+    btn.title = e.message;
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function bindActions() {
+  document.querySelectorAll('[data-action]').forEach(b => { b.onclick = () => act(b); });
 }
 
 /* ── Управление торговлей ───────────────────────────────────────────────── */
@@ -1115,7 +1492,7 @@ function renderControls() {
       </div>${note ? `<div class="ctl-note">${note}</div>` : ''}`;
     }).join('');
 
-    return `<div class="ctl-card">
+    return `<div class="panel">
       <div class="ctl-head">
         <span class="key" style="background:${COLOR[key] || 'var(--muted)'}"></span>
         <span class="nm">${esc(NAMES[key] || key)}</span>
@@ -1248,7 +1625,7 @@ function logClass(line) {
 
 async function refreshLog() {
   const box = document.getElementById('log');
-  if (!document.getElementById('logbox').open) return;
+  if (page !== 'log') return;
   try {
     const d = await (await fetch('/api/log', { cache: 'no-store' })).json();
     const atEnd = box.scrollTop + box.clientHeight >= box.scrollHeight - 40;
@@ -1283,18 +1660,27 @@ function render() {
   }
 
   const label = (PERIODS.find(p => p.id === period) || {}).label;
-  document.getElementById('f-count').textContent =
-    `${closed.length} закрытых · ${open.length} в работе · ${waiting.length} ждут`;
-  document.getElementById('sum-hint').textContent =
-    period === 'all' ? 'за всё время' : `за период: ${label.toLowerCase()}`;
-  document.getElementById('chart-hint').textContent =
-    PAPER ? '% от депозита на начало периода' : 'накопленный результат, $';
+  setText('f-count',
+    `${closed.length} закрытых · ${open.length} в работе · ${waiting.length} ждут`);
+  setText('sum-hint',
+    period === 'all' ? 'за всё время' : `за период: ${label.toLowerCase()}`);
+  setText('chart-hint',
+    PAPER ? '% от депозита на начало периода' : 'накопленный результат, $');
 
   cards(byStrategy);
   chart(byStrategy);
+  underwater(byStrategy);
   openCards(open);
   waitingTable(waiting);
   closedTable(closed);
+  histogram(closed);
+  exitBreakdown(closed);
+  pairBreakdown(closed);
+  funnelView(DATA.funnel);
+  regimeView(DATA.regime);
+  attention(DATA.attention);
+  bindActions();
+  showPage();
 }
 
 async function refresh() {
@@ -1306,13 +1692,12 @@ async function refresh() {
     PAPER = !!d.paper;
     showState(d.status);
 
-    document.getElementById('mode').textContent =
-      PAPER ? '👻 фантом' : (d.mode || '—');
+    setText('mode', PAPER ? '👻 фантом' : (d.mode || '—'));
     const c = d.costs;
-    document.getElementById('stamp').textContent =
+    setText('stamp',
       (c ? `комиссии ${(c.maker * 100).toFixed(3)}/${(c.taker * 100).toFixed(3)}%, `
          + `спорная свеча — против нас · ` : '')
-      + `обновлено ${when(d.generated)}`;
+      + `обновлено ${when(d.generated)}`);
 
     render();
   } catch (e) {
@@ -1322,12 +1707,7 @@ async function refresh() {
   }
 }
 
-document.getElementById('logbox').addEventListener('toggle', refreshLog);
-// Настройки перечитываем при раскрытии панели, а не по таймеру: иначе фоновое
-// обновление затирало бы поле, которое оператор прямо сейчас правит.
-document.getElementById('ctlbox').addEventListener('toggle', function () {
-  if (this.open) loadSettings();
-});
+showPage();
 refresh();
 setInterval(refresh, 15000);
 // Журнал обновляем чаще: в окне приложения он заменяет консоль, и по нему

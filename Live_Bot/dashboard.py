@@ -533,8 +533,28 @@ def build_payload():
     # они уходили только в лог. Это ответ на самый частый вопрос при
     # наблюдении — «почему он ничего не делает».
     payload['funnel'] = scan_report.snapshot()
+    payload['regime'] = _regime()
     payload['attention'] = _attention(payload)
     return payload
+
+
+def _regime():
+    """
+    Режим рынка и текущий множитель риска SMC.
+
+    Показывается, потому что иначе уменьшенный размер позиции выглядит как
+    сбой: сделка открыта, а риск вдвое меньше настроенного, и объяснения
+    этому на дашборде нет. Значение берётся из общего суточного кэша
+    адаптера — лишнего запроса к бирже здесь не возникает.
+    """
+    try:
+        import strategy_smc
+        name, mult, text = strategy_smc.market_regime()
+        return {'name': name, 'scale': mult, 'text': text,
+                'reduced': mult < 1.0}
+    except Exception as exc:
+        return {'name': None, 'scale': 1.0, 'text': f'режим неизвестен ({exc})',
+                'reduced': False}
 
 
 def _attention(payload):

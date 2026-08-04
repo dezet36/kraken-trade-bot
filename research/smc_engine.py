@@ -329,13 +329,19 @@ def simulate_order(order, exec_arrays, start_pos, risk_amount,
 def run_portfolio(orders, exec_data, risk_pct=1.0, max_positions=5,
                   cooldown_hours=12.0, initial_balance=INITIAL_BALANCE,
                   breakeven_after_tp1=True, max_hold_hours=336.0,
-                  max_same_direction=0):
+                  max_same_direction=0, risk_scale=None):
     """
     Портфельная симуляция: ордера в хронологическом порядке, ограничения по
     числу позиций и кулдауну, риск считается от ТЕКУЩЕГО баланса.
 
     orders    — список Order, отсортируется по created
     exec_data — {pair: DataFrame свечей исполнения (5m)}
+    risk_scale — необязательная функция order -> множитель риска. Нужна, чтобы
+        проверять переменный размер позиции, не трогая сам сигнал: R-множитель
+        сделки от размера не зависит, а доходность и просадка зависят, и без
+        этого крючка отличить «торговать меньше» от «не торговать» нельзя.
+        Множитель обязан считаться ТОЛЬКО по прошлым данным на момент
+        order.created — иначе в симуляцию попадёт будущее.
     """
     prepared = {pair: _prepare(df) for pair, df in exec_data.items()}
     positions = {}
@@ -390,7 +396,11 @@ def run_portfolio(orders, exec_data, risk_pct=1.0, max_positions=5,
         if start_pos >= len(arrays['ts']):
             continue
 
-        risk_amount = balance * risk_pct / 100
+        scale = 1.0 if risk_scale is None else float(risk_scale(order))
+        if scale <= 0:
+            skipped['risk_zero'] = skipped.get('risk_zero', 0) + 1
+            continue
+        risk_amount = balance * risk_pct / 100 * scale
         result = simulate_order(
             order, arrays, start_pos, risk_amount,
             breakeven_after_tp1=breakeven_after_tp1,
@@ -406,6 +416,7 @@ def run_portfolio(orders, exec_data, risk_pct=1.0, max_positions=5,
 
         balance += result['pnl']
         result['balance'] = balance
+        result['risk_scale'] = scale
         result['pnl_pct'] = result['pnl'] / (balance - result['pnl']) * 100
         trades.append(result)
         equity_curve.append((result['exit_time'], balance))

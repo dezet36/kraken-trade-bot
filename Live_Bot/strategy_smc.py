@@ -22,6 +22,7 @@ import settings_store as settings
 from exchange import fetch_ohlcv
 from logger import log
 from smc import params as smc_params
+from smc import regime as regime_mod
 from smc import signal as smc_signal
 
 # Причина отказа по последней проверенной паре. Ядро возвращает её вторым
@@ -43,6 +44,42 @@ def _apply_settings():
 
 # pair -> (последний timestamp закрытой свечи, контекст)
 _context_cache = {}
+
+# (дата последней закрытой дневной свечи) -> (режим, er, порог, множитель).
+# Режим меняется раз в сутки, тянуть дневные свечи BTC на каждой паре
+# бессмысленно.
+_regime_cache = {}
+
+
+def market_regime(client=None):
+    """
+    Режим рынка по дневным свечам BTC и множитель риска к нему.
+
+    Возвращает (режим, множитель, описание). При любой неудаче — полный
+    размер: правило умеет только уменьшать ставку, и отсутствие данных не
+    повод торговать иначе, чем обычно.
+    """
+    need = (smc_params.REGIME_ER_WINDOW + smc_params.REGIME_MIN_HISTORY + 30)
+    try:
+        raw = fetch_ohlcv('1d', limit=need, symbol=smc_params.REGIME_SYMBOL,
+                          client=client)
+        df = _drop_forming_candle(raw)
+        if df is None or len(df) < smc_params.REGIME_ER_WINDOW + 2:
+            return regime_mod.UNKNOWN, 1.0, 'режим неизвестен (нет дневных данных)'
+
+        key = str(df['timestamp'].iloc[-1])
+        if key in _regime_cache:
+            name, er, threshold, mult = _regime_cache[key]
+            return name, mult, regime_mod.describe(name, er, threshold, mult)
+
+        name, er, threshold = regime_mod.classify(df['close'].to_numpy())
+        mult = regime_mod.risk_multiplier(name)
+        _regime_cache.clear()
+        _regime_cache[key] = (name, er, threshold, mult)
+        return name, mult, regime_mod.describe(name, er, threshold, mult)
+    except Exception as exc:
+        log(f"   режим рынка не определён ({exc}) — риск полный")
+        return regime_mod.UNKNOWN, 1.0, 'режим неизвестен (ошибка)'
 
 
 def _drop_forming_candle(df):
@@ -105,7 +142,7 @@ def get_context(pair, client=None, force=False):
     return context
 
 
-def _to_bot_signal(setup, pair, balance):
+def _to_bot_signal(setup, pair, balance, risk_scale=1.0):
     """
     Переводит сетап SMC в структуру, понятную trade_manager.
 
@@ -133,9 +170,13 @@ def _to_bot_signal(setup, pair, balance):
         'tp_targets': list(targets),
         'tp_fractions': list(trade['fractions']),
         'max_same_direction': smc_params.MAX_SAME_DIRECTION,
-        'risk_pct': settings.risk_pct('SMC'),
-        'position_size': trade['position_size'],
-        'risk_amount': trade['risk_amount'],
+        # Риск режется режимом рынка ЗДЕСЬ, в одном месте: и paper_broker, и
+        # trade_manager считают объём от params['risk_pct'], поэтому фантом и
+        # бой получают одинаковый размер по построению, а не по совпадению.
+        'risk_pct': settings.risk_pct('SMC') * risk_scale,
+        'risk_scale': risk_scale,
+        'position_size': trade['position_size'] * risk_scale,
+        'risk_amount': trade['risk_amount'] * risk_scale,
         'rr': trade['rr'],
         'sl_distance': trade['sl_distance'],
     }
@@ -175,7 +216,7 @@ def _to_bot_signal(setup, pair, balance):
     }
 
 
-def analyze_market(pair, balance, client=None):
+def analyze_market(pair, balance, client=None, risk_scale=None):
     """
     Проверяет одну пару и возвращает сигнал либо None.
 
@@ -184,6 +225,8 @@ def analyze_market(pair, balance, client=None):
     самостоятельно — передавать готовые окна снаружи здесь бессмысленно.
     """
     _apply_settings()
+    if risk_scale is None:
+        _, risk_scale, _ = market_regime(client=client)
     context = get_context(pair, client=client)
     if context is None:
         log(f"   {pair}: недостаточно данных для SMC-контекста")
@@ -200,7 +243,7 @@ def analyze_market(pair, balance, client=None):
 
     log(f"   {pair}: {setup['direction']} {setup['poi']['type']} | "
         f"confluence {setup['confluence']} | RR {setup['params']['rr']:.2f}")
-    return _to_bot_signal(setup, pair, balance)
+    return _to_bot_signal(setup, pair, balance, risk_scale=risk_scale)
 
 
 def scan_for_setups(pairs, trade_manager, client=None, balance=None):
@@ -215,6 +258,11 @@ def scan_for_setups(pairs, trade_manager, client=None, balance=None):
     candidates = []
     report.begin('SMC')
 
+    # Режим считается один раз на цикл, а не на каждой паре: он общий для
+    # всего рынка и меняется раз в сутки.
+    _, risk_scale, regime_text = market_regime(client=client)
+    log(f"   рынок: {regime_text}")
+
     for pair in pairs:
         try:
             if not trade_manager.check_cooldown(pair):
@@ -226,7 +274,8 @@ def scan_for_setups(pairs, trade_manager, client=None, balance=None):
                 report.record('SMC', pair, 'позиция или ордер уже есть')
                 continue
 
-            signal = analyze_market(pair, balance, client=client)
+            signal = analyze_market(pair, balance, client=client,
+                                    risk_scale=risk_scale)
             report.record('SMC', pair, None if signal else _last_reason.get(pair))
             if signal:
                 context = _context_cache.get(pair)

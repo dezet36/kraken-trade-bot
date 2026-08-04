@@ -192,13 +192,25 @@ class MarketContext:
         # против +86.0%). Торговать при неизвестном bias — ровно то, что этот
         # фильтр и должен запрещать.
         required = {'agree': ('bias', 'htf'), 'bias_only': ('bias',),
-                    'htf_only': ('htf',)}.get(mode, ())
+                    'htf_only': ('htf',),
+                    'htf_unless_against': ('bias', 'htf')}.get(mode, ())
         if any(key not in trends for key in required):
             return NEUTRAL
         if mode == 'bias_only':
             return trends.get('bias', NEUTRAL)
         if mode == 'htf_only':
             return trends.get('htf', NEUTRAL)
+        if mode == 'htf_unless_against':
+            # Направление задаёт 4H; дневная свеча имеет право только запретить.
+            # Разница со строгим согласием — свечи, где 1D в боковике: там
+            # 'agree' не торгует, хотя дневной график ничему не противоречит.
+            # Разница с 'htf_only' — сохранён запрет на встречную торговлю,
+            # а именно он держит просадку (замер: без него 36.7% -> 45.3%).
+            htf = trends['htf']
+            bias = trends['bias']
+            if htf == NEUTRAL or (bias != NEUTRAL and bias != htf):
+                return NEUTRAL
+            return htf
         if mode == 'any':
             # При противоречии верим старшему таймфрейму (§2.6: приоритет
             # всегда у более старшего ТФ)
@@ -307,9 +319,16 @@ class MarketContext:
         factors, score = self._confluence(
             df, at_index, best, leg, bias, swept, best_gap, timestamp
         )
-        if score < params.MIN_CONFLUENCE_SCORE:
+        # Порог у покупок может быть выше: замер на двух независимых периодах и
+        # во всех трёх режимах рынка показал, что лонги слабее шортов ВЕЗДЕ
+        # (0.144 R против 0.390 R при 46% и 54% сделок). Премия равна нулю —
+        # поведение прежнее, симметричное.
+        threshold = params.MIN_CONFLUENCE_SCORE
+        if bias == BULLISH:
+            threshold += params.LONG_CONFLUENCE_PREMIUM
+        if score < threshold:
             missing = [k for k, v in factors.items() if not v]
-            return None, f'confluence {score:.1f} < {params.MIN_CONFLUENCE_SCORE} (нет: {", ".join(missing)})'
+            return None, f'confluence {score:.1f} < {threshold} (нет: {", ".join(missing)})'
 
         # 8) Геометрия сделки
         trade = self._build_trade(best, leg, bias, swept, at_index, balance)
