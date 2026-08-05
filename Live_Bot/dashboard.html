@@ -212,6 +212,25 @@
   }
   .note .dot { margin-top: 6px; }
 
+  /* ── Обновление кода ─────────────────────────────────────────────── */
+  .upd-now { font-size: 13px; color: var(--ink-2); margin-bottom: 10px; }
+  .upd-now code, .upd-row code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 12px; background: var(--surface-2); padding: 2px 6px;
+    border-radius: 6px; border: 1px solid var(--hairline);
+  }
+  .upd-date { color: var(--ink-4); font-size: 12px; margin: 0 8px; }
+  .upd-msg { color: var(--ink-3); }
+  .upd-branch { color: var(--ink-4); font-size: 12px; margin-left: 8px; }
+  .upd-state { font-size: 13px; color: var(--ink-3); margin-bottom: 10px; }
+  .upd-state.has { color: var(--accent); font-weight: 600; }
+  .upd-list {
+    border: 1px solid var(--hairline); border-radius: var(--r-md);
+    padding: 10px 14px; margin-bottom: 12px; max-height: 220px; overflow-y: auto;
+  }
+  .upd-row { display: flex; align-items: baseline; gap: 4px; padding: 4px 0;
+             font-size: 12.5px; }
+
   /* ── Состояние ───────────────────────────────────────────────────── */
   .state { display: inline-flex; align-items: center; gap: 7px; font-size: 12.5px;
            color: var(--ink-3); }
@@ -502,6 +521,7 @@
       <!-- ── Управление ───────────────────────────────────────────────── -->
       <section class="page" data-page="control" hidden>
         <div id="controls"></div>
+        <div id="update"></div>
       </section>
 
       <!-- ── Журнал ───────────────────────────────────────────────────── -->
@@ -1181,6 +1201,7 @@ function showPage() {
   // клику в меню. Без этого «Управление» и «Журнал» открывались пустыми:
   // обработчик клика не срабатывал, а данные для них в общий опрос не входят.
   if (page === 'control' && !SETTINGS) loadSettings();
+  if (page === 'control' && !UPDATE) loadUpdate(false);
   // Настройки могли отрисоваться раньше, чем пришли данные бота: тогда в
   // карточках не было полей, зависящих от режима (депозит есть только в
   // фантоме) и от истории стратегии. Перерисовываем ровно один раз —
@@ -1344,6 +1365,110 @@ function pairBreakdown(rows) {
     <td class="${cls(v.r)}"><b>${v.r >= 0 ? '+' : ''}${v.r.toFixed(1)}</b></td>
     <td class="${cls(v.r)}">${(v.r / v.n) >= 0 ? '+' : ''}${(v.r / v.n).toFixed(2)}</td>
   </tr>`).join('')}</tbody></table>`;
+}
+
+/* ── Обновление кода ────────────────────────────────────────────────────── */
+let UPDATE = null;
+
+async function loadUpdate(check) {
+  const box = el('update');
+  if (!box) return;
+  try {
+    const url = '/api/update' + (check ? '?check=1' : '');
+    const d = await (await fetch(url, { cache: 'no-store' })).json();
+    UPDATE = d.update;
+    renderUpdate(d.writable);
+  } catch (e) { /* панель просто не появится */ }
+}
+
+function renderUpdate(writable) {
+  const box = el('update');
+  if (!box || !UPDATE) return;
+  if (!UPDATE.available) {
+    box.innerHTML = `<div class="panel card-pad"><div class="panel-head bare">
+      <h2>Обновление</h2></div><div class="empty">${esc(UPDATE.reason || '')}</div></div>`;
+    return;
+  }
+  const cur = UPDATE.current || {};
+  const list = (UPDATE.pending || []).map(c => `
+    <div class="upd-row"><code>${esc(c.commit)}</code>
+      <span class="upd-date">${esc(c.date)}</span>
+      <span class="upd-msg">${esc(c.subject)}</span></div>`).join('');
+
+  const state = UPDATE.behind
+    ? `<b>${UPDATE.behind}</b> ${plural(UPDATE.behind, 'обновление', 'обновления', 'обновлений')} доступно`
+    : 'установлена последняя версия';
+
+  box.innerHTML = `
+    <div class="panel card-pad">
+      <div class="panel-head bare">
+        <h2>Обновление</h2>
+        <span class="hint">код стратегий из git; сделки, настройки и ключи не трогаются</span>
+      </div>
+      <div class="upd-now">
+        Сейчас: <code>${esc(cur.commit || '?')}</code>
+        <span class="upd-date">${esc(cur.date || '')}</span>
+        <span class="upd-msg">${esc(cur.subject || '')}</span>
+        <span class="upd-branch">ветка ${esc(UPDATE.branch || '?')}</span>
+      </div>
+      <div class="upd-state ${UPDATE.behind ? 'has' : ''}">${state}</div>
+      ${list ? `<div class="upd-list">${list}</div>` : ''}
+      ${UPDATE.reason && !UPDATE.can_update
+        ? `<div class="ctl-note">${esc(UPDATE.reason)}</div>` : ''}
+      ${UPDATE.restart_required
+        ? `<div class="warn-box">Код обновлён, но работает ещё старый: Python
+           держит загруженные модули в памяти. Перезапустите бота.</div>` : ''}
+      <div class="ctl-foot">
+        <button type="button" class="btn ghost" id="upd-check">Проверить</button>
+        <button type="button" class="btn" id="upd-apply"
+          ${(writable && UPDATE.can_update) ? '' : 'disabled'}>Обновить</button>
+        ${UPDATE.previous ? `<button type="button" class="btn ghost" id="upd-back"
+          ${writable ? '' : 'disabled'}>Откатить</button>` : ''}
+        <span class="saved" id="upd-msg"></span>
+      </div>
+      <div class="ctl-note">Обновление переносит только код. Журнал сделок,
+        открытые позиции, настройки и ключи лежат вне репозитория, git их не
+        видит. После обновления прогоняются тесты: не прошли — код
+        возвращается на прежнюю версию автоматически.</div>
+    </div>`;
+
+  const msg = el('upd-msg');
+  el('upd-check').onclick = async () => {
+    msg.textContent = 'проверяю…';
+    await loadUpdate(true);
+    const m = el('upd-msg');
+    if (m) m.textContent = '';
+  };
+  const apply = el('upd-apply');
+  if (apply) apply.onclick = () => sendUpdate('/api/update', 'обновляю…');
+  const back = el('upd-back');
+  if (back) back.onclick = () => sendUpdate('/api/update/rollback', 'откатываю…');
+}
+
+async function sendUpdate(url, working) {
+  const msg = el('upd-msg');
+  if (msg) { msg.style.color = 'var(--ink-3)'; msg.textContent = working; }
+  try {
+    const resp = await fetch(url, { method: 'POST',
+      headers: { 'Content-Type': 'application/json' }, body: '{}' });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.error || resp.status);
+    UPDATE = data.update;
+    renderUpdate(true);
+    const m = el('upd-msg');
+    if (m) { m.style.color = 'var(--good)'; m.textContent = data.message; }
+  } catch (e) {
+    const m = el('upd-msg');
+    if (m) { m.style.color = 'var(--bad)'; m.textContent = 'Не выполнено: ' + e.message; }
+  }
+}
+
+function plural(n, one, few, many) {
+  const a = Math.abs(n) % 100, b = a % 10;
+  if (a > 10 && a < 20) return many;
+  if (b > 1 && b < 5) return few;
+  if (b === 1) return one;
+  return many;
 }
 
 /* ── Режим рынка ────────────────────────────────────────────────────────── */

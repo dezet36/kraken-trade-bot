@@ -86,3 +86,6 @@ Live_Bot/bot_log.txt
 *.tmp
 *.bak
 ~$*
+
+# Состояние обновления (какая версия стояла до последнего git pull)
+Live_Bot/update_state.json

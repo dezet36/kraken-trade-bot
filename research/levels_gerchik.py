@@ -1,33 +1,42 @@
 """
 Стратегия горизонтальных уровней. Самостоятельная, ни на чём нашем не стоит.
 
-ПРИНЦИП. Стратегия не наследует ничего у SMC и фибо: ни поиска экстремумов,
-ни порогов риска, ни числа слотов, ни лимита на одну сторону. Все её числа
-лежат в levels_params.py и обоснованы из самого метода. Оценивается она
-тоже сама по себе — прибыльна ли, какая просадка, воспроизводится ли на
-двух независимых периодах, — а не тем, дополняет ли она чужой портфель.
+ПРИНЦИП. Не наследует у SMC и фибо ничего: ни поиска экстремумов, ни
+порогов риска, ни числа слотов, ни лимита направления. Все числа — в
+levels_params.py. Оценивается сама по себе: прибыльна ли, какая просадка,
+воспроизводится ли на двух независимых периодах.
 
-Разбивка по режимам рынка в отчёте есть, но как СПРАВКА о характере
-стратегии, а не как условие приёмки.
+МЕТОД И ЧТО ОКАЗАЛОСЬ ГЛАВНЫМ. Уровень — цена, к которой рынок возвращался
+несколько раз, возможно с разных сторон. Первая версия ставила лимит прямо
+на уровень и дала -1104 R: вход происходил и когда уровень устоял, и когда
+его прошли насквозь — в момент постановки заявки это неразличимо.
 
-МЕТОД. Уровень — цена, к которой рынок возвращался несколько раз, возможно
-с разных сторон. Вход лимитом на отбой от уровня, стоп вплотную за ним,
-цель кратна риску.
+Добавление ПОДТВЕРЖДЕНИЯ перевернуло результат на том же наборе уровней:
 
-Формализуемые критерии силы уровня:
+    лимит на уровне           бык -1104 R    медведь -1467 R
+    прокол + возврат          бык  +138 R    медведь  +112 R
 
-    касания        сколько раз цена разворачивалась на этой цене
-    зеркальность   уровень работал и как потолок, и как пол
-    круглое число  психологический уровень
-    скорость подхода   быстро пришли — ждём отбой; сползали — ждём пробой
+Работает не уровень сам по себе, а отказ входить до того, как рынок показал
+реакцию. Стоп при этом уезжает за экстремум прокола — то есть за точку,
+куда цена уже сходила и откуда вернулась, а не в зону, где собирают стопы.
 
-Из метода НЕ воспроизводится биржевой стакан («плотность», крупная лимитная
-заявка). Ни в кэше, ни в истории ccxt его нет, и восстановить по свечам
-невозможно. Проверяется формализуемая часть.
+ЧТО ПРОВЕРЯЕТСЯ ЗДЕСЬ. К подтверждённому входу по одному добавляются
+критерии классики, и каждый принимается только если улучшает ОБА периода:
 
-ЧЕСТНОСТЬ. Экстремум подтверждается через PIVOT_N баров после себя, уровень
-известен с подтверждения последнего входящего в него касания. Скорость
-подхода и ATR считаются по барам до свечи решения включительно.
+    объём на возврате     защита уровня крупным участником
+    цель на следующем уровне   вместо кратной риску
+    безубыток после 1R    строгий money management
+    ближайшие уровни      живой трейдер держит на графике единицы уровней
+    зеркальность, касания, круглые числа, скорость подхода
+
+Из метода НЕ воспроизводится биржевой стакан (плотность, крупная заявка).
+Ни в кэше, ни в истории ccxt его нет. Объём свечи — единственный доступный
+след присутствия крупного участника.
+
+ЧЕСТНОСТЬ. Экстремум известен через PIVOT_N баров после себя; уровень — с
+подтверждения последнего входящего в него касания. Прокол и возврат
+считаются по закрытым свечам, вход — по закрытию свечи возврата. ATR,
+объём и скорость подхода берутся по барам до свечи решения включительно.
 
 Запуск:
     python research/levels_gerchik.py
@@ -48,6 +57,17 @@ from smc_market_regime import (BEAR_CACHE, BEAR_PAIRS, BULL_CACHE,  # noqa: E402
                                BULL_PAIRS, REGIMES, ci, load_period)
 
 LONG, SHORT = 'LONG', 'SHORT'
+RNG = np.random.default_rng(20260805)
+BOOTSTRAP = 10_000
+
+
+def diff_ci(a, b):
+    """Интервал разности средних. Пересекает ноль — разница недоказуема."""
+    a, b = np.asarray(a, float), np.asarray(b, float)
+    da = RNG.choice(a, size=(BOOTSTRAP, len(a)), replace=True).mean(axis=1)
+    db = RNG.choice(b, size=(BOOTSTRAP, len(b)), replace=True).mean(axis=1)
+    d = da - db
+    return np.percentile(d, [2.5, 97.5]), float((d > 0).mean())
 
 
 def atr(df, period=14):
@@ -68,20 +88,19 @@ def pivots(df, n):
     """
     Точки касания: локальные экстремумы с n барами по обе стороны.
 
-    Своя реализация, а не заимствованная. Здесь важно ровно одно свойство —
-    момент, когда экстремум СТАНОВИТСЯ ИЗВЕСТЕН: это n баров после него.
-    Уровень, построенный по экстремуму раньше этого момента, знал бы будущее.
+    Важно ровно одно свойство — момент, когда экстремум СТАНОВИТСЯ ИЗВЕСТЕН:
+    это n баров после него. Уровень, построенный раньше, знал бы будущее.
     """
     high = df['high'].to_numpy(dtype=float)
     low = df['low'].to_numpy(dtype=float)
     out = []
     for i in range(n, len(df) - n):
-        window_h = high[i - n:i + n + 1]
-        window_l = low[i - n:i + n + 1]
-        if high[i] == window_h.max() and (window_h.argmax() == n):
+        wh = high[i - n:i + n + 1]
+        wl = low[i - n:i + n + 1]
+        if high[i] == wh.max() and wh.argmax() == n:
             out.append({'index': i, 'price': float(high[i]), 'kind': 'high',
                         'known_at': i + n})
-        if low[i] == window_l.min() and (window_l.argmin() == n):
+        if low[i] == wl.min() and wl.argmin() == n:
             out.append({'index': i, 'price': float(low[i]), 'kind': 'low',
                         'known_at': i + n})
     return sorted(out, key=lambda p: p['index'])
@@ -91,8 +110,8 @@ def round_distance_pct(price):
     """
     Близость цены к круглому числу, в процентах.
 
-    Шаг круглости — на порядок мельче самой цены: для 62 800 это 1 000, для
-    0.85 это 0.01. Без привязки к порядку «круглое число» на биткоине и на
+    Шаг круглости — на порядок мельче цены: для 62 800 это 1 000, для 0.85
+    это 0.01. Без привязки к порядку «круглое число» на биткоине и на
     дожкоине значило бы совершенно разное.
     """
     if price <= 0:
@@ -102,30 +121,26 @@ def round_distance_pct(price):
     return abs(price - nearest) / price * 100
 
 
-def build_levels(df, tolerance_pct=None, min_touches=None, max_span=None,
-                 pivot_n=None):
+def build_levels(df, tolerance_pct=None, min_touches=None):
     """
-    Уровни: кластеры касаний, лежащих на одной цене.
+    Уровни: кластеры касаний на одной цене.
 
-    Вершины и низы кладутся в ОДИН пул. Уровень, который сначала
-    останавливал рост, а потом держал падение, и есть зеркальный —
-    сильнейший по классике. Раздельные пулы такие уровни не видят.
+    Вершины и низы — в ОДНОМ пуле. Уровень, который сначала останавливал
+    рост, а потом держал падение, и есть зеркальный. Раздельные пулы таких
+    уровней не видят вовсе.
     """
     tolerance_pct = LP.TOLERANCE_PCT if tolerance_pct is None else tolerance_pct
     min_touches = LP.MIN_TOUCHES if min_touches is None else min_touches
-    max_span = LP.MAX_SPAN_BARS if max_span is None else max_span
-    pivot_n = LP.PIVOT_N if pivot_n is None else pivot_n
 
-    points = pivots(df, pivot_n)
+    points = pivots(df, LP.PIVOT_N)
     levels, used = [], set()
-
     for i, first in enumerate(points):
         if i in used:
             continue
         members, idxs = [first], {i}
         for j in range(i + 1, len(points)):
             second = points[j]
-            if second['index'] - first['index'] > max_span:
+            if second['index'] - first['index'] > LP.MAX_SPAN_BARS:
                 break
             if abs(second['price'] - first['price']) / first['price'] * 100 <= tolerance_pct:
                 members.append(second)
@@ -137,34 +152,70 @@ def build_levels(df, tolerance_pct=None, min_touches=None, max_span=None,
             'price': float(np.mean([m['price'] for m in members])),
             'touches': len(members),
             'mirror': len({m['kind'] for m in members}) > 1,
-            'last_index': members[-1]['index'],
             'known_at': max(m['known_at'] for m in members),
         })
     return levels
 
 
-def build_orders(pair, df, require_mirror=False, min_touches=None,
+def _reclaim(high, low, close, i, level, side, atr_now):
+    """
+    Прокол уровня с возвратом в ближайших барах после i.
+
+    Возвращает (индекс свечи возврата, экстремум прокола) или None. Решение
+    принимается на закрытии свечи возврата — раньше подтверждения нет.
+    """
+    limit = min(i + LP.RECLAIM_BARS + 1, len(close))
+    need = LP.PIERCE_ATR * atr_now
+
+    pierce_at = None
+    for k in range(i, limit):
+        if side == LONG and low[k] <= level - need:
+            pierce_at = k
+            break
+        if side == SHORT and high[k] >= level + need:
+            pierce_at = k
+            break
+    if pierce_at is None:
+        return None
+
+    extreme = low[pierce_at] if side == LONG else high[pierce_at]
+    for k in range(pierce_at, min(pierce_at + LP.RECLAIM_BARS + 1, len(close))):
+        extreme = min(extreme, low[k]) if side == LONG else max(extreme, high[k])
+        if k > pierce_at and (close[k] > level if side == LONG else close[k] < level):
+            return k, float(extreme)
+    return None
+
+
+def build_orders(pair, df, min_touches=None, require_mirror=False,
                  max_round_pct=None, speed_mode=None, rr_target=None,
-                 stop_atr=None, min_stop_pct=None, tolerance_pct=None):
-    """Лимитные заявки на отбой от уровня."""
+                 min_stop_pct=None, tolerance_pct=None, nearest=None,
+                 volume_ratio=None, target_next_level=False,
+                 breakeven_r=None, max_same_bar=None):
+    """Заявки на отбой от уровня с подтверждением реакции."""
     rr_target = LP.RR_TARGET if rr_target is None else rr_target
-    stop_atr = LP.STOP_ATR if stop_atr is None else stop_atr
     min_stop_pct = LP.MIN_STOP_PCT if min_stop_pct is None else min_stop_pct
+    nearest = LP.NEAREST_LEVELS if nearest is None else nearest
 
     ts = pd.to_datetime(df['timestamp'])
     if getattr(ts.dt, 'tz', None) is not None:
         ts = ts.dt.tz_convert('UTC').dt.tz_localize(None)
     ts = ts.to_numpy(dtype='datetime64[ns]')
+    high = df['high'].to_numpy(dtype=float)
+    low = df['low'].to_numpy(dtype=float)
     close = df['close'].to_numpy(dtype=float)
+    vol = (df['volume'].to_numpy(dtype=float) if 'volume' in df.columns
+           else np.ones(len(df)))
+    vol_avg = pd.Series(vol).rolling(LP.VOLUME_WINDOW).mean().to_numpy()
     a = atr(df)
     bar_ns = int(np.median(np.diff(ts).astype('int64'))) if len(ts) > 2 else 0
     expiry = np.timedelta64(int(LP.EXPIRY_HOURS * 3600), 's')
 
-    levels = build_levels(df, tolerance_pct=tolerance_pct, min_touches=min_touches)
+    levels = build_levels(df, tolerance_pct, min_touches)
     if not levels:
         return []
     levels.sort(key=lambda x: x['known_at'])
     known_at = np.array([lv['known_at'] for lv in levels])
+    prices = np.array([lv['price'] for lv in levels])
 
     orders, seen = [], set()
     for i in range(60, len(df)):
@@ -183,9 +234,17 @@ def build_orders(pair, df, require_mirror=False, min_touches=None,
             if speed_mode == 'slow' and speed >= LP.SPEED_THRESHOLD:
                 continue
 
-        for lv in levels[:upto]:
-            if i - lv['known_at'] > LP.MAX_AGE_BARS:
-                continue
+        # Только ближайшие к цене уровни: трейдер держит на графике единицы
+        # уровней, а не сотню. Без этого одна пара давала тысячи заявок.
+        candidates = [k for k in range(upto)
+                      if i - levels[k]['known_at'] <= LP.MAX_AGE_BARS]
+        if not candidates:
+            continue
+        candidates.sort(key=lambda k: abs(prices[k] - price))
+        candidates = candidates[:nearest]
+
+        for k in candidates:
+            lv = levels[k]
             if require_mirror and not lv['mirror']:
                 continue
             if max_round_pct is not None and round_distance_pct(lv['price']) > max_round_pct:
@@ -194,30 +253,58 @@ def build_orders(pair, df, require_mirror=False, min_touches=None,
             gap = price - lv['price']
             if abs(gap) > LP.TRIGGER_ATR * a[i] or abs(gap) < LP.MIN_GAP_ATR * a[i]:
                 continue
-
             side = LONG if gap > 0 else SHORT     # цена выше уровня -> поддержка
 
-            # Одна заявка на уровень в сутки: цена может подходить к нему
-            # много свечей подряд, и без этого одна и та же идея порождала бы
-            # десятки ордеров.
             key = (pair, round(lv['price'], 8), side, int(i // 24))
             if key in seen:
                 continue
             seen.add(key)
 
-            entry = float(lv['price'])
-            dist = max(stop_atr * a[i], entry * min_stop_pct / 100)
-            stop = entry - dist if side == LONG else entry + dist
-            target = entry + rr_target * dist if side == LONG else entry - rr_target * dist
+            found = _reclaim(high, low, close, i, lv['price'], side, a[i])
+            if found is None:
+                continue
+            r_at, extreme = found
 
-            created = ts[i] + np.timedelta64(bar_ns, 'ns')
+            if volume_ratio is not None:
+                avg = vol_avg[r_at]
+                if not np.isfinite(avg) or avg <= 0 or vol[r_at] / avg < volume_ratio:
+                    continue
+
+            entry = float(close[r_at])
+            dist = max(abs(entry - extreme) + LP.STOP_PAD_ATR * a[r_at],
+                       entry * min_stop_pct / 100)
+            stop = entry - dist if side == LONG else entry + dist
+
+            if target_next_level:
+                # Цель — следующий уровень по ходу сделки. Так выходит
+                # трейдер, торгующий от уровней: движение живёт до
+                # следующего препятствия, а не до круглого числа R.
+                ahead = [prices[m] for m in range(upto)
+                         if (prices[m] > entry + dist if side == LONG
+                             else prices[m] < entry - dist)]
+                if not ahead:
+                    continue
+                target = min(ahead) if side == LONG else max(ahead)
+                if abs(target - entry) / dist < 1.5:
+                    continue
+            else:
+                target = (entry + rr_target * dist if side == LONG
+                          else entry - rr_target * dist)
+
+            created = ts[r_at] + np.timedelta64(bar_ns, 'ns')
+            be = None
+            if breakeven_r:
+                be = (entry + breakeven_r * dist if side == LONG
+                      else entry - breakeven_r * dist)
+
             orders.append(Order(
                 pair=pair, direction=side, entry=entry, stop=float(stop),
                 targets=[float(target)], fractions=[1.0],
                 created=created, expires=created + expiry, key=key,
-                entry_type='limit',
+                entry_type='stop', be_trigger=be,
                 meta={'touches': lv['touches'], 'mirror': lv['mirror'],
-                      'round_pct': round_distance_pct(lv['price'])},
+                      'round_pct': round_distance_pct(lv['price']),
+                      'rr': abs(target - entry) / dist},
             ))
     return orders
 
@@ -226,8 +313,7 @@ def run(period, orders):
     """Прогон на СОБСТВЕННЫХ портфельных настройках стратегии."""
     result = run_portfolio(
         orders, {p: period['data'][p]['5m'] for p in period['data']},
-        risk_pct=LP.RISK_PCT,
-        max_positions=LP.MAX_POSITIONS,
+        risk_pct=LP.RISK_PCT, max_positions=LP.MAX_POSITIONS,
         cooldown_hours=LP.COOLDOWN_HOURS,
         max_same_direction=LP.MAX_SAME_DIRECTION,
         max_hold_hours=LP.MAX_HOLD_HOURS,
@@ -242,8 +328,10 @@ def run(period, orders):
         rows.append({
             'r': t['pnl'] / t['risk'],
             'regime': period['regime'](t['entry_time']),
+            'direction': 'LONG' if t['direction'] in ('BULLISH', 'LONG') else 'SHORT',
             'touches': t['meta'].get('touches', 0),
             'mirror': bool(t['meta'].get('mirror')),
+            'entry_time': pd.Timestamp(t['entry_time']),
             'days': (pd.Timestamp(t['exit_time']) - pd.Timestamp(t['entry_time'])
                      ).total_seconds() / 86400,
         })
@@ -252,18 +340,28 @@ def run(period, orders):
     return stats
 
 
+BASE = 'база: подтверждение, 2 касания, RR3'
+
+# Финальный круг. Из двенадцати проверенных дополнений приёмку прошло одно —
+# объём на свече возврата: он улучшил доход И просадку на ОБОИХ периодах, а
+# на бычьем разница доказуема (интервал не пересекает ноль). Цель 4R тоже
+# улучшила оба периода по доходу, но подняла просадку на медвежьем с 40% до
+# 53.5%, поэтому проверяется в связке с объёмом, который просадку снижает.
+#
+# Критерии силы уровня (зеркальность, три касания, круглые числа, скорость
+# подхода) отклонены: каждый улучшал один период и портил другой.
 CONFIGS = [
-    ('база: 2 касания, RR3',        dict()),
-    ('3 касания',                   dict(min_touches=3)),
-    ('только зеркальные',           dict(require_mirror=True)),
-    ('зеркальные + 3 касания',      dict(require_mirror=True, min_touches=3)),
-    ('быстрый подход',              dict(speed_mode='fast')),
-    ('МЕДЛЕННЫЙ подход (контроль)', dict(speed_mode='slow')),
-    ('круглые числа',               dict(max_round_pct=LP.ROUND_MAX_PCT)),
-    ('допуск 0.10% (точное касание)', dict(tolerance_pct=0.10)),
-    ('RR 2',                        dict(rr_target=2.0)),
-    ('всё вместе',                  dict(require_mirror=True, min_touches=3,
-                                         speed_mode='fast', max_round_pct=0.3)),
+    (BASE,                          dict()),
+    ('объём x1.5',                  dict(volume_ratio=1.5)),
+    ('объём x1.5 + RR4',            dict(volume_ratio=1.5, rr_target=4.0)),
+    ('объём x1.5 + RR4 + 4 уровня', dict(volume_ratio=1.5, rr_target=4.0,
+                                         nearest=4)),
+    ('объём x1.5 + RR5',            dict(volume_ratio=1.5, rr_target=5.0)),
+    ('объём x1.2 + RR4',            dict(volume_ratio=1.2, rr_target=4.0)),
+    ('объём x2.0 + RR4',            dict(volume_ratio=2.0, rr_target=4.0)),
+    ('объём x2.5 + RR4',            dict(volume_ratio=2.5, rr_target=4.0)),
+    ('объём x1.5 + RR4 + цель на уровне',
+     dict(volume_ratio=1.5, rr_target=4.0, target_next_level=True)),
 ]
 
 
@@ -284,7 +382,7 @@ def main():
                 continue
             results[(period['label'], name)] = stats
             df = stats['rows']
-            print(f'   [{period["label"]}] {name}: ордеров {stats["orders"]}, '
+            print(f'   [{period["label"]}] {name}: заявок {stats["orders"]}, '
                   f'{len(df)} сделок, {stats["return_pct"]:+.1f}%, '
                   f'DD {stats["max_dd_pct"]:.1f}%, сумма R {df.r.sum():+.1f}',
                   flush=True)
@@ -292,10 +390,10 @@ def main():
     for period in periods:
         label = period['label']
         print()
-        print('=' * 104)
+        print('=' * 110)
         print(label.upper())
-        print('=' * 104)
-        head = (f'{"конфигурация":<32}{"сделок":>8}{"винрейт":>9}{"R/сделку":>10}'
+        print('=' * 110)
+        head = (f'{"конфигурация":<34}{"сделок":>8}{"винрейт":>9}{"R/сделку":>10}'
                 f'{"сумма R":>9}{"доход%":>9}{"DD%":>7}{"доход/DD":>10}{"дней":>7}')
         print(head)
         print('-' * len(head))
@@ -305,36 +403,31 @@ def main():
                 continue
             df = stats['rows']
             dd = stats['max_dd_pct']
-            print(f'{name:<32}{len(df):>8}{(df.r > 0).mean() * 100:>8.0f}%'
+            print(f'{name:<34}{len(df):>8}{(df.r > 0).mean() * 100:>8.0f}%'
                   f'{df.r.mean():>10.3f}{df.r.sum():>9.1f}'
                   f'{stats["return_pct"]:>+9.1f}{dd:>7.1f}'
                   f'{stats["return_pct"] / dd if dd else float("nan"):>10.2f}'
                   f'{df.days.median():>7.1f}')
 
-    print()
-    print('=' * 104)
-    print('ПРЕДСКАЗЫВАЮТ ЛИ КРИТЕРИИ СИЛЫ УРОВНЯ (база, оба периода)')
-    print('=' * 104)
-    print('Это отдельный вопрос: даже если стратегия в целом не взлетит,')
-    print('работающий признак имеет ценность сам по себе.')
-    frames = [results[(p['label'], 'база: 2 касания, RR3')]['rows'] for p in periods
-              if (p['label'], 'база: 2 касания, RR3') in results]
-    if frames:
-        merged = pd.concat(frames, ignore_index=True)
-        for col, title in (('touches', 'касаний'), ('mirror', 'зеркальный')):
-            print()
-            for value, sub in merged.groupby(col):
-                if len(sub) < 10:
-                    continue
-                lo, hi = ci(sub.r)
-                print(f'   {title} = {value}:  {len(sub):>5} сделок  '
-                      f'R/сделку {sub.r.mean():+.3f}  [{lo:+.3f}; {hi:+.3f}]')
+        base = results.get((label, BASE))
+        if not base:
+            continue
+        print()
+        print('Разница с базой (интервал через ноль = разница недоказуема):')
+        for name, _ in CONFIGS[1:]:
+            stats = results.get((label, name))
+            if not stats:
+                continue
+            (lo, hi), p = diff_ci(stats['rows'].r, base['rows'].r)
+            verdict = 'ЕСТЬ разница' if lo > 0 or hi < 0 else 'шум'
+            print(f'   {name:<34} ΔR {stats["rows"].r.mean() - base["rows"].r.mean():+.3f}  '
+                  f'[{lo:+.3f}; {hi:+.3f}]  P(лучше)={p:.0%}  -> {verdict}')
 
     print()
-    print('=' * 104)
+    print('=' * 110)
     print('СПРАВОЧНО: ПО РЕЖИМАМ РЫНКА (не критерий приёмки)')
-    print('=' * 104)
-    head = f'{"конфигурация":<32}' + ''.join(f'{r:>26}' for r in REGIMES)
+    print('=' * 110)
+    head = f'{"конфигурация":<34}' + ''.join(f'{r:>26}' for r in REGIMES)
     print(head)
     print('-' * len(head))
     for name, _ in CONFIGS:
@@ -351,11 +444,34 @@ def main():
                 continue
             lo, hi = ci(sub.r)
             parts.append(f'{sub.r.mean():>8.3f} [{lo:+.2f};{hi:+.2f}]'.rjust(26))
-        print(f'{name:<32}' + ''.join(parts))
+        print(f'{name:<34}' + ''.join(parts))
 
     print()
-    print('ПРИЁМКА: прибыль на ОБОИХ периодах при просадке, с которой можно')
-    print('жить. Стратегия оценивается сама по себе.')
+    print('=' * 110)
+    print('БАЗОВАЯ КОНФИГУРАЦИЯ ПОДРОБНО')
+    print('=' * 110)
+    for period in periods:
+        stats = results.get((period['label'], BASE))
+        if not stats:
+            continue
+        df = stats['rows']
+        print()
+        print(f'{period["label"]}: {len(df)} сделок, {stats["return_pct"]:+.1f}%, '
+              f'просадка {stats["max_dd_pct"]:.1f}%')
+        for side in (LONG, SHORT):
+            sub = df[df.direction == side]
+            if len(sub) < 5:
+                continue
+            lo, hi = ci(sub.r)
+            print(f'   {side:<6}{len(sub):>6} сделок  винрейт {(sub.r > 0).mean() * 100:>3.0f}%  '
+                  f'R/сделку {sub.r.mean():+.3f}  [{lo:+.3f}; {hi:+.3f}]')
+        month = df.set_index('entry_time').resample('MS').r.agg(['count', 'sum'])
+        month = month[month['count'] > 0]
+        pos = (month['sum'] > 0).mean() * 100
+        print(f'   прибыльных месяцев: {pos:.0f}% из {len(month)}')
+
+    print()
+    print('ПРИЁМКА: изменение принимается, только если улучшает ОБА периода.')
 
 
 if __name__ == '__main__':

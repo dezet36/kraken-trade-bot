@@ -704,6 +704,13 @@ class _Handler(BaseHTTPRequestHandler):
             self._send_file(export_paths()[0], 'text/csv; charset=utf-8')
         elif path == '/api/export.jsonl':
             self._send_file(export_paths()[1], 'application/x-ndjson; charset=utf-8')
+        elif path == '/api/update':
+            # fetch по требованию: без него страница ждала бы сеть на каждом
+            # обновлении, а состояние репозитория меняется несравнимо реже.
+            import updater
+            fetch = 'check' in (self.path.split('?', 1) + [''])[1]
+            self._send_json({'update': updater.status(fetch=fetch),
+                             'writable': _controls_allowed()})
         elif path == '/api/settings':
             self._send_json({'settings': settings_store.load(),
                              'limits': settings_store.LIMITS,
@@ -715,7 +722,8 @@ class _Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         path = self.path.split('?')[0]
-        if path not in ('/api/settings', '/api/deposit', '/api/action'):
+        if path not in ('/api/settings', '/api/deposit', '/api/action',
+                        '/api/update', '/api/update/rollback'):
             self.send_error(404)
             return
         if not _controls_allowed():
@@ -732,6 +740,19 @@ class _Handler(BaseHTTPRequestHandler):
                 raise ValueError('ожидается объект')
         except Exception as exc:
             self._fail(400, f'Неверные данные: {exc}')
+            return
+
+        if path in ('/api/update', '/api/update/rollback'):
+            import updater
+            if path.endswith('rollback'):
+                ok, message = updater.rollback()
+                info = updater.status(fetch=False)
+            else:
+                ok, message, info = updater.apply()
+            if not ok:
+                self._fail(409, message)
+                return
+            self._send_json({'ok': True, 'message': message, 'update': info})
             return
 
         if path == '/api/action':
