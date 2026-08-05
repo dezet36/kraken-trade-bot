@@ -540,6 +540,105 @@ def build_payload():
     return payload
 
 
+# Свечи для графика сделки. Кэш живёт в памяти процесса: одну и ту же
+# сделку открывают по нескольку раз, а каждый показ — это запрос к бирже.
+_candle_cache = {}
+_CANDLE_CACHE_MAX = 60
+
+
+# Биржа отдаёт максимум 1000 свечей от текущего момента назад. Это задаёт
+# предел досягаемости каждого таймфрейма.
+_TF_MINUTES = (('5m', 5), ('15m', 15), ('1h', 60), ('4h', 240), ('1d', 1440))
+_MAX_CANDLES = 1000
+
+
+def _pick_timeframe(span_minutes, age_minutes):
+    """
+    Таймфрейм под длительность сделки И её возраст.
+
+    Длительность задаёт нижнюю границу: сделку длиной в час пятиминутками
+    видно (12 свечей), а двухнедельную — уже каша из трёх тысяч.
+
+    Возраст задаёт верхнюю, и про неё легко забыть. Свечи запрашиваются
+    БЕЗ отметки начала: биржа отдаёт последние 1000 от текущего момента.
+    Пятиминутки добивают на 3.5 дня назад, часовые на 41 день. Короткая
+    сделка месячной давности при выборе только по длительности получила бы
+    пятиминутки — и пустой график вместо ошибки, которую видно.
+    """
+    need_back = age_minutes + span_minutes * 1.4
+    for name, minutes in _TF_MINUTES:
+        fits_detail = span_minutes / minutes <= 220
+        reaches = need_back / minutes <= _MAX_CANDLES - 20
+        if fits_detail and reaches:
+            return name, minutes
+    return _TF_MINUTES[-1]
+
+
+def _trade_candles(pair, opened, closed):
+    """
+    Свечи вокруг сделки: окно расширено на 30% с каждой стороны.
+
+    Без запаса вход и выход упираются в края графика, и не видно, откуда
+    цена пришла и куда ушла — а это половина смысла разбора.
+    """
+    from datetime import timedelta
+
+    import pandas as pd
+
+    # Время приводим к наивному UTC. В журнале метки бывают и с зоной, и без:
+    # сравнение таких напрямую падает, а тихое приведение одной из них дало бы
+    # сдвиг на часы и график не от той сделки.
+    def _naive(value):
+        stamp = pd.Timestamp(value)
+        if stamp.tzinfo is not None:
+            stamp = stamp.tz_convert('UTC').tz_localize(None)
+        return stamp
+
+    start = _naive(opened)
+    end = _naive(closed) if closed else pd.Timestamp.utcnow().tz_localize(None)
+    span = max((end - start).total_seconds() / 60, 30)
+    age = max((pd.Timestamp.utcnow().tz_localize(None) - start).total_seconds() / 60, 0)
+    timeframe, tf_min = _pick_timeframe(span, age)
+    pad = timedelta(minutes=span * 0.35)
+    since = start - pad
+    until = end + pad
+    need = int((until - since).total_seconds() / 60 / tf_min) + 5
+
+    key = (pair, timeframe, since.strftime('%Y%m%d%H%M'), need)
+    if key in _candle_cache:
+        return _candle_cache[key]
+
+    from exchange import fetch_ohlcv
+    limit = min(max(need, 60), 1000)
+    df = fetch_ohlcv(timeframe, limit=limit, symbol=pair)
+    if df is None or not len(df):
+        return None
+
+    stamps = pd.to_datetime(df['timestamp'])
+    if getattr(stamps.dt, 'tz', None) is not None:
+        stamps = stamps.dt.tz_convert('UTC').dt.tz_localize(None)
+    mask = (stamps >= since) & (stamps <= until)
+    window = df[mask.to_numpy()]
+    if not len(window):
+        # Сделка старше того, что отдаёт биржа при этом лимите: показать
+        # нечего, и честнее сказать об этом, чем нарисовать чужие свечи.
+        return None
+
+    out = {
+        'timeframe': timeframe,
+        'candles': [
+            [str(t), float(o), float(h), float(l), float(c)]
+            for t, o, h, l, c in zip(
+                stamps[mask.to_numpy()], window['open'], window['high'],
+                window['low'], window['close'])
+        ],
+    }
+    if len(_candle_cache) >= _CANDLE_CACHE_MAX:
+        _candle_cache.clear()
+    _candle_cache[key] = out
+    return out
+
+
 def _errors_summary():
     """Короткая сводка по ошибкам — для значка в меню."""
     try:
@@ -750,6 +849,24 @@ class _Handler(BaseHTTPRequestHandler):
             self._send_file(export_paths()[0], 'text/csv; charset=utf-8')
         elif path == '/api/export.jsonl':
             self._send_file(export_paths()[1], 'application/x-ndjson; charset=utf-8')
+        elif path.startswith('/api/candles'):
+            from urllib.parse import parse_qs, urlparse
+            q = parse_qs(urlparse(self.path).query)
+            pair = (q.get('pair') or [''])[0]
+            opened = (q.get('from') or [''])[0]
+            closed = (q.get('to') or [''])[0]
+            if not pair or not opened:
+                self._fail(400, 'нужны pair и from')
+                return
+            try:
+                data = _trade_candles(pair, opened, closed)
+            except Exception as exc:               # noqa: BLE001
+                self._fail(502, f'свечи недоступны: {exc}')
+                return
+            if data is None:
+                self._fail(404, 'свечей за этот период нет')
+                return
+            self._send_json(data)
         elif path == '/api/errors':
             try:
                 import error_log

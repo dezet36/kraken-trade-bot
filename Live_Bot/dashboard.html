@@ -250,6 +250,62 @@
     font-size: 11.5px; line-height: 1.45; white-space: pre;
   }
 
+  /* ── Сравнение стратегий ─────────────────────────────────────────── */
+  /* ── Развёрнутая сделка ──────────────────────────────────────────── */
+  tr.clickable { cursor: pointer; }
+  tr.clickable:hover { background: var(--surface-2); }
+  tr.clickable.open { background: var(--surface-2); }
+  tr.clickable.open td { font-weight: 600; }
+  tr.tc-detail > td { padding: 0 !important; background: var(--surface-2);
+                      border-bottom: 1px solid var(--hairline);
+                      box-sizing: border-box; }
+  .tc-box { display: grid; grid-template-columns: minmax(320px, 1.45fr) minmax(280px, 1fr);
+            gap: 18px; padding: 16px 18px 18px; }
+  @media (max-width: 1100px) { .tc-box { grid-template-columns: 1fr; } }
+  .tc-left, .tc-right { min-width: 0; }
+  .tc-chart { background: var(--surface); border: 1px solid var(--hairline);
+              border-radius: var(--r-md); padding: 6px 8px 2px; }
+  .tc-chart svg { width: 100%; height: auto; display: block; }
+  .tc-tf { text-align: right; font-size: 11px; color: var(--ink-4); padding: 2px 4px; }
+  .tc-note { background: var(--surface); border: 1px solid var(--hairline);
+             border-radius: var(--r-md); padding: 40px 20px; text-align: center;
+             color: var(--ink-4); font-size: 12.5px; }
+  .tc-hero { display: flex; align-items: baseline; gap: 10px; margin-bottom: 10px; }
+  .tc-hero .big { font-size: 26px; font-weight: 700; letter-spacing: -.4px; }
+  .tc-hero .side { font-size: 14px; font-weight: 600; }
+  .tc-reason { margin-left: auto; color: var(--ink-3); font-size: 12px; }
+  .tc-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+             gap: 0 18px; }
+  .tc-row { display: flex; justify-content: space-between; align-items: baseline;
+            padding: 6px 0; border-bottom: 1px solid var(--hairline-2);
+            font-size: 12.5px; }
+  .tc-row .k { color: var(--ink-3); }
+  .tc-row .v { font-variant-numeric: tabular-nums; }
+  .tc-why { margin-top: 12px; padding: 10px 12px; background: var(--surface);
+            border: 1px solid var(--hairline); border-radius: var(--r-md);
+            font-size: 12px; color: var(--ink-2); line-height: 1.5;
+            /* Обоснование сетапа — длинная строка без пробелов в именах
+               факторов; без переноса она уезжала за край карточки. */
+            overflow-wrap: anywhere; }
+  .tc-why .k { color: var(--ink-4); font-size: 11px; margin-bottom: 3px; }
+  .tc-hide { margin-top: 12px; }
+
+  .tbl-wrap { overflow-x: auto; }
+  .cmp { width: 100%; border-collapse: collapse; font-size: 13px;
+         min-width: 420px; }
+  .cmp th, .cmp td { padding: 9px 14px; text-align: right;
+                     font-variant-numeric: tabular-nums; }
+  .cmp thead th { text-align: right; color: var(--ink-2); font-weight: 600;
+                  border-bottom: 1px solid var(--hairline); white-space: nowrap; }
+  .cmp thead th .key { margin-right: 6px; }
+  .cmp th.lbl { text-align: left; color: var(--ink-3); font-weight: 400;
+                white-space: nowrap; }
+  .cmp tbody tr + tr { border-top: 1px solid var(--hairline-2); }
+  .cmp tbody tr:hover { background: var(--surface-2); }
+  .cmp td.best { font-weight: 700; color: var(--ink-1); }
+  .cmp td.best::after { content: ' ●'; color: var(--good); font-size: 9px;
+                        vertical-align: middle; }
+
   /* ── Предел портфеля ─────────────────────────────────────────────── */
   .pf-now { font-size: 13.5px; color: var(--ink-2); margin-bottom: 12px; }
   .pf-bar { height: 8px; border-radius: 4px; background: var(--hairline-2);
@@ -538,6 +594,7 @@
 
       <!-- ── Аналитика ────────────────────────────────────────────────── -->
       <section class="page" data-page="analytics" hidden>
+        <div id="compare"></div>
         <div class="cols2">
           <div class="panel">
             <div class="panel-head"><h2>Распределение результата</h2>
@@ -689,7 +746,7 @@ function buildFilters() {
 
   const keys = Object.keys((DATA && DATA.strategies) || {});
   const sbox = document.getElementById('f-strategy');
-  const opts = [{ id: 'ALL', label: 'Обе' }].concat(
+  const opts = [{ id: 'ALL', label: 'Все' }].concat(
     keys.map(k => ({ id: k, label: NAMES[k] || k })));
   sbox.innerHTML = opts.map(o => {
     const key = o.id === 'ALL' ? ''
@@ -791,7 +848,11 @@ function cards(byStrategy) {
         ${kpi('Сумма R', (s.stats.sumR >= 0 ? '+' : '') + s.stats.sumR.toFixed(1), '',
               cls(s.stats.sumR))}
         ${kpi('Просадка', maxDD(s.rows, base).toFixed(1) + '%', 'от пика')}
-        ${openNow ? kpi('В рынке', money(floating), 'плавающий', cls(floating)) : ''}
+        ${/* строка всегда на месте: без неё карточки стратегий имели
+             разную высоту и сетка выглядела сломанной */ ''}
+        ${kpi('В рынке', openNow ? money(floating) : '—',
+              openNow ? 'плавающий' : 'позиций нет',
+              openNow ? cls(floating) : '')}
         ${PAPER ? kpi('Издержки', '$' + s.stats.fees.toFixed(2), 'комиссии и фандинг') : ''}
       </div>
     </div>`;
@@ -1192,7 +1253,8 @@ function closedTable(rows) {
          <td>$${((r.fees || 0) + (r.funding || 0)).toFixed(2)}</td>
          <td>${(r.mfe_r || 0).toFixed(2)} / ${(r.mae_r || 0).toFixed(2)}</td>`
       : '';
-    return `<tr>
+    return `<tr class="clickable" data-trade="${esc(r.id)}"
+      title="Нажмите, чтобы открыть карточку сделки">
       <td>${esc(r.id)}</td>
       <td>${skey(r.strategy)}</td>
       <td class="pair">${esc(r.pair)}</td>
@@ -1207,6 +1269,13 @@ function closedTable(rows) {
       <td>${when(r.closed)}</td>
       <td class="why" title="${esc(r.why)}">${esc(r.why) || '—'}</td></tr>`;
   }).join('')}</tbody></table>`;
+
+  // Обработчик на таблице, а не на каждой строке: строк бывает три сотни,
+  // и триста обработчиков пересоздаются на каждом обновлении данных.
+  box.onclick = e => {
+    const tr = e.target.closest('tr[data-trade]');
+    if (tr) openTrade(tr.dataset.trade);
+  };
 }
 
 
@@ -1740,6 +1809,332 @@ function regimeView(regime) {
     </div>`;
 }
 
+/* ── Сравнение стратегий ────────────────────────────────────────────────── */
+/* Ради этого сравнения фантом и запущен. По трём карточкам его делать
+   неудобно: одинаковые показатели стоят в разных местах экрана, и вопрос
+   «у кого винрейт выше» требует перевода взгляда туда-обратно. Здесь
+   стратегии в столбцах, показатели в строках — сравнение идёт вдоль
+   строки. Лучший в строке выделен, но только когда сравнивать есть с чем:
+   при одной стратегии выделять нечего. */
+/* ── Карточка сделки ────────────────────────────────────────────────────── */
+/* Строка таблицы отвечает на вопрос «сколько», карточка — на вопрос
+   «что было». График рисуется своим SVG, а не библиотекой: страница
+   работает без единого внешнего запроса, и тащить ради шести свечей
+   стороннюю зависимость незачем. */
+let TRADE_OPEN = null;
+// Номер раскрытой сделки и её свечи. Нужны потому, что таблица
+// перерисовывается на каждом обновлении данных — раз в несколько секунд, — и
+// раскрытая строка при этом исчезала бы вместе со всей разметкой. Пользователь
+// увидел бы, что карточка «сама закрывается» через пару секунд после клика.
+let TRADE_OPEN_ID = null;
+const TRADE_CHARTS = {};
+
+function openTrade(id, quiet) {
+  const table = el('closed');
+  if (!table) return;
+  // Ищем перебором, а не селектором. CSS.escape предназначена для
+  // идентификаторов, и номер «75» она превращает в « 5» — внутри
+  // значения атрибута это не совпадает ни с чем, и строка молча не
+  // находилась: ни ошибки, ни раскрытия.
+  const row = Array.from(table.querySelectorAll('tr[data-trade]'))
+    .find(n => n.dataset.trade === String(id));
+  if (!row) return;
+
+  // Открыта одна сделка за раз: каждая тянет свечи с биржи, и десяток
+  // открытых строк — это десяток запросов и простыня вместо списка.
+  const already = row.nextElementSibling
+    && row.nextElementSibling.classList.contains('tc-detail');
+  closeTrade(true);
+  if (already) { syncTradeUrl(null); return; }
+
+  const t = (DATA.closed || []).find(x => String(x.id) === String(id));
+  if (!t) return;
+  TRADE_OPEN = t;
+  TRADE_OPEN_ID = String(id);
+
+  const detail = document.createElement('tr');
+  detail.className = 'tc-detail';
+  detail.innerHTML = '<td colspan="' + row.cells.length + '"></td>';
+  row.after(detail);
+  row.classList.add('open');
+
+  // Таблица шире экрана и прокручивается вбок. Ячейка развёрнутой строки
+  // растянута на всю ширину ТАБЛИЦЫ, поэтому её правая часть оказывалась за
+  // краем экрана: половина чисел была не видна. Прижимаем содержимое к левому
+  // краю области прокрутки и задаём ему видимую ширину.
+  const cell = detail.firstElementChild;
+  cell.style.position = 'sticky';
+  cell.style.left = '0';
+  cell.style.width = table.clientWidth + 'px';
+  cell.style.maxWidth = table.clientWidth + 'px';
+
+  // Свечи по этой сделке уже могли быть загружены до перерисовки: повторный
+  // запрос к бирже ради тех же данных не нужен.
+  const cached = TRADE_CHARTS[String(id)];
+  renderTradeCard(t, cached || null, cached ? null : 'загружаю график…');
+  if (!quiet) syncTradeUrl(id);
+  if (!cached) loadTradeChart(t);
+}
+
+function syncTradeUrl(id) {
+  const url = new URL(location.href);
+  if (id === null) url.searchParams.delete('trade');
+  else url.searchParams.set('trade', String(id));
+  history.replaceState(null, '', url);
+}
+
+function closeTrade(keepUrl) {
+  document.querySelectorAll('tr.tc-detail').forEach(n => n.remove());
+  document.querySelectorAll('tr.clickable.open').forEach(n => n.classList.remove('open'));
+  TRADE_OPEN = null;
+  if (!keepUrl) {
+    TRADE_OPEN_ID = null;
+    syncTradeUrl(null);
+  }
+}
+
+async function loadTradeChart(t) {
+  try {
+    const url = '/api/candles?pair=' + encodeURIComponent(t.pair)
+      + '&from=' + encodeURIComponent(t.opened)
+      + '&to=' + encodeURIComponent(t.closed || '');
+    const resp = await fetch(url, { cache: 'no-store' });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.error || resp.status);
+    TRADE_CHARTS[String(t.id)] = data;
+    if (TRADE_OPEN === t) renderTradeCard(t, data, null);
+  } catch (e) {
+    if (TRADE_OPEN === t) renderTradeCard(t, null, 'график недоступен: ' + e.message);
+  }
+}
+
+function tradeChart(t, data) {
+  const candles = (data && data.candles) || [];
+  if (!candles.length) return '';
+
+  const W = 720, H = 300, PL = 8, PR = 74, PT = 12, PB = 22;
+  const lows = candles.map(c => c[3]), highs = candles.map(c => c[2]);
+  const levels = [t.entry, t.stop, t.tp1, t.tp2, t.exit].filter(v => v > 0);
+  let lo = Math.min(...lows, ...levels), hi = Math.max(...highs, ...levels);
+  const pad = (hi - lo) * 0.06 || hi * 0.01;
+  lo -= pad; hi += pad;
+
+  const x = i => PL + i * (W - PL - PR) / Math.max(candles.length - 1, 1);
+  const y = v => PT + (hi - v) / (hi - lo || 1) * (H - PT - PB);
+  const bw = Math.max(1.5, (W - PL - PR) / candles.length * 0.62);
+
+  const body = candles.map((c, i) => {
+    const [ts, o, h, l, cl] = c;
+    const up = cl >= o;
+    const col = up ? 'var(--good)' : 'var(--bad)';
+    const yo = y(o), yc = y(cl);
+    const top = Math.min(yo, yc), height = Math.max(Math.abs(yc - yo), 1);
+    return '<line x1="' + x(i) + '" y1="' + y(h) + '" x2="' + x(i) + '" y2="' + y(l)
+      + '" stroke="' + col + '" stroke-width="1" opacity=".55"/>'
+      + '<rect x="' + (x(i) - bw / 2) + '" y="' + top + '" width="' + bw
+      + '" height="' + height + '" fill="' + col + '" opacity=".85"/>';
+  }).join('');
+
+  const line = (v, color, label, dash) => {
+    if (!(v > 0) || v < lo || v > hi) return '';
+    const yy = y(v);
+    return '<line x1="' + PL + '" y1="' + yy + '" x2="' + (W - PR) + '" y2="' + yy
+      + '" stroke="' + color + '" stroke-width="1.2"'
+      + (dash ? ' stroke-dasharray="4 3"' : '') + ' opacity=".9"/>'
+      + '<text x="' + (W - PR + 6) + '" y="' + (yy + 3.5)
+      + '" fill="' + color + '" font-size="10.5">' + label + ' ' + price(v) + '</text>';
+  };
+
+  // Вертикальные отметки входа и выхода: без них непонятно, в какой момент
+  // окна сделка началась и закончилась.
+  const stamps = candles.map(c => new Date(c[0]).getTime());
+  const nearest = iso => {
+    if (!iso) return null;
+    const target = new Date(iso).getTime();
+    let best = 0, diff = Infinity;
+    stamps.forEach((v, i) => {
+      const d = Math.abs(v - target);
+      if (d < diff) { diff = d; best = i; }
+    });
+    return best;
+  };
+  const mark = (idx, color, label) => {
+    if (idx === null) return '';
+    return '<line x1="' + x(idx) + '" y1="' + PT + '" x2="' + x(idx) + '" y2="'
+      + (H - PB) + '" stroke="' + color + '" stroke-width="1" stroke-dasharray="2 4"'
+      + ' opacity=".7"/><text x="' + (x(idx) + 4) + '" y="' + (PT + 11)
+      + '" fill="' + color + '" font-size="10">' + label + '</text>';
+  };
+
+  const isLong = (t.direction || '').toUpperCase() === 'LONG';
+  return '<div class="tc-chart"><svg viewBox="0 0 ' + W + ' ' + H
+    + '" preserveAspectRatio="xMidYMid meet" role="img" aria-label="график сделки">'
+    + body
+    + line(t.stop, 'var(--bad)', 'стоп', true)
+    + line(t.entry, 'var(--ink-3)', 'вход', false)
+    + line(t.tp1, 'var(--good)', 'цель', true)
+    + (t.tp2 && t.tp2 !== t.tp1 ? line(t.tp2, 'var(--good)', 'цель 2', true) : '')
+    + line(t.exit, isLong ? 'var(--accent)' : 'var(--accent)', 'выход', false)
+    + mark(nearest(t.opened), 'var(--ink-4)', 'вход')
+    + mark(nearest(t.closed), 'var(--ink-4)', 'выход')
+    + '</svg><div class="tc-tf">' + esc(data.timeframe) + ' · '
+    + candles.length + ' свечей</div></div>';
+}
+
+function renderTradeCard(t, data, note) {
+  const cell = document.querySelector('tr.tc-detail > td');
+  if (!cell) return;
+  const good = (t.pnl || 0) >= 0;
+  const r = t.pnl_r != null ? t.pnl_r : (t.risk ? t.pnl / t.risk : 0);
+
+  const row = (k, v, c) => '<div class="tc-row"><span class="k">' + k
+    + '</span><span class="v ' + (c || '') + '">' + v + '</span></div>';
+
+  const mfe = t.mfe_r != null
+    ? row('Ходила в плюс', '+' + Number(t.mfe_r).toFixed(2) + ' R', 'pos') : '';
+  const mae = t.mae_r != null
+    ? row('Ходила в минус', '−' + Math.abs(Number(t.mae_r)).toFixed(2) + ' R', 'neg') : '';
+
+  cell.innerHTML = '<div class="tc-box">'
+    + '<div class="tc-left">'
+    + (note ? '<div class="tc-note">' + esc(note) + '</div>' : tradeChart(t, data))
+    + '</div>'
+    + '<div class="tc-right">'
+    + '<div class="tc-hero"><span class="big ' + (good ? 'pos' : 'neg') + '">'
+    + money(t.pnl) + '</span><span class="side ' + (good ? 'pos' : 'neg') + '">'
+    + (r >= 0 ? '+' : '') + r.toFixed(2) + ' R</span>'
+    + '<span class="tc-reason">' + esc(t.reason_ru || t.reason || '') + '</span></div>'
+    + '<div class="tc-grid">'
+    + row('Вход', price(t.entry))
+    + row('Стоп', price(t.stop), 'neg')
+    + row('Цель', price(t.tp1), 'pos')
+    + row('Выход', price(t.exit))
+    + row('Открыта', fmtWhen(t.opened))
+    + row('Закрыта', fmtWhen(t.closed))
+    + row('В позиции', fmtMinutes(t.duration_min))
+    + row('Риск', money(t.risk))
+    + row('Плановый RR', (t.rr || 0).toFixed(2))
+    + row('Издержки', '$' + ((t.fees || 0) + (t.funding || 0)).toFixed(2), 'neg')
+    + mfe + mae
+    + '</div>'
+    + (t.why ? '<div class="tc-why"><div class="k">Почему вошли</div>'
+        + esc(t.why) + '</div>' : '')
+    + '<button type="button" class="btn ghost tc-hide">Свернуть</button>'
+    + '</div></div>';
+
+  const hide = cell.querySelector('.tc-hide');
+  if (hide) hide.onclick = () => closeTrade();
+}
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') closeTrade();
+});
+
+function compareTable(byStrategy) {
+  const box = el('compare');
+  if (!box) return;
+  const keys = activeStrategies().filter(k => byStrategy[k]);
+  if (keys.length < 2) {
+    box.innerHTML = '';
+    return;
+  }
+
+  const months = key => {
+    const rows = byStrategy[key].rows;
+    if (!rows.length) return 0;
+    const first = new Date(rows[0].closed), last = new Date(rows[rows.length - 1].closed);
+    return Math.max((last - first) / (1000 * 3600 * 24 * 30.4), 0.2);
+  };
+
+  const bestPair = (key, worst) => {
+    const rows = byStrategy[key].rows;
+    if (!rows.length) return ['—', 0];
+    const agg = {};
+    rows.forEach(t => {
+      const r = t.pnl_r != null ? t.pnl_r : (t.risk ? t.pnl / t.risk : 0);
+      agg[t.pair] = (agg[t.pair] || 0) + r;
+    });
+    const sorted = Object.entries(agg).sort((a, b) => a[1] - b[1]);
+    return worst ? sorted[0] : sorted[sorted.length - 1];
+  };
+
+  const median = key => {
+    const v = byStrategy[key].rows.map(t => t.duration_min || 0).sort((a, b) => a - b);
+    if (!v.length) return 0;
+    return v[Math.floor(v.length / 2)];
+  };
+
+  // higher: больше — лучше; null — не сравниваем (нечего выделять)
+  const ROWS = [
+    ['Сделок', k => byStrategy[k].stats.trades, v => v, null],
+    ['В месяц', k => months(k) ? byStrategy[k].stats.trades / months(k) : 0,
+     v => v.toFixed(1), true],
+    ['Винрейт', k => byStrategy[k].stats.winrate, v => v.toFixed(1) + '%', true],
+    ['Средний R', k => byStrategy[k].stats.expectancy,
+     v => (v >= 0 ? '+' : '') + v.toFixed(3), true],
+    ['Сумма R', k => byStrategy[k].stats.sumR,
+     v => (v >= 0 ? '+' : '') + v.toFixed(1), true],
+    ['Profit factor', k => byStrategy[k].stats.pf,
+     v => v === null ? '—' : v.toFixed(2), true],
+    ['Просадка', k => maxDD(byStrategy[k].rows, windowStartBalance(k, byStrategy[k].rows)),
+     v => v.toFixed(1) + '%', false],
+    ['Доход к просадке', k => {
+      const st = byStrategy[k];
+      const base = windowStartBalance(k, st.rows);
+      const dd = maxDD(st.rows, base);
+      return dd ? (base ? st.stats.pnl / base * 100 : 0) / dd : 0;
+    }, v => v.toFixed(2), true],
+    ['Медиана удержания', k => median(k), v => fmtMinutes(v), null],
+    ['Издержки', k => byStrategy[k].stats.fees, v => '$' + v.toFixed(2), false],
+  ];
+
+  const head = keys.map(k =>
+    '<th><span class="key" style="background:' + (COLOR[k] || 'var(--muted)') + '"></span>'
+    + esc(NAMES[k] || k) + '</th>').join('');
+
+  const body = ROWS.map(([label, get, fmt, higher]) => {
+    const vals = keys.map(get);
+    let bestIdx = -1;
+    if (higher !== null) {
+      const nums = vals.map(v => (v === null || isNaN(v)) ? null : v);
+      const valid = nums.filter(v => v !== null);
+      if (valid.length > 1) {
+        const target = higher ? Math.max(...valid) : Math.min(...valid);
+        bestIdx = nums.indexOf(target);
+      }
+    }
+    const cells = vals.map((v, i) =>
+      '<td class="' + (i === bestIdx ? 'best' : '') + '">' + fmt(v) + '</td>').join('');
+    return '<tr><th class="lbl">' + label + '</th>' + cells + '</tr>';
+  }).join('');
+
+  const pairRow = (label, worst) => {
+    const cells = keys.map(k => {
+      const [pair, r] = bestPair(k, worst);
+      if (pair === '—') return '<td>—</td>';
+      const c = r >= 0 ? 'pos' : 'neg';
+      return '<td>' + esc(pair) + ' <span class="' + c + '">'
+        + (r >= 0 ? '+' : '') + r.toFixed(1) + 'R</span></td>';
+    }).join('');
+    return '<tr><th class="lbl">' + label + '</th>' + cells + '</tr>';
+  };
+
+  box.innerHTML = '<div class="panel card-pad">'
+    + '<div class="panel-head bare"><h2>Сравнение стратегий</h2>'
+    + '<span class="hint">лучший в строке выделен</span></div>'
+    + '<div class="tbl-wrap"><table class="cmp"><thead><tr><th></th>'
+    + head + '</tr></thead><tbody>' + body
+    + pairRow('Лучшая пара', false) + pairRow('Худшая пара', true)
+    + '</tbody></table></div></div>';
+}
+
+function fmtMinutes(m) {
+  if (!m) return '—';
+  if (m < 60) return Math.round(m) + ' мин';
+  if (m < 60 * 24) return (m / 60).toFixed(1) + ' ч';
+  return (m / 60 / 24).toFixed(1) + ' дн';
+}
+
 /* ── Воронка отсева ─────────────────────────────────────────────────────── */
 function funnelView(funnel) {
   const box = document.getElementById('funnel');
@@ -2070,6 +2465,16 @@ function render() {
   histogram(closed);
   exitBreakdown(closed);
   pairBreakdown(closed);
+  compareTable(byStrategy);
+
+  // Раскрытая сделка восстанавливается после каждой перерисовки таблицы.
+  // Номер из адреса подхватывается один раз — при первой загрузке.
+  if (!window._tradeShown) {
+    window._tradeShown = true;
+    const wanted = q.get('trade');
+    if (wanted) TRADE_OPEN_ID = String(wanted);
+  }
+  if (TRADE_OPEN_ID) openTrade(TRADE_OPEN_ID, true);
   funnelView(DATA.funnel);
   regimeView(DATA.regime);
   attention(DATA.attention);
