@@ -535,8 +535,18 @@ def build_payload():
     payload['funnel'] = scan_report.snapshot()
     payload['regime'] = _regime()
     payload['portfolio'] = _portfolio()
+    payload['errors'] = _errors_summary()
     payload['attention'] = _attention(payload)
     return payload
+
+
+def _errors_summary():
+    """Короткая сводка по ошибкам — для значка в меню."""
+    try:
+        import error_log
+        return error_log.summary()
+    except Exception:                              # noqa: BLE001
+        return {'groups': 0, 'total': 0, 'last': None, 'categories': []}
 
 
 def _portfolio():
@@ -628,11 +638,17 @@ def _attention(payload):
                                 for o in expiring[:4]),
         })
 
-    errors = [line for line in read_log(120)
-              if '❌' in line or 'Traceback' in line or 'ошибк' in line.lower()]
-    if errors:
-        items.append({'level': 'warn', 'text': f'Ошибок в журнале: {len(errors)}',
-                      'detail': errors[-1][-140:]})
+    # Число берём из журнала ошибок, а не пересчитываем строки лога: иначе
+    # полоса и раздел «Ошибки» показывают разные цифры об одном и том же, и
+    # непонятно, какой верить.
+    errors = payload.get('errors') or {}
+    if errors.get('groups'):
+        last = ', '.join(errors.get('categories') or [])
+        items.append({
+            'level': 'warn',
+            'text': (f'Ошибок: {errors["groups"]} видов, '
+                     f'{errors["total"]} случаев'),
+            'detail': f'категории: {last}. Разбор — в разделе «Ошибки»'})
 
     return items
 
@@ -734,6 +750,14 @@ class _Handler(BaseHTTPRequestHandler):
             self._send_file(export_paths()[0], 'text/csv; charset=utf-8')
         elif path == '/api/export.jsonl':
             self._send_file(export_paths()[1], 'application/x-ndjson; charset=utf-8')
+        elif path == '/api/errors':
+            try:
+                import error_log
+                self._send_json({'errors': error_log.snapshot(),
+                                 'summary': error_log.summary(),
+                                 'writable': _controls_allowed()})
+            except Exception as exc:               # noqa: BLE001
+                self._fail(500, f'журнал ошибок недоступен: {exc}')
         elif path == '/api/update':
             # fetch по требованию: без него страница ждала бы сеть на каждом
             # обновлении, а состояние репозитория меняется несравнимо реже.
@@ -753,7 +777,8 @@ class _Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         path = self.path.split('?')[0]
         if path not in ('/api/settings', '/api/deposit', '/api/action',
-                        '/api/update', '/api/update/rollback'):
+                        '/api/update', '/api/update/rollback',
+                        '/api/errors/clear'):
             self.send_error(404)
             return
         if not _controls_allowed():
@@ -770,6 +795,15 @@ class _Handler(BaseHTTPRequestHandler):
                 raise ValueError('ожидается объект')
         except Exception as exc:
             self._fail(400, f'Неверные данные: {exc}')
+            return
+
+        if path == '/api/errors/clear':
+            import error_log
+            ok = error_log.clear()
+            if not ok:
+                self._fail(500, 'не удалось очистить журнал ошибок')
+                return
+            self._send_json({'ok': True, 'message': 'журнал ошибок очищен'})
             return
 
         if path in ('/api/update', '/api/update/rollback'):

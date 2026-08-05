@@ -16,6 +16,18 @@ LOG_FILE  = os.path.join(_DATA_DIR, "bot_log.txt")
 TRADES_CSV = os.path.join(_DATA_DIR, "trades.csv")
 
 
+# Обработчик ошибок ставится модулем error_log при старте. Держим его здесь,
+# а не импортируем error_log напрямую: logger подключается раньше всего
+# остального, и любой импорт отсюда создаёт цикл.
+_error_hook = None
+
+
+def set_error_hook(func):
+    """Подключает сбор ошибок. None отключает."""
+    global _error_hook
+    _error_hook = func
+
+
 def log(message, level="INFO"):
     """Пишет сообщение в лог-файл и в консоль.
 
@@ -40,6 +52,14 @@ def log(message, level="INFO"):
             f.write(entry + "\n")
     except Exception:
         pass
+
+    # Журнал ошибок. Тоже best-effort: сбой сбора не имеет права ронять ни
+    # логирование, ни тем более торговлю.
+    if _error_hook is not None:
+        try:
+            _error_hook(message, level)
+        except Exception:
+            pass
 
 
 def log_trade(trade_data):

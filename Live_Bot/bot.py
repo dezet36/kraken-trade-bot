@@ -7,6 +7,7 @@ import telegram_notify as tg
 from telegram_bot import controller
 from exchange import get_exchange, make_market_client, fetch_ohlcv
 import dashboard
+import error_log
 import strategy_levels
 import strategy_smc
 from strategy import analyze_market
@@ -483,6 +484,11 @@ def _start_paper():
 
 def main():
     global trade_manager, _last_summary_date
+
+    # Сбор ошибок подключается ДО первой строки лога: иначе проблемы старта
+    # (нет ключей, недоступна биржа) — самые интересные для разбора — в
+    # журнал не попадут.
+    error_log.install()
 
     log("=" * 60)
     mode_label = {'LIVE': 'LIVE', 'PAPER': 'ФАНТОМ'}.get(config.TRADING_MODE, 'DEMO')

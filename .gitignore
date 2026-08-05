@@ -93,3 +93,6 @@ Live_Bot/update_state.json
 # Собранная папка для сервера (создаётся make_release.py)
 release/
 kraken-bot.zip
+
+# Журнал ошибок (данные, не код)
+Live_Bot/errors.json

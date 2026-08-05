@@ -216,92 +216,47 @@
   }
   .note .dot { margin-top: 6px; }
 
-  /* ── Предел на весь портфель ────────────────────────────────────────────── */
-/* Каждая стратегия соблюдает СВОЙ лимит слотов. Три стратегии по шесть
-   позиций при риске 0.5% дают 9% депозита под риском одновременно, и при
-   этом ни одна правил не нарушила. Предел смотрит поверх всех. */
-function portfolioLimit(writable) {
-  const box = el('portfolio-limit');
-  const p = (DATA || {}).portfolio;
-  if (!box || !p) return;
-
-  const on = p.limit_pct > 0 || p.limit_positions > 0;
-  const bar = p.limit_pct > 0
-    ? Math.min(100, p.risk_pct / p.limit_pct * 100)
-    : 0;
-
-  box.innerHTML = `
-    <div class="panel card-pad">
-      <div class="panel-head bare">
-        <h2>Предел на весь портфель</h2>
-        <span class="hint">поверх лимитов отдельных стратегий</span>
-      </div>
-      <div class="pf-now">
-        Сейчас под риском <b class="${p.over ? 'neg' : ''}">${usd(p.risk_usd)}</b>
-        — <b class="${p.over ? 'neg' : ''}">${p.risk_pct.toFixed(2)}%</b>
-        от ${usd(p.deposit)} · позиций и ордеров ${p.slots}
-      </div>
-      ${on && p.limit_pct > 0 ? `
-        <div class="pf-bar"><div class="pf-fill ${p.over ? 'over' : ''}"
-          style="width:${bar}%"></div></div>` : ''}
-      <div class="ctl-row">
-        <label for="pf-risk">Максимум под риском</label>
-        <span class="unit">%</span>
-        <input type="number" id="pf-risk" min="0" max="100" step="0.5"
-               value="${p.limit_pct}" ${writable ? '' : 'disabled'}>
-      </div>
-      <div class="ctl-note">Сколько процентов депозита может стоять под риском
-        одновременно, считая все стратегии вместе. <b>0 — предел выключен.</b></div>
-      <div class="ctl-row">
-        <label for="pf-slots">Максимум позиций</label>
-        <span class="unit"></span>
-        <input type="number" id="pf-slots" min="0" max="60" step="1"
-               value="${p.limit_positions}" ${writable ? '' : 'disabled'}>
-      </div>
-      <div class="ctl-note">Открытых позиций и ожидающих ордеров суммарно.
-        <b>0 — предел выключен.</b></div>
-      <div class="ctl-foot">
-        <button type="button" class="btn" id="pf-save"
-          ${writable ? '' : 'disabled'}>Применить</button>
-        <button type="button" class="btn ghost" id="pf-off"
-          ${writable ? '' : 'disabled'}>Отключить</button>
-        <span class="saved" id="pf-msg"></span>
-      </div>
-      <div class="ctl-note">Предел не трогает уже открытые позиции: он решает
-        только, открывать ли новую. Стратегия, упёршаяся в него, пишет причину
-        в журнал — молчаливого пропуска не будет.</div>
-    </div>`;
-
-  const save = (risk, slots) => sendPortfolio(risk, slots);
-  el('pf-save').onclick = () => save(
-    parseFloat(el('pf-risk').value) || 0,
-    parseInt(el('pf-slots').value, 10) || 0);
-  el('pf-off').onclick = () => save(0, 0);
-}
-
-async function sendPortfolio(risk, slots) {
-  const msg = el('pf-msg');
-  if (msg) { msg.style.color = 'var(--ink-3)'; msg.textContent = 'сохраняю…'; }
-  try {
-    const resp = await fetch('/api/settings', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ PORTFOLIO: {
-        portfolio_risk_pct: risk, portfolio_max_positions: slots } }),
-    });
-    const data = await resp.json();
-    if (!resp.ok) throw new Error(data.error || resp.status);
-    SETTINGS = data.settings || SETTINGS;
-    await refresh();
-    const m = el('pf-msg');
-    if (m) {
-      m.style.color = 'var(--good)';
-      m.textContent = (risk || slots) ? 'предел применён' : 'предел выключен';
-    }
-  } catch (e) {
-    const m = el('pf-msg');
-    if (m) { m.style.color = 'var(--bad)'; m.textContent = 'Не применено: ' + e.message; }
+  /* ── Ошибки ──────────────────────────────────────────────────────── */
+  .err-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
+  .err-chip {
+    font-size: 12.5px; color: var(--ink-2); background: var(--surface-2);
+    border: 1px solid var(--hairline); border-radius: 999px; padding: 4px 11px;
   }
-}
+  .err-chip b { color: var(--ink-1); margin-left: 4px; }
+  .err-list { border: 1px solid var(--hairline); border-radius: var(--r-md);
+              overflow: hidden; }
+  .err-row + .err-row { border-top: 1px solid var(--hairline); }
+  .err-head {
+    display: flex; align-items: baseline; gap: 12px; padding: 11px 14px;
+    cursor: pointer; font-size: 13px;
+  }
+  .err-head:hover { background: var(--surface-2); }
+  .err-row.bad  { border-left: 3px solid var(--bad); }
+  .err-row.warn { border-left: 3px solid var(--warn); }
+  .err-cat { color: var(--ink-3); font-size: 12px; width: 100px; flex: none; }
+  .err-text { flex: 1; color: var(--ink-1); word-break: break-word; }
+  .err-count { color: var(--ink-2); font-variant-numeric: tabular-nums;
+               font-weight: 600; }
+  .err-when { color: var(--ink-4); font-size: 12px; width: 100px;
+              text-align: right; flex: none; }
+  .err-body { padding: 0 14px 14px 126px; }
+  .err-meta { font-size: 12px; color: var(--ink-3); margin-bottom: 8px; }
+  .err-sample { border-top: 1px solid var(--hairline-2); padding: 8px 0;
+                font-size: 12.5px; color: var(--ink-2); }
+  .err-sample-at { font-size: 11.5px; color: var(--ink-4); margin-bottom: 3px; }
+  .err-trace {
+    margin-top: 6px; padding: 8px 10px; background: var(--surface-2);
+    border: 1px solid var(--hairline); border-radius: 8px; overflow-x: auto;
+    font-size: 11.5px; line-height: 1.45; white-space: pre;
+  }
+
+  /* ── Предел портфеля ─────────────────────────────────────────────── */
+  .pf-now { font-size: 13.5px; color: var(--ink-2); margin-bottom: 12px; }
+  .pf-bar { height: 8px; border-radius: 4px; background: var(--hairline-2);
+            margin-bottom: 16px; overflow: hidden; }
+  .pf-fill { height: 8px; border-radius: 4px; background: var(--accent);
+             transition: width .3s cubic-bezier(.32,.72,0,1); }
+  .pf-fill.over { background: var(--bad); }
 
 /* ── Обновление кода ─────────────────────────────────────────────── */
   .upd-now { font-size: 13px; color: var(--ink-2); margin-bottom: 10px; }
@@ -614,6 +569,11 @@ async function sendPortfolio(risk, slots) {
         <div id="portfolio-limit"></div>
         <div id="controls"></div>
         <div id="update"></div>
+      </section>
+
+      <!-- ── Ошибки ───────────────────────────────────────────────────── -->
+      <section class="page" data-page="errors" hidden>
+        <div id="errors"></div>
       </section>
 
       <!-- ── Журнал ───────────────────────────────────────────────────── -->
@@ -1257,6 +1217,7 @@ const PAGES = [
   { id: 'history',   ic: '≡', title: 'История' },
   { id: 'analytics', ic: '◨', title: 'Аналитика' },
   { id: 'control',   ic: '⚙', title: 'Управление' },
+  { id: 'errors',    ic: '⚠', title: 'Ошибки' },
   { id: 'log',       ic: '⌘', title: 'Журнал' },
 ];
 let page = PAGES.some(p => p.id === q.get('page')) ? q.get('page') : 'overview';
@@ -1265,6 +1226,7 @@ function buildNav() {
   const counts = {
     positions: (DATA && (DATA.open_positions || []).length + (DATA.pending_orders || []).length) || 0,
     history: (DATA && DATA.closed_total) || 0,
+    errors: (DATA && DATA.errors && DATA.errors.groups) || 0,
   };
   document.getElementById('nav').innerHTML = PAGES.map(p => {
     const n = counts[p.id];
@@ -1295,6 +1257,7 @@ function showPage() {
   if (page === 'control' && !SETTINGS) loadSettings();
   if (page === 'control' && !UPDATE) loadUpdate(false);
   if (page === 'control') portfolioLimit(WRITABLE);
+  if (page === 'errors') loadErrors();
   // Настройки могли отрисоваться раньше, чем пришли данные бота: тогда в
   // карточках не было полей, зависящих от режима (депозит есть только в
   // фантоме) и от истории стратегии. Перерисовываем ровно один раз —
@@ -1458,6 +1421,202 @@ function pairBreakdown(rows) {
     <td class="${cls(v.r)}"><b>${v.r >= 0 ? '+' : ''}${v.r.toFixed(1)}</b></td>
     <td class="${cls(v.r)}">${(v.r / v.n) >= 0 ? '+' : ''}${(v.r / v.n).toFixed(2)}</td>
   </tr>`).join('')}</tbody></table>`;
+}
+
+/* ── Ошибки ─────────────────────────────────────────────────────────────── */
+/* Одинаковые беды схлопнуты в одну строку со счётчиком: недоступная на
+   десять минут биржа даёт триста одинаковых записей в обычном логе, и по
+   ним невозможно понять, это одна проблема или триста разных. */
+let ERRORS = null;
+
+async function loadErrors() {
+  try {
+    const d = await (await fetch('/api/errors', { cache: 'no-store' })).json();
+    ERRORS = d;
+    renderErrors();
+  } catch (e) { /* раздел просто не появится */ }
+}
+
+const ERR_ICON = {
+  'сеть': '\u21c4', 'биржа': '\u21c5', 'данные': '\u25a4',
+  'стратегия': '\u25c8', 'позиции': '\u25a6', 'прочее': '\u2022',
+};
+
+function errIcon(c) { return ERR_ICON[c] || '\u2022'; }
+
+function fmtWhen(iso) {
+  if (!iso) return '\u2014';
+  const d = new Date(iso);
+  return isNaN(d) ? esc(iso) : d.toLocaleString('ru', {
+    day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+}
+
+function renderErrors() {
+  const box = el('errors');
+  if (!box || !ERRORS) return;
+  const list = ERRORS.errors || [];
+
+  if (!list.length) {
+    box.innerHTML = '<div class="panel card-pad">'
+      + '<div class="panel-head bare"><h2>Ошибки</h2></div>'
+      + '<div class="empty">Ошибок не было. Здесь появится всё, на чём бот '
+      + 'споткнулся: недоступная биржа, отказ в правах на файл, сбой '
+      + 'стратегии — с числом повторов и временем последнего случая.</div></div>';
+    return;
+  }
+
+  const cats = {};
+  list.forEach(g => { cats[g.category] = (cats[g.category] || 0) + g.count; });
+  const chips = Object.entries(cats).sort((a, b) => b[1] - a[1])
+    .map(([c, n]) => '<span class="err-chip">' + errIcon(c) + ' ' + esc(c)
+      + ' <b>' + n + '</b></span>').join('');
+
+  const rows = list.map((g, idx) => {
+    const sample = (g.samples || [])[0] || {};
+    const ctx = sample.context
+      ? Object.entries(sample.context).map(([k, v]) => esc(k) + ': ' + esc(v)).join(' · ')
+      : '';
+    const samples = (g.samples || []).map(sm =>
+      '<div class="err-sample"><div class="err-sample-at">' + fmtWhen(sm.at)
+      + '</div><div>' + esc(sm.text) + '</div>'
+      + (sm.traceback ? '<pre class="err-trace">' + esc(sm.traceback) + '</pre>' : '')
+      + '</div>').join('');
+    return '<div class="err-row ' + (g.level === 'WARN' ? 'warn' : 'bad') + '">'
+      + '<div class="err-head" data-err="' + idx + '">'
+      + '<span class="err-cat">' + errIcon(g.category) + ' ' + esc(g.category) + '</span>'
+      + '<span class="err-text">' + esc(g.signature) + '</span>'
+      + '<span class="err-count">' + g.count + '\u00d7</span>'
+      + '<span class="err-when">' + fmtWhen(g.last) + '</span></div>'
+      + '<div class="err-body" id="err-' + idx + '" hidden>'
+      + '<div class="err-meta">впервые ' + fmtWhen(g.first) + ' · последний раз '
+      + fmtWhen(g.last) + ' · всего ' + g.count + '</div>'
+      + (ctx ? '<div class="err-meta">' + ctx + '</div>' : '')
+      + samples + '</div></div>';
+  }).join('');
+
+  box.innerHTML = '<div class="panel card-pad">'
+    + '<div class="panel-head bare"><h2>Ошибки</h2>'
+    + '<span class="hint">одинаковые собраны вместе; нажмите строку, чтобы '
+    + 'раскрыть подробности</span></div>'
+    + '<div class="err-chips">' + chips + '</div>'
+    + '<div class="err-list">' + rows + '</div>'
+    + '<div class="ctl-foot">'
+    + '<button type="button" class="btn ghost" id="err-reload">Обновить</button>'
+    + '<button type="button" class="btn ghost" id="err-clear"'
+    + (ERRORS.writable ? '' : ' disabled') + '>Очистить</button>'
+    + '<span class="saved" id="err-msg"></span></div>'
+    + '<div class="ctl-note">Очищать имеет смысл после того, как разобрались: '
+    + 'счётчик покажет, вернулась ли проблема.</div></div>';
+
+  box.querySelectorAll('.err-head').forEach(h => {
+    h.onclick = () => {
+      const body = el('err-' + h.dataset.err);
+      if (body) body.hidden = !body.hidden;
+    };
+  });
+  el('err-reload').onclick = () => loadErrors();
+  const clear = el('err-clear');
+  if (clear) clear.onclick = async () => {
+    try {
+      const resp = await fetch('/api/errors/clear', { method: 'POST',
+        headers: { 'Content-Type': 'application/json' }, body: '{}' });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.error || resp.status);
+      await loadErrors();
+      const m = el('err-msg');
+      if (m) { m.style.color = 'var(--good)'; m.textContent = data.message; }
+    } catch (e) {
+      const m = el('err-msg');
+      if (m) { m.style.color = 'var(--bad)'; m.textContent = 'Не выполнено: ' + e.message; }
+    }
+  };
+}
+
+/* ── Предел на весь портфель ────────────────────────────────────────────── */
+/* Каждая стратегия соблюдает СВОЙ лимит слотов. Три стратегии по шесть
+   позиций при риске 0.5% дают 9% депозита под риском одновременно, и при
+   этом ни одна правил не нарушила. Предел смотрит поверх всех. */
+function portfolioLimit(writable) {
+  const box = el('portfolio-limit');
+  const p = (DATA || {}).portfolio;
+  if (!box || !p) return;
+
+  const on = p.limit_pct > 0 || p.limit_positions > 0;
+  const bar = p.limit_pct > 0
+    ? Math.min(100, p.risk_pct / p.limit_pct * 100)
+    : 0;
+
+  box.innerHTML = `
+    <div class="panel card-pad">
+      <div class="panel-head bare">
+        <h2>Предел на весь портфель</h2>
+        <span class="hint">поверх лимитов отдельных стратегий</span>
+      </div>
+      <div class="pf-now">
+        Сейчас под риском <b class="${p.over ? 'neg' : ''}">${usd(p.risk_usd)}</b>
+        — <b class="${p.over ? 'neg' : ''}">${p.risk_pct.toFixed(2)}%</b>
+        от ${usd(p.deposit)} · позиций и ордеров ${p.slots}
+      </div>
+      ${on && p.limit_pct > 0 ? `
+        <div class="pf-bar"><div class="pf-fill ${p.over ? 'over' : ''}"
+          style="width:${bar}%"></div></div>` : ''}
+      <div class="ctl-row">
+        <label for="pf-risk">Максимум под риском</label>
+        <span class="unit">%</span>
+        <input type="number" id="pf-risk" min="0" max="100" step="0.5"
+               value="${p.limit_pct}" ${writable ? '' : 'disabled'}>
+      </div>
+      <div class="ctl-note">Сколько процентов депозита может стоять под риском
+        одновременно, считая все стратегии вместе. <b>0 — предел выключен.</b></div>
+      <div class="ctl-row">
+        <label for="pf-slots">Максимум позиций</label>
+        <span class="unit"></span>
+        <input type="number" id="pf-slots" min="0" max="60" step="1"
+               value="${p.limit_positions}" ${writable ? '' : 'disabled'}>
+      </div>
+      <div class="ctl-note">Открытых позиций и ожидающих ордеров суммарно.
+        <b>0 — предел выключен.</b></div>
+      <div class="ctl-foot">
+        <button type="button" class="btn" id="pf-save"
+          ${writable ? '' : 'disabled'}>Применить</button>
+        <button type="button" class="btn ghost" id="pf-off"
+          ${writable ? '' : 'disabled'}>Отключить</button>
+        <span class="saved" id="pf-msg"></span>
+      </div>
+      <div class="ctl-note">Предел не трогает уже открытые позиции: он решает
+        только, открывать ли новую. Стратегия, упёршаяся в него, пишет причину
+        в журнал — молчаливого пропуска не будет.</div>
+    </div>`;
+
+  const save = (risk, slots) => sendPortfolio(risk, slots);
+  el('pf-save').onclick = () => save(
+    parseFloat(el('pf-risk').value) || 0,
+    parseInt(el('pf-slots').value, 10) || 0);
+  el('pf-off').onclick = () => save(0, 0);
+}
+
+async function sendPortfolio(risk, slots) {
+  const msg = el('pf-msg');
+  if (msg) { msg.style.color = 'var(--ink-3)'; msg.textContent = 'сохраняю…'; }
+  try {
+    const resp = await fetch('/api/settings', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ PORTFOLIO: {
+        portfolio_risk_pct: risk, portfolio_max_positions: slots } }),
+    });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.error || resp.status);
+    SETTINGS = data.settings || SETTINGS;
+    await refresh();
+    const m = el('pf-msg');
+    if (m) {
+      m.style.color = 'var(--good)';
+      m.textContent = (risk || slots) ? 'предел применён' : 'предел выключен';
+    }
+  } catch (e) {
+    const m = el('pf-msg');
+    if (m) { m.style.color = 'var(--bad)'; m.textContent = 'Не применено: ' + e.message; }
+  }
 }
 
 /* ── Обновление кода ────────────────────────────────────────────────────── */
