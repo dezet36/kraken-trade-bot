@@ -48,17 +48,23 @@ BOOTSTRAP = 10_000
 TRACKED = ('MIN_TARGET_R', 'VOLUME_RATIO', 'STOP_PAD_ATR', 'MIN_STOP_PCT',
            'PIERCE_ATR', 'MAX_SAME_DIRECTION')
 
+# ПРОВЕРКА УСТОЙЧИВОСТИ ПРИНЯТОГО, а не поиск лучшего числа.
+#
+# Принято: MIN_TARGET_R=2.0 и MIN_STOP_PCT=1.2. Оба рычага названы
+# диагностикой ДО проверки, а не подобраны перебором. Вопрос здесь один:
+# держится ли результат при сдвиге настроек. Если хорошо только ровно на
+# 1.2% — это подгонка, и честный вывод «стоп должен быть шире», а не
+# «стоп ровно 1.2%».
 CONFIGS = [
-    ('база (RR>=1.5, объём 1.5)', {}),
-    ('RR >= 2.0',                 {'MIN_TARGET_R': 2.0}),
-    ('RR >= 2.5',                 {'MIN_TARGET_R': 2.5}),
-    ('RR >= 3.0',                 {'MIN_TARGET_R': 3.0}),
-    ('RR >= 2.0 + объём 2.0',     {'MIN_TARGET_R': 2.0, 'VOLUME_RATIO': 2.0}),
-    ('RR >= 2.0 + объём 3.0',     {'MIN_TARGET_R': 2.0, 'VOLUME_RATIO': 3.0}),
-    ('RR >= 2.0 + стоп +0.3 ATR', {'MIN_TARGET_R': 2.0, 'STOP_PAD_ATR': 0.3}),
-    ('RR >= 2.0 + стоп >= 1.2%',  {'MIN_TARGET_R': 2.0, 'MIN_STOP_PCT': 1.2}),
-    ('RR >= 2.0 + прокол 0.3 ATR', {'MIN_TARGET_R': 2.0, 'PIERCE_ATR': 0.3}),
-    ('RR >= 2.0 + кэп стороны 3', {'MIN_TARGET_R': 2.0, 'MAX_SAME_DIRECTION': 3}),
+    ('прежнее (RR1.5, стоп 0.8%)', {'MIN_TARGET_R': 1.5, 'MIN_STOP_PCT': 0.8}),
+    ('стоп 0.8%',                  {'MIN_STOP_PCT': 0.8}),
+    ('стоп 1.0%',                  {'MIN_STOP_PCT': 1.0}),
+    ('ПРИНЯТО: стоп 1.2%',         {}),
+    ('стоп 1.5%',                  {'MIN_STOP_PCT': 1.5}),
+    ('стоп 2.0%',                  {'MIN_STOP_PCT': 2.0}),
+    ('RR 1.75',                    {'MIN_TARGET_R': 1.75}),
+    ('RR 2.25',                    {'MIN_TARGET_R': 2.25}),
+    ('RR 2.5',                     {'MIN_TARGET_R': 2.5}),
 ]
 
 
@@ -200,12 +206,12 @@ def main():
                   f'{stats["return_pct"]:>+9.1f}{dd:>7.1f}'
                   f'{stats["return_pct"] / dd if dd else float("nan"):>10.2f}')
 
-        base = results.get((label, CONFIGS[0][0]))
+        base = results.get((label, 'ПРИНЯТО: стоп 1.2%'))
         if not base:
             continue
         print()
-        print('Разница с базой (интервал через ноль = разница недоказуема):')
-        for name, _ in CONFIGS[1:]:
+        print('Разница с ПРИНЯТЫМ (интервал через ноль = разница недоказуема):')
+        for name, _ in CONFIGS:
             stats = results.get((label, name))
             if not stats:
                 continue
