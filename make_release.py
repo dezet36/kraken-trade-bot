@@ -48,7 +48,7 @@ INCLUDE_FILES = (
     'install.ps1', 'run.ps1',
     # Загрузчик кладём и сюда: с ним собранную папку можно потом обновлять
     # прямо с GitHub, не пересобирая её здесь.
-    'bootstrap.sh', 'bootstrap.ps1',
+    'bootstrap.sh', 'bootstrap.ps1', 'bootstrap.bat',
     'Dockerfile', 'docker-compose.yml', 'start_server.sh', 'stop_server.sh',
     'README_СЕРВЕР.md', 'DEPLOY.md',
 )

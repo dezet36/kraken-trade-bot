@@ -16,6 +16,52 @@ function Ok   ($t) { Write-Host "  OK    $t" -ForegroundColor Green }
 function Warn ($t) { Write-Host "  ВНИМ  $t" -ForegroundColor Yellow }
 function Die  ($t) { Write-Host "  ОШИБКА $t" -ForegroundColor Red; exit 1 }
 
+function Test-Interactive {
+    # Спрашивать можно только у живой консоли. Под планировщиком задач или в
+    # конвейере Read-Host не вернёт ничего и установка встанет насмерть —
+    # молча, потому что вопрос никто не увидит.
+    return [Environment]::UserInteractive -and -not [Console]::IsInputRedirected
+}
+
+function Ask-Choice ($title, $options, $default) {
+    while ($true) {
+        $answer = Read-Host "  $title [$($options -join '/')], по умолчанию $default"
+        if (-not $answer) { return $default }
+        $match = $options | Where-Object { $_ -ieq $answer }
+        if ($match) { return $match }
+        Write-Host "    надо одно из: $($options -join ', ')" -ForegroundColor Yellow
+    }
+}
+
+function Ask-Secret ($title) {
+    while ($true) {
+        $secure = Read-Host "  $title" -AsSecureString
+        $value = [Runtime.InteropServices.Marshal]::PtrToStringAuto(
+            [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure))
+        # Ключ, скопированный из браузера, часто приезжает с пробелом на конце,
+        # и биржа отвечает «неверная подпись» — искать причину потом долго.
+        $value = ($value -replace '^\s+|\s+$', '')
+        if ($value) { return $value }
+        Write-Host '    пусто — введите значение' -ForegroundColor Yellow
+    }
+}
+
+function Set-EnvValue ($path, $key, $value) {
+    # Значение подставляется в существующую строку, а не дописывается в конец:
+    # иначе в файле окажутся два TRADING_MODE, и какой из них подействует —
+    # вопрос порядка чтения, а не намерения.
+    $lines = [IO.File]::ReadAllLines($path)
+    $done = $false
+    for ($i = 0; $i -lt $lines.Count; $i++) {
+        if ($lines[$i] -match "^\s*$([regex]::Escape($key))\s*=") {
+            $lines[$i] = "$key=$value"
+            $done = $true
+        }
+    }
+    if (-not $done) { $lines += "$key=$value" }
+    [IO.File]::WriteAllLines($path, $lines, (New-Object Text.UTF8Encoding $false))
+}
+
 Say '1. Python'
 $py = $null
 foreach ($c in @('python', 'python3', 'py')) {
@@ -55,9 +101,35 @@ $EnvFile = Join-Path $DataDir '.env'
 $NeedKeys = $false
 if (-not (Test-Path $EnvFile)) {
     Copy-Item (Join-Path $AppDir '.env.example') $EnvFile
-    Warn "создан $EnvFile из шаблона — ВПИШИТЕ КЛЮЧИ БИРЖИ"
-    Warn 'потом запустите install.ps1 ещё раз для проверки'
-    $NeedKeys = $true
+    # Спрашиваем ключи здесь же. Отправлять человека править .env в блокноте —
+    # это лишний шаг, на котором проще всего ошибиться: не тот файл, лишние
+    # пробелы, кавычки вокруг ключа. Запишем сами.
+    if (Test-Interactive) {
+        Write-Host ''
+        Write-Host '  Нужны ключи биржи. Даже в режиме фантома: котировки берутся с биржи.'
+        Write-Host '  Для PAPER и DEMO подойдут ключи демо-счёта.'
+        Write-Host ''
+
+        $exchange = Ask-Choice 'Биржа' @('bybit', 'bingx') 'bybit'
+        $mode = Ask-Choice 'Режим' @('PAPER', 'DEMO', 'LIVE') 'PAPER'
+        if ($mode -eq 'LIVE') {
+            Warn 'LIVE — реальные деньги. Бот дополнительно переспросит при запуске.'
+        }
+
+        $prefix = $exchange.ToUpper()
+        $apiKey = Ask-Secret "$prefix API key"
+        $apiSecret = Ask-Secret "$prefix secret key"
+
+        Set-EnvValue $EnvFile 'EXCHANGE' $exchange
+        Set-EnvValue $EnvFile 'TRADING_MODE' $mode
+        Set-EnvValue $EnvFile "${prefix}_API_KEY" $apiKey
+        Set-EnvValue $EnvFile "${prefix}_SECRET_KEY" $apiSecret
+        Ok "записаны в $EnvFile"
+    } else {
+        Warn "создан $EnvFile из шаблона — ВПИШИТЕ КЛЮЧИ БИРЖИ"
+        Warn 'потом запустите install.ps1 ещё раз для проверки'
+        $NeedKeys = $true
+    }
 } else {
     Ok '.env на месте (не тронут)'
 }
@@ -82,3 +154,18 @@ Write-Host @"
 
   Данные:  $DataDir   (обновление кода их не трогает)
 "@
+
+# Проверка пройдена — предложить сразу и запустить. Иначе установка кончается
+# списком команд, которые надо где-то набрать, а человек просил обратного.
+if (Test-Interactive) {
+    Write-Host ''
+    $how = Ask-Choice 'Запустить сейчас' @('служба', 'окно', 'нет') 'служба'
+    if ($how -eq 'служба') {
+        # Служба переживает перезагрузку сервера и поднимает бота после падения.
+        & powershell -NoProfile -ExecutionPolicy Bypass `
+            -File (Join-Path $AppDir 'Live_Bot\install_service.ps1')
+    } elseif ($how -eq 'окно') {
+        & powershell -NoProfile -ExecutionPolicy Bypass `
+            -File (Join-Path $AppDir 'run.ps1')
+    }
+}
