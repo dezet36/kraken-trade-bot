@@ -113,6 +113,23 @@ def _to_float(value, default=0.0):
         return default
 
 
+def _geometry(raw):
+    """
+    Разметка сетапа из журнала. В CSV она лежит строкой JSON.
+
+    У сделок, закрытых до появления колонки, её нет — это нормально, график
+    просто нарисует один план входа. Пустой словарь честнее выдумывания
+    зон задним числом.
+    """
+    if not raw:
+        return {}
+    try:
+        value = json.loads(raw)
+    except (TypeError, ValueError):
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
 def _read_rows(path):
     if not os.path.exists(path):
         return []
@@ -195,6 +212,7 @@ def _read_paper_trades():
             'reason_ru': row.get('exit_reason_ru') or row.get('exit_reason', ''),
             'confirmed': [x for x in (row.get('confirmed_ru') or '').split('; ') if x],
             'missing': [x for x in (row.get('missing_ru') or '').split('; ') if x],
+            'geometry': _geometry(row.get('geometry')),
             'balance_after': _to_float(row.get('balance_after')),
         })
     trades.sort(key=lambda t: t['closed'])

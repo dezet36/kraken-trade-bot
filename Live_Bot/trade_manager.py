@@ -996,7 +996,16 @@ class LiveTradeManager:
             log(f"❌ Депозит/баланс недоступен (${sizing_balance:.2f})")
             return False
 
-        sig_sl_dist = abs(signal['params']['entry'] - signal['params']['stop_loss'])
+        # Лимит уходит на 0.1% ХУЖЕ расчётного входа — плата за то, чтобы цена
+        # его гарантированно задела. Войдём мы по этой цене, а не по расчётной,
+        # и стоп окажется дальше, чем считала стратегия. Размер поэтому берём
+        # от цены заполнения: пока считали от расчётной, настройка «риск 0.5%»
+        # рисковала 0.5625% — смещение 0.1% при стопе 0.8% даёт 12.5% сверху.
+        _entry_offset = config.LIMIT_ENTRY_OFFSET_PCT if config.USE_LIMIT_ENTRY else 0.0
+        sizing_entry = (signal['params']['entry'] * (1 + _entry_offset)
+                        if setup['type'] == 'LONG'
+                        else signal['params']['entry'] * (1 - _entry_offset))
+        sig_sl_dist = abs(sizing_entry - signal['params']['stop_loss'])
         if sig_sl_dist <= 0:
             log(f"❌ SL дистанция = 0 — пропускаем")
             return False

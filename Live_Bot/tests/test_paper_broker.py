@@ -616,3 +616,105 @@ class TestSnapshot:
         # Обоснование входа читается человеком, без словаря технических имён
         assert 'Лонг' in position['why'] and 'зона A' in position['why']
         assert snap['strategies']['FIBO']['start_balance'] == 10_000
+
+
+def _live(broker):
+    """Открытая позиция из снимка: в 'open' лежат и ожидающие ордера."""
+    return [p for p in broker.snapshot()['open'] if not p.get('pending')][0]
+
+
+class TestGeometry:
+    """
+    Разметка сетапа — зоны и уровни, по которым стратегия принимала решение.
+
+    Она нужна не для красоты: график сделки без неё показывает только план
+    входа, и по нему нельзя проверить, отработал ли сетап или вход случайно
+    совпал с движением. Разметка обязана дожить до журнала — там её читают
+    через месяц, когда параметры стратегии уже другие.
+    """
+
+    def test_fibo_keeps_correction_zones(self, broker_env):
+        broker, client, pb, _cfg = broker_env
+        pb._now_ms = lambda: 1_700_000_000_000
+        sig = signal()
+        sig['zone_a'] = {'top': 104.72, 'bottom': 100.0}
+        sig['zone_b'] = {'top': 100.0, 'bottom': 95.44}
+        broker.open('FIBO', sig)
+        feed(broker, client, 'BTCUSDT', [(100, 100, 100)])
+
+        geo = _live(broker)['geometry']
+        labels = [b['label'] for b in geo['bands']]
+        assert any('зона A' in x for x in labels)
+        assert any('зона B' in x for x in labels)
+        assert {round(g['price'], 2) for g in geo['lines']} == {80.0, 120.0}
+
+    def test_smc_keeps_the_order_block(self, broker_env):
+        broker, client, pb, _cfg = broker_env
+        pb._now_ms = lambda: 1_700_000_000_000
+        sig = signal(strategy='SMC')
+        sig['smc'] = {'poi_type': 'ORDER_BLOCK', 'poi_top': 101.0, 'poi_bottom': 99.0}
+        broker.open('SMC', sig)
+        feed(broker, client, 'BTCUSDT', [(100, 100, 100)])
+
+        band = _live(broker)['geometry']['bands'][0]
+        assert (band['bottom'], band['top']) == (99.0, 101.0)
+
+    def test_geometry_survives_the_journal(self, broker_env):
+        broker, client, pb, _cfg = broker_env
+        pb._now_ms = lambda: 1_700_000_000_000
+        sig = signal(entry=100.0, stop=90.0, tp1=130.0)
+        sig['zone_a'] = {'top': 104.72, 'bottom': 100.0}
+        broker.open('FIBO', sig)
+        feed(broker, client, 'BTCUSDT', [(100, 100, 100), (100, 89, 89)])
+
+        import json
+        row = pb.read_journal()[0]
+        # Журнал дашборд читает из CSV, поэтому разметка лежит там строкой.
+        assert json.loads(row['geometry'])['bands'][0]['top'] == 104.72
+
+    def test_missing_zones_are_not_invented(self, broker_env):
+        broker, client, pb, _cfg = broker_env
+        pb._now_ms = lambda: 1_700_000_000_000
+        broker.open('FIBO', signal())        # сигнал без zone_a/zone_b
+        feed(broker, client, 'BTCUSDT', [(100, 100, 100)])
+
+        assert _live(broker)['geometry']['bands'] == []
+
+
+class TestRiskMatchesSetting:
+    """
+    Заявленный риск должен совпадать с фактическим.
+
+    Лимит входа ставится на 0.1% хуже расчётной цены — чтобы цена его точно
+    задела. Размер позиции считался от РАСЧЁТНОЙ цены, а входили мы по
+    лимитной, и стоп оказывался дальше: при стопе 0.8% настройка «риск 1%»
+    рисковала 1.125%. Ошибка тихая — она не роняет бота, а просто делает
+    просадку глубже настройки и портит отчётный R: стоп-лосс выходил −1.12R
+    вместо −1.0R.
+    """
+
+    def test_size_accounts_for_the_entry_offset(self, broker_env):
+        broker, client, pb, cfg = broker_env
+        pb._now_ms = lambda: 1_700_000_000_000
+        cfg.LIMIT_ENTRY_OFFSET_PCT = 0.001
+        cfg.USE_LIMIT_ENTRY = True
+
+        broker.open('FIBO', signal(entry=100.0, stop=99.2, tp1=103.0))
+        feed(broker, client, 'BTCUSDT', [(100.5, 100.0, 100.2)])
+
+        position = _live(broker)
+        risked = abs(position['entry'] - position['stop']) * position['size']
+        assert position['entry'] == pytest.approx(100.1)   # вошли по лимиту
+        assert risked == pytest.approx(position['risk'], rel=1e-6)
+
+    def test_stop_out_costs_exactly_one_r(self, broker_env):
+        broker, client, pb, cfg = broker_env
+        pb._now_ms = lambda: 1_700_000_000_000
+        cfg.LIMIT_ENTRY_OFFSET_PCT = 0.001
+        cfg.USE_LIMIT_ENTRY = True
+
+        broker.open('FIBO', signal(entry=100.0, stop=99.2, tp1=103.0))
+        feed(broker, client, 'BTCUSDT', [(100.5, 100.0, 100.2), (100.2, 99.0, 99.1)])
+
+        row = pb.read_journal()[0]
+        assert float(row['pnl_r']) == pytest.approx(-1.0, abs=0.005)

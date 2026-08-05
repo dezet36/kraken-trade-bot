@@ -280,8 +280,10 @@
   .tc-hero .big { font-size: 26px; font-weight: 700; letter-spacing: -.4px; }
   .tc-hero .side { font-size: 14px; font-weight: 600; }
   .tc-reason { margin-left: auto; color: var(--ink-3); font-size: 12px; }
-  .tc-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
-             gap: 0 18px; }
+  .tc-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+             gap: 4px 18px; align-items: start; }
+  .tc-gt { font-size: 10.5px; letter-spacing: .04em; text-transform: uppercase;
+           color: var(--ink-4); padding-bottom: 2px; }
   .tc-row { display: flex; justify-content: space-between; align-items: baseline;
             padding: 6px 0; border-bottom: 1px solid var(--hairline-2);
             font-size: 12.5px; }
@@ -364,7 +366,13 @@
        font-variant-numeric: tabular-nums; white-space: nowrap; }
   tbody tr:last-child td { border-bottom: none; }
   tbody tr:hover { background: var(--hairline-2); }
-  td.why { max-width: 260px; overflow: hidden; text-overflow: ellipsis; color: var(--ink-3); }
+  /* Ограничение ширины живёт на вложенном блоке: max-width на самой ячейке
+     табличная раскладка не соблюдает, и колонка растягивалась под весь текст
+     причины — вместе с ней уезжала за край и вся таблица. Полный текст
+     остаётся в подсказке и в развёрнутой карточке. */
+  td.why { color: var(--ink-3); }
+  td.why > div { max-width: 260px; overflow: hidden;
+                 text-overflow: ellipsis; white-space: nowrap; }
   .pair { font-weight: 620; }
   .side-l { color: var(--good); font-weight: 600; }
   .side-s { color: var(--bad); font-weight: 600; }
@@ -426,8 +434,12 @@
               margin-top: 13px; padding-top: 12px; border-top: 1px solid var(--hairline-2); }
   .pos-grid .k { font-size: 10.5px; color: var(--ink-3); }
   .pos-grid .v { font-size: 13.5px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  /* Причина входа переносится по словам. В одну строку с обрезанием она
+     обрывалась на «...импул», а обрезаемая часть — как раз то, чем сетапы
+     отличаются друг от друга. */
   .pos-why { margin-top: 11px; font-size: 12px; color: var(--ink-3);
-             overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+             line-height: 1.45; overflow-wrap: anywhere; }
+  .pos-grid .v .sub { font-size: 10.5px; font-weight: 400; color: var(--ink-4); }
   .flags { display: flex; gap: 5px; flex-wrap: wrap; }
   .flag { font-size: 10.5px; padding: 2px 7px; border-radius: 5px;
           background: var(--hairline-2); color: var(--ink-3); }
@@ -1094,6 +1106,19 @@ function openCards(rows) {
   }).join('');
 }
 
+// Сколько позиция ЕЩЁ может потерять, а не сколько закладывали при входе.
+// Стоп двигается: после переноса в безубыток он стоит на цене входа, и
+// карточка, продолжая писать первоначальные $50, обещала риск, которого
+// больше нет. Считаем от текущего стопа.
+function riskNow(r) {
+  const size = r.size || 0;
+  const now = size ? Math.abs(r.entry - r.stop) * size : (r.risk || 0);
+  if (r.breakeven || now < (r.risk || 0) * 0.02) {
+    return '$0 <span class="sub">был $' + (r.risk || 0).toFixed(0) + '</span>';
+  }
+  return '$' + now.toFixed(2);
+}
+
 function posCards(rows) {
   return rows.map(r => {
     const color = COLOR[r.strategy] || 'var(--muted)';
@@ -1157,8 +1182,8 @@ function posCards(rows) {
         ${cell('Вход', price(r.entry))}
         ${cell('Стоп-лосс', price(r.stop) + dist(r.stop, r.price), 'neg')}
         ${cell('Тейк-профит', price(targets[0]) + dist(targets[0], r.price), 'pos')}
-        ${cell('Риск', '$' + (r.risk || 0).toFixed(2))}
-        ${cell('RR', r.rr ? r.rr.toFixed(2) : '—')}
+        ${cell('Риск', riskNow(r), r.breakeven ? 'pos' : '')}
+        ${cell('RR план', r.rr ? r.rr.toFixed(2) : '—')}
         ${cell('Макс. ход', (r.mfe_r != null ? r.mfe_r.toFixed(2) : '—') + ' R')}
         ${targets.length > 1
           ? cell('Дальние цели', targets.slice(1).map(price).join(' · '), 'pos') : ''}
@@ -1237,7 +1262,7 @@ function orderRow(r) {
       <td>$${(r.risk || 0).toFixed(2)}</td>
       <td>${dur(r.waiting_min || 0)}</td>
       <td>${dur(r.expires_in_min || 0)}</td>
-      <td class="why" title="${esc(r.why)}">${esc(r.why) || '—'}</td>
+      <td class="why"><div title="${esc(r.why)}">${esc(r.why) || '—'}</div></td>
       <td><button type="button" class="btn ghost sm" data-action="cancel"
         data-strategy="${r.strategy}" data-pair="${esc(r.pair)}">Снять</button></td></tr>`;
   }).join('');
@@ -1277,7 +1302,7 @@ function closedTable(rows) {
       <td><span class="chip">${esc(r.reason) || '—'}</span></td>
       <td>${dur(r.duration_min || 0)}</td>
       <td>${when(r.closed)}</td>
-      <td class="why" title="${esc(r.why)}">${esc(r.why) || '—'}</td></tr>`;
+      <td class="why"><div title="${esc(r.why)}">${esc(r.why) || '—'}</div></td></tr>`;
   }).join('')}</tbody></table>`;
 
   // Обработчик на таблице, а не на каждой строке: строк бывает три сотни,
@@ -1992,7 +2017,7 @@ function posChartHtml(pos, data) {
     entry: pos.entry, stop: pos.stop, tp1: targets[0],
     tp2: targets.length > 1 ? targets[1] : null,
     exit: 0, direction: pos.direction,
-    opened: pos.opened, closed: null,
+    opened: pos.opened, closed: null, geometry: pos.geometry,
   }, data, { W: 420, H: 230 });
 }
 
@@ -2078,9 +2103,38 @@ function tradeChart(t, data, size) {
       + (right ? ' text-anchor="end"' : '') + '>' + label + '</text>';
   };
 
+  // Разметка, по которой стратегия принимала решение: зона коррекции,
+  // ордер-блок, уровень. Без неё непонятно главное — вошли ли там, где
+  // собирались. Полосы и линии рисуются ПОД свечами, чтобы не закрывать их.
+  const geo = t.geometry || {};
+  const inView = v => v > lo && v < hi;
+  // Разметка обрезается по окну, а окно под неё НЕ расширяется: зона B и
+  // начало импульса бывают далеко от цены, и ради них пришлось бы сжать все
+  // свечи в полоску. Что не поместилось — не рисуем.
+  const bands = (geo.bands || []).map(b => {
+    const top = Math.min(b.top, hi), bottom = Math.max(b.bottom, lo);
+    if (top <= bottom) return '';
+    return '<rect x="' + PL + '" y="' + y(top) + '" width="' + (W - PR - PL)
+      + '" height="' + Math.max(y(bottom) - y(top), 1) + '" fill="var(--accent)"'
+      + ' opacity=".07"/>'
+      + '<line x1="' + PL + '" y1="' + y(top) + '" x2="' + (W - PR) + '" y2="' + y(top)
+      + '" stroke="var(--accent)" stroke-width=".8" opacity=".35"/>'
+      + '<line x1="' + PL + '" y1="' + y(bottom) + '" x2="' + (W - PR) + '" y2="'
+      + y(bottom) + '" stroke="var(--accent)" stroke-width=".8" opacity=".35"/>'
+      + '<text x="' + (PL + 4) + '" y="' + (y(top) + 10) + '" fill="var(--accent)"'
+      + ' font-size="9.5" opacity=".85">' + esc(b.label || '') + '</text>';
+  }).join('');
+  const guides = (geo.lines || []).filter(g => inView(g.price)).map(g =>
+    '<line x1="' + PL + '" y1="' + y(g.price) + '" x2="' + (W - PR) + '" y2="'
+      + y(g.price) + '" stroke="var(--ink-4)" stroke-width=".8"'
+      + ' stroke-dasharray="1 4" opacity=".7"/>'
+    + '<text x="' + (PL + 4) + '" y="' + (y(g.price) - 3) + '" fill="var(--ink-4)"'
+    + ' font-size="9.5">' + esc(g.label || '') + '</text>').join('');
+
   const isLong = (t.direction || '').toUpperCase() === 'LONG';
   return '<div class="tc-chart"><svg viewBox="0 0 ' + W + ' ' + H
     + '" preserveAspectRatio="xMidYMid meet" role="img" aria-label="график сделки">'
+    + bands + guides
     + body
     + line(t.stop, 'var(--bad)', 'стоп', true)
     + line(t.entry, 'var(--ink-3)', 'вход', false)
@@ -2102,6 +2156,8 @@ function renderTradeCard(t, data, note) {
 
   const row = (k, v, c) => '<div class="tc-row"><span class="k">' + k
     + '</span><span class="v ' + (c || '') + '">' + v + '</span></div>';
+  const group = (title, rows) => '<div class="tc-group"><div class="tc-gt">'
+    + title + '</div>' + rows + '</div>';
 
   const mfe = t.mfe_r != null
     ? row('Ходила в плюс', '+' + Number(t.mfe_r).toFixed(2) + ' R', 'pos') : '';
@@ -2117,18 +2173,24 @@ function renderTradeCard(t, data, note) {
     + money(t.pnl) + '</span><span class="side ' + (good ? 'pos' : 'neg') + '">'
     + (r >= 0 ? '+' : '') + r.toFixed(2) + ' R</span>'
     + '<span class="tc-reason">' + esc(t.reason_ru || t.reason || '') + '</span></div>'
+    // Строки разложены по смыслу — цены, время, деньги, — а не сплошным
+    // списком в две колонки: там «В позиции» вставало рядом с «Риск», и
+    // соседями оказывались часы и доллары.
     + '<div class="tc-grid">'
-    + row('Вход', price(t.entry))
-    + row('Стоп', price(t.stop), 'neg')
-    + row('Цель', price(t.tp1), 'pos')
-    + row('Выход', price(t.exit))
-    + row('Открыта', fmtWhen(t.opened))
-    + row('Закрыта', fmtWhen(t.closed))
-    + row('В позиции', fmtMinutes(t.duration_min))
-    + row('Риск', money(t.risk))
-    + row('Плановый RR', (t.rr || 0).toFixed(2))
-    + row('Издержки', '$' + ((t.fees || 0) + (t.funding || 0)).toFixed(2), 'neg')
-    + mfe + mae
+    + group('Уровни',
+        row('Вход', price(t.entry))
+        + row('Стоп', price(t.stop), 'neg')
+        + row('Цель', price(t.tp1), 'pos')
+        + row('Выход', price(t.exit)))
+    + group('Время',
+        row('Открыта', fmtWhen(t.opened))
+        + row('Закрыта', fmtWhen(t.closed))
+        + row('В позиции', fmtMinutes(t.duration_min)))
+    + group('Деньги',
+        row('Риск', money(t.risk))
+        + row('Плановый RR', (t.rr || 0).toFixed(2))
+        + row('Издержки', '$' + ((t.fees || 0) + (t.funding || 0)).toFixed(2), 'neg'))
+    + (mfe || mae ? group('Ход цены', mfe + mae) : '')
     + '</div>'
     + (t.why ? '<div class="tc-why"><div class="k">Почему вошли</div>'
         + esc(t.why) + '</div>' : '')

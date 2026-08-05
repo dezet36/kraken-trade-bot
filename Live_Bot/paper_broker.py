@@ -73,6 +73,9 @@ COLUMNS = [
     # не держа в голове словарь технических имён. Технические имена остались
     # в колонке factors: на них считается разбор вкладов.
     'exit_reason_ru', 'confirmed_ru', 'missing_ru',
+    # Разметка сетапа (зоны и уровни) — строкой JSON. Колонка нужна графику
+    # закрытой сделки: дашборд читает журнал из CSV, а не из JSONL.
+    'geometry',
 ]
 
 
@@ -509,7 +512,20 @@ class PaperBroker:
 
         entry = float(params['entry'])
         stop = float(params['stop_loss'])
-        sl_dist = abs(entry - stop)
+
+        # Лимит ставится на 0.1% ХУЖЕ расчётного входа — это плата за то, чтобы
+        # цена его гарантированно задела. Значит, войдём мы не по `entry`, а по
+        # `limit_price`, и стоп окажется дальше, чем считала стратегия.
+        #
+        # Размер поэтому считается от цены ЗАПОЛНЕНИЯ, а не от расчётной. Пока
+        # он считался от `entry`, настройка «риск 0.5%» на деле рисковала
+        # 0.5625%: смещение 0.1% при стопе 0.8% — это 12.5% сверху. Ошибка
+        # уезжала и в отчётность — стоп-лосс выходил −1.09R вместо −1.0R,
+        # потому что делили на риск, которого не было.
+        offset = config.LIMIT_ENTRY_OFFSET_PCT if config.USE_LIMIT_ENTRY else 0.0
+        limit_price = entry * (1 + offset) if is_long else entry * (1 - offset)
+
+        sl_dist = abs(limit_price - stop)
         if sl_dist <= 0:
             log(f"   [{strategy}] {pair}: нулевая дистанция стопа — пропуск")
             return False
@@ -529,7 +545,7 @@ class PaperBroker:
         # Тот же предохранитель, что в бою: позиция не может стоить больше
         # депозита с плечом. Без него мелкий депозит «торговал» бы объёмами,
         # которые биржа не пропустит.
-        notional = size * entry
+        notional = size * limit_price
         if notional > balance * config.LEVERAGE:
             log(f"   [{strategy}] {pair}: объём ${notional:,.0f} > депозит×плечо "
                 f"${balance * config.LEVERAGE:,.0f} — пропуск")
@@ -542,9 +558,6 @@ class PaperBroker:
         if not targets:
             log(f"   [{strategy}] {pair}: у сигнала нет целей — пропуск")
             return False
-
-        offset = config.LIMIT_ENTRY_OFFSET_PCT if config.USE_LIMIT_ENTRY else 0.0
-        limit_price = entry * (1 + offset) if is_long else entry * (1 - offset)
 
         now = _now_ms()
         record = {
@@ -600,6 +613,57 @@ class PaperBroker:
         return float(signal['params']['stop_loss'])
 
     @staticmethod
+    def _geometry(strategy, signal):
+        """
+        Разметка, по которой стратегия принимала решение: зоны и уровни.
+
+        Без неё график сделки — свечи с тремя линиями плана, и по нему нельзя
+        проверить главное: вошли ли там, где собирались. Зона коррекции,
+        ордер-блок, уровень — это и есть сам сетап; цена входа лишь его
+        следствие.
+
+        Разметка СОХРАНЯЕТСЯ вместе со сделкой, а не считается заново при
+        показе. Параметры стратегий меняются, и пересчёт нарисовал бы зоны,
+        которых в момент входа не было, — разбор сделки превратился бы в
+        разбор сегодняшних настроек.
+
+        Форма общая для всех стратегий: полосы и линии. Рисовальщику незачем
+        знать, ордер-блок перед ним или зона Фибоначчи.
+        """
+        bands, lines = [], []
+        setup = signal.get('setup') or {}
+
+        def band(low, high, label):
+            if low and high and float(high) != float(low):
+                bands.append({'bottom': min(float(low), float(high)),
+                              'top': max(float(low), float(high)), 'label': label})
+
+        def leg(label_from, label_to):
+            if setup.get('start_price') and setup.get('end_price'):
+                lines.append({'price': float(setup['start_price']), 'label': label_from})
+                lines.append({'price': float(setup['end_price']), 'label': label_to})
+
+        if strategy == 'FIBO':
+            za, zb = signal.get('zone_a') or {}, signal.get('zone_b') or {}
+            band(za.get('bottom'), za.get('top'), 'зона A · 38.2–61.8%')
+            band(zb.get('bottom'), zb.get('top'), 'зона B · 61.8–88.6%')
+            leg('начало импульса', 'конец импульса')
+        elif strategy == 'SMC':
+            smc = signal.get('smc') or {}
+            band(smc.get('poi_bottom'), smc.get('poi_top'),
+                 glossary.poi_type(smc.get('poi_type')))
+            leg('начало движения', 'конец движения')
+        elif strategy == 'LEVELS':
+            lv = signal.get('levels') or {}
+            if lv.get('level'):
+                touches = lv.get('touches')
+                lines.append({
+                    'price': float(lv['level']),
+                    'label': f"уровень · касаний {touches}" if touches else 'уровень',
+                })
+        return {'bands': bands, 'lines': lines}
+
+    @staticmethod
     def _context(strategy, signal):
         """
         «Почему открылась» — то, что потом читают в дашборде и выгрузке.
@@ -647,6 +711,7 @@ class PaperBroker:
                      f"тренд 4H {glossary.trend(ctx['htf_trend'])}",
                      f"импульс {impulse}"]
         ctx['why'] = ' · '.join(parts)
+        ctx['geometry'] = PaperBroker._geometry(strategy, signal)
         return ctx
 
     # ── Симуляция ────────────────────────────────────────────────────────────
@@ -982,6 +1047,7 @@ class PaperBroker:
             'mae_r': round(sign * (pos['mae_price'] - pos['entry_price']) / sl_dist, 3) if sl_dist else '',
             'breakeven_set': pos['breakeven_set'],
             'why': ctx.get('why', ''),
+            'geometry': json.dumps(ctx.get('geometry') or {}, ensure_ascii=False),
             'exit_reason_ru': glossary.exit_reason(reason),
             'confirmed_ru': '; '.join(ctx.get('confirmed') or []),
             'missing_ru': '; '.join(ctx.get('missing') or []),
@@ -1149,6 +1215,7 @@ class PaperBroker:
             'why': (pos.get('context') or {}).get('why', ''),
             'confirmed': (pos.get('context') or {}).get('confirmed', []),
             'missing': (pos.get('context') or {}).get('missing', []),
+            'geometry': (pos.get('context') or {}).get('geometry') or {},
         }
 
     def _pending_view(self, strategy, pair, order):
@@ -1184,6 +1251,7 @@ class PaperBroker:
             'why': (order.get('context') or {}).get('why', ''),
             'confirmed': (order.get('context') or {}).get('confirmed', []),
             'missing': (order.get('context') or {}).get('missing', []),
+            'geometry': (order.get('context') or {}).get('geometry') or {},
         }
 
 
