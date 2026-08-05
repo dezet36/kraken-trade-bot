@@ -1177,6 +1177,16 @@ function showPage() {
   document.querySelectorAll('.page').forEach(s => {
     s.hidden = s.dataset.page !== page;
   });
+  // Ленивые разделы грузятся и при открытии по прямой ссылке, а не только по
+  // клику в меню. Без этого «Управление» и «Журнал» открывались пустыми:
+  // обработчик клика не срабатывал, а данные для них в общий опрос не входят.
+  if (page === 'control' && !SETTINGS) loadSettings();
+  // Настройки могли отрисоваться раньше, чем пришли данные бота: тогда в
+  // карточках не было полей, зависящих от режима (депозит есть только в
+  // фантоме) и от истории стратегии. Перерисовываем ровно один раз —
+  // повторять на каждом такте нельзя, это затирало бы поле под курсором.
+  if (page === 'control' && SETTINGS && CONTROLS_BLIND && DATA) renderControls();
+  if (page === 'log' && !LOG_LOADED) refreshLog();
   const def = PAGES.find(p => p.id === page);
   document.getElementById('page-title').textContent = def ? def.title : '';
   buildNav();
@@ -1430,6 +1440,11 @@ function bindActions() {
 
 /* ── Управление торговлей ───────────────────────────────────────────────── */
 let SETTINGS = null;
+// Журнал грузится по требованию; флаг нужен, чтобы showPage() не тянул его
+// заново на каждом такте общего опроса.
+let LOG_LOADED = false;
+// true, если карточки настроек рисовались без данных бота.
+let CONTROLS_BLIND = false;
 let LIMITS = null;
 let WRITABLE = false;
 
@@ -1453,6 +1468,7 @@ async function loadSettings() {
 function renderControls() {
   const box = document.getElementById('controls');
   if (!SETTINGS) { box.innerHTML = ''; return; }
+  CONTROLS_BLIND = !DATA;
 
   const lock = WRITABLE ? '' :
     `<div class="warn-box">Изменение настроек отключено: дашборд слушает не
@@ -1632,6 +1648,7 @@ async function refreshLog() {
     box.innerHTML = (d.lines || [])
       .map(l => `<span class="${logClass(l)}">${esc(l)}</span>`).join('\n');
     if (atEnd) box.scrollTop = box.scrollHeight;
+    LOG_LOADED = true;
     showState(d.status);
   } catch (e) { showState({ state: 'error', detail: 'нет связи с ботом' }); }
 }

@@ -51,6 +51,22 @@ _context_cache = {}
 _regime_cache = {}
 
 
+def regime_snapshot():
+    """
+    Последний посчитанный режим БЕЗ обращения к бирже.
+
+    Отдельная функция нужна дашборду. Он обновляется раз в несколько секунд,
+    и если бы он звал market_regime(), каждый его запрос тянул бы дневные
+    свечи с биржи: при недоступной сети страница висла бы на таймауте
+    HTTP-запроса, а отображение состояния не должно зависеть от того,
+    отвечает ли биржа.
+    """
+    if not _regime_cache:
+        return None, 1.0, 'режим ещё не считался'
+    name, er, threshold, mult = next(iter(_regime_cache.values()))
+    return name, mult, regime_mod.describe(name, er, threshold, mult)
+
+
 def market_regime(client=None):
     """
     Режим рынка по дневным свечам BTC и множитель риска к нему.
