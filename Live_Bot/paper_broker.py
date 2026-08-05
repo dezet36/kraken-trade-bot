@@ -270,15 +270,33 @@ class PaperBroker:
         Считаются и открытые позиции, и ожидающие ордера: ордер, который
         вот-вот нальётся, — это уже принятый риск, и не учитывать его
         значило бы обходить собственный предел.
+
+        У позиции берётся риск по ТЕКУЩЕМУ стопу. После переноса в безубыток
+        терять нечего, а прежняя сумма продолжала занимать место в пределе
+        портфеля и молча не пускала новые сделки.
         """
         amount, deposit = 0.0, 0.0
         for strategy in self.strategies:
             deposit += float(self.balance(strategy) or 0)
-            for book in (self.positions(strategy), self.pending(strategy)):
-                for item in book.values():
-                    amount += float(item.get('risk_amount') or 0)
+            for pos in self.positions(strategy).values():
+                amount += self._live_risk(pos)
+            for order in self.pending(strategy).values():
+                amount += float(order.get('risk_amount') or 0)
         pct = (amount / deposit * 100) if deposit > 0 else 0.0
         return amount, pct, deposit
+
+    @staticmethod
+    def _live_risk(pos):
+        """
+        Сколько позиция ЕЩЁ может потерять — по текущему стопу и остатку
+        объёма. Если чего-то из этого нет, честнее вернуть первоначальный
+        риск, чем занизить предел на догадке.
+        """
+        entry, stop = pos.get('entry_price'), pos.get('stop_loss')
+        size = pos.get('size')
+        if entry is None or stop is None or not size:
+            return float(pos.get('risk_amount') or 0)
+        return abs(float(entry) - float(stop)) * float(size)
 
     def portfolio_slots(self):
         """Позиций и ордеров по всем стратегиям вместе."""

@@ -718,3 +718,27 @@ class TestRiskMatchesSetting:
 
         row = pb.read_journal()[0]
         assert float(row['pnl_r']) == pytest.approx(-1.0, abs=0.005)
+
+
+class TestPortfolioRiskIsLive:
+    """
+    Предел портфеля должен считать риск по текущему стопу.
+
+    Позиция, переведённая в безубыток, потерять уже ничего не может, но её
+    первоначальный риск продолжал занимать место в пределе — и тихо не
+    пускал новые сделки. Молча, потому что отказ выглядит как обычное
+    «предел портфеля занят».
+    """
+
+    def test_breakeven_position_frees_the_budget(self, broker_env):
+        broker, client, pb, _cfg = broker_env
+        pb._now_ms = lambda: 1_700_000_000_000
+        broker.open('FIBO', signal(entry=100.0, stop=90.0, tp1=130.0))
+        feed(broker, client, 'BTCUSDT', [(100, 100, 100)])
+        before, _pct, _dep = broker.portfolio_risk()
+        assert before == pytest.approx(100.0)
+
+        broker.move_to_breakeven('FIBO', 'BTCUSDT')
+
+        after, _pct, _dep = broker.portfolio_risk()
+        assert after == pytest.approx(0.0, abs=1e-6)
