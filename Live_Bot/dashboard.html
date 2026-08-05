@@ -251,6 +251,9 @@
   }
 
   /* ── Сравнение стратегий ─────────────────────────────────────────── */
+  .pos-chart { margin-top: 10px; }
+  .pos-chart[hidden] { display: none; }
+
   /* ── Развёрнутая сделка ──────────────────────────────────────────── */
   tr.clickable { cursor: pointer; }
   tr.clickable:hover { background: var(--surface-2); }
@@ -259,6 +262,9 @@
   tr.tc-detail > td { padding: 0 !important; background: var(--surface-2);
                       border-bottom: 1px solid var(--hairline);
                       box-sizing: border-box; }
+  /* Прилипает к левому краю области прокрутки: ячейка шире экрана, и без
+     этого при прокрутке таблицы вбок карточка уезжала вместе с ней. */
+  .tc-wrap { position: sticky; left: 0; }
   .tc-box { display: grid; grid-template-columns: minmax(320px, 1.45fr) minmax(280px, 1fr);
             gap: 18px; padding: 16px 18px 18px; }
   @media (max-width: 1100px) { .tc-box { grid-template-columns: 1fr; } }
@@ -1159,7 +1165,11 @@ function posCards(rows) {
       </div>
       ${flags.length ? `<div class="flags" style="margin-top:10px">${flags.join('')}</div>` : ''}
       <div class="pos-why" title="${esc(r.why)}">${esc(r.why) || '—'}</div>
+      <div class="pos-chart" id="poschart-${esc(r.strategy)}-${esc(r.pair)}" hidden></div>
       <div class="pos-act">
+        <button type="button" class="btn ghost sm" data-chart="${esc(r.pair)}"
+          data-chart-strategy="${esc(r.strategy)}"
+          data-opened="${esc(r.opened || '')}">График</button>
         <button type="button" class="btn ghost sm" data-action="breakeven"
           data-strategy="${r.strategy}" data-pair="${esc(r.pair)}">В безубыток</button>
         <button type="button" class="btn ghost sm" data-action="close"
@@ -1854,19 +1864,18 @@ function openTrade(id, quiet) {
 
   const detail = document.createElement('tr');
   detail.className = 'tc-detail';
-  detail.innerHTML = '<td colspan="' + row.cells.length + '"></td>';
+  detail.innerHTML = '<td colspan="' + row.cells.length + '"><div class="tc-wrap">'
+    + '</div></td>';
   row.after(detail);
   row.classList.add('open');
 
-  // Таблица шире экрана и прокручивается вбок. Ячейка развёрнутой строки
-  // растянута на всю ширину ТАБЛИЦЫ, поэтому её правая часть оказывалась за
-  // краем экрана: половина чисел была не видна. Прижимаем содержимое к левому
-  // краю области прокрутки и задаём ему видимую ширину.
-  const cell = detail.firstElementChild;
-  cell.style.position = 'sticky';
-  cell.style.left = '0';
-  cell.style.width = table.clientWidth + 'px';
-  cell.style.maxWidth = table.clientWidth + 'px';
+  // Таблица шире экрана и прокручивается вбок, а ячейка с colspan всегда
+  // шириной со всю таблицу — её правая половина оказывалась за краем экрана.
+  // Ширину задаём ВЛОЖЕННОМУ блоку: табличная раскладка ширину самой ячейки
+  // не слушает, это подсказка, а не ограничение. Блок ещё и прилипает к
+  // левому краю области прокрутки, чтобы не уезжать при прокрутке вбок.
+  const wrap = detail.querySelector('.tc-wrap');
+  wrap.style.width = table.clientWidth + 'px';
 
   // Свечи по этой сделке уже могли быть загружены до перерисовки: повторный
   // запрос к бирже ради тех же данных не нужен.
@@ -1908,11 +1917,95 @@ async function loadTradeChart(t) {
   }
 }
 
-function tradeChart(t, data) {
+/* ── График открытой позиции ────────────────────────────────────────────── */
+/* Грузится по нажатию: позиций бывает десяток, и десять запросов к бирже на
+   каждом открытии страницы — плохая цена за то, что нужно одной-двум.
+   Загруженное запоминается и переживает перерисовку списка. */
+const POS_CHARTS = {};
+const POS_OPEN = {};
+
+async function togglePosChart(strategy, pair, opened) {
+  const key = strategy + '-' + pair;
+  const box = el('poschart-' + key);
+  if (!box) return;
+  if (!box.hidden) { box.hidden = true; POS_OPEN[key] = false; return; }
+  POS_OPEN[key] = true;
+
+  const pos = (DATA.open_positions || [])
+    .find(p => p.strategy === strategy && p.pair === pair);
+  if (!pos) return;
+
+  box.hidden = false;
+  const cached = POS_CHARTS[key];
+  if (cached) { box.innerHTML = posChartHtml(pos, cached); return; }
+  box.innerHTML = '<div class="tc-note">загружаю график…</div>';
+  await loadPosChart(pos, opened);
+}
+
+async function loadPosChart(pos, opened) {
+  const key = pos.strategy + '-' + pos.pair;
+  try {
+    const url = '/api/candles?pair=' + encodeURIComponent(pos.pair)
+      + '&from=' + encodeURIComponent(opened || pos.opened || '') + '&to=';
+    const resp = await fetch(url, { cache: 'no-store' });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.error || resp.status);
+    data.fetched = Date.now();
+    POS_CHARTS[key] = data;
+    const box = el('poschart-' + key);
+    if (box && POS_OPEN[key]) { box.hidden = false; box.innerHTML = posChartHtml(pos, data); }
+  } catch (e) {
+    const box = el('poschart-' + key);
+    if (box && POS_OPEN[key]) {
+      box.innerHTML = '<div class="tc-note">график недоступен: ' + esc(e.message) + '</div>';
+    }
+  }
+}
+
+// Список позиций перерисовывается каждые несколько секунд, и раскрытый
+// график схлопывался сам собой. Возвращаем его на место из памяти — без
+// повторного запроса к бирже.
+function restorePosCharts() {
+  Object.keys(POS_OPEN).forEach(key => {
+    if (!POS_OPEN[key]) return;
+    const box = el('poschart-' + key);
+    const data = POS_CHARTS[key];
+    if (!box || !data) return;
+    const pos = (DATA.open_positions || [])
+      .find(p => p.strategy + '-' + p.pair === key);
+    if (!pos) { POS_OPEN[key] = false; return; }
+    box.hidden = false;
+    box.innerHTML = posChartHtml(pos, data);
+    // Позиция открыта, свечи продолжают идти. Раз в две минуты подтягиваем
+    // свежие: иначе график замирает на моменте первого нажатия и показывает
+    // прошлое, притворяясь настоящим.
+    if (Date.now() - (data.fetched || 0) > 120000) loadPosChart(pos, pos.opened);
+  });
+}
+
+function posChartHtml(pos, data) {
+  // tradeChart ждёт поля закрытой сделки; у открытой позиции выхода ещё нет,
+  // и подсовывать вместо него текущую цену нельзя — на графике появилась бы
+  // линия «выход», которой не существует.
+  const targets = pos.targets && pos.targets.length ? pos.targets : [pos.tp1];
+  return tradeChart({
+    entry: pos.entry, stop: pos.stop, tp1: targets[0],
+    tp2: targets.length > 1 ? targets[1] : null,
+    exit: 0, direction: pos.direction,
+    opened: pos.opened, closed: null,
+  }, data, { W: 420, H: 230 });
+}
+
+function tradeChart(t, data, size) {
   const candles = (data && data.candles) || [];
   if (!candles.length) return '';
 
-  const W = 720, H = 300, PL = 8, PR = 74, PT = 12, PB = 22;
+  // Картинка тянется по ширине места, а шрифт внутри неё задан в координатах
+  // холста — значит, чем шире холст, тем мельче текст на экране. Карточка
+  // позиции втрое уже строки истории, и один холст на двоих давал там
+  // нечитаемые подписи. Поэтому холст подбирается под место.
+  const W = (size && size.W) || 720, H = (size && size.H) || 300;
+  const PL = 8, PR = W < 600 ? 96 : 112, PT = 12, PB = 22;
   const lows = candles.map(c => c[3]), highs = candles.map(c => c[2]);
   const levels = [t.entry, t.stop, t.tp1, t.tp2, t.exit].filter(v => v > 0);
   let lo = Math.min(...lows, ...levels), hi = Math.max(...highs, ...levels);
@@ -1935,14 +2028,29 @@ function tradeChart(t, data) {
       + '" height="' + height + '" fill="' + col + '" opacity=".85"/>';
   }).join('');
 
+  // Уровни рисуем в два прохода: сначала линии, потом подписи. Стоп и выход
+  // сплошь и рядом стоят почти на одной цене — по стопу и выходят, — и их
+  // подписи ложились друг на друга: не читалась ни та, ни другая. Разводим
+  // их по вертикали, линии при этом остаются на своих местах.
+  const marks = [];
   const line = (v, color, label, dash) => {
     if (!(v > 0) || v < lo || v > hi) return '';
     const yy = y(v);
+    marks.push({ y: yy, color: color, text: label + ' ' + price(v) });
     return '<line x1="' + PL + '" y1="' + yy + '" x2="' + (W - PR) + '" y2="' + yy
       + '" stroke="' + color + '" stroke-width="1.2"'
-      + (dash ? ' stroke-dasharray="4 3"' : '') + ' opacity=".9"/>'
-      + '<text x="' + (W - PR + 6) + '" y="' + (yy + 3.5)
-      + '" fill="' + color + '" font-size="10.5">' + label + ' ' + price(v) + '</text>';
+      + (dash ? ' stroke-dasharray="4 3"' : '') + ' opacity=".9"/>';
+  };
+
+  const labels = () => {
+    marks.sort((a, b) => a.y - b.y);
+    let prev = -99;
+    return marks.map(m => {
+      const yy = Math.max(m.y, prev + 12);
+      prev = yy;
+      return '<text x="' + (W - PR + 6) + '" y="' + (yy + 3.5) + '" fill="' + m.color
+        + '" font-size="10.5">' + m.text + '</text>';
+    }).join('');
   };
 
   // Вертикальные отметки входа и выхода: без них непонятно, в какой момент
@@ -1960,10 +2068,14 @@ function tradeChart(t, data) {
   };
   const mark = (idx, color, label) => {
     if (idx === null) return '';
+    // Выход обычно у правого края окна, и подпись справа от черты залезала
+    // в колонку с ценами уровней. У правого края пишем слева от черты.
+    const right = x(idx) > (W - PR) * 0.75;
     return '<line x1="' + x(idx) + '" y1="' + PT + '" x2="' + x(idx) + '" y2="'
       + (H - PB) + '" stroke="' + color + '" stroke-width="1" stroke-dasharray="2 4"'
-      + ' opacity=".7"/><text x="' + (x(idx) + 4) + '" y="' + (PT + 11)
-      + '" fill="' + color + '" font-size="10">' + label + '</text>';
+      + ' opacity=".7"/><text x="' + (x(idx) + (right ? -4 : 4)) + '" y="' + (PT + 11)
+      + '" fill="' + color + '" font-size="10"'
+      + (right ? ' text-anchor="end"' : '') + '>' + label + '</text>';
   };
 
   const isLong = (t.direction || '').toUpperCase() === 'LONG';
@@ -1977,12 +2089,13 @@ function tradeChart(t, data) {
     + line(t.exit, isLong ? 'var(--accent)' : 'var(--accent)', 'выход', false)
     + mark(nearest(t.opened), 'var(--ink-4)', 'вход')
     + mark(nearest(t.closed), 'var(--ink-4)', 'выход')
+    + labels()
     + '</svg><div class="tc-tf">' + esc(data.timeframe) + ' · '
     + candles.length + ' свечей</div></div>';
 }
 
 function renderTradeCard(t, data, note) {
-  const cell = document.querySelector('tr.tc-detail > td');
+  const cell = document.querySelector('tr.tc-detail .tc-wrap');
   if (!cell) return;
   const good = (t.pnl || 0) >= 0;
   const r = t.pnl_r != null ? t.pnl_r : (t.risk ? t.pnl / t.risk : 0);
@@ -2207,6 +2320,10 @@ async function act(btn) {
 }
 
 function bindActions() {
+  document.querySelectorAll('[data-chart]').forEach(b => {
+    b.onclick = () => togglePosChart(b.dataset.chartStrategy, b.dataset.chart,
+                                     b.dataset.opened);
+  });
   document.querySelectorAll('[data-action]').forEach(b => { b.onclick = () => act(b); });
 }
 
@@ -2475,9 +2592,19 @@ function render() {
     if (wanted) TRADE_OPEN_ID = String(wanted);
   }
   if (TRADE_OPEN_ID) openTrade(TRADE_OPEN_ID, true);
+  // График позиции тоже открывается ссылкой: ?poschart=SMC-ADAUSDT.
+  if (!window._posShown) {
+    window._posShown = true;
+    const wantPos = q.get('poschart');
+    if (wantPos) {
+      const cut = wantPos.indexOf('-');
+      if (cut > 0) togglePosChart(wantPos.slice(0, cut), wantPos.slice(cut + 1), '');
+    }
+  }
   funnelView(DATA.funnel);
   regimeView(DATA.regime);
   attention(DATA.attention);
+  restorePosCharts();
   bindActions();
   showPage();
 }

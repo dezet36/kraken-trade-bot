@@ -627,7 +627,11 @@ def _trade_candles(pair, opened, closed):
     out = {
         'timeframe': timeframe,
         'candles': [
-            [str(t), float(o), float(h), float(l), float(c)]
+            # Время — строго ISO-8601 с зоной. str() у pandas даёт
+            # «2026-08-05 13:15:00»: без «T» и без зоны браузер читает такую
+            # строку как МЕСТНОЕ время, и отметки входа и выхода уезжали на
+            # столько часов, на сколько часовой пояс отличается от UTC.
+            [t.strftime('%Y-%m-%dT%H:%M:%SZ'), float(o), float(h), float(l), float(c)]
             for t, o, h, l, c in zip(
                 stamps[mask.to_numpy()], window['open'], window['high'],
                 window['low'], window['close'])
@@ -637,6 +641,18 @@ def _trade_candles(pair, opened, closed):
         _candle_cache.clear()
     _candle_cache[key] = out
     return out
+
+
+def _strategy_settings(stored=None):
+    """
+    Только настройки стратегий, без раздела портфеля.
+
+    Портфель лежит в том же файле, и панель управления, перебирая ключи,
+    рисовала его как ещё одну стратегию — карточку с названием PORTFOLIO и
+    пустыми полями риска.
+    """
+    stored = settings_store.load() if stored is None else stored
+    return {k: v for k, v in stored.items() if k in settings_store.STRATEGIES}
 
 
 def _errors_summary():
@@ -883,9 +899,16 @@ class _Handler(BaseHTTPRequestHandler):
             self._send_json({'update': updater.status(fetch=fetch),
                              'writable': _controls_allowed()})
         elif path == '/api/settings':
-            self._send_json({'settings': settings_store.load(),
-                             'limits': settings_store.LIMITS,
-                             'writable': _controls_allowed()})
+            # Раздел портфеля отдаём ОТДЕЛЬНО от стратегий. Он лежит в том же
+            # файле настроек, и панель управления, перебирая ключи, рисовала
+            # его как ещё одну стратегию — с названием PORTFOLIO и пустыми
+            # полями риска.
+            stored = settings_store.load()
+            self._send_json({
+                'settings': _strategy_settings(stored),
+                'portfolio': stored.get(settings_store.PORTFOLIO, {}),
+                'limits': settings_store.LIMITS,
+                'writable': _controls_allowed()})
         elif path in ('/', '/index.html'):
             self._send_html()
         else:
@@ -958,13 +981,15 @@ class _Handler(BaseHTTPRequestHandler):
             # покажет одно число, а брокер будет считать по другому.
             settings_store.save({changes['strategy']: {'deposit': changes['deposit']}})
             self._send_json({'ok': True, 'message': message,
-                             'settings': settings_store.load()})
+                             'settings': _strategy_settings()})
             return
 
         result = settings_store.save(changes)
         if _broker is not None:
             _broker.apply_settings(result)
-        self._send_json({'settings': result, 'limits': settings_store.LIMITS,
+        self._send_json({'settings': _strategy_settings(result),
+                         'portfolio': result.get(settings_store.PORTFOLIO, {}),
+                         'limits': settings_store.LIMITS,
                          'writable': True})
 
     def _fail(self, code, text):
