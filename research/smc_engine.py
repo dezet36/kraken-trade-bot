@@ -57,10 +57,12 @@ class Order:
     """Отложенный лимитный ордер, ожидающий налива."""
 
     __slots__ = ('pair', 'direction', 'entry', 'stop', 'targets', 'fractions',
-                 'created', 'expires', 'key', 'meta', 'be_trigger')
+                 'created', 'expires', 'key', 'meta', 'be_trigger',
+                 'entry_type', 'trail_distance')
 
     def __init__(self, pair, direction, entry, stop, targets, fractions,
-                 created, expires, key, meta=None, be_trigger=None):
+                 created, expires, key, meta=None, be_trigger=None,
+                 entry_type='limit', trail_distance=None):
         self.pair = pair
         self.direction = direction
         self.entry = entry
@@ -76,6 +78,18 @@ class Order:
         # тейк. Без поддержки этого механизма старая стратегия в сравнении
         # выглядела бы хуже, чем она есть.
         self.be_trigger = be_trigger
+        # 'limit' — цена ПРИХОДИТ к уровню (возвратные стратегии: вход в зону).
+        # 'stop'  — цена УХОДИТ за уровень (пробойные: вход по направлению).
+        # Разница принципиальна для симуляции: лимит на уровне выше рынка
+        # налился бы мгновенно и по лучшей цене, чем в реальности, а стоп на
+        # том же уровне ждёт, пока рынок туда дойдёт. Без разделения пробойная
+        # стратегия получала бы вход по цене, которой на рынке не было.
+        self.entry_type = entry_type
+        # Дистанция трейлинг-стопа в единицах цены. None — трейлинга нет.
+        # Нужна трендовым стратегиям: их прибыль в редких длинных движениях,
+        # а фиксированная цель обрезает ровно тот хвост, ради которого всё и
+        # затевается. Стоп только подтягивается, никогда не ослабляется.
+        self.trail_distance = trail_distance
 
 
 def to_naive_ns(series):
@@ -114,19 +128,24 @@ def simulate_order(order, exec_arrays, start_pos, risk_amount,
     допущение систематически завышает результат.
     """
     ts = exec_arrays['ts']
+    opens = exec_arrays['open']
     high = exec_arrays['high']
     low = exec_arrays['low']
     close = exec_arrays['close']
     size = len(ts)
 
     is_long = order.direction in ('BULLISH', 'LONG')
+    is_stop_entry = getattr(order, 'entry_type', 'limit') == 'stop'
 
-    # ── Фаза 1: ждём налива лимита ───────────────────────────────────────
+    # ── Фаза 1: ждём налива ──────────────────────────────────────────────
     fill_pos = None
     for i in range(start_pos, size):
         if ts[i] > order.expires:
             break
-        touched = low[i] <= order.entry if is_long else high[i] >= order.entry
+        if is_stop_entry:
+            touched = high[i] >= order.entry if is_long else low[i] <= order.entry
+        else:
+            touched = low[i] <= order.entry if is_long else high[i] >= order.entry
         if touched:
             fill_pos = i
             break
@@ -135,6 +154,13 @@ def simulate_order(order, exec_arrays, start_pos, risk_amount,
         return None   # ордер не налился — сделки не было
 
     entry = order.entry
+    if is_stop_entry:
+        # Разрыв через уровень: стоп-маркет исполняется по открытию свечи,
+        # а не по своей цене. Считать иначе значило бы дарить стратегии
+        # лучшую цену ровно в тех случаях, когда рынок ушёл против неё.
+        gapped = opens[fill_pos] > entry if is_long else opens[fill_pos] < entry
+        if gapped:
+            entry = opens[fill_pos]
     entry_time = ts[fill_pos]
     sl_distance = abs(entry - order.stop)
     if sl_distance <= 0:
@@ -142,7 +168,8 @@ def simulate_order(order, exec_arrays, start_pos, risk_amount,
 
     position = risk_amount / sl_distance
     notional_in = position * entry
-    fees = notional_in * FEE_MAKER
+    # Вход по стопу исполняется по рынку — комиссия тейкерская, а не мейкерская.
+    fees = notional_in * (FEE_TAKER if is_stop_entry else FEE_MAKER)
 
     remaining = position
     realised = 0.0
@@ -175,6 +202,17 @@ def simulate_order(order, exec_arrays, start_pos, risk_amount,
     # себя — как и везде в этом движке.
     for i in range(fill_pos, size):
         hi, lo = high[i], low[i]
+
+        # Трейлинг считается по лучшей цене на КОНЕЦ ПРЕДЫДУЩЕЙ свечи, до
+        # того как в best_price попадёт экстремум текущей. Иначе стоп внутри
+        # одной свечи подтягивался бы к её же максимуму и выбивал позицию по
+        # цене, до которой рынок на момент срабатывания ещё не дошёл, —
+        # классическое подглядывание внутрь свечи, дающее красивую кривую и
+        # невоспроизводимое вживую.
+        trail = order.trail_distance
+        if trail:
+            trailed = best_price - trail if is_long else best_price + trail
+            stop = max(stop, trailed) if is_long else min(stop, trailed)
 
         if is_long:
             best_price = max(best_price, hi)
