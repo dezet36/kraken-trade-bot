@@ -12,9 +12,22 @@
 считает, что у него уже открыты позиции, которых на бирже нет. Здесь оба
 случая исключены списком и проверкой после сборки.
 
+ДВА ВИДА СБОРКИ
+
+    --git   (по умолчанию, если git доступен) — release/ становится
+            частичным клоном репозитория с разреженной выкладкой: внутри
+            только рабочие файлы, но это НАСТОЯЩИЙ git-репозиторий. Кнопка
+            «Обновить» на дашборде работает; на сервере ничего скачивать
+            руками не нужно.
+
+    --copy  простое копирование. Папка без git: обновлять придётся
+            копированием новой версии поверх старой (update.sh). Нужен,
+            когда на сервере нет git или доступа к GitHub.
+
 Запуск:
-    python make_release.py            -> release/
-    python make_release.py --zip      -> release/ + kraken-bot.zip
+    python make_release.py            -> release/ (git, если возможно)
+    python make_release.py --copy     -> release/ без git
+    python make_release.py --zip      -> + kraken-bot.zip
 """
 
 import os
@@ -30,7 +43,7 @@ OUT = os.path.join(ROOT, 'release')
 INCLUDE_DIRS = ('Live_Bot',)
 INCLUDE_FILES = (
     'requirements.txt', '.env.example',
-    'install.sh', 'run.sh', 'install_service.sh',
+    'install.sh', 'run.sh', 'install_service.sh', 'update.sh',
     'install.ps1', 'run.ps1',
     'Dockerfile', 'docker-compose.yml', 'start_server.sh', 'stop_server.sh',
     'README_СЕРВЕР.md', 'DEPLOY.md',
@@ -72,13 +85,77 @@ def _ignore(directory, names):
     return skip
 
 
-def build(make_zip=False):
+def remote_url():
+    try:
+        proc = subprocess.run(['git', 'remote', 'get-url', 'origin'], cwd=ROOT,
+                              capture_output=True, text=True, timeout=30)
+        return proc.stdout.strip() if proc.returncode == 0 else ''
+    except Exception:                              # noqa: BLE001
+        return ''
+
+
+def current_branch():
+    try:
+        proc = subprocess.run(['git', 'rev-parse', '--abbrev-ref', 'HEAD'],
+                              cwd=ROOT, capture_output=True, text=True, timeout=30)
+        return proc.stdout.strip() if proc.returncode == 0 else 'main'
+    except Exception:                              # noqa: BLE001
+        return 'main'
+
+
+def build_git():
+    """
+    Сборка разреженным клоном: папка содержит только рабочие файлы, но
+    остаётся полноценным git-репозиторием.
+
+    Именно это позволяет кнопке «Обновить» на дашборде работать на сервере:
+    обычная копия папки git-репозиторием не является, и обновляться ей
+    нечем. --filter=blob:none не тянет историю файлов, поэтому клон весит
+    столько же, сколько копия.
+    """
+    url, branch = remote_url(), current_branch()
+    if not url:
+        return False, 'у репозитория нет origin'
+
+    paths = list(INCLUDE_DIRS) + [f for f in INCLUDE_FILES]
+    cmds = [
+        ['git', 'clone', '--filter=blob:none', '--no-checkout',
+         '--branch', branch, url, OUT],
+        ['git', '-C', OUT, 'sparse-checkout', 'init', '--no-cone'],
+        ['git', '-C', OUT, 'sparse-checkout', 'set'] + paths,
+        ['git', '-C', OUT, 'checkout', branch],
+    ]
+    for cmd in cmds:
+        proc = subprocess.run(cmd, capture_output=True, text=True,
+                              encoding='utf-8', errors='replace', timeout=300)
+        if proc.returncode != 0:
+            return False, (proc.stderr or proc.stdout).strip()[:200]
+    return True, f'{url} ({branch})'
+
+
+def build(make_zip=False, use_git=True):
     if os.path.exists(OUT):
         shutil.rmtree(OUT)
-    os.makedirs(OUT)
+
+    git_ok, git_note = (False, 'отключено ключом --copy')
+    if use_git:
+        git_ok, git_note = build_git()
+        if git_ok:
+            print(f'   разреженный клон: {git_note}')
+        else:
+            print(f'   клон не удался ({git_note}) — обычное копирование')
+            if os.path.exists(OUT):
+                shutil.rmtree(OUT)
+
+    if not os.path.exists(OUT):
+        os.makedirs(OUT)
 
     copied = 0
-    for name in INCLUDE_DIRS:
+    if git_ok:
+        # Файлы уже на месте из клона; докладывать нечего, но проверки и
+        # каталог данных нужны те же.
+        copied = len(INCLUDE_DIRS) + len(INCLUDE_FILES)
+    for name in (() if git_ok else INCLUDE_DIRS):
         src = os.path.join(ROOT, name)
         if not os.path.isdir(src):
             print(f'   пропущено (нет каталога): {name}')
@@ -86,7 +163,7 @@ def build(make_zip=False):
         shutil.copytree(src, os.path.join(OUT, name), ignore=_ignore)
         copied += 1
 
-    for name in INCLUDE_FILES:
+    for name in (() if git_ok else INCLUDE_FILES):
         src = os.path.join(ROOT, name)
         if os.path.isfile(src):
             shutil.copy2(src, os.path.join(OUT, name))
@@ -170,4 +247,5 @@ def _size(path):
 
 
 if __name__ == '__main__':
-    sys.exit(build(make_zip='--zip' in sys.argv))
+    sys.exit(build(make_zip='--zip' in sys.argv,
+                   use_git='--copy' not in sys.argv))
