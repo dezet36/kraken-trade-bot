@@ -576,16 +576,30 @@ def _run_scheduler():
     log(f"Сканирую {len(config.TRADING_PAIRS_POOL)} пар каждые 5 минут...")
     log("Нажми Ctrl+C для остановки\n")
 
+    # Состояние для дашборда. До этой строки его сообщало ТОЛЬКО настольное
+    # приложение, поэтому запущенный службой бот честно торговал, а индикатор
+    # внизу слева навсегда оставался «запуск…»: понять по нему, жив бот или
+    # нет, было нельзя — а именно за этим на него и смотрят.
+    dashboard.set_status('running')
+
     try:
         scheduler.start()
     except KeyboardInterrupt:
         log("\n\nБот остановлен пользователем")
+        dashboard.set_status('stopped', 'остановлен с клавиатуры')
         controller.stop()
         history     = executor.trade_history
         session_pnl = sum(t.get('pnl', 0) for t in history)
         tg.bot_stopped(len(history), session_pnl, executor.get_real_balance())
         if trade_manager is not None:
             trade_manager.get_stats()
+    except Exception as exc:                      # noqa: BLE001
+        # Упавший планировщик — это конец торговли, и узнать об этом надо с
+        # дашборда, а не по тому, что сделок давно нет. Ошибка не глотается:
+        # она поднимается дальше, и петля перезапуска увидит ненулевой код.
+        dashboard.set_status('error', str(exc)[:200])
+        log(f"\n❌ Цикл торговли остановлен ошибкой: {exc}")
+        raise
 
 
 if __name__ == "__main__":
