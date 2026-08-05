@@ -39,25 +39,26 @@ function Die($m)  { Write-Host "  [ОШИБКА] $m" -ForegroundColor Red; exit 
 # доходило. Здесь stderr просто собирается в текст, а решение принимается по
 # коду возврата, как и положено.
 function Try-Git ([string[]] $Arguments) {
-    $saved = $ErrorActionPreference
-    # Сочетание проверено вручную, оно единственное рабочее из трёх:
-    #   2>&1 + Continue          — PowerShell печатает stderr красным сам, и
-    #                              обычное «репозиторий недоступен» выглядит
-    #                              падением скрипта;
-    #   2>файл + SilentlyContinue — строки выбрасываются, файл пуст, причина
-    #                              отказа теряется;
-    #   2>файл + Continue        — в файле текст, на экране ничего.
-    $ErrorActionPreference = 'Continue'
+    # git запускается ЧЕРЕЗ cmd, а не напрямую. Причина в том, как Windows
+    # PowerShell обращается со stderr внешней программы: он заворачивает каждую
+    # строку в объект ошибки, и дальше выбор только плохой. При 'Continue' он
+    # печатает их красным сам — обычное «нет доступа к репозиторию» выглядит
+    # падением скрипта на полэкрана. При 'SilentlyContinue' выбрасывает вместе
+    # с текстом, и причина отказа теряется. Перенаправление 2>файл от этого не
+    # спасает: строки всё равно проходят через тот же механизм.
+    #
+    # cmd перенаправляет потоки сам, до PowerShell. В файлах оказывается ровно
+    # то, что напечатал git, на экране — ничего.
+    $outFile = [IO.Path]::GetTempFileName()
     $errFile = [IO.Path]::GetTempFileName()
     try {
-        $output = & git @Arguments 2>$errFile | Out-String
+        $quoted = ($Arguments | ForEach-Object { '"' + $_ + '"' }) -join ' '
+        cmd /c "git $quoted > `"$outFile`" 2> `"$errFile`""
         $code = $LASTEXITCODE
-        $stderr = ''
-        if (Test-Path $errFile) { $stderr = [IO.File]::ReadAllText($errFile) }
-        return @{ Code = $code; Out = ("$output`n$stderr").Trim() }
+        $text = ([IO.File]::ReadAllText($outFile) + [IO.File]::ReadAllText($errFile)).Trim()
+        return @{ Code = $code; Out = $text }
     } finally {
-        $ErrorActionPreference = $saved
-        Remove-Item $errFile -Force -ErrorAction SilentlyContinue
+        Remove-Item $outFile, $errFile -Force -ErrorAction SilentlyContinue
     }
 }
 
@@ -146,8 +147,13 @@ if ($needToken) {
     Write-Host ""
     Write-Host "  Где взять: github.com -> Settings -> Developer settings ->"
     Write-Host "             Personal access tokens -> Fine-grained tokens -> Generate"
-    Write-Host "             Repository access: только kraken-trade-bot"
-    Write-Host "             Permissions: Contents -> Read-only"
+    Write-Host ""
+    Write-Host "  ВАЖНО, здесь ошибаются чаще всего:" -ForegroundColor Yellow
+    Write-Host "    Repository access -> Only select repositories -> kraken-trade-bot"
+    Write-Host "    Значение по умолчанию (Public Repositories) НЕ ПОДОЙДЁТ:"
+    Write-Host "    репозиторий закрытый, и такой токен его просто не увидит."
+    Write-Host ""
+    Write-Host "    Permissions -> Repository permissions -> Contents -> Read-only"
     Write-Host ""
     Write-Host "  Токен сохранится в $credFile и понадобится ещё раз при"
     Write-Host "  обновлениях — вводить его каждый раз не придётся."
@@ -170,8 +176,20 @@ if ($needToken) {
     $check = Try-Git ((Auth-Args $credFile) + @('ls-remote', $RepoUrl, 'HEAD'))
     if ($check.Code -ne 0) {
         Remove-Item $credFile -Force -ErrorAction SilentlyContinue
-        Write-Host ($check.Out.Trim()) -ForegroundColor DarkGray
-        Die "токен не подошёл. Проверьте, что у него есть доступ к kraken-trade-bot (Contents: Read-only)"
+        Write-Host ""
+        Write-Host "  Ответ GitHub: $($check.Out.Trim())" -ForegroundColor DarkGray
+        Write-Host ""
+        # Ответ «403 / Write access not granted» сбивает с толку: звучит как
+        # нехватка прав на запись, хотя мы всего лишь читаем. На деле GitHub так
+        # отвечает, когда токен опознан, но ЭТОТ репозиторий в его список не
+        # входит — то есть выбран не тот Repository access.
+        if ($check.Out -match '403|not granted|not found') {
+            Die ("токен опознан, но kraken-trade-bot ему не виден. " +
+                 "В настройках токена Repository access должен быть " +
+                 "'Only select repositories' с выбранным kraken-trade-bot — " +
+                 "значение по умолчанию 'Public Repositories' закрытый репозиторий не покажет")
+        }
+        Die "токен не подошёл"
     }
     Ok "токен принят"
 }
