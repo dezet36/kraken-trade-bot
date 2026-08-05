@@ -12,13 +12,27 @@ param(
     [string]$Script = "bot.py"
 )
 
-# ── Проверка прав администратора ───────────────────────────────────────────────
+# ── Права администратора: получаем сами ───────────────────────────────────────
+# Раньше скрипт просто отказывался работать и просил перезапустить PowerShell
+# от имени администратора. На практике это означало, что установка кончалась
+# ничем: человек закрывал окно, бот оставался незапущенным, а понять, что
+# случилось, было можно только прочитав красную строку в потоке вывода.
 $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]"Administrator")
 if (-not $isAdmin) {
-    Write-Host "ОШИБКА: Запусти PowerShell от имени Администратора!" -ForegroundColor Red
-    Write-Host "Закрой это окно, найди PowerShell в меню Пуск, нажми правой кнопкой -> 'Запуск от имени администратора'" -ForegroundColor Yellow
-    pause
-    exit 1
+    Write-Host "Для установки службы нужны права администратора — запрашиваю..." -ForegroundColor Cyan
+    $self = $MyInvocation.MyCommand.Path
+    $argList = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$self`"",
+                 '-Script', $Script)
+    try {
+        $p = Start-Process powershell -ArgumentList $argList -Verb RunAs -Wait -PassThru
+        exit $p.ExitCode
+    } catch {
+        Write-Host "ОШИБКА: повышение прав отклонено." -ForegroundColor Red
+        Write-Host "Запустите PowerShell от имени администратора и выполните:" -ForegroundColor Yellow
+        Write-Host "  powershell -ExecutionPolicy Bypass -File `"$self`"" -ForegroundColor Yellow
+        pause
+        exit 1
+    }
 }
 
 $TaskName  = if ($Script -eq "platform_bot.py") { "KrakenPlatformBot" } else { "KrakenBot" }
@@ -110,8 +124,18 @@ schtasks /delete /tn $TaskName /f 2>$null | Out-Null
 
 # ── Зарегистрировать задание через schtasks.exe ───────────────────────────────
 Write-Host "`nРегистрирую задание планировщика ($TaskName)..." -ForegroundColor Cyan
-$currentUser = "$env:USERDOMAIN\$env:USERNAME"
-schtasks /create /tn $TaskName /tr "`"$batPath`"" /sc ONSTART /ru $currentUser /it /f
+# От имени SYSTEM, а НЕ от пользователя с ключом /it.
+#
+# /it означает «выполнять только когда пользователь вошёл в систему». Вместе с
+# триггером ONSTART это противоречие: в момент загрузки в систему ещё никто не
+# вошёл, и задание не стартует. То есть автозапуск, ради которого всё и
+# делалось, не работал — а заметить это можно было только перезагрузив сервер.
+# Выход из сеанса убивал бота по той же причине.
+#
+# SYSTEM не требует пароля и не зависит от сеанса: бот поднимается при загрузке
+# и живёт, пока сервер включён. Данные лежат по абсолютным путям, поэтому смена
+# учётной записи на них не влияет.
+schtasks /create /tn $TaskName /tr "`"$batPath`"" /sc ONSTART /ru "SYSTEM" /rl HIGHEST /f
 
 if ($LASTEXITCODE -ne 0) {
     Write-Host "ERROR: не удалось зарегистрировать задание" -ForegroundColor Red

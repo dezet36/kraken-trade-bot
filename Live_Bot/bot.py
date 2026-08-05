@@ -434,6 +434,21 @@ def confirm_live_mode():
     log(f"  Пул пар:      {len(config.TRADING_PAIRS_POOL)} пар")
     log("")
 
+    # Под службой клавиатуры нет: input() сразу упирается в конец потока, бот
+    # падает, петля перезапуска поднимает его снова — и так каждые 15 секунд,
+    # молча. Поэтому здесь либо письменное подтверждение в настройках, либо
+    # внятный отказ. Требование подтвердить LIVE осознанно этим не смягчается:
+    # LIVE_CONFIRMED=YES человек вписывает руками, случайно так не выходит.
+    if not sys.stdin or not sys.stdin.isatty():
+        if str(getattr(config, 'LIVE_CONFIRMED', '')).strip().upper() == 'YES':
+            log("LIVE подтверждён настройкой LIVE_CONFIRMED=YES в .env")
+            return
+        log("Бот запущен без консоли (служба), подтвердить с клавиатуры некому.")
+        log("Чтобы разрешить LIVE службе, впишите в bot_data/.env строку:")
+        log("    LIVE_CONFIRMED=YES")
+        log("Запуск отменён.")
+        sys.exit(1)
+
     answer = input("Введи 'YES' для подтверждения: ").strip()
     if answer != 'YES':
         log("Запуск отменён.")
