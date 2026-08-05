@@ -1,0 +1,260 @@
+"""
+Проверка готовности к запуску: что не так и как это чинить.
+
+ЗАЧЕМ ОТДЕЛЬНЫЙ МОДУЛЬ. Бот, запущенный с неверным ключом или в каталоге без
+прав на запись, падает где-то в середине первого цикла — со стеком, из
+которого причина не видна. На сервере, куда только что скопировали папку,
+это самый частый способ потерять полчаса. Здесь всё, что может пойти не так
+ДО первой сделки, проверяется по порядку и объясняется по-русски.
+
+Каждая проверка возвращает уровень:
+
+    ok     всё в порядке
+    warn   работать будет, но не так, как вы, вероятно, ожидаете
+    fail   торговать нельзя, запуск бессмысленен
+
+Запуск отдельно:
+    python Live_Bot/doctor.py
+"""
+
+import os
+import sys
+
+OK, WARN, FAIL = 'ok', 'warn', 'fail'
+
+MIN_PYTHON = (3, 10)
+REQUIRED_PACKAGES = (
+    ('ccxt', 'биржевое API'),
+    ('pandas', 'работа со свечами'),
+    ('numpy', 'расчёты'),
+    ('dotenv', 'чтение .env'),
+    ('requests', 'сеть'),
+)
+
+
+def _result(level, title, detail='', fix=''):
+    return {'level': level, 'title': title, 'detail': detail, 'fix': fix}
+
+
+def check_python():
+    v = sys.version_info
+    text = f'{v.major}.{v.minor}.{v.micro}'
+    if (v.major, v.minor) < MIN_PYTHON:
+        return _result(FAIL, f'Python {text} слишком старый',
+                       f'нужен {MIN_PYTHON[0]}.{MIN_PYTHON[1]} или новее',
+                       'установите свежий Python и пересоздайте окружение')
+    return _result(OK, f'Python {text}')
+
+
+def check_packages():
+    missing = []
+    for module, purpose in REQUIRED_PACKAGES:
+        try:
+            __import__(module)
+        except ImportError:
+            missing.append(f'{module} ({purpose})')
+    if missing:
+        return _result(FAIL, 'Не установлены зависимости',
+                       ', '.join(missing),
+                       'pip install -r requirements.txt')
+    return _result(OK, 'Зависимости на месте')
+
+
+def check_data_dir():
+    import config
+    path = config.DATA_DIR
+    if not os.path.isdir(path):
+        return _result(FAIL, 'Каталог данных не создан', path,
+                       'создайте каталог или задайте BOT_DATA_DIR')
+    probe = os.path.join(path, '.write_test')
+    try:
+        with open(probe, 'w', encoding='utf-8') as fh:
+            fh.write('x')
+        os.remove(probe)
+    except Exception as exc:                       # noqa: BLE001
+        return _result(FAIL, 'В каталог данных нельзя писать',
+                       f'{path}: {exc}',
+                       'дайте права на запись пользователю, от которого работает бот')
+
+    # Данные ВНУТРИ кода переживут запуск, но не переживут обновление
+    # копированием папки поверх старой.
+    code_dir = os.path.dirname(os.path.abspath(__file__))
+    if os.path.abspath(path) == os.path.abspath(code_dir):
+        return _result(WARN, 'Данные лежат внутри папки с кодом', path,
+                       'задайте BOT_DATA_DIR на каталог вне Live_Bot, иначе '
+                       'копирование новой версии поверх старой сотрёт журнал '
+                       'сделок и состояние позиций')
+    return _result(OK, 'Каталог данных доступен на запись', path)
+
+
+def check_env():
+    import config
+    if not os.path.exists(os.path.join(config.DATA_DIR, '.env')) and not config.env_loaded:
+        return _result(FAIL, 'Файл .env не найден',
+                       f'ожидался в {config.DATA_DIR}',
+                       'скопируйте .env.example в .env и впишите ключи')
+    return _result(OK, 'Файл .env прочитан')
+
+
+def check_keys():
+    import config
+    name = (config.EXCHANGE_NAME or '').lower()
+    if name == 'bybit':
+        key, secret = config.BYBIT_API_KEY, config.BYBIT_SECRET_KEY
+    elif name == 'bingx':
+        key, secret = config.BINGX_API_KEY, config.BINGX_SECRET_KEY
+    else:
+        return _result(FAIL, f'Неизвестная биржа: {config.EXCHANGE_NAME}', '',
+                       'EXCHANGE=bybit или bingx')
+    if not key or not secret:
+        if config.PAPER_MODE:
+            return _result(WARN, f'Нет ключей {name}',
+                           'в фантомном режиме сделки не отправляются, но '
+                           'котировки берутся с биржи',
+                           'впишите ключи в .env — даже для фантома нужны данные')
+        return _result(FAIL, f'Нет ключей {name}', '',
+                       'впишите API-ключ и секрет в .env')
+    return _result(OK, f'Ключи {name} загружены')
+
+
+def check_mode():
+    import config
+    mode = config.TRADING_MODE
+    if mode == 'LIVE':
+        return _result(WARN, 'Режим LIVE — торговля реальными деньгами',
+                       f'риск на сделку {config.RISK_PER_TRADE}%',
+                       'для проверки поставьте TRADING_MODE=PAPER')
+    if mode == 'PAPER':
+        return _result(OK, 'Режим PAPER — ордера на биржу не отправляются')
+    return _result(OK, f'Режим {mode}')
+
+
+def check_strategy():
+    import config
+    known = ('FIBO', 'SMC', 'BOTH')
+    if config.STRATEGY not in known:
+        return _result(FAIL, f'Неизвестная стратегия: {config.STRATEGY}',
+                       '', f'STRATEGY = один из {", ".join(known)}')
+    return _result(OK, f'Стратегия: {config.STRATEGY}')
+
+
+def check_exchange():
+    """Живая проверка связи: ключи могут быть на месте и при этом неверны."""
+    import config
+    # Проверяем ровно тот вызов, которым живёт бот: свечи. Тикер идёт по
+    # другому маршруту и может падать там, где торговля работает.
+    try:
+        import exchange
+        ex = exchange.get_exchange()
+        candles = ex.fetch_ohlcv(config.TRADING_PAIRS_POOL[0], '1h', limit=5)
+        if not candles:
+            raise RuntimeError('биржа вернула пустой список свечей')
+    except Exception as exc:                       # noqa: BLE001
+        return _result(FAIL, 'Биржа недоступна', str(exc)[:200],
+                       'проверьте интернет, ключи и права ключа '
+                       '(нужна торговля фьючерсами)')
+    if config.PAPER_MODE:
+        return _result(OK, 'Связь с биржей есть (котировки)')
+    try:
+        ex.fetch_balance()
+    except Exception as exc:                       # noqa: BLE001
+        return _result(FAIL, 'Ключи не дают доступа к счёту', str(exc)[:200],
+                       'проверьте права ключа и IP-фильтр в кабинете биржи')
+    return _result(OK, 'Связь с биржей и доступ к счёту есть')
+
+
+def check_pairs():
+    import config
+    pool = config.TRADING_PAIRS_POOL
+    if not pool:
+        return _result(FAIL, 'Пул пар пуст', '', 'задайте TRADING_PAIRS_POOL')
+    return _result(OK, f'Пул: {len(pool)} пар')
+
+
+def check_risk():
+    import config
+    risk = config.RISK_PER_TRADE
+    slots = config.MAX_ACTIVE_PAIRS
+    exposure = risk * slots
+    if risk > 2:
+        return _result(WARN, f'Риск на сделку {risk}% — высокий',
+                       f'при {slots} позициях под риском {exposure:.1f}% депозита',
+                       'обычно берут 0.5-1%')
+    if exposure > 10:
+        return _result(WARN, f'Суммарный риск {exposure:.1f}% депозита',
+                       f'{slots} позиций по {risk}%',
+                       'уменьшите число слотов или риск на сделку')
+    return _result(OK, f'Риск {risk}% на сделку, до {exposure:.1f}% суммарно')
+
+
+def check_telegram():
+    import config
+    if not config.TELEGRAM_BOT_TOKEN or not config.TELEGRAM_CHAT_ID:
+        return _result(WARN, 'Telegram не настроен',
+                       'уведомления о сделках приходить не будут',
+                       'TELEGRAM_BOT_TOKEN и TELEGRAM_CHAT_ID в .env')
+    return _result(OK, 'Telegram настроен')
+
+
+CHECKS = (
+    ('Python', check_python),
+    ('Зависимости', check_packages),
+    ('Каталог данных', check_data_dir),
+    ('Файл .env', check_env),
+    ('Ключи биржи', check_keys),
+    ('Режим', check_mode),
+    ('Стратегия', check_strategy),
+    ('Пул пар', check_pairs),
+    ('Риск', check_risk),
+    ('Telegram', check_telegram),
+)
+
+NETWORK_CHECKS = (
+    ('Связь с биржей', check_exchange),
+)
+
+
+def run(network=True):
+    """Все проверки по порядку. Возвращает (список результатов, есть ли fail)."""
+    results = []
+    checks = list(CHECKS) + (list(NETWORK_CHECKS) if network else [])
+    for name, func in checks:
+        try:
+            item = func()
+        except Exception as exc:                   # noqa: BLE001
+            item = _result(FAIL, f'{name}: проверка не выполнилась', str(exc)[:200])
+        item['name'] = name
+        results.append(item)
+        # Без зависимостей и Python остальные проверки бессмысленны:
+        # они импортируют config, который импортирует dotenv.
+        if item['level'] == FAIL and name in ('Python', 'Зависимости'):
+            break
+    return results, any(r['level'] == FAIL for r in results)
+
+
+MARK = {OK: '  OK  ', WARN: ' ВНИМ ', FAIL: 'ОШИБКА'}
+
+
+def main():
+    print()
+    print('=' * 72)
+    print('ПРОВЕРКА ГОТОВНОСТИ')
+    print('=' * 72)
+    results, failed = run(network='--offline' not in sys.argv)
+    for item in results:
+        print(f'[{MARK[item["level"]]}] {item["name"]:<18} {item["title"]}')
+        if item['detail']:
+            print(f'{"":<28}{item["detail"]}')
+        if item['fix'] and item['level'] != OK:
+            print(f'{"":<28}-> {item["fix"]}')
+    print('=' * 72)
+    if failed:
+        print('ЗАПУСКАТЬ НЕЛЬЗЯ: сначала устраните ошибки выше.')
+        return 1
+    warns = sum(1 for r in results if r['level'] == WARN)
+    print('Готово к запуску.' + (f' Предупреждений: {warns}.' if warns else ''))
+    return 0
+
+
+if __name__ == '__main__':
+    sys.exit(main())

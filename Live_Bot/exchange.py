@@ -86,20 +86,28 @@ def get_exchange():
     if _exchange_instance is not None:
         return _exchange_instance
 
+    # PAPER подключается к тому же эндпоинту, что и DEMO. Фантому нужны только
+    # котировки, счёт он ведёт у себя; заходить при этом на боевой эндпоинт
+    # незачем и опасно. Раньше сравнение mode == 'DEMO' было ложным для PAPER,
+    # и фантом открывал боевого клиента: с демо-ключами авторизованные вызовы
+    # падали, а с боевыми — читал реальный счёт, чего от фантома никто не ждёт.
+    endpoint_mode = 'DEMO' if config.TRADING_MODE in ('DEMO', 'PAPER') else 'LIVE'
+
     if config.EXCHANGE_NAME.lower() == 'bybit':
         if not config.BYBIT_API_KEY or not config.BYBIT_SECRET_KEY:
             raise Exception("BYBIT_API_KEY или BYBIT_SECRET_KEY не загружены из .env!")
         _exchange_instance = make_client('bybit', config.BYBIT_API_KEY, config.BYBIT_SECRET_KEY,
-                                         config.TRADING_MODE)
-        if config.TRADING_MODE == 'DEMO':
-            log("🟢 Подключение к Bybit DEMO (api-demo.bybit.com)...")
+                                         endpoint_mode)
+        if endpoint_mode == 'DEMO':
+            label = 'ФАНТОМ' if config.PAPER_MODE else 'DEMO'
+            log(f"🟢 Подключение к Bybit {label} (api-demo.bybit.com)...")
         else:
             log("🔴 Подключение к Bybit LIVE (РЕАЛЬНЫЙ СЧЁТ)...")
     else:
         if not config.BINGX_API_KEY or not config.BINGX_SECRET_KEY:
             raise Exception("BINGX_API_KEY или BINGX_SECRET_KEY не загружены из .env!")
         _exchange_instance = make_client('bingx', config.BINGX_API_KEY, config.BINGX_SECRET_KEY,
-                                         config.TRADING_MODE)
+                                         endpoint_mode)
         log("🔴 Подключение к BingX LIVE (РЕАЛЬНЫЙ СЧЁТ)...")
         if config.TRADING_MODE == 'DEMO':
             log("⚠️  BingX не имеет demo endpoint — используется реальный счёт")

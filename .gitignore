@@ -89,3 +89,7 @@ Live_Bot/bot_log.txt
 
 # Состояние обновления (какая версия стояла до последнего git pull)
 Live_Bot/update_state.json
+
+# Собранная папка для сервера (создаётся make_release.py)
+release/
+kraken-bot.zip
