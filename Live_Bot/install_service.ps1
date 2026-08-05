@@ -1,4 +1,4 @@
-# Kraken Bot — установка через schtasks.exe (совместимо с любой Windows, без Docker)
+﻿# Kraken Bot — установка через schtasks.exe (совместимо с любой Windows, без Docker)
 # Запускать от имени Администратора:
 #   powershell -ExecutionPolicy Bypass -File install_service.ps1 -Script bot.py
 #   powershell -ExecutionPolicy Bypass -File install_service.ps1 -Script platform_bot.py

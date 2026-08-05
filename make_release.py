@@ -46,6 +46,9 @@ INCLUDE_FILES = (
     'requirements.txt', '.env.example',
     'install.sh', 'run.sh', 'install_service.sh', 'update.sh',
     'install.ps1', 'run.ps1',
+    # Загрузчик кладём и сюда: с ним собранную папку можно потом обновлять
+    # прямо с GitHub, не пересобирая её здесь.
+    'bootstrap.sh', 'bootstrap.ps1',
     'Dockerfile', 'docker-compose.yml', 'start_server.sh', 'stop_server.sh',
     'README_СЕРВЕР.md', 'DEPLOY.md',
 )

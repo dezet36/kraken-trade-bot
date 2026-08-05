@@ -1,14 +1,40 @@
 # Установка на сервер
 
-Три шага. Если что-то пойдёт не так, установщик сам скажет что именно и как
-чинить — гадать не придётся.
+## Способ 1: один файл (проще всего)
 
-## 1. Скопировать папку
+Скопируйте на сервер **только `bootstrap.sh`** (или `bootstrap.ps1` для
+Windows) и запустите. Он сам скачает актуальный код с GitHub, поставит
+окружение и прогонит проверку готовности.
 
-Всю папку целиком — на сервер, в любой каталог. Например `/opt/kraken-bot`
-или `C:\kraken-bot`.
+**Linux**
 
-## 2. Запустить установку
+```bash
+chmod +x bootstrap.sh
+./bootstrap.sh                 # поставит в /opt/kraken-bot
+./bootstrap.sh ~/kraken-bot    # или куда скажете
+```
+
+**Windows**
+
+```powershell
+powershell -ExecutionPolicy Bypass -File bootstrap.ps1
+powershell -ExecutionPolicy Bypass -File bootstrap.ps1 -Dir D:\kraken-bot
+```
+
+Репозиторий закрытый, поэтому загрузчик спросит **токен доступа GitHub**.
+Взять его: github.com → Settings → Developer settings → Personal access
+tokens → Fine-grained tokens → Generate. Доступ — только к репозиторию
+`kraken-trade-bot`, права — Contents: Read-only. Токен сохранится в
+`bot_data/.git-credentials` и понадобится ещё раз при обновлениях: тем же
+токеном пользуется кнопка «Обновить» на дашборде.
+
+Повторный запуск загрузчика безопасен — он обновит код и не тронет данные.
+
+## Способ 2: скопировать папку целиком
+
+Если сервер не должен ходить в GitHub, соберите папку здесь
+(`python make_release.py --zip`), скопируйте её на сервер и запустите
+установщик вручную.
 
 **Linux**
 
