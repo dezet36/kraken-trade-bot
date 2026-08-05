@@ -67,9 +67,11 @@ PAPER_START_BALANCE = float(os.getenv('PAPER_START_BALANCE', 10_000))
 # Индивидуальный депозит, если нужно разное (пусто = как у всех)
 _pb_fibo = os.getenv('PAPER_START_BALANCE_FIBO', '').strip()
 _pb_smc  = os.getenv('PAPER_START_BALANCE_SMC', '').strip()
+_pb_lvl  = os.getenv('PAPER_START_BALANCE_LEVELS', '').strip()
 PAPER_START_BALANCES = {
-    'FIBO': float(_pb_fibo) if _pb_fibo else PAPER_START_BALANCE,
-    'SMC':  float(_pb_smc)  if _pb_smc  else PAPER_START_BALANCE,
+    'FIBO':   float(_pb_fibo) if _pb_fibo else PAPER_START_BALANCE,
+    'SMC':    float(_pb_smc)  if _pb_smc  else PAPER_START_BALANCE,
+    'LEVELS': float(_pb_lvl)  if _pb_lvl  else PAPER_START_BALANCE,
 }
 
 # Издержки. Ставки Bybit для линейных перпетуалов: мейкер 0.02%, тейкер 0.055%.

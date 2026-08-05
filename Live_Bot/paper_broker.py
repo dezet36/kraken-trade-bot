@@ -45,7 +45,7 @@ import glossary
 from exit_plan import direction_cap, tp_plan, wants_breakeven
 from logger import log
 
-STRATEGIES = ('FIBO', 'SMC')
+STRATEGIES = ('FIBO', 'SMC', 'LEVELS')
 
 BAR_TF = '5m'
 BAR_MS = 5 * 60 * 1000

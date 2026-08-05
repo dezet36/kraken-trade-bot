@@ -35,6 +35,10 @@
     --axis:      rgba(60,60,67,.26);
     --fibo:      #2a78d6;
     --smc:       #eb6834;
+    /* Третий цвет выбран расчётом, а не на глаз: зелёный при дейтеранопии
+       отличается от оранжевого на 6.2 (нужно >= 8), фиолетовый от синего на
+       5.9. Бирюзовый даёт худшую пару 13.2 — с запасом. */
+    --levels:    #17a398;
     --shadow:    0 1px 2px rgba(0,0,0,.04), 0 8px 28px -14px rgba(0,0,0,.18);
     --r-lg: 16px; --r-md: 12px; --r-sm: 9px;
   }
@@ -49,7 +53,7 @@
       --accent: #0a84ff; --accent-soft: rgba(10,132,255,.22);
       --good: #30d158; --bad: #ff453a; --warn: #ff9f0a; --ok-dot: #30d158;
       --grid: rgba(235,235,245,.10); --axis: rgba(235,235,245,.26);
-      --fibo: #3987e5; --smc: #d95926;
+      --fibo: #3987e5; --smc: #d95926; --levels: #2bbfb2;
       --shadow: 0 1px 2px rgba(0,0,0,.5), 0 8px 28px -14px rgba(0,0,0,.8);
     }
   }
@@ -63,7 +67,7 @@
     --accent: #0a84ff; --accent-soft: rgba(10,132,255,.22);
     --good: #30d158; --bad: #ff453a; --warn: #ff9f0a; --ok-dot: #30d158;
     --grid: rgba(235,235,245,.10); --axis: rgba(235,235,245,.26);
-    --fibo: #3987e5; --smc: #d95926;
+    --fibo: #3987e5; --smc: #d95926; --levels: #2bbfb2;
   }
 
   * { box-sizing: border-box; }
@@ -535,11 +539,11 @@
 <script>
 'use strict';
 
-const NAMES  = { FIBO: 'Фибоначчи', SMC: 'Smart Money' };
+const NAMES  = { FIBO: 'Фибоначчи', SMC: 'Smart Money', LEVELS: 'Уровни' };
 // Цвет закреплён за стратегией, а не за местом в списке: при фильтрации
 // оставшаяся кривая не должна менять цвет — иначе читатель, запомнивший
 // «фибо синяя», будет введён в заблуждение.
-const COLOR  = { FIBO: 'var(--fibo)', SMC: 'var(--smc)' };
+const COLOR  = { FIBO: 'var(--fibo)', SMC: 'var(--smc)', LEVELS: 'var(--levels)' };
 const PERIODS = [
   { id: 'today', label: 'Сегодня', days: 0 },
   { id: '7d',    label: '7 дней',  days: 7 },

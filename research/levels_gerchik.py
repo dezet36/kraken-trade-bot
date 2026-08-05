@@ -350,18 +350,35 @@ BASE = 'база: подтверждение, 2 касания, RR3'
 #
 # Критерии силы уровня (зеркальность, три касания, круглые числа, скорость
 # подхода) отклонены: каждый улучшал один период и портил другой.
+# ПРОВЕРКА УСТОЙЧИВОСТИ ПОБЕДИТЕЛЯ, а не поиск лучшего числа.
+#
+# Принята конфигурация «объём + цель на следующем уровне»: единственная за
+# сессию, доказуемая на ОБОИХ периодах (бык ΔR +0.177 [+0.017; +0.336],
+# медведь +0.288 [+0.104; +0.476]), просадка 9.9% и 5.7% против 33.7% и
+# 40.0% у базы.
+#
+# Вопрос здесь один: держится ли результат при сдвиге настроек. Если да —
+# находка настоящая. Если пик приходится ровно на выбранные числа, а по
+# краям всё разваливается, значит это подгонка, и настоящий вывод —
+# «работает подтверждение входа», а не «работают именно эти пороги».
 CONFIGS = [
-    (BASE,                          dict()),
-    ('объём x1.5',                  dict(volume_ratio=1.5)),
-    ('объём x1.5 + RR4',            dict(volume_ratio=1.5, rr_target=4.0)),
-    ('объём x1.5 + RR4 + 4 уровня', dict(volume_ratio=1.5, rr_target=4.0,
-                                         nearest=4)),
-    ('объём x1.5 + RR5',            dict(volume_ratio=1.5, rr_target=5.0)),
-    ('объём x1.2 + RR4',            dict(volume_ratio=1.2, rr_target=4.0)),
-    ('объём x2.0 + RR4',            dict(volume_ratio=2.0, rr_target=4.0)),
-    ('объём x2.5 + RR4',            dict(volume_ratio=2.5, rr_target=4.0)),
-    ('объём x1.5 + RR4 + цель на уровне',
-     dict(volume_ratio=1.5, rr_target=4.0, target_next_level=True)),
+    (BASE,                      dict()),
+    ('цель на уровне (без объёма)',
+     dict(target_next_level=True)),
+    ('объём x1.2 + цель на уровне',
+     dict(volume_ratio=1.2, target_next_level=True)),
+    ('объём x1.5 + цель на уровне',
+     dict(volume_ratio=1.5, target_next_level=True)),
+    ('объём x2.0 + цель на уровне',
+     dict(volume_ratio=2.0, target_next_level=True)),
+    ('объём x2.5 + цель на уровне',
+     dict(volume_ratio=2.5, target_next_level=True)),
+    ('объём x1.5 + цель + 3 касания',
+     dict(volume_ratio=1.5, target_next_level=True, min_touches=3)),
+    ('объём x1.5 + цель + 1 уровень',
+     dict(volume_ratio=1.5, target_next_level=True, nearest=1)),
+    ('объём x1.5 + цель + 4 уровня',
+     dict(volume_ratio=1.5, target_next_level=True, nearest=4)),
 ]
 
 
@@ -451,7 +468,7 @@ def main():
     print('БАЗОВАЯ КОНФИГУРАЦИЯ ПОДРОБНО')
     print('=' * 110)
     for period in periods:
-        stats = results.get((period['label'], BASE))
+        stats = results.get((period['label'], 'объём x1.5 + цель на уровне'))
         if not stats:
             continue
         df = stats['rows']

@@ -7,6 +7,7 @@ import telegram_notify as tg
 from telegram_bot import controller
 from exchange import get_exchange, make_market_client, fetch_ohlcv
 import dashboard
+import strategy_levels
 import strategy_smc
 from strategy import analyze_market
 from pair_scanner import get_liquid_pairs, scan_for_setups
@@ -117,6 +118,8 @@ def _run_dual_strategy(liquid_pairs, balance, open_pairs):
         ('FIBO', lambda: scan_for_setups(liquid_pairs, trade_manager)),
         ('SMC', lambda: strategy_smc.scan_for_setups(liquid_pairs, trade_manager,
                                                      balance=balance)),
+        ('LEVELS', lambda: strategy_levels.scan_for_setups(
+            liquid_pairs, trade_manager, balance=balance)),
     )
 
     for strategy, scan in scanners:
@@ -232,6 +235,9 @@ def _paper_cycle():
         try:
             if strategy == 'SMC':
                 candidates = strategy_smc.scan_for_setups(
+                    liquid_pairs, gate, client=client, balance=balance)
+            elif strategy == 'LEVELS':
+                candidates = strategy_levels.scan_for_setups(
                     liquid_pairs, gate, client=client, balance=balance)
             else:
                 candidates = scan_for_setups(liquid_pairs, gate, client=client)

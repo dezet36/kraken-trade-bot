@@ -131,7 +131,7 @@ def check_mode():
 
 def check_strategy():
     import config
-    known = ('FIBO', 'SMC', 'BOTH')
+    known = ('FIBO', 'SMC', 'LEVELS', 'BOTH')
     if config.STRATEGY not in known:
         return _result(FAIL, f'Неизвестная стратегия: {config.STRATEGY}',
                        '', f'STRATEGY = один из {", ".join(known)}')

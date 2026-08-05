@@ -22,7 +22,7 @@ import config
 from logger import log
 
 SETTINGS_FILE = os.path.join(config.DATA_DIR, 'runtime_settings.json')
-STRATEGIES = ('FIBO', 'SMC')
+STRATEGIES = ('FIBO', 'SMC', 'LEVELS')
 
 # Границы разумного. Верхняя граница риска намеренно невелика: 5% на сделку
 # при винрейте около трети — это разорение на серии из десяти минусов.
