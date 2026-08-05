@@ -30,6 +30,25 @@ function Ok($m)   { Write-Host "  [ok] $m"   -ForegroundColor Green }
 function Info($m) { Write-Host "  $m"        -ForegroundColor DarkGray }
 function Die($m)  { Write-Host "  [ОШИБКА] $m" -ForegroundColor Red; exit 1 }
 
+# Запуск git, который НЕ роняет скрипт.
+#
+# Windows PowerShell заворачивает каждую строку stderr внешней программы в
+# ошибку, а при $ErrorActionPreference='Stop' первая же такая строка обрывает
+# выполнение. Из-за этого проверка «а доступен ли репозиторий без токена»
+# вместо ответа «нет» убивала установку — до вопроса про токен дело не
+# доходило. Здесь stderr просто собирается в текст, а решение принимается по
+# коду возврата, как и положено.
+function Try-Git ([string[]] $Arguments) {
+    $saved = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $output = & git @Arguments 2>&1 | Out-String
+        return @{ Code = $LASTEXITCODE; Out = $output }
+    } finally {
+        $ErrorActionPreference = $saved
+    }
+}
+
 Write-Host ""
 Write-Host "-- Установка торгового бота --------------------------------------------"
 Write-Host "   репозиторий: $RepoUrl ($Branch)"
@@ -65,13 +84,23 @@ $credGit  = $credFile -replace '\\', '/'
 $needToken = $true
 
 $env:GIT_TERMINAL_PROMPT = '0'
-git ls-remote $RepoUrl HEAD 2>$null | Out-Null
-if ($LASTEXITCODE -eq 0) {
+
+# Пустой credential.helper ПЕРЕД нашим сбрасывает список унаследованных.
+# Без этого на Windows первым отвечает диспетчер учётных данных, и если в нём
+# лежит чужой или просроченный доступ к GitHub, git берёт его и получает отказ,
+# так и не спросив наш файл с токеном. Симптом обманчивый: «Write access to
+# repository not granted» на обычном чтении.
+function Auth-Args ($file) {
+    if (-not $file -or -not (Test-Path $file)) { return @() }
+    $asGit = $file -replace '\\', '/'
+    return @('-c', 'credential.helper=', '-c', "credential.helper=store --file=$asGit")
+}
+
+if ((Try-Git @('ls-remote', $RepoUrl, 'HEAD')).Code -eq 0) {
     $needToken = $false
     Ok "репозиторий доступен без токена"
 } elseif (Test-Path $credFile) {
-    git -c "credential.helper=store --file=$credGit" ls-remote $RepoUrl HEAD 2>$null | Out-Null
-    if ($LASTEXITCODE -eq 0) {
+    if ((Try-Git ((Auth-Args $credFile) + @('ls-remote', $RepoUrl, 'HEAD'))).Code -eq 0) {
         $needToken = $false
         Ok "токен уже сохранён с прошлой установки"
     }
@@ -104,16 +133,16 @@ if ($needToken) {
     $rule = '{0}:(R,W)' -f $env:USERNAME
     & icacls $credFile /inheritance:r /grant:r $rule | Out-Null
 
-    git -c "credential.helper=store --file=$credGit" ls-remote $RepoUrl HEAD 2>$null | Out-Null
-    if ($LASTEXITCODE -ne 0) {
+    $check = Try-Git ((Auth-Args $credFile) + @('ls-remote', $RepoUrl, 'HEAD'))
+    if ($check.Code -ne 0) {
         Remove-Item $credFile -Force -ErrorAction SilentlyContinue
+        Write-Host ($check.Out.Trim()) -ForegroundColor DarkGray
         Die "токен не подошёл. Проверьте, что у него есть доступ к kraken-trade-bot (Contents: Read-only)"
     }
     Ok "токен принят"
 }
 
-$auth = @()
-if (Test-Path $credFile) { $auth = @('-c', "credential.helper=store --file=$credGit") }
+$auth = Auth-Args $credFile
 
 # -- Код ---------------------------------------------------------------------
 # Клонируем целиком, без разреженной выкладки: весь репозиторий — пара
@@ -122,14 +151,15 @@ if (Test-Path $credFile) { $auth = @('-c', "credential.helper=store --file=$cred
 # причём видно это станет не при установке, а при первом запуске.
 if (Test-Path (Join-Path $Dir '.git')) {
     Info "папка уже существует — обновляю код"
-    & git @auth -C $Dir fetch --quiet origin $Branch
-    if ($LASTEXITCODE -ne 0) { Die "не удалось получить обновления" }
+    $r = Try-Git ($auth + @('-C', $Dir, 'fetch', '--quiet', 'origin', $Branch))
+    if ($r.Code -ne 0) { Write-Host $r.Out -ForegroundColor DarkGray
+                         Die "не удалось получить обновления" }
     # Только перемотка вперёд: локальные правки на сервере молча затирать нельзя.
-    git -C $Dir merge --ff-only "origin/$Branch" --quiet
-    if ($LASTEXITCODE -ne 0) {
+    $r = Try-Git @('-C', $Dir, 'merge', '--ff-only', "origin/$Branch", '--quiet')
+    if ($r.Code -ne 0) {
         Die "на сервере есть локальные изменения кода. Уберите их (git -C $Dir status) и запустите снова"
     }
-    Ok "код обновлён до $(git -C $Dir rev-parse --short HEAD)"
+    Ok "код обновлён до $((Try-Git @('-C', $Dir, 'rev-parse', '--short', 'HEAD')).Out.Trim())"
 } else {
     $junk = @()
     if (Test-Path $Dir) {
@@ -142,18 +172,25 @@ if (Test-Path (Join-Path $Dir '.git')) {
     # bot_data мог быть создан выше ради токена — в непустую папку git не
     # клонирует, поэтому клонируем рядом и переносим.
     $tmp = Join-Path ([IO.Path]::GetTempPath()) ("kraken-" + [Guid]::NewGuid().ToString('N'))
-    & git @auth clone --quiet --branch $Branch $RepoUrl $tmp
-    if ($LASTEXITCODE -ne 0) { Die "не удалось склонировать репозиторий" }
+    $r = Try-Git ($auth + @('clone', '--quiet', '--branch', $Branch, $RepoUrl, $tmp))
+    if ($r.Code -ne 0) { Write-Host $r.Out -ForegroundColor DarkGray
+                         Die "не удалось склонировать репозиторий" }
     New-Item -ItemType Directory -Force -Path $Dir | Out-Null
     Get-ChildItem -Force $tmp | Move-Item -Destination $Dir -Force
     Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue
-    Ok "код скачан, версия $(git -C $Dir rev-parse --short HEAD)"
+    Ok "код скачан, версия $((Try-Git @('-C', $Dir, 'rev-parse', '--short', 'HEAD')).Out.Trim())"
 }
 
 # Токен нужен и кнопке «Обновить» на дашборде: она делает обычный git fetch из
 # того же каталога и без сохранённого доступа упрётся в ту же стену.
+#
+# Сначала пустое значение, потом наше: --add дописывает helper в список, а не
+# заменяет его, и унаследованный из глобального конфига диспетчер учётных
+# данных Windows отвечал бы первым — своим, чужим и негодным доступом.
 if (Test-Path $credFile) {
-    git -C $Dir config credential.helper "store --file=$credGit"
+    $null = Try-Git @('-C', $Dir, 'config', '--local', 'credential.helper', '')
+    $null = Try-Git @('-C', $Dir, 'config', '--local', '--add',
+                      'credential.helper', "store --file=$credGit")
     Ok "доступ сохранён — кнопка «Обновить» на дашборде будет работать"
 }
 
