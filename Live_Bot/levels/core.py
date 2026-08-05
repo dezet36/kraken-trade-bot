@@ -2,14 +2,21 @@
 Ядро стратегии уровней: чистые вычисления, без биржи и ордеров.
 
 Модуль намеренно ничего не знает ни про ccxt, ни про trade_manager: на вход
-свечи, на выход сетап. Ровно та же функция вызывается из бэктеста и из
-живого бота, поэтому расхождение между моделью и боем невозможно —
-единственный способ его исключить, известный по опыту этого проекта.
+свечи, на выход сетап. Ровно эта функция вызывается и из бэктеста, и из
+живого бота — иначе модель и бой расходятся, и в этом проекте такое уже
+стоило девяти кругов подгонки под несуществующее преимущество.
+
+НАПРАВЛЕНИЕ ПОИСКА — не деталь реализации. Свеча at_index, на которой
+принимается решение, это свеча ВОЗВРАТА. Прокол ищется НАЗАД, в предыдущих
+RECLAIM_BARS свечах. Первая версия искала вперёд: в бэктесте работало
+(ордер создавался на баре возврата, лежащем в прошлом), а живой бот зовёт
+функцию на последней закрытой свече, где никакого «вперёд» нет — и сигнал
+не появлялся никогда. Замер показывал +90%, бот молчал, и по логу это
+выглядело как «сетапов не найдено».
 
 ЧЕСТНОСТЬ ПО ВРЕМЕНИ. Экстремум становится известен через PIVOT_N баров
 после себя; уровень — с подтверждения последнего входящего в него касания.
-Прокол и возврат ищутся только по ЗАКРЫТЫМ свечам, вход считается по
-закрытию свечи возврата. Ни одна величина не смотрит вперёд.
+Ни одна проверка не смотрит правее at_index.
 """
 
 import numpy as np
@@ -58,8 +65,6 @@ def build_levels(high, low, tolerance_pct=None, min_touches=None):
 
     Вершины и низы кладутся в ОДИН пул: уровень, который сначала
     останавливал рост, а потом держал падение, раздельные пулы не увидят.
-    (Замер показал, что зеркальность результат не улучшает, но объединённый
-    пул даёт больше уровней вообще, и это полезно само по себе.)
     """
     tolerance_pct = params.TOLERANCE_PCT if tolerance_pct is None else tolerance_pct
     min_touches = params.MIN_TOUCHES if min_touches is None else min_touches
@@ -89,42 +94,53 @@ def build_levels(high, low, tolerance_pct=None, min_touches=None):
     return levels
 
 
-def find_reclaim(high, low, close, start, level, side, atr_now):
+def find_reclaim(high, low, close, at, level, side, atr_now):
     """
-    Прокол уровня с возвратом. Возвращает (индекс возврата, экстремум) или None.
+    Завершился ли на свече `at` прокол уровня с возвратом.
 
-    Это главный элемент стратегии. Без него вход происходит и когда уровень
-    устоял, и когда его прошли насквозь — в момент постановки заявки это
-    неразличимо, и результат превращается в подбрасывание монеты с
-    комиссией. Замер: -1104 R без подтверждения против +138 R с ним.
+    Возвращает (индекс первой свечи прокола, экстремум прокола) или None.
+    Смотрит только назад: свеча `at` обязана закрыться обратно за уровнем, а
+    прокол должен был случиться в предыдущих RECLAIM_BARS свечах.
+
+    Подтверждение — главный элемент стратегии. Без него вход происходит и
+    когда уровень устоял, и когда его прошли насквозь: в момент постановки
+    заявки это неразличимо, и результат превращается в подбрасывание монеты
+    с комиссией. Замер: -1104 R без подтверждения против +138 R с ним.
     """
-    limit = min(start + params.RECLAIM_BARS + 1, len(close))
+    if at <= 0 or at >= len(close):
+        return None
+    back = close[at] > level if side == LONG else close[at] < level
+    if not back:
+        return None
+
     need = params.PIERCE_ATR * atr_now
-
-    pierce_at = None
-    for k in range(start, limit):
+    start = max(0, at - params.RECLAIM_BARS)
+    pierce_at, extreme = None, None
+    for k in range(start, at):
         if side == LONG and low[k] <= level - need:
-            pierce_at = k
-            break
-        if side == SHORT and high[k] >= level + need:
-            pierce_at = k
-            break
+            pierce_at = k if pierce_at is None else pierce_at
+            extreme = low[k] if extreme is None else min(extreme, low[k])
+        elif side == SHORT and high[k] >= level + need:
+            pierce_at = k if pierce_at is None else pierce_at
+            extreme = high[k] if extreme is None else max(extreme, high[k])
     if pierce_at is None:
         return None
 
-    extreme = low[pierce_at] if side == LONG else high[pierce_at]
-    for k in range(pierce_at, min(pierce_at + params.RECLAIM_BARS + 1, len(close))):
-        extreme = min(extreme, low[k]) if side == LONG else max(extreme, high[k])
-        if k > pierce_at and (close[k] > level if side == LONG else close[k] < level):
-            return k, float(extreme)
-    return None
+    # Тень самой свечи возврата тоже входит в экстремум: стоп должен стоять
+    # за всей зоной, куда цена сходила.
+    extreme = min(extreme, low[at]) if side == LONG else max(extreme, high[at])
+    return pierce_at, float(extreme)
 
 
 def evaluate(high, low, close, volume, at_index, levels=None, atr_values=None):
     """
-    Сетап на свече at_index или (None, причина отказа).
+    Сетап, ЗАВЕРШИВШИЙСЯ на свече at_index, или (None, причина отказа).
 
-    Причина возвращается всегда: без неё воронка отсева на дашборде
+    at_index — свеча возврата, на закрытии которой принимается решение.
+    Живой бот подаёт последнюю закрытую свечу, бэктест перебирает все по
+    очереди; видят они при этом ровно одно и то же.
+
+    Причина отказа возвращается всегда: без неё воронка отсева на дашборде
     показывала бы «ничего не найдено» без объяснения, а это самый частый
     вопрос при наблюдении за ботом.
     """
@@ -148,60 +164,78 @@ def evaluate(high, low, close, volume, at_index, levels=None, atr_values=None):
 
     reason = 'цена далеко от уровней'
     for lv in known[:params.NEAREST_LEVELS]:
-        gap = price - lv['price']
-        if abs(gap) > params.TRIGGER_ATR * a[i]:
-            continue
-        if abs(gap) < params.MIN_GAP_ATR * a[i]:
-            reason = 'цена вплотную к уровню — вход поздно'
+        if abs(price - lv['price']) > params.TRIGGER_ATR * a[i]:
             continue
 
-        side = LONG if gap > 0 else SHORT   # выше уровня -> он поддержка
+        # Сторона определяется тем, куда пошёл возврат: проткнули снизу и
+        # закрылись выше — уровень устоял как поддержка, покупаем.
+        side = LONG if price > lv['price'] else SHORT
 
         found = find_reclaim(high, low, close, i, lv['price'], side, a[i])
         if found is None:
             reason = 'нет подтверждения: уровень не проколот с возвратом'
             continue
-        r_at, extreme = found
+        pierce_at, extreme = found
 
-        avg = float(np.mean(volume[max(0, r_at - params.VOLUME_WINDOW):r_at])) \
-            if r_at > 0 else 0.0
-        ratio = (volume[r_at] / avg) if avg > 0 else 0.0
-        if ratio < params.VOLUME_RATIO:
-            reason = (f'объём на возврате {ratio:.1f}x < '
-                      f'{params.VOLUME_RATIO}x — уровень никто не защищает')
+        # Подход проверяется на свече ПЕРЕД проколом: цена должна была идти
+        # к уровню со своей стороны, а не топтаться на нём. Без этого
+        # сетапом считался бы любой возврат внутри болтанки вокруг уровня.
+        before = pierce_at - 1
+        if before < 1:
+            reason = 'мало истории до прокола'
+            continue
+        approach = close[before] - lv['price']
+        if (approach <= 0) if side == LONG else (approach >= 0):
+            reason = 'перед проколом цена была не с той стороны уровня'
+            continue
+        if abs(approach) < params.MIN_GAP_ATR * a[before]:
+            reason = 'перед проколом цена уже стояла на уровне'
+            continue
+        if abs(approach) > params.TRIGGER_ATR * a[before]:
+            reason = 'перед проколом цена была далеко от уровня'
             continue
 
-        entry = float(close[r_at])
-        dist = max(abs(entry - extreme) + params.STOP_PAD_ATR * a[r_at],
+        avg = float(np.mean(volume[max(0, i - params.VOLUME_WINDOW):i])) if i > 0 else 0.0
+        ratio = (volume[i] / avg) if avg > 0 else 0.0
+        if ratio < params.VOLUME_RATIO:
+            reason = (f'объём на возврате {ratio:.1f}x < {params.VOLUME_RATIO}x '
+                      f'— уровень никто не защищает')
+            continue
+
+        entry = price
+        dist = max(abs(entry - extreme) + params.STOP_PAD_ATR * a[i],
                    entry * params.MIN_STOP_PCT / 100)
         stop = entry - dist if side == LONG else entry + dist
 
         # Цель — следующий уровень по ходу сделки. Так выходит трейдер,
         # торгующий от уровней: движение живёт до следующего препятствия.
-        ahead = [lv2['price'] for lv2 in known
-                 if (lv2['price'] > entry + dist if side == LONG
-                     else lv2['price'] < entry - dist)]
-        target = None
-        if ahead:
-            candidate = min(ahead) if side == LONG else max(ahead)
-            if abs(candidate - entry) / dist >= params.MIN_TARGET_R:
-                target = candidate
-        if target is None:
-            target = (entry + params.FALLBACK_RR * dist if side == LONG
-                      else entry - params.FALLBACK_RR * dist)
+        # Запасной цели, кратной риску, здесь нет намеренно: замер показал,
+        # что цель на уровне работает только вместе с объёмом, а фиксированная
+        # кратность — это уже другая стратегия с другим результатом.
+        ahead = [other['price'] for other in known
+                 if (other['price'] > entry + dist if side == LONG
+                     else other['price'] < entry - dist)]
+        if not ahead:
+            reason = 'впереди нет уровня для цели'
+            continue
+        target = min(ahead) if side == LONG else max(ahead)
+        if abs(target - entry) / dist < params.MIN_TARGET_R:
+            reason = f'следующий уровень ближе {params.MIN_TARGET_R}R'
+            continue
 
         return {
             'direction': side,
             'level': float(lv['price']),
             'touches': lv['touches'],
             'mirror': lv['mirror'],
-            'entry': entry,
+            'entry': float(entry),
             'stop_loss': float(stop),
             'target': float(target),
             'rr': float(abs(target - entry) / dist),
             'sl_distance': float(dist),
             'volume_ratio': float(ratio),
-            'reclaim_index': int(r_at),
+            'reclaim_index': int(i),
+            'pierce_index': int(pierce_at),
             'pierce_extreme': float(extreme),
         }, None
 

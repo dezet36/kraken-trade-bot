@@ -38,6 +38,26 @@ _cache = None
 _mtime = None
 
 
+def _default_slots(strategy):
+    """
+    Слотов по умолчанию — из настроек САМОЙ стратегии, если они у неё есть.
+
+    Иначе получается тихое расхождение: замер уровней считался на шести
+    слотах, а бот брал общее число из конфига. Работать он будет, но
+    торговать не то, что измерено, и заметить это можно только через
+    месяцы по разошедшейся доходности.
+    """
+    if config.SLOTS_PER_STRATEGY:
+        return int(config.SLOTS_PER_STRATEGY)
+    if strategy == 'LEVELS':
+        try:
+            from levels import params as levels_params
+            return int(levels_params.MAX_POSITIONS)
+        except Exception:                          # noqa: BLE001
+            pass
+    return int(config.MAX_ACTIVE_PAIRS)
+
+
 def _defaults():
     return {
         name: {
@@ -46,7 +66,7 @@ def _defaults():
             'min_stop_pct': round(float(config.MIN_SL_PERCENT) * 100, 3),
             'deposit': float(config.PAPER_START_BALANCES.get(name,
                                                              config.PAPER_START_BALANCE)),
-            'max_slots': int(config.SLOTS_PER_STRATEGY or config.MAX_ACTIVE_PAIRS),
+            'max_slots': _default_slots(name),
         }
         for name in STRATEGIES
     }

@@ -42,7 +42,7 @@ from datetime import datetime, timezone
 
 import config
 import glossary
-from exit_plan import direction_cap, tp_plan, wants_breakeven
+from exit_plan import cooldown_hours, direction_cap, tp_plan, wants_breakeven
 from logger import log
 
 STRATEGIES = ('FIBO', 'SMC', 'LEVELS')
@@ -257,7 +257,7 @@ class PaperBroker:
         if not last:
             return True
         hours = (_now_ms() - int(last)) / 3_600_000
-        return hours >= config.COOLDOWN_HOURS
+        return hours >= cooldown_hours(strategy)
 
     def slots_used_by(self, strategy):
         return len(self.positions(strategy)) + len(self.pending(strategy))

@@ -72,15 +72,16 @@ class TestУровни:
 
 class TestПодтверждение:
     def test_prokol_s_vozvratom_podtverzhdaet(self):
+        """Решение принимается НА свече возврата, прокол ищется назад."""
         high, low, close, _ = series([
             (100.5, 99.5, 100.0, 1.0),
             (100.2, 97.0, 97.5, 1.0),     # прокол уровня 98
-            (99.5, 97.4, 98.6, 1.0),      # возврат выше 98
+            (99.5, 97.4, 98.6, 1.0),      # возврат выше 98 — свеча решения
         ])
-        found = core.find_reclaim(high, low, close, 0, 98.0, core.LONG, 1.0)
+        found = core.find_reclaim(high, low, close, 2, 98.0, core.LONG, 1.0)
         assert found is not None
-        index, extreme = found
-        assert index == 2
+        pierce_at, extreme = found
+        assert pierce_at == 1
         assert extreme == pytest.approx(97.0)
 
     def test_proboy_bez_vozvrata_ne_podtverzhdaet(self):
@@ -91,7 +92,9 @@ class TestПодтверждение:
             (97.6, 96.0, 96.2, 1.0),
             (96.5, 95.0, 95.1, 1.0),
         ])
-        assert core.find_reclaim(high, low, close, 0, 98.0, core.LONG, 1.0) is None
+        # Ни на одной из свечей после прокола возврата не было
+        assert all(core.find_reclaim(high, low, close, k, 98.0, core.LONG, 1.0) is None
+                   for k in range(1, 4))
 
     def test_kasanie_bez_prokola_ne_podtverzhdaet(self):
         """Цена не дошла до уровня — подтверждать нечего."""
@@ -100,24 +103,38 @@ class TestПодтверждение:
             (100.2, 98.5, 99.0, 1.0),
             (100.0, 98.8, 99.5, 1.0),
         ])
-        assert core.find_reclaim(high, low, close, 0, 98.0, core.LONG, 1.0) is None
+        assert core.find_reclaim(high, low, close, 2, 98.0, core.LONG, 1.0) is None
 
     def test_vozvrat_pozzhe_okna_ne_schitaetsya(self):
+        """
+        Прокол за пределами окна RECLAIM_BARS не считается: возврат через
+        неделю после прокола — не реакция на уровень, а новое движение.
+        Свечи между ними держатся НИЖЕ уровня, чтобы прокол не повторялся.
+        """
         rows = [(100.5, 99.5, 100.0, 1.0), (100.2, 97.0, 97.5, 1.0)]
-        rows += [(97.8, 97.0, 97.2, 1.0)] * (params.RECLAIM_BARS + 2)
-        rows += [(99.0, 97.5, 98.8, 1.0)]           # возврат, но слишком поздно
+        # Пауза заведомо длиннее окна, и без новых проколов ниже 98 - need:
+        # цена стоит на 97.9, что выше порога прокола при ATR = 1.0.
+        rows += [(97.95, 97.90, 97.92, 1.0)] * (params.RECLAIM_BARS + 3)
+        rows += [(99.0, 97.90, 98.8, 1.0)]          # возврат, но слишком поздно
         high, low, close, _ = series(rows)
-        assert core.find_reclaim(high, low, close, 0, 98.0, core.LONG, 1.0) is None
+        last = len(rows) - 1
+        assert core.find_reclaim(high, low, close, last, 98.0, core.LONG, 1.0) is None
 
 
 class TestСетап:
     def _scene(self, reclaim_volume):
-        """Уровень 98, подход сверху, прокол и возврат на заданном объёме."""
+        """
+        Уровень 98 (поддержка), уровень 103.3 (цель), подход сверху,
+        прокол и возврат на заданном объёме. Свеча решения — 77.
+        """
         rows = flat(80, price=100.0, vol=1.0)
         rows[20] = touch(100.0, 2.0)
         rows[40] = touch(100.0, 2.0)
-        # Цена подходит к уровню. Расстояние до него должно быть меньше
-        # TRIGGER_ATR * ATR (здесь ATR ~0.67), иначе сетап не рассматривается.
+        # Уровень выше — цель сделки. Без него сетап отклоняется: цель
+        # берётся со следующего уровня, запасной кратности риску нет.
+        rows[50] = (103.3, 99.7, 100.0, 1.0)
+        rows[65] = (103.3, 99.7, 100.0, 1.0)
+        # Подход: ближе TRIGGER_ATR * ATR (здесь ATR ~0.67) и не вплотную.
         rows[75] = (98.7, 98.3, 98.4, 1.0)
         rows[76] = (98.6, 97.0, 97.4, 1.0)                  # прокол
         rows[77] = (99.0, 97.3, 98.7, reclaim_volume)       # возврат
@@ -125,7 +142,7 @@ class TestСетап:
 
     def test_setap_sobiraetsya_na_obeme(self):
         high, low, close, volume = self._scene(reclaim_volume=5.0)
-        setup, reason = core.evaluate(high, low, close, volume, 75)
+        setup, reason = core.evaluate(high, low, close, volume, 77)
         assert setup is not None, reason
         assert setup['direction'] == core.LONG
         assert setup['stop_loss'] < setup['entry'] < setup['target']
@@ -134,7 +151,7 @@ class TestСетап:
     def test_bez_obema_setapa_net(self):
         """Уровень, который никто не защищает объёмом, не торгуется."""
         high, low, close, volume = self._scene(reclaim_volume=1.0)
-        setup, reason = core.evaluate(high, low, close, volume, 75)
+        setup, reason = core.evaluate(high, low, close, volume, 77)
         assert setup is None
         assert 'объём' in reason
 
@@ -144,7 +161,7 @@ class TestСетап:
         уровня собирают стопы, и стоп там выбивается шумом.
         """
         high, low, close, volume = self._scene(reclaim_volume=5.0)
-        setup, _ = core.evaluate(high, low, close, volume, 75)
+        setup, _ = core.evaluate(high, low, close, volume, 77)
         assert setup['stop_loss'] < setup['pierce_extreme'] + 1e-9
 
     def test_stop_ne_tonshe_minimuma(self):
@@ -154,13 +171,13 @@ class TestСетап:
         конфигурациях.
         """
         high, low, close, volume = self._scene(reclaim_volume=5.0)
-        setup, _ = core.evaluate(high, low, close, volume, 75)
+        setup, _ = core.evaluate(high, low, close, volume, 77)
         floor = setup['entry'] * params.MIN_STOP_PCT / 100
         assert setup['sl_distance'] >= floor - 1e-9
 
     def test_prichina_otkaza_vozvrashchaetsya_vsegda(self):
         high, low, close, volume = series(flat(80))
-        setup, reason = core.evaluate(high, low, close, volume, 75)
+        setup, reason = core.evaluate(high, low, close, volume, 77)
         assert setup is None
         assert reason and isinstance(reason, str)
 
@@ -178,12 +195,14 @@ class TestАдаптер:
         rows = flat(80, price=100.0, vol=1.0)
         rows[20] = touch(100.0, 2.0)
         rows[40] = touch(100.0, 2.0)
+        rows[50] = (103.3, 99.7, 100.0, 1.0)
+        rows[65] = (103.3, 99.7, 100.0, 1.0)
         rows[75] = (98.7, 98.3, 98.4, 1.0)
         rows[76] = (98.6, 97.0, 97.4, 1.0)
         rows[77] = (99.0, 97.3, 98.7, 5.0)
         high, low, close, volume = series(rows)
 
-        setup, reason = core.evaluate(high, low, close, volume, 75)
+        setup, reason = core.evaluate(high, low, close, volume, 77)
         assert setup is not None, reason
 
         signal = strategy_levels._to_bot_signal(setup, 'BTCUSDT', 10000.0, None)

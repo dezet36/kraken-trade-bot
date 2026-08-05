@@ -74,6 +74,25 @@ def direction_cap(params):
         return 0
 
 
+def cooldown_hours(strategy):
+    """
+    Пауза по паре после выхода — настройка СТРАТЕГИИ, а не бота.
+
+    Книги у стратегий раздельные, горизонты разные: уровни держат позицию
+    часы и переоценивают ситуацию быстро, SMC тянет до дальних целей. Общее
+    число обслуживало обе плохо, а после появления третьей стратегии стало
+    просто неверным: замер уровней делался на шести часах, живой бот брал
+    двенадцать из конфига, и торговал бы не то, что измерено.
+    """
+    if strategy == 'LEVELS':
+        try:
+            from levels import params as levels_params
+            return float(levels_params.COOLDOWN_HOURS)
+        except Exception:                          # noqa: BLE001
+            pass
+    return float(getattr(config, 'COOLDOWN_HOURS', 12))
+
+
 def tps_completed(remaining_size, original_size, fractions, tolerance=0.01):
     """
     Сколько целей уже отработало — по остатку позиции на бирже.
