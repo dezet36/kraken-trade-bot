@@ -20,11 +20,19 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 def dash(tmp_path, monkeypatch):
     """Дашборд, читающий изолированный каталог данных."""
     monkeypatch.setenv('BOT_DATA_DIR', str(tmp_path))
+    # Режим задаётся явно, а не наследуется из .env машины. Эти тесты
+    # проверяют боевую ветку сборки данных; когда оператор переключил бота на
+    # фантом, build_payload() молча уходил в другую ветку и семь тестов
+    # падали на пустой статистике — при том, что код был исправен. Тест,
+    # зависящий от настройки рабочей машины, проверяет не то, что нужно.
+    monkeypatch.setenv('TRADING_MODE', 'DEMO')
     for module in ('config', 'trade_journal', 'dashboard'):
         sys.modules.pop(module, None)
 
     import trade_journal
     import dashboard as dash_module
+
+    monkeypatch.setattr(dash_module, '_broker', None, raising=False)
 
     monkeypatch.setattr(dash_module, 'JOURNAL_FILE', str(tmp_path / 'trades_journal.csv'))
     monkeypatch.setattr(dash_module, 'POSITIONS_FILE', str(tmp_path / 'positions_state.json'))
