@@ -32,6 +32,7 @@
 
 import os
 import shutil
+import stat
 import subprocess
 import sys
 import zipfile
@@ -67,14 +68,42 @@ EXCLUDE_SUFFIXES = ('.pyc', '.pyo', '.log', '.bak', '.db', '.db-wal', '.db-shm')
 MUST_EXIST = (
     'Live_Bot/bot.py', 'Live_Bot/config.py', 'Live_Bot/dashboard.py',
     'Live_Bot/dashboard.html', 'Live_Bot/doctor.py', 'Live_Bot/updater.py',
-    'Live_Bot/exchange.py', 'Live_Bot/strategy.py', 'Live_Bot/strategy_smc.py',
-    'Live_Bot/paper_broker.py', 'Live_Bot/smc/params.py',
+    'Live_Bot/exchange.py', 'Live_Bot/paper_broker.py',
+    # Три стратегии и их ядра: пропажа любого файла ломает бота на сервере
+    # молча — стратегия просто «не находит сетапов».
+    'Live_Bot/strategy.py',
+    'Live_Bot/strategy_smc.py', 'Live_Bot/smc/params.py', 'Live_Bot/smc/signal.py',
+    'Live_Bot/strategy_levels.py', 'Live_Bot/levels/core.py',
+    'Live_Bot/levels/params.py',
+    # Общая инфраструктура
+    'Live_Bot/market_regime.py', 'Live_Bot/error_log.py',
+    'Live_Bot/settings_store.py', 'Live_Bot/exit_plan.py',
     'requirements.txt', '.env.example', 'install.sh', 'install.ps1',
+    'update.sh',
 )
 
 # Чего в сборке быть не должно. Проверяется рекурсивно.
 MUST_NOT_EXIST = ('.env', 'platform.db', 'trades_journal.csv',
                   'positions_state.json', 'paper_trades.csv', 'bot_log.txt')
+
+
+def _force_remove(func, path, _exc):
+    """
+    Снимает защиту от записи и повторяет удаление.
+
+    Git помечает файлы в .git/objects только для чтения, и обычный rmtree на
+    них падает. Без этого ВТОРАЯ сборка подряд всегда завершалась ошибкой —
+    первая проходила, потому что удалять было нечего.
+    """
+    try:
+        os.chmod(path, stat.S_IWRITE)
+        func(path)
+    except Exception:                              # noqa: BLE001
+        pass
+
+
+def _rmtree(path):
+    shutil.rmtree(path, onexc=_force_remove)
 
 
 def _ignore(directory, names):
@@ -135,7 +164,7 @@ def build_git():
 
 def build(make_zip=False, use_git=True):
     if os.path.exists(OUT):
-        shutil.rmtree(OUT)
+        _rmtree(OUT)
 
     git_ok, git_note = (False, 'отключено ключом --copy')
     if use_git:
@@ -145,7 +174,7 @@ def build(make_zip=False, use_git=True):
         else:
             print(f'   клон не удался ({git_note}) — обычное копирование')
             if os.path.exists(OUT):
-                shutil.rmtree(OUT)
+                _rmtree(OUT)
 
     if not os.path.exists(OUT):
         os.makedirs(OUT)
