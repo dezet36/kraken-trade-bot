@@ -22,6 +22,10 @@ import settings_store as settings
 from exchange import fetch_ohlcv
 from logger import log
 from smc import params as smc_params
+# Псевдоним обязателен: ниже определена функция market_regime(), и без
+# него она перекрыла бы модуль. Ошибка была бы молчаливой — вызов
+# обёрнут в try, и режим просто перестал бы определяться.
+import market_regime as regime_state
 from smc import regime as regime_mod
 from smc import signal as smc_signal
 
@@ -75,12 +79,12 @@ def market_regime(client=None):
     размер: правило умеет только уменьшать ставку, и отсутствие данных не
     повод торговать иначе, чем обычно.
     """
-    need = (smc_params.REGIME_ER_WINDOW + smc_params.REGIME_MIN_HISTORY + 30)
+    need = regime_state.ER_WINDOW + regime_state.MIN_HISTORY + 30
     try:
-        raw = fetch_ohlcv('1d', limit=need, symbol=smc_params.REGIME_SYMBOL,
+        raw = fetch_ohlcv('1d', limit=need, symbol=regime_state.SYMBOL,
                           client=client)
         df = _drop_forming_candle(raw)
-        if df is None or len(df) < smc_params.REGIME_ER_WINDOW + 2:
+        if df is None or len(df) < regime_state.ER_WINDOW + 2:
             return regime_mod.UNKNOWN, 1.0, 'режим неизвестен (нет дневных данных)'
 
         key = str(df['timestamp'].iloc[-1])

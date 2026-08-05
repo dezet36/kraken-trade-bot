@@ -62,15 +62,18 @@ TRACKED = ('MIN_TARGET_R', 'VOLUME_RATIO', 'STOP_PAD_ATR', 'MIN_STOP_PCT',
 #
 # Здесь сетка RR идёт ВНИЗ от 1.75 при новом стопе. Если улучшение
 # продолжится к 1.5, порог не нужен вовсе и работает только широкий стоп.
+# РАЗМЕР ПОЗИЦИИ ПО РЕЖИМУ. У SMC преимущество в боковике, у уровней — в
+# падении (+0.667 против +0.289), поэтому урезать надо не то же самое.
+# Множитель не меняет состав сетапов, только ставку; контроль равномерным
+# сокращением обязателен — иначе измеряется «торговать меньше», а не
+# «торговать меньше там, где нет преимущества».
 CONFIGS = [
-    ('RR 1.50, стоп 1.2%', {'MIN_TARGET_R': 1.50}),
-    ('RR 1.60, стоп 1.2%', {'MIN_TARGET_R': 1.60}),
-    ('RR 1.75, стоп 1.2%', {'MIN_TARGET_R': 1.75}),
-    ('RR 1.90, стоп 1.2%', {'MIN_TARGET_R': 1.90}),
-    ('RR 2.00, стоп 1.2%', {}),
-    ('RR 1.50, стоп 1.5%', {'MIN_TARGET_R': 1.50, 'MIN_STOP_PCT': 1.5}),
-    ('RR 1.75, стоп 1.5%', {'MIN_TARGET_R': 1.75, 'MIN_STOP_PCT': 1.5}),
-    ('RR 1.75, стоп 2.0%', {'MIN_TARGET_R': 1.75, 'MIN_STOP_PCT': 2.0}),
+    ('без деления по режиму',    {}),
+    ('в боковике 0.75',          {'_range': 0.75}),
+    ('в боковике 0.50',          {'_range': 0.50}),
+    ('в росте 0.50',             {'_trend_up_only': 0.50}),
+    ('равномерно 0.85 (контроль)', {'_uniform': 0.85}),
+    ('равномерно 0.70 (контроль)', {'_uniform': 0.70}),
 ]
 
 
@@ -133,18 +136,63 @@ def build_orders(pair, item):
     return orders
 
 
+# Режимный множитель проверяется ОТДЕЛЬНО от параметров сигнала: он не
+# меняет состав сетапов, только размер ставки. Разметка причинная — порог
+# берётся по прошлым дням, как в market_regime.
+REGIME_SCALE = {'trend': None, 'range': None}
+
+
+def _regime_lookup(period):
+    import market_regime as mr
+    import numpy as np, pandas as pd
+    daily = period['data']['BTCUSDT']['1d']
+    closes = daily['close'].to_numpy(dtype=float)
+    times = pd.to_datetime(daily['timestamp'])
+    if getattr(times.dt, 'tz', None) is not None:
+        times = times.dt.tz_convert('UTC').dt.tz_localize(None)
+    times = times.to_numpy(dtype='datetime64[ns]')
+    labels = []
+    for i in range(len(closes)):
+        name, _, _ = mr.classify(closes[:i + 1])
+        labels.append(name)
+
+    def lookup(when):
+        idx = int(np.searchsorted(times, np.datetime64(pd.Timestamp(when)
+                                                       .tz_localize(None)
+                                                       if pd.Timestamp(when).tzinfo
+                                                       else pd.Timestamp(when)),
+                                  'right')) - 1
+        return labels[idx] if 0 <= idx < len(labels) else None
+    return lookup
+
+
 def run(period, cache):
     orders = []
     for pair, item in cache.items():
         orders += build_orders(pair, item)
     if not orders:
         return None
+
+    scale = None
+    if REGIME_SCALE['trend'] is not None or REGIME_SCALE['range'] is not None:
+        import market_regime as mr
+        lookup = _regime_lookup(period)
+
+        def scale(order):
+            reg = lookup(order.created)
+            if reg == mr.RANGE and REGIME_SCALE['range'] is not None:
+                return REGIME_SCALE['range']
+            if reg in (mr.TREND_UP, mr.TREND_DOWN) and REGIME_SCALE['trend'] is not None:
+                return REGIME_SCALE['trend']
+            return 1.0
+
     result = run_portfolio(
         orders, {p: period['data'][p]['5m'] for p in period['data']},
         risk_pct=LP.RISK_PCT, max_positions=LP.MAX_POSITIONS,
         cooldown_hours=LP.COOLDOWN_HOURS,
         max_same_direction=LP.MAX_SAME_DIRECTION,
-        max_hold_hours=LP.MAX_HOLD_HOURS, breakeven_after_tp1=False)
+        max_hold_hours=LP.MAX_HOLD_HOURS, breakeven_after_tp1=False,
+        risk_scale=scale)
     if not result['trades']:
         return None
     stats = compute_stats(result, label='')
@@ -175,8 +223,16 @@ def main():
     for name, over in CONFIGS:
         for key, value in defaults.items():
             setattr(LP, key, value)
+        REGIME_SCALE['trend'] = REGIME_SCALE['range'] = None
         for key, value in over.items():
-            setattr(LP, key, value)
+            if key == '_range':
+                REGIME_SCALE['range'] = value
+            elif key == '_trend_up_only':
+                REGIME_SCALE['trend'] = value
+            elif key == '_uniform':
+                REGIME_SCALE['trend'] = REGIME_SCALE['range'] = value
+            else:
+                setattr(LP, key, value)
         for period in periods:
             stats = run(period, caches[period['label']])
             if stats is None:
@@ -212,11 +268,11 @@ def main():
                   f'{stats["return_pct"]:>+9.1f}{dd:>7.1f}'
                   f'{stats["return_pct"] / dd if dd else float("nan"):>10.2f}')
 
-        base = results.get((label, 'RR 2.00, стоп 1.2%'))
+        base = results.get((label, 'без деления по режиму'))
         if not base:
             continue
         print()
-        print('Разница с текущим RR 2.00 (интервал через ноль = недоказуема):')
+        print('Разница с базой (интервал через ноль = недоказуема):')
         for name, _ in CONFIGS:
             stats = results.get((label, name))
             if not stats:
