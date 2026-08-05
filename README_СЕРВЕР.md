@@ -38,7 +38,7 @@ TRADING_MODE=PAPER          начните с фантома, ордера на 
 EXCHANGE=bybit
 BYBIT_API_KEY=...
 BYBIT_SECRET_KEY=...
-STRATEGY=BOTH               обе стратегии одновременно, каждая со своим депозитом
+STRATEGY=BOTH               все три стратегии одновременно, каждая со своим депозитом
 RISK_PER_TRADE=0.5
 ```
 
