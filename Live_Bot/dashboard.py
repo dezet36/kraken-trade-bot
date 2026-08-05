@@ -534,8 +534,38 @@ def build_payload():
     # наблюдении — «почему он ничего не делает».
     payload['funnel'] = scan_report.snapshot()
     payload['regime'] = _regime()
+    payload['portfolio'] = _portfolio()
     payload['attention'] = _attention(payload)
     return payload
+
+
+def _portfolio():
+    """
+    Текущая загрузка портфеля и действующий предел.
+
+    Показывается всегда, даже когда предел выключен: цифра «под риском
+    сейчас» нужна, чтобы решение о пределе принималось по факту, а не
+    наугад.
+    """
+    source = _broker if _broker is not None else _trade_manager
+    used, pct, deposit, slots = 0.0, 0.0, 0.0, 0
+    try:
+        if source is not None:
+            used, pct, deposit = source.portfolio_risk()
+            slots = source.portfolio_slots()
+    except Exception:                              # noqa: BLE001
+        pass
+    try:
+        limit = settings_store.portfolio_risk_pct()
+        max_positions = settings_store.portfolio_max_positions()
+    except Exception:                              # noqa: BLE001
+        limit, max_positions = 0.0, 0
+    return {
+        'risk_usd': round(used, 2), 'risk_pct': round(pct, 2),
+        'deposit': round(deposit, 2), 'slots': slots,
+        'limit_pct': limit, 'limit_positions': max_positions,
+        'over': bool(limit and pct > limit),
+    }
 
 
 def _regime():

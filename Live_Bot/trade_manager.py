@@ -427,6 +427,60 @@ class LiveTradeManager:
         """Есть ли на бирже позиция/ордер ИЛИ наш pending-лимит по паре (защита от дублей)."""
         return self._norm_symbol(trading_pair) in self.get_open_pairs()
 
+    def portfolio_risk(self):
+        """
+        Сколько сейчас под риском по всему счёту: сумма, доля и депозит.
+
+        Считаются и открытые позиции, и наши ожидающие лимиты: ордер, который
+        вот-вот нальётся, — это уже принятый риск, и не учитывать его значило
+        бы обходить собственный предел.
+        """
+        amount = 0.0
+        for positions in self.active_positions.values():
+            for position in positions:
+                if position.get('status') != 'OPEN':
+                    continue
+                params = (position.get('signal') or {}).get('params') or {}
+                amount += float(params.get('risk_amount') or 0)
+        for order in self._load_pending_orders().values():
+            params = (order.get('signal') or {}).get('params') or {}
+            amount += float(params.get('risk_amount') or 0)
+        deposit = float(self.get_trading_balance() or 0)
+        pct = (amount / deposit * 100) if deposit > 0 else 0.0
+        return amount, pct, deposit
+
+    def portfolio_slots(self):
+        """Позиций и ожидающих ордеров по всему счёту."""
+        return len(self.get_open_pairs())
+
+    def _portfolio_room(self, signal):
+        """Пропускает ли предел портфеля ещё одну сделку."""
+        try:
+            import settings_store as settings
+            max_positions = settings.portfolio_max_positions()
+            limit = settings.portfolio_risk_pct()
+        except Exception:                          # noqa: BLE001
+            return True, ''
+
+        if max_positions:
+            used = self.portfolio_slots()
+            if used >= max_positions:
+                return False, (f'предел портфеля: занято {used}/{max_positions} '
+                               f'позиций')
+        if not limit:
+            return True, ''
+
+        used_amount, pct, deposit = self.portfolio_risk()
+        if deposit <= 0:
+            return True, ''
+        risk_pct = float((signal.get('params') or {}).get('risk_pct')
+                         or config.RISK_PER_TRADE)
+        after = (used_amount + deposit * risk_pct / 100) / deposit * 100
+        if after > limit:
+            return False, (f'предел портфеля: под риском {pct:.1f}%, сделка '
+                           f'добавит до {after:.1f}% при пределе {limit:.1f}%')
+        return True, ''
+
     def get_direction_counts(self):
         """{'LONG': n, 'SHORT': n} — реальные позиции биржи + наши pending-лимиты.
         Биржа недоступна (pos_ok=False) — считаем по in-memory позициям (та же
@@ -905,6 +959,14 @@ class LiveTradeManager:
         # Защита от дублей: на бирже уже есть позиция/ордер по паре ИЛИ наш pending-лимит
         if self.has_position_or_order(trading_pair):
             log(f"⏳ {trading_pair}: позиция/ордер уже есть на бирже — пропускаем (без дубля)")
+            return False
+
+        # Предел на ВЕСЬ портфель. На бирже книга общая, и три стратегии,
+        # каждая в рамках своего лимита слотов, вместе выводят под риск
+        # столько, сколько ни одна из них не планировала.
+        allowed, why = self._portfolio_room(signal)
+        if not allowed:
+            log(f"⛔ {trading_pair}: {why}")
             return False
 
         # Направленный кэп берём из сигнала: у стратегий он разный.

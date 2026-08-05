@@ -31,7 +31,20 @@ LIMITS = {
     'min_stop_pct': (0.1, 20.0),
     'deposit':      (10.0, 10_000_000.0),
     'max_slots':    (1, 20),
+    # Предел на ВЕСЬ портфель: сколько процентов депозита может стоять под
+    # риском одновременно, считая все стратегии вместе. Ноль отключает.
+    'portfolio_risk_pct':  (0.0, 100.0),
+    # Максимум открытых позиций и ордеров суммарно. Ноль отключает.
+    'portfolio_max_positions': (0, 60),
 }
+
+# Общие настройки портфеля хранятся отдельным разделом: они не принадлежат
+# ни одной стратегии, а ограничивают их все вместе. Без такого предела
+# каждая стратегия соблюдает СВОЙ лимит слотов, и три стратегии по шесть
+# позиций при риске 0.5% дают 9% депозита под риском одновременно — при том
+# что ни одна из них своих правил не нарушила.
+PORTFOLIO = 'PORTFOLIO'
+PORTFOLIO_FIELDS = ('portfolio_risk_pct', 'portfolio_max_positions')
 
 _lock = threading.Lock()
 _cache = None
@@ -58,8 +71,23 @@ def _default_slots(strategy):
     return int(config.MAX_ACTIVE_PAIRS)
 
 
-def _defaults():
+def _portfolio_defaults():
+    """
+    По умолчанию предел ВЫКЛЮЧЕН.
+
+    Включённое по умолчанию ограничение, о котором оператор не знает, — это
+    сделки, которые бот молча не открыл. Пусть лучше решение будет
+    осознанным: панель показывает текущую загрузку, и включить предел можно
+    одним полем.
+    """
     return {
+        'portfolio_risk_pct': float(os.getenv('PORTFOLIO_RISK_PCT', 0) or 0),
+        'portfolio_max_positions': int(os.getenv('PORTFOLIO_MAX_POSITIONS', 0) or 0),
+    }
+
+
+def _defaults():
+    base = {
         name: {
             'enabled': True,
             'risk_pct': float(config.RISK_PER_TRADE),
@@ -70,6 +98,8 @@ def _defaults():
         }
         for name in STRATEGIES
     }
+    base[PORTFOLIO] = _portfolio_defaults()
+    return base
 
 
 def _clamp(field, value, fallback):
@@ -81,7 +111,8 @@ def _clamp(field, value, fallback):
     if value != value:                       # NaN
         return fallback
     value = min(max(value, low), high)
-    return int(value) if field == 'max_slots' else value
+    return (int(value) if field in ('max_slots', 'portfolio_max_positions')
+            else value)
 
 
 def load(force=False):
@@ -104,6 +135,11 @@ def load(force=False):
             try:
                 with open(SETTINGS_FILE, 'r', encoding='utf-8') as fh:
                     stored = json.load(fh)
+                stored_portfolio = stored.get(PORTFOLIO) or {}
+                for field in PORTFOLIO_FIELDS:
+                    if field in stored_portfolio:
+                        data[PORTFOLIO][field] = _clamp(
+                            field, stored_portfolio[field], data[PORTFOLIO][field])
                 for name in STRATEGIES:
                     item = (stored.get(name) or {})
                     data[name]['enabled'] = bool(item.get('enabled', True))
@@ -126,6 +162,12 @@ def save(changes):
     """
     global _cache, _mtime
     data = json.loads(json.dumps(load()))     # копия, чтобы не портить кэш
+
+    portfolio = changes.get(PORTFOLIO) or {}
+    for field in PORTFOLIO_FIELDS:
+        if field in portfolio:
+            data[PORTFOLIO][field] = _clamp(field, portfolio[field],
+                                            data[PORTFOLIO][field])
 
     for name in STRATEGIES:
         item = (changes.get(name) or {})
@@ -178,6 +220,16 @@ def min_stop_pct(strategy):
 def deposit(strategy):
     return float(load().get(strategy, {}).get('deposit',
                                               config.PAPER_START_BALANCE))
+
+
+def portfolio_risk_pct():
+    """Предел риска на весь портфель в процентах. 0 — выключен."""
+    return float(load().get(PORTFOLIO, {}).get('portfolio_risk_pct', 0) or 0)
+
+
+def portfolio_max_positions():
+    """Предел числа позиций и ордеров на весь портфель. 0 — выключен."""
+    return int(load().get(PORTFOLIO, {}).get('portfolio_max_positions', 0) or 0)
 
 
 def max_slots(strategy):

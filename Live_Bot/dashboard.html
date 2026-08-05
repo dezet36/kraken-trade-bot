@@ -216,7 +216,94 @@
   }
   .note .dot { margin-top: 6px; }
 
-  /* ── Обновление кода ─────────────────────────────────────────────── */
+  /* ── Предел на весь портфель ────────────────────────────────────────────── */
+/* Каждая стратегия соблюдает СВОЙ лимит слотов. Три стратегии по шесть
+   позиций при риске 0.5% дают 9% депозита под риском одновременно, и при
+   этом ни одна правил не нарушила. Предел смотрит поверх всех. */
+function portfolioLimit(writable) {
+  const box = el('portfolio-limit');
+  const p = (DATA || {}).portfolio;
+  if (!box || !p) return;
+
+  const on = p.limit_pct > 0 || p.limit_positions > 0;
+  const bar = p.limit_pct > 0
+    ? Math.min(100, p.risk_pct / p.limit_pct * 100)
+    : 0;
+
+  box.innerHTML = `
+    <div class="panel card-pad">
+      <div class="panel-head bare">
+        <h2>Предел на весь портфель</h2>
+        <span class="hint">поверх лимитов отдельных стратегий</span>
+      </div>
+      <div class="pf-now">
+        Сейчас под риском <b class="${p.over ? 'neg' : ''}">${usd(p.risk_usd)}</b>
+        — <b class="${p.over ? 'neg' : ''}">${p.risk_pct.toFixed(2)}%</b>
+        от ${usd(p.deposit)} · позиций и ордеров ${p.slots}
+      </div>
+      ${on && p.limit_pct > 0 ? `
+        <div class="pf-bar"><div class="pf-fill ${p.over ? 'over' : ''}"
+          style="width:${bar}%"></div></div>` : ''}
+      <div class="ctl-row">
+        <label for="pf-risk">Максимум под риском</label>
+        <span class="unit">%</span>
+        <input type="number" id="pf-risk" min="0" max="100" step="0.5"
+               value="${p.limit_pct}" ${writable ? '' : 'disabled'}>
+      </div>
+      <div class="ctl-note">Сколько процентов депозита может стоять под риском
+        одновременно, считая все стратегии вместе. <b>0 — предел выключен.</b></div>
+      <div class="ctl-row">
+        <label for="pf-slots">Максимум позиций</label>
+        <span class="unit"></span>
+        <input type="number" id="pf-slots" min="0" max="60" step="1"
+               value="${p.limit_positions}" ${writable ? '' : 'disabled'}>
+      </div>
+      <div class="ctl-note">Открытых позиций и ожидающих ордеров суммарно.
+        <b>0 — предел выключен.</b></div>
+      <div class="ctl-foot">
+        <button type="button" class="btn" id="pf-save"
+          ${writable ? '' : 'disabled'}>Применить</button>
+        <button type="button" class="btn ghost" id="pf-off"
+          ${writable ? '' : 'disabled'}>Отключить</button>
+        <span class="saved" id="pf-msg"></span>
+      </div>
+      <div class="ctl-note">Предел не трогает уже открытые позиции: он решает
+        только, открывать ли новую. Стратегия, упёршаяся в него, пишет причину
+        в журнал — молчаливого пропуска не будет.</div>
+    </div>`;
+
+  const save = (risk, slots) => sendPortfolio(risk, slots);
+  el('pf-save').onclick = () => save(
+    parseFloat(el('pf-risk').value) || 0,
+    parseInt(el('pf-slots').value, 10) || 0);
+  el('pf-off').onclick = () => save(0, 0);
+}
+
+async function sendPortfolio(risk, slots) {
+  const msg = el('pf-msg');
+  if (msg) { msg.style.color = 'var(--ink-3)'; msg.textContent = 'сохраняю…'; }
+  try {
+    const resp = await fetch('/api/settings', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ PORTFOLIO: {
+        portfolio_risk_pct: risk, portfolio_max_positions: slots } }),
+    });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.error || resp.status);
+    SETTINGS = data.settings || SETTINGS;
+    await refresh();
+    const m = el('pf-msg');
+    if (m) {
+      m.style.color = 'var(--good)';
+      m.textContent = (risk || slots) ? 'предел применён' : 'предел выключен';
+    }
+  } catch (e) {
+    const m = el('pf-msg');
+    if (m) { m.style.color = 'var(--bad)'; m.textContent = 'Не применено: ' + e.message; }
+  }
+}
+
+/* ── Обновление кода ─────────────────────────────────────────────── */
   .upd-now { font-size: 13px; color: var(--ink-2); margin-bottom: 10px; }
   .upd-now code, .upd-row code {
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
@@ -524,6 +611,7 @@
 
       <!-- ── Управление ───────────────────────────────────────────────── -->
       <section class="page" data-page="control" hidden>
+        <div id="portfolio-limit"></div>
         <div id="controls"></div>
         <div id="update"></div>
       </section>
@@ -1206,6 +1294,7 @@ function showPage() {
   // обработчик клика не срабатывал, а данные для них в общий опрос не входят.
   if (page === 'control' && !SETTINGS) loadSettings();
   if (page === 'control' && !UPDATE) loadUpdate(false);
+  if (page === 'control') portfolioLimit(WRITABLE);
   // Настройки могли отрисоваться раньше, чем пришли данные бота: тогда в
   // карточках не было полей, зависящих от режима (депозит есть только в
   // фантоме) и от истории стратегии. Перерисовываем ровно один раз —

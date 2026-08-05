@@ -43,6 +43,7 @@ from datetime import datetime, timezone
 import config
 import glossary
 from exit_plan import cooldown_hours, direction_cap, tp_plan, wants_breakeven
+import settings_store as settings
 from logger import log
 
 STRATEGIES = ('FIBO', 'SMC', 'LEVELS')
@@ -259,6 +260,49 @@ class PaperBroker:
         hours = (_now_ms() - int(last)) / 3_600_000
         return hours >= cooldown_hours(strategy)
 
+    def portfolio_risk(self):
+        """
+        Сколько сейчас под риском по всему портфелю: сумма и доля депозита.
+
+        Считаются и открытые позиции, и ожидающие ордера: ордер, который
+        вот-вот нальётся, — это уже принятый риск, и не учитывать его
+        значило бы обходить собственный предел.
+        """
+        amount, deposit = 0.0, 0.0
+        for strategy in self.strategies:
+            deposit += float(self.balance(strategy) or 0)
+            for book in (self.positions(strategy), self.pending(strategy)):
+                for item in book.values():
+                    amount += float(item.get('risk_amount') or 0)
+        pct = (amount / deposit * 100) if deposit > 0 else 0.0
+        return amount, pct, deposit
+
+    def portfolio_slots(self):
+        """Позиций и ордеров по всем стратегиям вместе."""
+        return sum(len(self.positions(s)) + len(self.pending(s))
+                   for s in self.strategies)
+
+    def _portfolio_room(self, strategy, params):
+        """Пропускает ли предел портфеля ещё одну сделку."""
+        max_positions = settings.portfolio_max_positions()
+        if max_positions and self.portfolio_slots() >= max_positions:
+            return False, (f'предел портфеля: занято '
+                           f'{self.portfolio_slots()}/{max_positions} позиций')
+
+        limit = settings.portfolio_risk_pct()
+        if not limit:
+            return True, ''
+        used, pct, deposit = self.portfolio_risk()
+        if deposit <= 0:
+            return True, ''
+        risk_pct = float(params.get('risk_pct') or config.RISK_PER_TRADE)
+        addition = self.balance(strategy) * risk_pct / 100
+        after = (used + addition) / deposit * 100
+        if after > limit:
+            return False, (f'предел портфеля: под риском {pct:.1f}%, '
+                           f'сделка добавит до {after:.1f}% при пределе {limit:.1f}%')
+        return True, ''
+
     def slots_used_by(self, strategy):
         return len(self.positions(strategy)) + len(self.pending(strategy))
 
@@ -443,6 +487,15 @@ class PaperBroker:
             return False
         if not self.check_cooldown(strategy, pair):
             log(f"   [{strategy}] {pair}: кулдаун активен")
+            return False
+
+        # Предел на ВЕСЬ портфель — единственная проверка, которая смотрит
+        # за пределы своей стратегии. Каждая соблюдает свой лимит слотов, и
+        # при трёх стратегиях по шесть позиций под риском оказывается 9%
+        # депозита, хотя ни одна правил не нарушила.
+        allowed, why = self._portfolio_room(strategy, params)
+        if not allowed:
+            log(f"   [{strategy}] {pair}: {why}")
             return False
 
         # Направленный кэп берём из сигнала: у стратегий он разный. Считаем
