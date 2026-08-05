@@ -20,7 +20,13 @@ ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 sys.path.insert(0, os.path.join(ROOT, 'research'))
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import smc_engine as eng   # noqa: E402
+# Движок бэктеста живёт в research/ и в серверную сборку не входит: боту он
+# в работе не нужен. Пропуск вместо падения — иначе проверка после
+# обновления на сервере валилась бы всегда, и автоматический откат
+# срабатывал бы на каждом обновлении, каким бы исправным оно ни было.
+eng = pytest.importorskip(
+    'smc_engine',
+    reason='движок бэктеста (research/) отсутствует — это серверная сборка')
 
 T0 = pd.Timestamp('2026-01-01', tz='UTC')
 
