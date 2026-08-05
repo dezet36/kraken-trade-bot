@@ -40,12 +40,24 @@ function Die($m)  { Write-Host "  [ОШИБКА] $m" -ForegroundColor Red; exit 
 # коду возврата, как и положено.
 function Try-Git ([string[]] $Arguments) {
     $saved = $ErrorActionPreference
+    # Сочетание проверено вручную, оно единственное рабочее из трёх:
+    #   2>&1 + Continue          — PowerShell печатает stderr красным сам, и
+    #                              обычное «репозиторий недоступен» выглядит
+    #                              падением скрипта;
+    #   2>файл + SilentlyContinue — строки выбрасываются, файл пуст, причина
+    #                              отказа теряется;
+    #   2>файл + Continue        — в файле текст, на экране ничего.
     $ErrorActionPreference = 'Continue'
+    $errFile = [IO.Path]::GetTempFileName()
     try {
-        $output = & git @Arguments 2>&1 | Out-String
-        return @{ Code = $LASTEXITCODE; Out = $output }
+        $output = & git @Arguments 2>$errFile | Out-String
+        $code = $LASTEXITCODE
+        $stderr = ''
+        if (Test-Path $errFile) { $stderr = [IO.File]::ReadAllText($errFile) }
+        return @{ Code = $code; Out = ("$output`n$stderr").Trim() }
     } finally {
         $ErrorActionPreference = $saved
+        Remove-Item $errFile -Force -ErrorAction SilentlyContinue
     }
 }
 
@@ -85,18 +97,32 @@ $needToken = $true
 
 $env:GIT_TERMINAL_PROMPT = '0'
 
-# Пустой credential.helper ПЕРЕД нашим сбрасывает список унаследованных.
-# Без этого на Windows первым отвечает диспетчер учётных данных, и если в нём
-# лежит чужой или просроченный доступ к GitHub, git берёт его и получает отказ,
-# так и не спросив наш файл с токеном. Симптом обманчивый: «Write access to
-# repository not granted» на обычном чтении.
+# Пустой credential.helper сбрасывает список унаследованных — и он стоит
+# ВСЕГДА, даже когда своего токена ещё нет.
+#
+# Иначе на Windows в дело вмешивается диспетчер учётных данных: он отвечает
+# первым, лезет в браузер за подтверждением и отдаёт доступ того аккаунта,
+# который там залогинен. Если у этого аккаунта прав на репозиторий нет, git
+# получает отказ — но отказ приходит уже ПОСЛЕ успешной аутентификации,
+# поэтому выглядит как «Write access to repository not granted», то есть как
+# проблема прав, а не как «взят не тот ключ». Хуже того, проверка «а доступен
+# ли репозиторий вообще без токена» с таким помощником отвечает «доступен» —
+# и установка идёт клонировать то, что склонировать не сможет.
+#
+# На сервере всплывающее окно браузера — отдельная беда: там его некому
+# закрыть. Сброшенный список решает и это.
 function Auth-Args ($file) {
-    if (-not $file -or -not (Test-Path $file)) { return @() }
-    $asGit = $file -replace '\\', '/'
-    return @('-c', 'credential.helper=', '-c', "credential.helper=store --file=$asGit")
+    # Имя намеренно не $args: так зовётся автоматическая переменная PowerShell.
+    $flags = @('-c', 'credential.helper=')
+    if ($file -and (Test-Path $file)) {
+        $asGit = $file -replace '\\', '/'
+        $flags += @('-c', "credential.helper=store --file=$asGit")
+    }
+    return $flags
 }
 
-if ((Try-Git @('ls-remote', $RepoUrl, 'HEAD')).Code -eq 0) {
+# Проверка «репозиторий открытый?» — строго без каких-либо учётных данных.
+if ((Try-Git ((Auth-Args $null) + @('ls-remote', $RepoUrl, 'HEAD'))).Code -eq 0) {
     $needToken = $false
     Ok "репозиторий доступен без токена"
 } elseif (Test-Path $credFile) {
@@ -107,6 +133,14 @@ if ((Try-Git @('ls-remote', $RepoUrl, 'HEAD')).Code -eq 0) {
 }
 
 if ($needToken) {
+    # Спрашивать можно только у живой консоли. Без неё Read-Host не вернёт
+    # ничего и установка повиснет насмерть — молча, потому что вопрос никто
+    # не увидит. Лучше внятный отказ.
+    if (-not ([Environment]::UserInteractive) -or [Console]::IsInputRedirected) {
+        Die ("нужен токен GitHub, но спросить некого — нет консоли. " +
+             "Запустите bootstrap.bat двойным щелчком либо положите токен в $credFile " +
+             "строкой вида https://x-access-token:ТОКЕН@github.com")
+    }
     Write-Host ""
     Write-Host "  Репозиторий закрытый — нужен токен доступа GitHub."
     Write-Host ""
