@@ -303,8 +303,60 @@ class PaperBroker:
         return sum(len(self.positions(s)) + len(self.pending(s))
                    for s in self.strategies)
 
+    def daily_result(self):
+        """
+        Результат сегодняшнего дня по всем стратегиям: сумма и доля депозита.
+
+        Считается по журналу закрытых сделок, а не по счётчику в памяти:
+        счётчик обнуляется при перезапуске, и бот, перезапущенный посреди
+        плохого дня, начинал бы его заново с чистого листа — ровно тогда,
+        когда предел нужнее всего.
+
+        «Сегодня» берётся по тем же часам, что и время закрытия сделок, а не
+        по часам машины. Журнал пишется в UTC, и в местный вечер эти два
+        представления о дне расходятся: предел считал бы вчерашние сделки
+        сегодняшними или наоборот.
+        """
+        today = _iso(_now_ms())[:10]
+        pnl = 0.0
+        for row in read_journal():
+            if str(row.get('close_time', ''))[:10] == today:
+                try:
+                    pnl += float(row.get('pnl_usd') or 0)
+                except (TypeError, ValueError):
+                    continue
+        deposit = sum(float(self.balance(s) or 0) for s in self.strategies)
+        pct = (pnl / deposit * 100) if deposit > 0 else 0.0
+        return pnl, pct, deposit
+
+    def _daily_stop_hit(self):
+        """
+        Сработал ли дневной стоп-кран.
+
+        Отдельно от предела портфеля: тот ограничивает риск, стоящий в рынке
+        ОДНОВРЕМЕННО, и молчит, когда десять сделок закрылись в минус по
+        очереди. Плохой день так и выглядит: каждая сделка по правилам, а к
+        вечеру депозита нет.
+
+        Предел не трогает уже открытые позиции — они ведутся до своих стопов
+        и целей. Закрывать их принудительно значило бы фиксировать убыток по
+        худшей цене дня ровно в тот момент, когда рынок и так против.
+        """
+        limit = settings.daily_loss_pct()
+        if not limit:
+            return False, ''
+        pnl, pct, _deposit = self.daily_result()
+        if pnl >= 0 or -pct < limit:
+            return False, ''
+        return True, (f'дневной предел убытка: {pct:.2f}% при пределе {limit:.2f}% — '
+                      f'новые сделки до завтра не открываются')
+
     def _portfolio_room(self, strategy, params):
         """Пропускает ли предел портфеля ещё одну сделку."""
+        stopped, why = self._daily_stop_hit()
+        if stopped:
+            return False, why
+
         max_positions = settings.portfolio_max_positions()
         if max_positions and self.portfolio_slots() >= max_positions:
             return False, (f'предел портфеля: занято '

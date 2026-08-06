@@ -742,3 +742,57 @@ class TestPortfolioRiskIsLive:
 
         after, _pct, _dep = broker.portfolio_risk()
         assert after == pytest.approx(0.0, abs=1e-6)
+
+
+class TestDailyStop:
+    """
+    Дневной стоп-кран: после убытка в X% за день новых сделок не открывать.
+
+    Отличается от предела портфеля тем, что тот ограничивает риск, стоящий в
+    рынке ОДНОВРЕМЕННО, и молчит, когда десять сделок закрылись в минус по
+    очереди. Плохой день выглядит именно так: каждая сделка по правилам, а к
+    вечеру депозита нет.
+    """
+
+    def test_limit_off_by_default(self, broker_env):
+        broker, client, pb, _cfg = broker_env
+        pb._now_ms = lambda: 1_700_000_000_000
+        broker.open('FIBO', signal(entry=100.0, stop=90.0, tp1=130.0))
+        feed(broker, client, 'BTCUSDT', [(100, 100, 100), (100, 89, 89)])
+
+        # Убыток есть, предел выключен — следующая сделка открывается.
+        assert broker.open('FIBO', signal(pair='ETHUSDT'))
+
+    def test_stops_new_trades_after_daily_loss(self, broker_env, monkeypatch):
+        broker, client, pb, _cfg = broker_env
+        import settings_store
+        pb._now_ms = lambda: 1_700_000_000_000
+        broker.open('FIBO', signal(entry=100.0, stop=90.0, tp1=130.0))
+        feed(broker, client, 'BTCUSDT', [(100, 100, 100), (100, 89, 89)])
+
+        pnl, pct, _dep = broker.daily_result()
+        assert pnl < 0, 'сделка должна была закрыться в минус'
+
+        # Предел ниже уже полученного убытка — новые сделки запрещены.
+        monkeypatch.setattr(settings_store, 'daily_loss_pct',
+                            lambda: abs(pct) / 2)
+        assert not broker.open('FIBO', signal(pair='ETHUSDT'))
+
+        # Предел выше убытка — торговля продолжается.
+        monkeypatch.setattr(settings_store, 'daily_loss_pct',
+                            lambda: abs(pct) * 2)
+        assert broker.open('FIBO', signal(pair='ETHUSDT'))
+
+    def test_open_positions_are_not_touched(self, broker_env, monkeypatch):
+        """Предел запрещает НОВЫЕ сделки, а не закрывает уже открытые."""
+        broker, client, pb, _cfg = broker_env
+        import settings_store
+        pb._now_ms = lambda: 1_700_000_000_000
+        broker.open('SMC', signal(pair='ETHUSDT', strategy='SMC'))
+        feed(broker, client, 'ETHUSDT', [(100, 100, 100)])
+        assert broker.positions('SMC')
+
+        monkeypatch.setattr(settings_store, 'daily_loss_pct', lambda: 0.01)
+        broker.update()
+
+        assert broker.positions('SMC'), 'открытая позиция должна остаться'

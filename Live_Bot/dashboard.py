@@ -711,11 +711,26 @@ def _portfolio():
         max_positions = settings_store.portfolio_max_positions()
     except Exception:                              # noqa: BLE001
         limit, max_positions = 0.0, 0
+
+    # Дневной итог показывается всегда, даже при выключенном пределе: цифра
+    # «сколько потеряно сегодня» нужна, чтобы решение о пределе принималось
+    # по факту, а не наугад.
+    day_pnl, day_pct, day_limit = 0.0, 0.0, 0.0
+    try:
+        day_limit = settings_store.daily_loss_pct()
+        if source is not None and hasattr(source, 'daily_result'):
+            day_pnl, day_pct, _dep = source.daily_result()
+    except Exception:                              # noqa: BLE001
+        pass
+
     return {
         'risk_usd': round(used, 2), 'risk_pct': round(pct, 2),
         'deposit': round(deposit, 2), 'slots': slots,
         'limit_pct': limit, 'limit_positions': max_positions,
         'over': bool(limit and pct > limit),
+        'day_pnl': round(day_pnl, 2), 'day_pct': round(day_pct, 2),
+        'day_limit': day_limit,
+        'day_stopped': bool(day_limit and day_pnl < 0 and -day_pct >= day_limit),
     }
 
 
@@ -909,6 +924,13 @@ class _Handler(BaseHTTPRequestHandler):
                 self._fail(404, 'свечей за этот период нет')
                 return
             self._send_json(data)
+        elif path == '/api/settings/history':
+            # Отдельная выдача, а не часть общей: история нужна редко, а
+            # общая выдача опрашивается каждые несколько секунд.
+            try:
+                self._send_json({'history': settings_store.history()})
+            except Exception as exc:               # noqa: BLE001
+                self._fail(500, f'история настроек недоступна: {exc}')
         elif path == '/api/errors':
             try:
                 import error_log

@@ -266,6 +266,27 @@
                padding: 8px 10px; margin: 2px 0 8px; max-height: 180px;
                overflow: auto; }
 
+  /* ── Календарь по дням ───────────────────────────────────────────── */
+  .cal-head, .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr);
+                         gap: 4px; max-width: 420px; }
+  .cal-head { margin: 10px 0 4px; }
+  .cal-head span { font-size: 11px; color: var(--ink-3); text-align: center; }
+  .cal-cell { aspect-ratio: 1; border-radius: var(--r-sm); display: flex;
+              align-items: center; justify-content: center; font-size: 11px;
+              color: var(--ink-2); background: var(--hairline-2); }
+  .cal-cell.empty { background: transparent; }
+  .cal-foot { margin-top: 12px; font-size: 12.5px; color: var(--ink-3); }
+
+  /* ── История настроек ────────────────────────────────────────────── */
+  .sh-rec { display: grid; grid-template-columns: 150px 1fr; gap: 14px;
+            padding: 10px 0; border-top: 1px solid var(--hairline-2); }
+  .sh-rec:first-of-type { border-top: 0; }
+  .sh-when { font-size: 12px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+  .sh-item { display: flex; gap: 10px; justify-content: space-between;
+             font-size: 12.5px; padding: 2px 0; }
+  .sh-item .k { color: var(--ink-3); }
+  .sh-item .v s { color: var(--ink-4); }
+
   /* ── Ключи биржи ─────────────────────────────────────────────────── */
   .keys-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
                gap: 12px 18px; margin: 12px 0 14px; }
@@ -688,6 +709,7 @@
       <!-- ── Аналитика ────────────────────────────────────────────────── -->
       <section class="page" data-page="analytics" hidden>
         <div id="compare"></div>
+        <div id="calendar"></div>
         <div class="cols2">
           <div class="panel">
             <div class="panel-head"><h2>Распределение результата</h2>
@@ -719,6 +741,7 @@
         <div id="portfolio-limit"></div>
         <div id="controls"></div>
         <div id="keys"></div>
+        <div id="settings-history"></div>
         <div id="update"></div>
       </section>
 
@@ -1462,6 +1485,7 @@ function showPage() {
   if (page === 'control' && !SETTINGS) loadSettings();
   if (page === 'control' && !UPDATE) loadUpdate(false);
   if (page === 'control') renderKeys(DATA && DATA.writable !== false);
+  if (page === 'control') loadSettingsHistory();
   if (page === 'control') portfolioLimit(WRITABLE);
   if (page === 'errors') loadErrors();
   // Настройки могли отрисоваться раньше, чем пришли данные бота: тогда в
@@ -1748,6 +1772,7 @@ function portfolioLimit(writable) {
   if (!box || !p) return;
 
   const on = p.limit_pct > 0 || p.limit_positions > 0;
+  const paused = DATA && DATA.status && DATA.status.state === 'paused';
   const bar = p.limit_pct > 0
     ? Math.min(100, p.risk_pct / p.limit_pct * 100)
     : 0;
@@ -1782,33 +1807,77 @@ function portfolioLimit(writable) {
       </div>
       <div class="ctl-note">Открытых позиций и ожидающих ордеров суммарно.
         <b>0 — предел выключен.</b></div>
+      <div class="pf-now">
+        Сегодня <b class="${cls(p.day_pnl)}">${money(p.day_pnl)}</b>
+        (${fx(p.day_pct, 2, true)}%)${p.day_stopped
+          ? ' · <b class="neg">торговля остановлена до завтра</b>' : ''}
+      </div>
+      <div class="ctl-row">
+        <label for="pf-day">Дневной предел убытка</label>
+        <span class="unit">%</span>
+        <input type="number" id="pf-day" min="0" max="50" step="0.5"
+               value="${p.day_limit}" ${writable ? '' : 'disabled'}>
+      </div>
+      <div class="ctl-note">Потеряли за день больше этого — новые сделки до
+        завтра не открываются. Считается по закрытым сделкам всех стратегий.
+        <b>0 — предел выключен.</b></div>
       <div class="ctl-foot">
         <button type="button" class="btn" id="pf-save"
           ${writable ? '' : 'disabled'}>Применить</button>
         <button type="button" class="btn ghost" id="pf-off"
           ${writable ? '' : 'disabled'}>Отключить</button>
+        <button type="button" class="btn ghost" id="pf-pause"
+          ${writable ? '' : 'disabled'}>${paused ? 'Продолжить' : 'Пауза'}</button>
         <span class="saved" id="pf-msg"></span>
       </div>
-      <div class="ctl-note">Предел не трогает уже открытые позиции: он решает
-        только, открывать ли новую. Стратегия, упёршаяся в него, пишет причину
-        в журнал — молчаливого пропуска не будет.</div>
+      <div class="ctl-note">Пауза останавливает ТОЛЬКО открытие новых сделок.
+        Открытые позиции продолжают вестись: стопы, безубыток, цели и выход по
+        времени работают как обычно.</div>
+      <div class="ctl-note">Ни один из пределов не трогает уже открытые позиции:
+        они решают только, открывать ли новую. Закрывать открытое означало бы
+        фиксировать убыток по худшей цене дня — ровно тогда, когда рынок и так
+        против. Стратегия, упёршаяся в предел, пишет причину в журнал —
+        молчаливого пропуска не будет.</div>
     </div>`;
 
-  const save = (risk, slots) => sendPortfolio(risk, slots);
-  el('pf-save').onclick = () => save(
+  const pause = el('pf-pause');
+  if (pause) {
+    pause.onclick = async () => {
+      const paused = DATA && DATA.status && DATA.status.state === 'paused';
+      pause.disabled = true;
+      try {
+        const resp = await fetch('/api/action', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: paused ? 'resume' : 'pause' }),
+        });
+        const data = await resp.json();
+        if (!resp.ok) throw new Error(data.error || resp.status);
+        await refresh();
+      } catch (e) {
+        const m = el('pf-msg');
+        if (m) { m.style.color = 'var(--bad)'; m.textContent = e.message; }
+      } finally {
+        pause.disabled = false;
+      }
+    };
+  }
+
+  el('pf-save').onclick = () => sendPortfolio(
     parseFloat(el('pf-risk').value) || 0,
-    parseInt(el('pf-slots').value, 10) || 0);
-  el('pf-off').onclick = () => save(0, 0);
+    parseInt(el('pf-slots').value, 10) || 0,
+    parseFloat(el('pf-day').value) || 0);
+  el('pf-off').onclick = () => sendPortfolio(0, 0, 0);
 }
 
-async function sendPortfolio(risk, slots) {
+async function sendPortfolio(risk, slots, day) {
   const msg = el('pf-msg');
   if (msg) { msg.style.color = 'var(--ink-3)'; msg.textContent = 'сохраняю…'; }
   try {
     const resp = await fetch('/api/settings', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ PORTFOLIO: {
-        portfolio_risk_pct: risk, portfolio_max_positions: slots } }),
+        portfolio_risk_pct: risk, portfolio_max_positions: slots,
+        daily_loss_pct: day } }),
     });
     const data = await resp.json();
     if (!resp.ok) throw new Error(data.error || resp.status);
@@ -1817,7 +1886,7 @@ async function sendPortfolio(risk, slots) {
     const m = el('pf-msg');
     if (m) {
       m.style.color = 'var(--good)';
-      m.textContent = (risk || slots) ? 'предел применён' : 'предел выключен';
+      m.textContent = (risk || slots || day) ? 'пределы применены' : 'пределы выключены';
     }
   } catch (e) {
     const m = el('pf-msg');
@@ -1885,6 +1954,63 @@ async function saveKeys() {
 }
 
 /* ── Обновление кода ────────────────────────────────────────────────────── */
+/* ── История настроек ───────────────────────────────────────────────────── */
+/* Вопрос «результаты изменились — что я тогда трогал?» возникает каждый раз,
+   когда цифры уезжают. В общем журнале это тонет: там сотни строк в час.
+   Здесь только изменения и только то, что изменилось: дашборд шлёт полный
+   набор полей при каждом «Применить», и запись «ничего не поменялось» была бы
+   шумом. */
+const FIELD_NAMES = {
+  'enabled': 'торгует', 'risk_pct': 'риск на сделку',
+  'min_stop_pct': 'минимальный стоп', 'deposit': 'стартовый депозит',
+  'max_slots': 'одновременных позиций',
+  'portfolio_risk_pct': 'предел портфеля, %',
+  'portfolio_max_positions': 'предел позиций',
+  'daily_loss_pct': 'дневной предел убытка, %',
+};
+
+function fieldLabel(path) {
+  const [section, field] = String(path).split('.');
+  const where = section === 'PORTFOLIO' ? 'Портфель' : (NAMES[section] || section);
+  return where + ' · ' + (FIELD_NAMES[field] || field);
+}
+
+function fieldValue(v) {
+  if (typeof v === 'boolean') return v ? 'да' : 'нет';
+  return v === null || v === undefined ? '—' : String(v);
+}
+
+async function loadSettingsHistory() {
+  const box = el('settings-history');
+  if (!box) return;
+  let items = [];
+  try {
+    const d = await (await fetch('/api/settings/history', { cache: 'no-store' })).json();
+    items = d.history || [];
+  } catch (e) { return; }
+
+  if (!items.length) {
+    box.innerHTML = `<div class="panel card-pad">
+      <div class="panel-head bare"><h2>Что меняли</h2></div>
+      <div class="empty">Настройки ещё не менялись</div></div>`;
+    return;
+  }
+
+  const rows = items.map(rec => `
+    <div class="sh-rec">
+      <div class="sh-when">${esc(when(rec.at))}</div>
+      <div class="sh-items">${(rec.changes || []).map(c => `
+        <div class="sh-item"><span class="k">${esc(fieldLabel(c.field))}</span>
+          <span class="v"><s>${esc(fieldValue(c.from))}</s> → <b>${esc(fieldValue(c.to))}</b></span>
+        </div>`).join('')}</div>
+    </div>`).join('');
+
+  box.innerHTML = `<div class="panel card-pad">
+    <div class="panel-head bare"><h2>Что меняли</h2>
+      <span class="hint">чтобы связать перемену в результатах с решением</span></div>
+    ${rows}</div>`;
+}
+
 let UPDATE = null;
 
 async function loadUpdate(check) {
@@ -2506,6 +2632,82 @@ function fx(v, digits, sign) {
   return (value < 0 ? '−' : (sign ? '+' : '')) + shown;
 }
 
+/* ── Календарь по дням ──────────────────────────────────────────────────── */
+/* Кривая доходности показывает, КУДА пришли, но не показывает, из чего это
+   сложилось. Плохая неделя и ровное сползание рисуются похоже, а лечатся
+   по-разному. Плитка по дням отвечает на вопрос «когда было плохо» за один
+   взгляд: дни идут неделями, цвет — знак результата, насыщенность — величина
+   относительно худшего и лучшего дня выборки.
+
+   Насыщенность считается от МАКСИМУМА по модулю, а не по фиксированной шкале:
+   у фантомного счёта и у боевого разные порядки сумм, и общая шкала сделала
+   бы одну из картинок одноцветной. */
+function calendarView(rows) {
+  const box = el('calendar');
+  if (!box) return;
+  if (!rows.length) { box.innerHTML = ''; return; }
+
+  const byDay = {};
+  rows.forEach(t => {
+    const day = String(t.closed || '').slice(0, 10);
+    if (!day) return;
+    if (!byDay[day]) byDay[day] = { pnl: 0, n: 0, r: 0 };
+    byDay[day].pnl += t.pnl || 0;
+    byDay[day].r += t.pnl_r != null ? t.pnl_r : (t.risk ? t.pnl / t.risk : 0);
+    byDay[day].n += 1;
+  });
+
+  const days = Object.keys(byDay).sort();
+  if (!days.length) { box.innerHTML = ''; return; }
+
+  // Сетка от понедельника первой недели до воскресенья последней: без
+  // выравнивания по дням недели столбцы не значат ничего.
+  // Всё считается в UTC, и это не придирка. Даты закрытия приходят в UTC, а
+  // new Date('2026-08-05T00:00:00') разбирается как МЕСТНАЯ полночь: при
+  // сдвиге на три часа день попадал не в свой столбец недели, и «понедельник»
+  // на картинке был средой.
+  const first = new Date(days[0] + 'T00:00:00Z');
+  const last = new Date(days[days.length - 1] + 'T00:00:00Z');
+  const start = new Date(first);
+  start.setUTCDate(start.getUTCDate() - ((start.getUTCDay() + 6) % 7));
+  const end = new Date(last);
+  end.setUTCDate(end.getUTCDate() + (6 - ((end.getUTCDay() + 6) % 7)));
+
+  const peak = Math.max(...Object.values(byDay).map(d => Math.abs(d.pnl)), 1);
+  const cells = [];
+  for (let d = new Date(start); d <= end; d.setUTCDate(d.getUTCDate() + 1)) {
+    const key = d.toISOString().slice(0, 10);
+    const item = byDay[key];
+    if (!item) {
+      cells.push(`<div class="cal-cell empty" title="${key}"></div>`);
+      continue;
+    }
+    const strength = Math.min(1, Math.abs(item.pnl) / peak);
+    const tone = item.pnl >= 0 ? 'var(--good)' : 'var(--bad)';
+    const label = `${key}: ${money(item.pnl)} · ${item.n} сд. · ${fx(item.r, 2, true)} R`;
+    cells.push(`<div class="cal-cell" title="${esc(label)}"
+      style="background: color-mix(in srgb, ${tone} ${(12 + strength * 78).toFixed(0)}%, transparent)">
+      <span>${d.getUTCDate()}</span></div>`);
+  }
+
+  const best = days.reduce((a, b) => byDay[b].pnl > byDay[a].pnl ? b : a, days[0]);
+  const worst = days.reduce((a, b) => byDay[b].pnl < byDay[a].pnl ? b : a, days[0]);
+  const green = days.filter(d => byDay[d].pnl > 0).length;
+
+  box.innerHTML = `<div class="panel card-pad">
+    <div class="panel-head bare"><h2>По дням</h2>
+      <span class="hint">наведите на день — сумма, сделки и R</span></div>
+    <div class="cal-head">${['пн','вт','ср','чт','пт','сб','вс']
+      .map(d => `<span>${d}</span>`).join('')}</div>
+    <div class="cal-grid">${cells.join('')}</div>
+    <div class="cal-foot">
+      Прибыльных дней ${green} из ${days.length} ·
+      лучший ${esc(best)} <b class="pos">${money(byDay[best].pnl)}</b> ·
+      худший ${esc(worst)} <b class="neg">${money(byDay[worst].pnl)}</b>
+    </div>
+  </div>`;
+}
+
 function compareTable(byStrategy) {
   const box = el('compare');
   if (!box) return;
@@ -2946,6 +3148,7 @@ function render() {
   exitBreakdown(closed);
   pairBreakdown(closed);
   compareTable(byStrategy);
+  calendarView(closed);
 
   // Раскрытая сделка восстанавливается после каждой перерисовки таблицы.
   // Номер из адреса подхватывается один раз — при первой загрузке.

@@ -15,6 +15,7 @@
 """
 
 import json
+from datetime import datetime
 import os
 import threading
 
@@ -36,6 +37,8 @@ LIMITS = {
     'portfolio_risk_pct':  (0.0, 100.0),
     # Максимум открытых позиций и ордеров суммарно. Ноль отключает.
     'portfolio_max_positions': (0, 60),
+    # Дневной предел убытка в процентах от депозита. Ноль отключает.
+    'daily_loss_pct': (0.0, 50.0),
 }
 
 # Общие настройки портфеля хранятся отдельным разделом: они не принадлежат
@@ -44,7 +47,8 @@ LIMITS = {
 # позиций при риске 0.5% дают 9% депозита под риском одновременно — при том
 # что ни одна из них своих правил не нарушила.
 PORTFOLIO = 'PORTFOLIO'
-PORTFOLIO_FIELDS = ('portfolio_risk_pct', 'portfolio_max_positions')
+PORTFOLIO_FIELDS = ('portfolio_risk_pct', 'portfolio_max_positions',
+                    'daily_loss_pct')
 
 _lock = threading.Lock()
 _cache = None
@@ -83,6 +87,7 @@ def _portfolio_defaults():
     return {
         'portfolio_risk_pct': float(os.getenv('PORTFOLIO_RISK_PCT', 0) or 0),
         'portfolio_max_positions': int(os.getenv('PORTFOLIO_MAX_POSITIONS', 0) or 0),
+        'daily_loss_pct': float(os.getenv('DAILY_LOSS_PCT', 0) or 0),
     }
 
 
@@ -161,6 +166,7 @@ def save(changes):
     Принимает частичный набор: дашборд шлёт только то, что трогали.
     """
     global _cache, _mtime
+    before = json.loads(json.dumps(load()))   # снимок ДО правки — для истории
     data = json.loads(json.dumps(load()))     # копия, чтобы не портить кэш
 
     portfolio = changes.get(PORTFOLIO) or {}
@@ -196,7 +202,67 @@ def save(changes):
         f"{name} {'вкл' if data[name]['enabled'] else 'ВЫКЛ'} "
         f"риск {data[name]['risk_pct']}% стоп>={data[name]['min_stop_pct']}%"
         for name in STRATEGIES))
+    _write_history(before, data)
     return data
+
+
+HISTORY_FILE = os.path.join(config.DATA_DIR, 'settings_history.jsonl')
+HISTORY_MAX = 500
+
+
+def _flatten(data):
+    """Настройки одним словарём «раздел.поле -> значение» — так их легко сравнить."""
+    flat = {}
+    for section, values in (data or {}).items():
+        if isinstance(values, dict):
+            for field, value in values.items():
+                flat[f'{section}.{field}'] = value
+    return flat
+
+
+def _write_history(before, after):
+    """
+    Запоминает, что именно изменилось и когда.
+
+    Зачем отдельно от общего журнала: там сотни строк в час, и найти в них
+    «когда я поднял риск» невозможно. А вопрос этот возникает каждый раз,
+    когда результаты меняются: сначала надо понять, менялось ли что-то в
+    настройках, и только потом искать причину в рынке.
+
+    Пишутся ТОЛЬКО отличия. Запись «ничего не изменилось» — это шум, а
+    дашборд шлёт полный набор полей при каждом нажатии «Применить».
+    """
+    old, new = _flatten(before), _flatten(after)
+    changes = [{'field': key, 'from': old.get(key), 'to': new[key]}
+               for key in new if old.get(key) != new[key]]
+    if not changes:
+        return
+    record = {'at': datetime.now().isoformat(timespec='seconds'), 'changes': changes}
+    try:
+        with open(HISTORY_FILE, 'a', encoding='utf-8') as fh:
+            fh.write(json.dumps(record, ensure_ascii=False) + '\n')
+    except OSError as exc:
+        log(f"⚠️ не удалось записать историю настроек: {exc}")
+
+
+def history(limit=100):
+    """Последние изменения настроек, новые сверху."""
+    if not os.path.exists(HISTORY_FILE):
+        return []
+    try:
+        with open(HISTORY_FILE, encoding='utf-8') as fh:
+            lines = fh.readlines()[-HISTORY_MAX:]
+    except OSError:
+        return []
+    out = []
+    for line in reversed(lines):
+        try:
+            out.append(json.loads(line))
+        except ValueError:
+            continue
+        if len(out) >= limit:
+            break
+    return out
 
 
 # ── Точечные запросы ─────────────────────────────────────────────────────────
@@ -230,6 +296,18 @@ def portfolio_risk_pct():
 def portfolio_max_positions():
     """Предел числа позиций и ордеров на весь портфель. 0 — выключен."""
     return int(load().get(PORTFOLIO, {}).get('portfolio_max_positions', 0) or 0)
+
+
+def daily_loss_pct():
+    """
+    Дневной предел убытка в процентах от депозита. 0 — выключен.
+
+    Отдельно от предела портфеля: тот ограничивает риск, стоящий в рынке
+    ОДНОВРЕМЕННО, и молчит, когда десять сделок подряд закрылись в минус по
+    очереди. Плохой день так и выглядит: каждая сделка по правилам, а к
+    вечеру депозита нет.
+    """
+    return float(load().get(PORTFOLIO, {}).get('daily_loss_pct', 0) or 0)
 
 
 def max_slots(strategy):
