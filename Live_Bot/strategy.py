@@ -56,7 +56,7 @@ def find_recent_impulse(df, lookback_candles=48):
 
     segment = df.tail(lookback_candles).reset_index(drop=True)
 
-    def _build_setup(direction, s_idx, e_idx, s_price, e_price):
+    def _build_setup(direction, s_idx, e_idx, s_price, e_price, source):
         size = abs(e_price - s_price)
         if size <= 0:
             return None
@@ -75,6 +75,15 @@ def find_recent_impulse(df, lookback_candles=48):
             )
             if directional / num < 0.60:
                 return None
+        # ── Происхождение импульса ───────────────────────────────────────────
+        # Записывается, не проверяется: поведение прежнее. Нужно затем, что
+        # «импульс» здесь — это отрезок между последним swing-low и последним
+        # swing-high, а между ними МОГУТ лежать другие свинги. Тогда отрезок
+        # уже не импульс, а кусок пилы, и сетка Фибоначчи натягивается не на
+        # то. Сколько таких — вопрос к данным, а не к рассуждению, поэтому
+        # число промежуточных свингов едет с сетапом.
+        between = sum(1 for p in (local_highs + local_lows)
+                      if s_idx < p['index'] < e_idx)
         return {
             'type': direction,
             'start_price': s_price,
@@ -82,6 +91,9 @@ def find_recent_impulse(df, lookback_candles=48):
             'size': size,
             'start_time': segment.loc[s_idx, 'timestamp'],
             'end_time': segment.loc[e_idx, 'timestamp'],
+            'source': source,
+            'swings_between': between,
+            'candles': num,
         }
 
     # ── Свинговый метод: ищем последний чистый направленный ход ─────────────
@@ -101,7 +113,7 @@ def find_recent_impulse(df, lookback_candles=48):
 
         # Проверка свежести: точка B в последних 24 свечах
         if e_idx >= len(segment) - 24:
-            setup = _build_setup(direction, s_idx, e_idx, s_price, e_price)
+            setup = _build_setup(direction, s_idx, e_idx, s_price, e_price, 'swing')
             if setup:
                 return setup
 
@@ -112,9 +124,9 @@ def find_recent_impulse(df, lookback_candles=48):
     min_price = segment.loc[min_idx, 'low']
 
     if min_idx < max_idx:
-        return _build_setup('LONG', min_idx, max_idx, min_price, max_price)
+        return _build_setup('LONG', min_idx, max_idx, min_price, max_price, 'range')
     elif max_idx < min_idx:
-        return _build_setup('SHORT', max_idx, min_idx, max_price, min_price)
+        return _build_setup('SHORT', max_idx, min_idx, max_price, min_price, 'range')
     return None
 
 def get_zones(setup):
