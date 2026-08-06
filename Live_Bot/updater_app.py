@@ -150,9 +150,14 @@ def status(fetch=True):
         reason = f'в выпуске {tag} нет файла {ASSET_NAME}'
     else:
         behind = 1
+        # Описание выпуска показывается на панели обновления: без него
+        # предложение «обновиться» ничем не обосновано, и нажимать его —
+        # доверять вслепую.
+        notes = (release.get('body') or '').strip()
         pending = [{'commit': tag,
                     'date': (release.get('published_at') or '')[:10],
-                    'subject': (release.get('name') or tag)}]
+                    'subject': (release.get('name') or tag),
+                    'notes': notes[:2000]}]
 
     return {
         'available': True, 'mode': 'exe', 'branch': 'выпуски',

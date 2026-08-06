@@ -485,6 +485,10 @@ def _paper_payload():
     return {
         'generated': datetime.now().isoformat(timespec='seconds'),
         'mode': config.TRADING_MODE,
+        'exchange': config.EXCHANGE_NAME,
+        # Можно ли менять что-либо с этой страницы. Панель ключей без
+        # этого флага рисовалась бы и на открытом наружу дашборде.
+        'writable': _controls_allowed(),
         'paper': True,
         'started_at': snapshot.get('started_at'),
         'strategy_mode': config.STRATEGY,
@@ -531,6 +535,10 @@ def _live_payload():
     return {
         'generated': datetime.now().isoformat(timespec='seconds'),
         'mode': config.TRADING_MODE,
+        'exchange': config.EXCHANGE_NAME,
+        # Можно ли менять что-либо с этой страницы. Панель ключей без
+        # этого флага рисовалась бы и на открытом наружу дашборде.
+        'writable': _controls_allowed(),
         'paper': False,
         'strategy_mode': config.STRATEGY,
         'balance': balance,
@@ -936,7 +944,7 @@ class _Handler(BaseHTTPRequestHandler):
         path = self.path.split('?')[0]
         if path not in ('/api/settings', '/api/deposit', '/api/action',
                         '/api/update', '/api/update/rollback',
-                        '/api/errors/clear'):
+                        '/api/errors/clear', '/api/keys'):
             self.send_error(404)
             return
         if not _controls_allowed():
@@ -953,6 +961,44 @@ class _Handler(BaseHTTPRequestHandler):
                 raise ValueError('ожидается объект')
         except Exception as exc:
             self._fail(400, f'Неверные данные: {exc}')
+            return
+
+        if path == '/api/keys':
+            # Ключи биржи меняются отсюда, а не правкой .env в блокноте.
+            # Окно первого запуска эту работу уже делает, но оно показывается
+            # РОВНО один раз: протух ключ или сменили биржу — и человек снова
+            # оставался наедине с текстовым файлом.
+            #
+            # Ключи не попадают ни в журнал, ни в ответ: в лог пишется только
+            # факт замены. Проверка идёт тем же способом и на том же адресе,
+            # каким потом пойдёт бот, — иначе демо-ключи при боевом режиме
+            # прошли бы молча.
+            import first_run
+            exchange = str(changes.get('exchange') or config.EXCHANGE_NAME).lower()
+            mode = str(changes.get('mode') or config.TRADING_MODE).upper()
+            api_key = str(changes.get('key') or '').strip()
+            secret = str(changes.get('secret') or '').strip()
+            if not api_key or not secret:
+                self._fail(400, 'Заполните оба поля')
+                return
+            ok, error = first_run.check_keys(exchange, mode, api_key, secret)
+            if not ok:
+                self._fail(409, f'Биржа не приняла ключи: {error}')
+                return
+            prefix = exchange.upper()
+            values = {'EXCHANGE': exchange, 'TRADING_MODE': mode,
+                      f'{prefix}_API_KEY': api_key, f'{prefix}_SECRET_KEY': secret}
+            if mode == 'LIVE':
+                values['LIVE_CONFIRMED'] = 'YES'
+            try:
+                first_run._write_env(values)
+            except Exception as exc:               # noqa: BLE001
+                self._fail(500, f'Не удалось записать настройки: {exc}')
+                return
+            log(f"🔑 ключи биржи заменены оператором ({exchange}, {mode})")
+            self._send_json({'ok': True, 'message':
+                             'Ключи проверены и сохранены. '
+                             'Перезапустите приложение, чтобы они начали действовать.'})
             return
 
         if path == '/api/errors/clear':

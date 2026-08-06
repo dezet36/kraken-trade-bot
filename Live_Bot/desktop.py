@@ -98,6 +98,89 @@ def _wait_for_dashboard(url, timeout=STARTUP_TIMEOUT):
 
 # ── Окно ─────────────────────────────────────────────────────────────────────
 
+GEOMETRY_FILE = os.path.join(config.DATA_DIR, 'window.json')
+
+
+def _load_geometry():
+    """Размер и положение окна с прошлого раза."""
+    try:
+        import json
+        with open(GEOMETRY_FILE, encoding='utf-8') as fh:
+            saved = json.load(fh)
+    except (OSError, ValueError):
+        return {}
+    # Окно, сохранённое на втором мониторе, которого больше нет, оказалось бы
+    # за пределами экрана — и человек решил бы, что программа не запускается.
+    if not isinstance(saved, dict) or saved.get('width', 0) < 600:
+        return {}
+    return saved
+
+
+def _save_geometry(window):
+    try:
+        import json
+        data = {'width': int(window.width), 'height': int(window.height),
+                'x': int(window.x), 'y': int(window.y)}
+        with open(GEOMETRY_FILE, 'w', encoding='utf-8') as fh:
+            json.dump(data, fh)
+    except Exception:                          # noqa: BLE001
+        pass
+
+
+def _open_positions_count():
+    """Сколько позиций бот ведёт прямо сейчас."""
+    try:
+        import dashboard as dash
+        book = dash._broker or dash._trade_manager
+        if book is None:
+            return 0
+        snapshot = book.snapshot() if hasattr(book, 'snapshot') else None
+        if snapshot is not None:
+            return len([p for p in snapshot.get('open', []) if not p.get('pending')])
+        return len(getattr(book, 'positions', {}) or {})
+    except Exception:                          # noqa: BLE001
+        return 0
+
+
+def _confirm_close():
+    """
+    Спрашивает перед закрытием, когда бот ведёт позиции.
+
+    Закрытие окна останавливает бота полностью — это проверено, зомби не
+    остаётся. Но именно поэтому у закрытия есть цена: стопы стоят на бирже и
+    сработают сами, а перевод в безубыток, частичные фиксации и выход по
+    времени делает бот. Закрыв окно с открытыми позициями, человек оставляет
+    их без ведения, и никто ему об этом не говорил.
+
+    Возврат False отменяет закрытие.
+
+    Здесь же запоминается размер и положение окна. В событии «закрыто» это
+    делать поздно: окна к тому моменту уже нет, и читать его геометрию не у
+    чего — проверено, файл не создавался.
+    """
+    try:
+        import webview
+        _save_geometry(webview.windows[0])
+    except Exception:                          # noqa: BLE001
+        pass
+
+    count = _open_positions_count()
+    if not count:
+        return True
+    try:
+        import webview
+        window = webview.windows[0]
+        return window.create_confirmation_dialog(
+            APP_TITLE,
+            f'Бот ведёт открытых позиций: {count}.\n\n'
+            'Закрытие окна останавливает бота. Стопы останутся на бирже и '
+            'сработают сами, но перевод в безубыток, частичные фиксации и '
+            'выход по времени делать будет некому.\n\n'
+            'Всё равно закрыть?')
+    except Exception:                          # noqa: BLE001
+        return True                            # спросить не вышло — не мешаем
+
+
 def _open_native(url):
     """
     Своё окно через pywebview. None — открыть не удалось, зовите запасной путь.
@@ -112,8 +195,15 @@ def _open_native(url):
     except ImportError:
         return None
 
-    webview.create_window(APP_TITLE, url, width=1360, height=900,
-                          min_size=(1000, 640))
+    saved = _load_geometry()
+    window = webview.create_window(
+        APP_TITLE, url,
+        width=saved.get('width', 1360), height=saved.get('height', 900),
+        x=saved.get('x'), y=saved.get('y'),
+        min_size=(1000, 640))
+
+    window.events.closing += _confirm_close
+
     gui = 'edgechromium' if sys.platform == 'win32' else None
     try:
         webview.start(gui=gui)          # блокирует до закрытия окна
@@ -250,6 +340,18 @@ def main():
         sys.exit(selftest())
     if '--diag' in sys.argv:
         sys.exit(diag())
+
+    # Второй экземпляр не запускаем. Проверено: два щелчка дают два бота на
+    # одних файлах состояния, и они затирают работу друг друга.
+    import single_instance
+    if not single_instance.acquire(config.DATA_DIR):
+        if not single_instance.focus_existing(APP_TITLE):
+            _alert(APP_TITLE,
+                   'Приложение уже запущено.\n\n'
+                   'Найдите его окно на панели задач. Если окна нет, а программа\n'
+                   'висит в памяти — снимите процесс Kraken.exe в диспетчере задач\n'
+                   'и запустите снова.')
+        return
 
     # Ключей нет — спрашиваем окном. Без них бот падает на первом обращении к
     # бирже, а человек видит только «дашборд не поднялся»: причина настоящая,

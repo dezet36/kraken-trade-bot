@@ -28,6 +28,42 @@ def set_error_hook(func):
     _error_hook = func
 
 
+# Ротация журнала. Механизма не было вовсе, и на машине разработки файл вырос
+# до 52 МБ — за год непрерывной работы это гигабайты. Дашборд читает только
+# хвост и от размера не страдает, но диск засоряется молча.
+#
+# Хранится одна предыдущая часть: журнал нужен, чтобы разобрать вчерашнее
+# происшествие, а не чтобы вести летопись. Всё важное и так лежит в журнале
+# сделок и в отдельном журнале ошибок, и они не ротируются.
+LOG_MAX_BYTES = int(os.getenv('LOG_MAX_BYTES', 20 * 1024 * 1024))
+_rotate_checked_at = 0
+
+
+def _rotate_if_big():
+    """
+    Переименовывает разросшийся журнал в .1 и начинает новый.
+
+    Размер проверяется не на каждой записи, а раз в тысячу: os.path.getsize —
+    обращение к диску, а строк в цикле бота сотни.
+    """
+    global _rotate_checked_at
+    _rotate_checked_at += 1
+    if _rotate_checked_at % 1000 != 1:
+        return
+    try:
+        if os.path.getsize(LOG_FILE) < LOG_MAX_BYTES:
+            return
+    except OSError:
+        return
+    previous = LOG_FILE + '.1'
+    try:
+        if os.path.exists(previous):
+            os.remove(previous)
+        os.replace(LOG_FILE, previous)
+    except OSError:
+        pass                                   # занят другим процессом — не беда
+
+
 def log(message, level="INFO"):
     """Пишет сообщение в лог-файл и в консоль.
 
@@ -48,6 +84,7 @@ def log(message, level="INFO"):
 
     # Файл (может быть недоступен/занят/read-only — глушим, бот продолжает работать)
     try:
+        _rotate_if_big()
         with open(LOG_FILE, "a", encoding="utf-8") as f:
             f.write(entry + "\n")
     except Exception:

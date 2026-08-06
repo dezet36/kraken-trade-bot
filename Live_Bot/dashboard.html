@@ -254,6 +254,22 @@
   .pos-chart { margin-top: 10px; }
   .pos-chart[hidden] { display: none; }
 
+  /* Описание выпуска: без него предложение обновиться ничем не обосновано. */
+  .upd-notes { white-space: pre-wrap; font-size: 12px; color: var(--ink-3);
+               background: var(--surface-2); border-radius: var(--r-sm);
+               padding: 8px 10px; margin: 2px 0 8px; max-height: 180px;
+               overflow: auto; }
+
+  /* ── Ключи биржи ─────────────────────────────────────────────────── */
+  .keys-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+               gap: 12px 18px; margin: 12px 0 14px; }
+  .keys-grid label { display: flex; flex-direction: column; gap: 5px;
+                     font-size: 12px; color: var(--ink-3); }
+  .keys-grid input, .keys-grid select {
+      padding: 7px 10px; border: 1px solid var(--hairline); border-radius: var(--r-sm);
+      background: var(--surface); color: var(--ink-1); font-size: 13px; }
+  .row-actions { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; }
+
   /* ── Развёрнутая сделка ──────────────────────────────────────────── */
   tr.clickable { cursor: pointer; }
   tr.clickable:hover { background: var(--surface-2); }
@@ -643,6 +659,7 @@
       <section class="page" data-page="control" hidden>
         <div id="portfolio-limit"></div>
         <div id="controls"></div>
+        <div id="keys"></div>
         <div id="update"></div>
       </section>
 
@@ -1360,6 +1377,7 @@ function showPage() {
   // обработчик клика не срабатывал, а данные для них в общий опрос не входят.
   if (page === 'control' && !SETTINGS) loadSettings();
   if (page === 'control' && !UPDATE) loadUpdate(false);
+  if (page === 'control') renderKeys(DATA && DATA.writable !== false);
   if (page === 'control') portfolioLimit(WRITABLE);
   if (page === 'errors') loadErrors();
   // Настройки могли отрисоваться раньше, чем пришли данные бота: тогда в
@@ -1723,6 +1741,65 @@ async function sendPortfolio(risk, slots) {
   }
 }
 
+/* ── Ключи биржи ────────────────────────────────────────────────────────── */
+/* Окно первого запуска спрашивает ключи один раз. Протух ключ или сменили
+   биржу — и человек снова оставался наедине с текстовым файлом, где легко
+   ошибиться: не тот файл, кавычки, пробел в конце. Здесь то же самое, но с
+   проверкой на бирже до сохранения. Введённое никуда не показывается и в
+   журнал не попадает. */
+function renderKeys(writable) {
+  const box = el('keys');
+  if (!box) return;
+  if (!writable) { box.innerHTML = ''; return; }
+  const ex = (DATA && DATA.exchange) || 'bybit';
+  const mode = (DATA && DATA.mode) || 'PAPER';
+  const opt = (v, cur) => `<option value="${v}"${v === cur ? ' selected' : ''}>${v}</option>`;
+  box.innerHTML = `<div class="panel card-pad">
+    <div class="panel-head bare"><h2>Ключи биржи</h2>
+      <span class="hint">меняются здесь, править файл не нужно</span></div>
+    <div class="keys-grid">
+      <label>Биржа<select id="k-ex">${opt('bybit', ex)}${opt('bingx', ex)}</select></label>
+      <label>Режим<select id="k-mode">${opt('PAPER', mode)}${opt('DEMO', mode)}${opt('LIVE', mode)}</select></label>
+      <label>API key<input id="k-key" type="password" autocomplete="off"></label>
+      <label>Secret key<input id="k-secret" type="password" autocomplete="off"></label>
+    </div>
+    <div class="row-actions">
+      <button type="button" class="btn primary" id="k-save">Проверить и сохранить</button>
+      <span id="k-msg" class="hint"></span>
+    </div>
+    <div class="hint">Ключи проверяются на бирже до сохранения — тем же способом и
+      на том же адресе, каким потом пойдёт бот. После сохранения нужен перезапуск.</div>
+  </div>`;
+  el('k-save').onclick = saveKeys;
+}
+
+async function saveKeys() {
+  const msg = el('k-msg');
+  const btn = el('k-save');
+  msg.style.color = 'var(--ink-3)';
+  msg.textContent = 'Проверяю на бирже…';
+  btn.disabled = true;
+  try {
+    const body = JSON.stringify({
+      exchange: el('k-ex').value, mode: el('k-mode').value,
+      key: el('k-key').value, secret: el('k-secret').value,
+    });
+    const resp = await fetch('/api/keys', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.error || resp.status);
+    msg.style.color = 'var(--good)';
+    msg.textContent = data.message;
+    el('k-key').value = '';
+    el('k-secret').value = '';
+  } catch (e) {
+    msg.style.color = 'var(--bad)';
+    msg.textContent = e.message;
+  } finally {
+    btn.disabled = false;
+  }
+}
+
 /* ── Обновление кода ────────────────────────────────────────────────────── */
 let UPDATE = null;
 
@@ -1749,7 +1826,8 @@ function renderUpdate(writable) {
   const list = (UPDATE.pending || []).map(c => `
     <div class="upd-row"><code>${esc(c.commit)}</code>
       <span class="upd-date">${esc(c.date)}</span>
-      <span class="upd-msg">${esc(c.subject)}</span></div>`).join('');
+      <span class="upd-msg">${esc(c.subject)}</span></div>
+    ${c.notes ? `<div class="upd-notes">${esc(c.notes)}</div>` : ''}`).join('');
 
   const state = UPDATE.behind
     ? `<b>${UPDATE.behind}</b> ${plural(UPDATE.behind, 'обновление', 'обновления', 'обновлений')} доступно`
