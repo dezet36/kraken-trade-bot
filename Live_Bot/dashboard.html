@@ -235,6 +235,18 @@
   .report-txt span { color: var(--ink-3); font-size: 12px; line-height: 1.45; }
   .report-box .btn { flex: 0 0 auto; }
 
+  /* Метка в строке истории и предупреждение в карточке. Цвет — предупреждающий,
+     не тревожный: сделка не сломана, ей просто нельзя верить как показателю
+     стратегии. */
+  .flag { display: inline-block; margin-left: 6px; padding: 1px 6px;
+    border-radius: 5px; font-size: 10.5px; line-height: 1.5; white-space: nowrap;
+    color: var(--warn, #a86a00); border: 1px solid currentColor; opacity: .9;
+    vertical-align: middle; cursor: help; }
+  .tc-warn { grid-column: 1 / -1; margin-bottom: 10px; padding: 9px 12px;
+    border-radius: 8px; font-size: 12.5px; line-height: 1.5;
+    color: var(--warn, #a86a00); border: 1px solid currentColor;
+    background: color-mix(in srgb, currentColor 8%, transparent); }
+
   .err-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
   .err-chip {
     font-size: 12.5px; color: var(--ink-2); background: var(--surface-2);
@@ -1473,7 +1485,9 @@ function closedTable(rows) {
     return `<tr class="clickable" data-trade="${esc(r.id)}"
       title="Нажмите, чтобы раскрыть подробности сделки">
       <td>${esc(r.id)}</td>
-      <td>${skey(r.strategy)}</td>
+      <td>${skey(r.strategy)}${r.suspect
+        ? ' <span class="flag" title="' + esc(r.suspect) + '">не свой сетап</span>'
+        : ''}</td>
       <td class="pair">${esc(r.pair)}</td>
       <td>${side(r.direction)}</td>
       <td class="${cls(r.pnl)}"><b>${money(r.pnl)}</b></td>
@@ -2843,6 +2857,10 @@ function renderTradeCard(t, data, note) {
     ? row('Ходила в минус', '−' + Math.abs(Number(t.mae_r)).toFixed(2) + ' R', 'neg') : '';
 
   cell.innerHTML = '<div class="tc-box">'
+    // Предупреждение стоит ПЕРВЫМ и во всю ширину: если сделка посчитана по
+    // чужой геометрии, читать её числа ниже бессмысленно, и узнать об этом
+    // надо до того, как начал их читать.
+    + (t.suspect ? '<div class="tc-warn">⚠ ' + esc(t.suspect) + '</div>' : '')
     + '<div class="tc-left">'
     + (note ? '<div class="tc-note">' + esc(note) + '</div>' : tradeChart(t, data))
     + '</div>'
