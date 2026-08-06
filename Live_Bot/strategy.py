@@ -285,14 +285,21 @@ def analyze_market(df_1h, df_5m, trading_pair, balance):
     # Вход = лимит на 38.2%-границе зоны A. Лимит должен «отдыхать» по ходу коррекции:
     #   LONG  — цена ещё ВЫШЕ границы (zone_a top) и не выше B
     #   SHORT — цена ещё НИЖЕ границы (zone_a bottom) и не ниже B
+    # Глубина входа — отдельный параметр, а не граница зоны A. Считается от
+    # КОНЦА импульса: 0.5 означает лимит на половине отката. Раньше вход был
+    # жёстко привязан к ближней границе зоны (38.2%), и поменять его можно
+    # было только сдвинув саму зону — вместе с её подписью на графике и с
+    # проверкой инвалидации.
+    depth = getattr(config, 'ENTRY_RETRACE', 1 - config.ZONE_A_TOP)
+
     if setup['type'] == 'LONG':
-        entry_price = zone_a['top']
+        entry_price = end_price - size * depth
         if not (entry_price <= current_price <= end_price):
             log(f"   {trading_pair}: нет сигнала — цена {current_price:.6f} вне окна входа "
                 f"[{entry_price:.6f}, {end_price:.6f}]")
             return None
     else:
-        entry_price = zone_a['bottom']
+        entry_price = end_price + size * depth
         if not (end_price <= current_price <= entry_price):
             log(f"   {trading_pair}: нет сигнала — цена {current_price:.6f} вне окна входа "
                 f"[{end_price:.6f}, {entry_price:.6f}]")
