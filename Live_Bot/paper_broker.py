@@ -964,6 +964,22 @@ class PaperBroker:
         self.state['positions'][strategy][pair] = position
         log(f"   👻 [{strategy}] {pair} {order['direction']}: ВХОД @ ${_fmt_p(price)} "
             f"({int((ts - order['placed_ts']) / 60000)} мин ожидания)")
+        # Уведомление — вспомогательное: его отказ не имеет права мешать
+        # торговле, поэтому глушится целиком.
+        try:
+            import notify
+            notify.trade_opened(strategy, pair, order['direction'], price,
+                                order['risk_amount'])
+        except Exception:                          # noqa: BLE001
+            pass
+        try:
+            import telegram_notify as tg
+            tg.paper_trade_opened(strategy, pair, order['direction'], price,
+                                  order['stop_loss'], order['targets'][0],
+                                  order['rr'], order['risk_amount'],
+                                  (order.get('context') or {}).get('why', ''))
+        except Exception:                          # noqa: BLE001
+            pass
 
     def _apply_funding(self, position, ts, rate):
         """Списывает фандинг за каждый пройденный 8-часовой интервал."""
@@ -1058,8 +1074,12 @@ class PaperBroker:
         self.state['cooldown'][strategy][pair] = ts
 
         self.daily_pnl += net
+        # pnl_r кладём сразу: дневная сводка показывает результат в R по каждой
+        # стратегии, а пересчитать его потом уже не из чего — риск сделки в
+        # истории не хранится.
         self.trade_history.append({'pnl': net, 'exit_time': datetime.now(), 'pair': pair,
-                                   'strategy': strategy})
+                                   'strategy': strategy,
+                                   'pnl_r': net / pos['risk_amount'] if pos['risk_amount'] else 0})
 
         row = self._journal_row(pos, ts, exit_price, reason, gross, fees, funding, net,
                                 balance_before, balance_after)
@@ -1068,6 +1088,19 @@ class PaperBroker:
         icon = '🟢' if net > 0 else ('⚪' if net == 0 else '🔴')
         log(f"   👻 [{strategy}] {pair}: {icon} {reason} @ ${_fmt_p(exit_price)} | "
             f"${net:+.2f} ({net / pos['risk_amount']:+.2f}R) | депозит ${balance_after:,.2f}")
+        pnl_r = net / pos['risk_amount'] if pos['risk_amount'] else 0
+        try:
+            import notify
+            notify.trade_closed(strategy, pair, net, pnl_r,
+                                glossary.exit_reason(reason))
+        except Exception:                          # noqa: BLE001
+            pass
+        try:
+            import telegram_notify as tg
+            tg.paper_trade_closed(strategy, pair, glossary.exit_reason(reason),
+                                  net, pnl_r, balance_after)
+        except Exception:                          # noqa: BLE001
+            pass
 
     def _journal_row(self, pos, ts, exit_price, reason, gross, fees, funding, net,
                      balance_before, balance_after):

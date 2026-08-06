@@ -360,6 +360,80 @@ def daily_summary(total: int, wins: int, daily_pnl: float, balance: float):
     )
 
 
+# ── Фантомный режим ──────────────────────────────────────────────────────────
+# В фантоме уведомлений не было вовсе: trade_opened и trade_closed зовутся
+# только из боевого пути, и месяц наблюдений шёл в Telegram молча — приходила
+# одна дневная сводка без разбивки. А смысл фантома именно в сравнении
+# стратегий, поэтому имя стратегии здесь стоит первым.
+
+def paper_trade_opened(strategy: str, pair: str, direction: str, entry: float,
+                       stop: float, target: float, rr: float, risk: float,
+                       why: str = ''):
+    arrow = "🟢" if direction == "LONG" else "🔴"
+    tail = f"\n<i>{why}</i>" if why else ""
+    _send(
+        f"{arrow} <b>{strategy}</b> · вход {pair} {direction}\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"Вход:  <b>{_fmt_p(entry)}</b>\n"
+        f"Стоп:  {_fmt_p(stop)}\n"
+        f"Цель:  {_fmt_p(target)}   RR {rr:.2f}\n"
+        f"Риск:  ${risk:.2f}"
+        + tail
+    )
+
+
+def paper_trade_closed(strategy: str, pair: str, reason: str, pnl: float,
+                       pnl_r: float, balance: float):
+    icon = "✅" if pnl > 0 else ("⚪" if pnl == 0 else "❌")
+    _send(
+        f"{icon} <b>{strategy}</b> · закрыта {pair}\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"Итог:    <b>{_pnl_str(pnl)}</b>  ({pnl_r:+.2f} R)\n"
+        f"Причина: {reason}\n"
+        f"Депозит: <b>${balance:,.2f}</b>"
+    )
+
+
+def daily_by_strategy(rows: list, date_str: str = ''):
+    """
+    Дневная сводка С РАЗБИВКОЙ по стратегиям.
+
+    Прежняя складывала всё в одну кучу: «12 сделок, +$40». По такой строке
+    нельзя понять, что одна стратегия заработала, а вторая ровно столько же
+    потеряла, — а ради этого сравнения фантом и запущен.
+
+    rows: [{'strategy', 'pnl', 'pnl_r'}]
+    """
+    date_str = date_str or datetime.now().strftime("%d.%m.%Y")
+    if not rows:
+        _send(f"📊 <b>Итог за {date_str}</b>\nСделок не было")
+        return
+
+    by = {}
+    for row in rows:
+        item = by.setdefault(row.get('strategy') or '—',
+                             {'n': 0, 'wins': 0, 'pnl': 0.0, 'r': 0.0})
+        item['n'] += 1
+        item['pnl'] += row.get('pnl', 0) or 0
+        item['r'] += row.get('pnl_r', 0) or 0
+        if (row.get('pnl', 0) or 0) > 0:
+            item['wins'] += 1
+
+    total_pnl = sum(i['pnl'] for i in by.values())
+    total_n = sum(i['n'] for i in by.values())
+    icon = "📈" if total_pnl >= 0 else "📉"
+
+    lines = [f"{icon} <b>Итог за {date_str}</b>", "━━━━━━━━━━━━━━━━━━━━"]
+    for name, item in sorted(by.items(), key=lambda kv: -kv[1]['pnl']):
+        wr = item['wins'] / item['n'] * 100 if item['n'] else 0
+        lines.append(
+            f"<b>{name}</b>: {item['n']} сд · WR {wr:.0f}% · "
+            f"{_pnl_str(item['pnl'])} · {item['r']:+.2f} R")
+    lines.append("━━━━━━━━━━━━━━━━━━━━")
+    lines.append(f"Всего: {total_n} сд · <b>{_pnl_str(total_pnl)}</b>")
+    _send("\n".join(lines))
+
+
 def scan_result(liquid: int, candidates: int, active_positions: int):
     if candidates == 0:
         return

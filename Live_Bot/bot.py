@@ -39,11 +39,15 @@ def _send_daily_summary_if_needed():
     yesterday    = today - timedelta(days=1)
     today_trades = [t for t in history
                     if t.get('exit_time') and t['exit_time'].date() == yesterday]
-    total    = len(today_trades)
-    wins     = sum(1 for t in today_trades if t.get('pnl', 0) > 0)
-    daily_pnl = sum(t.get('pnl', 0) for t in today_trades)
-    balance  = executor.get_real_balance()
-    tg.daily_summary(total, wins, daily_pnl, balance)
+    # Сводка с разбивкой по стратегиям. Общая складывала всё в одну кучу —
+    # «12 сделок, +$40», — и по такой строке нельзя понять, что одна стратегия
+    # заработала, а вторая ровно столько же потеряла. Ради этого сравнения
+    # фантом и запущен.
+    rows = [{'strategy': t.get('strategy') or '—',
+             'pnl': t.get('pnl', 0) or 0,
+             'pnl_r': t.get('pnl_r', 0) or 0}
+            for t in today_trades]
+    tg.daily_by_strategy(rows, yesterday.strftime('%d.%m.%Y'))
 
 
 def _build_signal(candidate, strategy, balance):
