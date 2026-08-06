@@ -69,8 +69,13 @@ def current_version():
     base = getattr(sys, '_MEIPASS', os.path.dirname(os.path.abspath(__file__)))
     path = os.path.join(base, 'VERSION')
     try:
-        with open(path, encoding='utf-8') as fh:
-            return fh.read().strip()
+        # utf-8-sig, а не utf-8: почти любой редактор и PowerShell на Windows
+        # пишут файл с меткой порядка байт, и обычный utf-8 отдаёт её первым
+        # символом строки. Видно её не было, а сравнение версий строгое —
+        # 'v1.0.9' != '﻿v1.0.9', — и приложение вечно предлагало бы
+        # обновиться на ту же самую версию, которая уже установлена.
+        with open(path, encoding='utf-8-sig') as fh:
+            return fh.read().strip().lstrip('﻿')
     except OSError:
         return ''
 

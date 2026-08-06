@@ -11,3 +11,5 @@
 {"at": "2026-08-06T19:41:42", "changes": [{"field": "LEVELS.sides", "from": "long", "to": "both"}]}
 {"at": "2026-08-06T19:50:15", "changes": [{"field": "LEVELS.sides", "from": "both", "to": "long"}]}
 {"at": "2026-08-06T19:50:15", "changes": [{"field": "LEVELS.sides", "from": "long", "to": "both"}]}
+{"at": "2026-08-06T20:35:04", "changes": [{"field": "LEVELS.sides", "from": "both", "to": "long"}]}
+{"at": "2026-08-06T20:35:04", "changes": [{"field": "LEVELS.sides", "from": "long", "to": "both"}]}

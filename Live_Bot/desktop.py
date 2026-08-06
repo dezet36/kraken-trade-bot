@@ -290,6 +290,28 @@ def selftest():
     report = os.path.join(config.DATA_DIR, 'selftest.log')
     lines = ([f'НЕ ЗАГРУЗИЛОСЬ {name}' for name in failed]
              or [f'самопроверка пройдена: {len(modules)} модулей на месте'])
+
+    # УЗНАЁТ ЛИ СБОРКА САМА СЕБЯ. Потерянный модуль — не единственная беда
+    # упаковки. У пользователя собранное приложение сочло себя запущенным из
+    # исходников и предложило обновляться через git, которого рядом нет.
+    # Собиралось оно при этом без единой жалобы, и самопроверка молчала.
+    # Теперь молчать не будет.
+    try:
+        import updater
+        import updater_app
+
+        version = updater_app.current_version()
+        frozen = bool(getattr(sys, 'frozen', False))
+        mode = 'выпуск' if updater._app_mode() is not None else 'ИСХОДНИКИ'
+        lines.append(f'версия: {version or "ФАЙЛА VERSION НЕТ"}')
+        lines.append(f'sys.frozen: {frozen}')
+        lines.append(f'обновление считает это: {mode}')
+        if mode != 'выпуск':
+            lines.insert(0, 'СБОРКА НЕ УЗНАЁТ СЕБЯ: обновление пойдёт через git')
+            failed.append('распознавание выпуска')
+    except Exception as exc:                       # noqa: BLE001
+        lines.append(f'проверка распознавания не отработала: {exc}')
+        failed.append('распознавание выпуска')
     try:
         with open(report, 'w', encoding='utf-8') as fh:
             fh.write('\n'.join(lines) + '\n')

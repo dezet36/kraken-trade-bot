@@ -125,3 +125,40 @@ def test_no_version_and_not_frozen_is_source(monkeypatch):
     monkeypatch.setattr(updater_app, 'is_frozen', lambda: False)
     monkeypatch.setattr(updater_app, 'current_version', lambda: '')
     assert updater._app_mode() is None
+
+
+@pytest.mark.parametrize('written', [
+    'v1.0.9',                     # чисто
+    '\ufeffv1.0.9',               # с меткой порядка байт
+    'v1.0.9\n',                   # с переводом строки
+    '\ufeffv1.0.9\r\n',           # и то и другое, как пишет Windows
+    '  v1.0.9  ',                 # с пробелами
+])
+def test_version_is_read_clean(written, tmp_path, monkeypatch):
+    """
+    Версия читается без мусора, чем бы файл ни был записан.
+
+    Сравнение с выпуском строгое: 'v1.0.9' != '\ufeffv1.0.9'. Метка порядка
+    байт, которую на Windows добавляет почти всё — PowerShell, блокнот, —
+    невидима в тексте, но заставляла приложение вечно предлагать обновление
+    на уже установленную версию.
+    """
+    import updater_app
+
+    (tmp_path / 'VERSION').write_text(written, encoding='utf-8')
+    monkeypatch.setattr(sys, '_MEIPASS', str(tmp_path), raising=False)
+    assert updater_app.current_version() == 'v1.0.9'
+
+
+def test_same_version_means_up_to_date(tmp_path, monkeypatch):
+    """Сборка с BOM обязана считать себя актуальной, а не отстающей."""
+    import updater_app
+
+    (tmp_path / 'VERSION').write_text('\ufeffv1.0.9', encoding='utf-8')
+    monkeypatch.setattr(sys, '_MEIPASS', str(tmp_path), raising=False)
+    monkeypatch.setattr(updater_app, '_fetch_latest',
+                        lambda: {'tag_name': 'v1.0.9', 'assets': []})
+    info = updater_app.status(fetch=True)
+    assert info['behind'] == 0
+    assert info['can_update'] is False
+    assert 'последняя' in info['reason']
