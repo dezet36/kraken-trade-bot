@@ -68,6 +68,19 @@ def write_version(tag):
 def build():
     if not shutil.which('python'):
         raise SystemExit('python не найден в PATH')
+
+    # ДВЕ СБОРКИ ОДНОВРЕМЕННО НЕ УЖИВУТСЯ. Каталог build общий, и вторая
+    # падает на середине с «файл занят другим процессом» — сообщение верное,
+    # но по нему не догадаться, что виноват твой же прошлый запуск, который
+    # ты считал прерванным. Прерывание оболочки процесс сборки не убивает.
+    others = subprocess.run(
+        ['tasklist', '/FI', 'IMAGENAME eq python.exe', '/NH', '/FO', 'CSV'],
+        capture_output=True, text=True,
+        creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0)).stdout
+    if others.count('python.exe') > 1:
+        say('внимание: запущено несколько python — если сборка упадёт на '
+            '«файл занят», снимите прошлый прогон publish_exe и повторите')
+
     say('собираю .exe (несколько минут)...')
     args = [
         sys.executable, '-m', 'PyInstaller', '--noconfirm', '--clean',
