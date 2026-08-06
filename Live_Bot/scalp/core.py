@@ -69,19 +69,25 @@ def find_levels(high, low, at):
         if len(window_h) < 2 * n + 1:
             continue
         if high[i] >= window_h.max():
-            points.append(float(high[i]))
+            points.append((float(high[i]), i))
         if low[i] <= window_l.min():
-            points.append(float(low[i]))
+            points.append((float(low[i]), i))
 
+    # Индекс касания едет вместе с ценой. Отбор от него не зависит — он нужен,
+    # чтобы посчитать ВОЗРАСТ уровня: свежий уровень из двух касаний за час и
+    # уровень, который держит цену третьи сутки, — разные вещи, а «касаний 2»
+    # у них одинаковое.
     levels = []
-    for price in sorted(points):
+    for price, index in sorted(points):
         if levels and abs(price - levels[-1]['sum'] / levels[-1]['touches']) \
                 <= price * params.TOLERANCE_PCT / 100:
             levels[-1]['sum'] += price
             levels[-1]['touches'] += 1
+            levels[-1]['first'] = min(levels[-1]['first'], index)
         else:
-            levels.append({'sum': price, 'touches': 1})
-    return [{'price': lv['sum'] / lv['touches'], 'touches': lv['touches']}
+            levels.append({'sum': price, 'touches': 1, 'first': index})
+    return [{'price': lv['sum'] / lv['touches'], 'touches': lv['touches'],
+             'age': at - lv['first']}
             for lv in levels if lv['touches'] >= params.MIN_TOUCHES]
 
 
@@ -119,6 +125,50 @@ def volume_ok(volume, at):
         return False, 0.0
     ratio = float(volume[at]) / average
     return ratio >= params.VOLUME_RATIO, ratio
+
+
+def squeeze_traits(high, low, volume, at, side, atr_now):
+    """
+    Два признака прижатия, которых в отборе НЕТ, — они только записываются.
+
+    ВЫСЫХАНИЕ ОБЪЁМА. Внешние источники дают самое сильное число всей темы:
+    падение объёма к моменту пробоя с последующим всплеском даёт около 65%
+    попаданий, а пробой на объёме ниже среднего — 48%, то есть хуже монетки.
+    Мы до сих пор смотрели только на всплеск НА пробойной свече. Сохнущий
+    объём внутри самого прижатия — другая величина и другой смысл: продавец
+    кончился, а не отошёл. Возвращается отношение «объём в прижатии к объёму
+    до него»: меньше единицы — сохнет.
+
+    НАПРАВЛЕННОСТЬ. Прижатие бывает симметричным — просто узкий коридор, — а
+    бывает односторонним: растущие минимумы упираются в плоское сопротивление
+    (или падающие максимумы в плоскую поддержку). Это разные вещи. Первое
+    означает затишье, второе — поглощение: одна сторона выедает лимитники
+    другой. Наш отбор до сих пор мерил только ширину коридора.
+
+    Возвращается наклон в долях ATR за бар и признак совпадения наклона с
+    направлением пробоя. Наклон считается по минимумам для лонга и по
+    максимумам для шорта: поджимают именно ту границу, к которой давят.
+    """
+    window = params.SQUEEZE_BARS
+    lo_idx = at - window + 1
+    if lo_idx < 1 or atr_now <= 0:
+        return {}
+
+    inside = volume[lo_idx:at + 1]
+    before_start = max(0, lo_idx - window * 2)
+    before = volume[before_start:lo_idx]
+    dry = (float(np.mean(inside)) / float(np.mean(before))
+           if len(before) and float(np.mean(before)) > 0 else float('nan'))
+
+    edge = low[lo_idx:at + 1] if side == LONG else high[lo_idx:at + 1]
+    steps = np.arange(len(edge), dtype=float)
+    # Наклон методом наименьших квадратов, а не «конец минус начало»: одна
+    # случайная тень на краю окна перевернула бы знак у второго способа.
+    slope = float(np.polyfit(steps, edge, 1)[0]) / atr_now if len(edge) > 2 else 0.0
+    directed = slope > 0 if side == LONG else slope < 0
+
+    return {'vol_dry': dry, 'slope_atr': slope, 'directed': bool(directed),
+            'vol_squeeze': float(np.mean(inside))}
 
 
 def find_setup(high, low, close, volume, at):
@@ -164,15 +214,27 @@ def find_setup(high, low, close, volume, at):
         if not ok:
             continue
 
+        traits = squeeze_traits(high, low, volume, at - 1, side, atr_now)
+        # Всплеск считается ОТ ОБЪЁМА В ПРИЖАТИИ, а не от двадцатибарного
+        # среднего: именно эту величину и называют источники, и она честнее —
+        # среднее по двадцати барам включает сам подход к уровню.
+        squeeze_vol = traits.get('vol_squeeze') or 0.0
+        surge = float(volume[at]) / squeeze_vol if squeeze_vol > 0 else float('nan')
+
         return {
             'direction': side,
             'level': value,
             'touches': level['touches'],
+            'age': level.get('age', 0),
             'box_low': box_low,
             'box_high': box_high,
             'box_height': box_high - box_low,
             'atr': atr_now,
             'volume_ratio': ratio,
+            'vol_dry': traits.get('vol_dry', float('nan')),
+            'vol_surge': surge,
+            'slope_atr': traits.get('slope_atr', 0.0),
+            'directed': traits.get('directed', False),
             'close': price,
         }
     return None
