@@ -376,7 +376,20 @@
   .neg { color: var(--bad); }
 
   /* ── Таблицы ─────────────────────────────────────────────────────── */
-  .scroll { overflow: auto; max-height: 560px; }
+  /* Тень у края, когда таблица продолжается за экраном. Колонок в истории
+     полтора десятка, вправо уезжают «Причина», «Держали», «Закрыта» и
+     «Почему открылась» — и узнать об этом было неоткуда: полосы прокрутки на
+     Windows не видно, пока не тронешь колесо. Тень держится на
+     background-attachment: local — она появляется ровно тогда, когда с этой
+     стороны есть непоказанное, и исчезает, когда докрутили до края. */
+  .scroll {
+    overflow: auto; max-height: 560px;
+    background:
+      linear-gradient(to right, var(--surface) 40%, transparent) left center / 30px 100% no-repeat local,
+      linear-gradient(to left,  var(--surface) 40%, transparent) right center / 30px 100% no-repeat local,
+      linear-gradient(to right, rgba(0,0,0,.10), transparent) left center / 14px 100% no-repeat scroll,
+      linear-gradient(to left,  rgba(0,0,0,.10), transparent) right center / 14px 100% no-repeat scroll;
+  }
   table { width: 100%; border-collapse: collapse; font-size: 13px; }
   thead th {
     position: sticky; top: 0; z-index: 1; text-align: left;
@@ -553,10 +566,24 @@
 
   @media (max-width: 900px) {
     .shell { flex-direction: column; }
+    /* Переносим, а не прокручиваем. Боковое меню, ставшее горизонтальным, не
+       помещалось в узкое окно: «Журнал» уезжал за край, а вместе с ним и
+       индикатор состояния бота — то единственное, что говорит, жив ли он.
+       Прокрутка формально была, но полосы на Windows не видно, и добраться до
+       спрятанного можно было только случайно. */
     .sidebar { width: auto; height: auto; position: static; flex-direction: row;
-            align-items: center; gap: 10px; overflow-x: auto; }
-    .sidebar-top { padding: 0 6px 0 0; } .side-foot { display: none; }
-    nav { flex-direction: row; }
+            align-items: center; gap: 10px; flex-wrap: wrap; }
+    .sidebar-top { padding: 0 6px 0 0; }
+    nav { flex-direction: row; flex-wrap: wrap; gap: 4px; }
+    /* Кнопка меню в столбце занимает всю ширину — так и надо. В строке та же
+       ширина растягивает каждый пункт на весь экран, и меню из семи пунктов
+       съедает половину окна. В строке ширина по содержимому. */
+    nav button { width: auto; padding: 7px 12px; }
+    nav button .tag { margin-left: 6px; }
+    /* Раньше здесь стоял .side-foot — класса с таким именем в разметке нет,
+       и правило не делало ничего. */
+    .sidebar-foot { flex-direction: row; align-items: center; gap: 10px;
+                    margin: 0; padding: 0; border: 0; }
     .topbar, .content { padding-left: 16px; padding-right: 16px; }
     .hero .big { font-size: 32px; }
   }
@@ -1332,7 +1359,7 @@ function closedTable(rows) {
     <th>Причина</th><th>Держали</th><th>Закрыта</th><th>Почему открылась</th>
   </tr></thead><tbody>${sorted.map(r => {
     const cells = PAPER
-      ? `<td class="${cls(r.pnl_r)}">${(r.pnl_r >= 0 ? '+' : '') + (r.pnl_r || 0).toFixed(2)}</td>
+      ? `<td class="${cls(r.pnl_r, 0.005)}">${fx(r.pnl_r, 2, true)}</td>
          <td>$${((r.fees || 0) + (r.funding || 0)).toFixed(2)}</td>
          <td>${(r.mfe_r || 0).toFixed(2)} / ${(r.mae_r || 0).toFixed(2)}</td>`
       : '';
@@ -1346,7 +1373,7 @@ function closedTable(rows) {
       <td>${price(r.exit)}</td>
       <td>${price(r.stop)}</td>
       <td class="${cls(r.pnl)}"><b>${money(r.pnl)}</b></td>
-      <td class="${cls(r.pnl)}">${(r.pnl_pct || 0).toFixed(2)}%</td>${cells}
+      <td class="${cls(r.pnl_pct, 0.005)}">${fx(r.pnl_pct, 2, false)}%</td>${cells}
       <td><span class="chip">${esc(r.reason) || '—'}</span></td>
       <td>${dur(r.duration_min || 0)}</td>
       <td>${when(r.closed)}</td>
