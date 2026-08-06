@@ -1298,7 +1298,9 @@ function posCards(rows) {
 /** Ордера, ожидающие активации: далеко ли до цены и сколько осталось жить. */
 function waitingTable(rows) {
   const box = document.getElementById('waiting');
-  setText('wait-hint', rows.length ? `${rows.length} шт.` : '');
+  setText('wait-hint', rows.length
+    ? `${rows.length} шт. · нажмите на строку, чтобы увидеть сетап`
+    : '');
   if (!rows.length) {
     box.innerHTML = '<div class="empty">Ожидающих ордеров нет</div>';
     return;
@@ -1312,7 +1314,7 @@ function waitingTable(rows) {
     return (a.distance_pct ?? 99) - (b.distance_pct ?? 99);
   });
 
-  const cols = 14;
+  const cols = 9;
   let owner = null;
   const body = sorted.map(r => {
     let head = '';
@@ -1328,32 +1330,36 @@ function waitingTable(rows) {
   }).join('');
 
   box.innerHTML = `<table><thead><tr>
-    <th>Стратегия</th><th>Пара</th><th>Напр.</th><th>Цена входа</th><th>Рынок</th>
-    <th>До входа</th><th>Стоп</th><th>Цель</th><th>RR</th><th>Риск</th>
-    <th>Ждёт</th><th>Истечёт через</th><th>Почему</th><th></th>
+    <th>Стратегия</th><th>Пара</th><th>Напр.</th><th>Цена входа</th>
+    <th>До входа</th><th>RR</th><th>Ждёт</th><th>Истечёт через</th><th></th>
   </tr></thead><tbody>${body}</tbody></table>`;
+
+  // Ордер раскрывается так же, как закрытая сделка: строка короткая, а
+  // подробности и график сетапа — по нажатию. Кнопка «Снять» из раскрытия
+  // исключена: по ней нажимают намеренно, а не разворачивая карточку.
+  box.onclick = e => {
+    if (e.target.closest('[data-action]')) return;
+    const tr = e.target.closest('tr[data-order]');
+    if (tr) openOrder(tr.dataset.order);
+  };
 }
 
 function orderRow(r) {
   return [r].map(r => {
     // Чем ближе рынок к лимиту, тем вероятнее заполнение — выделяем близкие
     const near = r.distance_pct != null && r.distance_pct < 0.5;
-    return `<tr>
+    return `<tr class="clickable" data-order="${esc(r.strategy)}-${esc(r.pair)}"
+      title="Нажмите, чтобы увидеть сетап на графике">
       <td>${skey(r.strategy)}</td>
       <td class="pair">${esc(r.pair)}</td>
       <td>${side(r.direction)}</td>
       <td>${price(r.entry)}</td>
-      <td>${r.price ? price(r.price) : '—'}</td>
       <td>${r.distance_pct == null ? '—'
         : `<span class="chip"${near ? ' style="border-color:var(--good);color:var(--good)"' : ''}>${
            r.distance_pct.toFixed(2)}%</span>`}</td>
-      <td class="neg">${price(r.stop)}</td>
-      <td class="pos">${price(r.tp1)}</td>
       <td>${r.rr ? r.rr.toFixed(2) : '—'}</td>
-      <td>$${(r.risk || 0).toFixed(2)}</td>
       <td>${dur(r.waiting_min || 0)}</td>
       <td>${dur(r.expires_in_min || 0)}</td>
-      <td class="why"><div title="${esc(r.why)}">${esc(r.why) || '—'}</div></td>
       <td><button type="button" class="btn ghost sm" data-action="cancel"
         data-strategy="${r.strategy}" data-pair="${esc(r.pair)}">Снять</button></td></tr>`;
   }).join('');
@@ -2065,7 +2071,7 @@ function openTrade(id, quiet) {
   // Список прокручивается в своей рамке высотой в пол-экрана. Раскрытая
   // карточка занимает её почти целиком, и соседние сделки уезжали за нижний
   // край — выглядело так, будто список обрезался. Подводим карточку к глазам.
-  detail.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  scrollRowIntoBox(table, row);
   if (!quiet) syncTradeUrl(id);
   if (!cached) loadTradeChart(t);
 }
@@ -2179,6 +2185,130 @@ function posChartHtml(pos, data) {
     exit: 0, direction: pos.direction,
     opened: pos.opened, closed: null, geometry: pos.geometry,
   }, data, { W: 420, H: 230 });
+}
+
+/* ── Раскрытый ордер ────────────────────────────────────────────────────── */
+/* Ожидающий ордер — это намерение, а не факт, и главный вопрос к нему один:
+   почему бот собрался входить именно здесь. Двенадцать чисел в строке на него
+   не отвечают, а график с зоной, импульсом и уровнем лимита отвечает сразу.
+   Разметка сетапа хранится вместе с ордером с тех пор, как её начали
+   записывать, поэтому рисовать её здесь ничего не стоит. */
+let ORDER_OPEN_ID = null;
+const ORDER_CHARTS = {};
+
+/* Подводит строку к верху СВОЕЙ рамки, не трогая страницу.
+   scrollIntoView прокручивает всех предков разом: страница уезжала вниз, над
+   заголовком оставалась пустота, и выглядело это как прыжок вёрстки. */
+function scrollRowIntoBox(box, row) {
+  // Шапка таблицы прилипшая и висит поверх содержимого: без поправки на её
+  // высоту строка уезжала ровно под неё и была видна наполовину.
+  const head = box.querySelector('thead');
+  const cover = head ? head.getBoundingClientRect().height : 0;
+  const delta = row.getBoundingClientRect().top - box.getBoundingClientRect().top;
+  box.scrollTop += delta - cover - 8;
+}
+
+function openOrder(id, quiet) {
+  const table = el('waiting');
+  if (!table) return;
+  const row = Array.from(table.querySelectorAll('tr[data-order]'))
+    .find(n => n.dataset.order === String(id));
+  if (!row) return;
+
+  const already = row.nextElementSibling
+    && row.nextElementSibling.classList.contains('tc-detail');
+  closeOrder();
+  if (already) return;
+
+  const order = (DATA.pending_orders || [])
+    .find(o => o.strategy + '-' + o.pair === String(id));
+  if (!order) return;
+  ORDER_OPEN_ID = String(id);
+
+  const detail = document.createElement('tr');
+  detail.className = 'tc-detail';
+  detail.innerHTML = '<td colspan="' + row.cells.length + '"><div class="tc-wrap">'
+    + '</div></td>';
+  row.after(detail);
+  row.classList.add('open');
+  detail.querySelector('.tc-wrap').style.width = table.clientWidth + 'px';
+
+  const cached = ORDER_CHARTS[String(id)];
+  renderOrderCard(order, cached || null, cached ? null : 'загружаю график…');
+  // К глазам подводится СТРОКА, а не карточка: карточка высокая, и
+  // прокрутка к ней уводила саму строку за верхний край — было непонятно,
+  // что именно раскрылось.
+  scrollRowIntoBox(table, row);
+  if (!cached) loadOrderChart(order);
+}
+
+function closeOrder() {
+  document.querySelectorAll('#waiting tr.tc-detail').forEach(n => n.remove());
+  document.querySelectorAll('#waiting tr.clickable.open')
+    .forEach(n => n.classList.remove('open'));
+  ORDER_OPEN_ID = null;
+}
+
+async function loadOrderChart(order) {
+  const id = order.strategy + '-' + order.pair;
+  try {
+    const url = '/api/candles?pair=' + encodeURIComponent(order.pair)
+      + '&from=' + encodeURIComponent(order.opened || '') + '&to=';
+    const resp = await fetch(url, { cache: 'no-store' });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.error || resp.status);
+    ORDER_CHARTS[id] = data;
+    if (ORDER_OPEN_ID === id) renderOrderCard(order, data, null);
+  } catch (e) {
+    if (ORDER_OPEN_ID === id) renderOrderCard(order, null, 'график недоступен: ' + e.message);
+  }
+}
+
+function renderOrderCard(o, data, note) {
+  const cell = document.querySelector('#waiting tr.tc-detail .tc-wrap');
+  if (!cell) return;
+
+  const row = (k, v, c) => '<div class="tc-row"><span class="k">' + k
+    + '</span><span class="v ' + (c || '') + '">' + v + '</span></div>';
+  const group = (title, rows) => '<div class="tc-group"><div class="tc-gt">'
+    + title + '</div>' + rows + '</div>';
+
+  // Ордер ещё не сделка: выхода нет, и подставлять вместо него текущую цену
+  // нельзя — на графике появилась бы линия «выход», которой не существует.
+  const chart = note ? '<div class="tc-note">' + esc(note) + '</div>'
+    : tradeChart({ entry: o.entry, stop: o.stop, tp1: o.tp1, tp2: null, exit: 0,
+                   direction: o.direction, opened: o.opened, closed: null,
+                   geometry: o.geometry }, data);
+
+  cell.innerHTML = '<div class="tc-box">'
+    + '<div class="tc-left">' + chart + '</div>'
+    + '<div class="tc-right">'
+    + '<div class="tc-hero"><span class="big">' + price(o.entry) + '</span>'
+    + '<span class="side">лимит</span>'
+    + '<span class="tc-reason">' + (o.distance_pct == null ? ''
+        : 'до входа ' + o.distance_pct.toFixed(2) + '%') + '</span></div>'
+    + '<div class="tc-grid">'
+    + group('Уровни',
+        row('Лимит', price(o.entry))
+        + row('Рынок', o.price ? price(o.price) : '—')
+        + row('Стоп', price(o.stop), 'neg')
+        + row('Цель', price(o.tp1), 'pos'))
+    + group('Время',
+        row('Выставлен', fmtWhen(o.opened))
+        + row('Ждёт', dur(o.waiting_min || 0))
+        + row('Истечёт через', dur(o.expires_in_min || 0)))
+    + group('Риск',
+        row('Риск', money(o.risk))
+        + row('RR план', (o.rr || 0).toFixed(2))
+        + (o.invalidation ? row('Отмена за', price(o.invalidation)) : ''))
+    + '</div>'
+    + (o.why ? '<div class="tc-why"><div class="k">Почему собрался входить</div>'
+        + esc(o.why) + '</div>' : '')
+    + '<button type="button" class="btn ghost tc-hide">Свернуть</button>'
+    + '</div></div>';
+
+  const hide = cell.querySelector('.tc-hide');
+  if (hide) hide.onclick = () => closeOrder();
 }
 
 function tradeChart(t, data, size) {
@@ -2825,6 +2955,13 @@ function render() {
     if (wanted) TRADE_OPEN_ID = String(wanted);
   }
   if (TRADE_OPEN_ID) openTrade(TRADE_OPEN_ID, true);
+  // Ордер раскрывается ссылкой: ?order=SMC-DOTUSDT.
+  if (!window._orderShown) {
+    window._orderShown = true;
+    const wantOrder = q.get('order');
+    if (wantOrder) ORDER_OPEN_ID = String(wantOrder);
+  }
+  if (ORDER_OPEN_ID) openOrder(ORDER_OPEN_ID, true);
   // График позиции тоже открывается ссылкой: ?poschart=SMC-ADAUSDT.
   if (!window._posShown) {
     window._posShown = true;
