@@ -97,8 +97,10 @@ def test_bot_skips_forbidden_direction(store, monkeypatch, tmp_path):
     """
     import bot
 
+    # Берём ТОТ экземпляр настроек, который читает бот. Пути ему уже
+    # переставил conftest — руками их здесь трогать не надо: прошлая версия
+    # трогала, и правка уходила в боевой журнал настроек мимо подмены.
     store = bot.settings
-    store.SETTINGS_FILE = str(tmp_path / 'runtime_settings.json')
     store.load(force=True)
     store.save({'LEVELS': {'sides': 'long'}})
     candidate = {
