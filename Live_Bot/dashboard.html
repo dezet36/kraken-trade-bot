@@ -283,13 +283,24 @@
   tr.clickable.open td { font-weight: 600; }
   tr.tc-detail > td { padding: 0 !important; background: var(--surface-2);
                       border-bottom: 1px solid var(--hairline);
-                      box-sizing: border-box; }
+                      box-sizing: border-box;
+                      /* Ячейкам таблицы запрещён перенос — числа в колонках не
+                         должны ломаться пополам. Но карточка живёт ВНУТРИ
+                         ячейки и наследовала этот запрет: «Почему вошли» не
+                         переносилась, а обрезалась по краю. */
+                      white-space: normal; }
   /* Прилипает к левому краю области прокрутки: ячейка шире экрана, и без
      этого при прокрутке таблицы вбок карточка уезжала вместе с ней. */
   .tc-wrap { position: sticky; left: 0; }
   .tc-box { display: grid; grid-template-columns: minmax(320px, 1.45fr) minmax(280px, 1fr);
             gap: 18px; padding: 16px 18px 18px; }
-  @media (max-width: 1100px) { .tc-box { grid-template-columns: 1fr; } }
+  /* Порог поднят с 1100 до 1300. Между этими ширинами карточка формально
+     оставалась двухколоночной, но правая колонка сжималась до 340px — в неё
+     переставали помещаться даже две группы по 170px, и «Уровни / Время /
+     Деньги / Ход цены» вставали в один столбик высотой в два экрана. Лучше
+     раньше отдать подробностям всю ширину: график встаёт сверху, группы
+     раскладываются в три-четыре колонки. */
+  @media (max-width: 1300px) { .tc-box { grid-template-columns: 1fr; } }
   .tc-left, .tc-right { min-width: 0; }
   .tc-chart { background: var(--surface); border: 1px solid var(--hairline);
               border-radius: var(--r-md); padding: 6px 8px 2px; }
@@ -302,7 +313,10 @@
   .tc-hero .big { font-size: 26px; font-weight: 700; letter-spacing: -.4px; }
   .tc-hero .side { font-size: 14px; font-weight: 600; }
   .tc-reason { margin-left: auto; color: var(--ink-3); font-size: 12px; }
-  .tc-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  /* 170px, а не 190: строка истории похудела, карточка получила меньше места,
+     и группы «Уровни / Время / Деньги» схлопнулись в одну колонку — карточка
+     вытянулась вниз на два экрана. */
+  .tc-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
              gap: 4px 18px; align-items: start; }
   .tc-gt { font-size: 10.5px; letter-spacing: .04em; text-transform: uppercase;
            color: var(--ink-4); padding-bottom: 2px; }
@@ -383,7 +397,9 @@
      background-attachment: local — она появляется ровно тогда, когда с этой
      стороны есть непоказанное, и исчезает, когда докрутили до края. */
   .scroll {
-    overflow: auto; max-height: 560px;
+    /* Раскрытая карточка занимает почти всю рамку, и соседние сделки
+       уезжали за нижний край — список выглядел обрезанным. */
+    overflow: auto; max-height: min(72vh, 760px);
     background:
       linear-gradient(to right, var(--surface) 40%, transparent) left center / 30px 100% no-repeat local,
       linear-gradient(to left,  var(--surface) 40%, transparent) right center / 30px 100% no-repeat local,
@@ -1345,39 +1361,43 @@ function orderRow(r) {
 
 function closedTable(rows) {
   const box = document.getElementById('closed');
-  setText('closed-hint', rows.length ? `${rows.length} шт., новые сверху` : '');
+  setText('closed-hint', rows.length
+    ? `${rows.length} шт., новые сверху · нажмите на строку, чтобы раскрыть подробности`
+    : '');
   if (!rows.length) { box.innerHTML = '<div class="empty">В выборке нет закрытых сделок</div>'; return; }
 
   // Порядок задаём явно, а не полагаемся на порядок с сервера: он уже
   // разворачивался выше по коду, и двойной разворот выдавал старые сверху.
   const sorted = rows.slice().sort((a, b) => ts(b.closed) - ts(a.closed));
 
-  const extra = PAPER ? '<th>R</th><th>Издержки</th><th>MFE / MAE</th>' : '';
+  // В строке — только то, по чему выбирают сделку глазами: кто, что, чем
+  // кончилось и когда. Цены входа и выхода, стоп, издержки, ход цены и
+  // обоснование входа переехали в карточку, которая раскрывается по нажатию.
+  //
+  // Раньше в строке было шестнадцать колонок, таблица не помещалась в окно, и
+  // половина уезжала за правый край — включая «Почему открылась», ради
+  // которой всё и затевалось. Читать её там было нельзя, а узнать, что она
+  // там есть, — тем более.
+  const extra = PAPER ? '<th>R</th>' : '';
   box.innerHTML = `<table><thead><tr>
     <th>#</th><th>Стратегия</th><th>Пара</th><th>Напр.</th>
-    <th>Вход</th><th>Выход</th><th>Стоп</th><th>Итог</th><th>%</th>${extra}
-    <th>Причина</th><th>Держали</th><th>Закрыта</th><th>Почему открылась</th>
+    <th>Итог</th><th>%</th>${extra}
+    <th>Причина</th><th>Держали</th><th>Закрыта</th>
   </tr></thead><tbody>${sorted.map(r => {
     const cells = PAPER
-      ? `<td class="${cls(r.pnl_r, 0.005)}">${fx(r.pnl_r, 2, true)}</td>
-         <td>$${((r.fees || 0) + (r.funding || 0)).toFixed(2)}</td>
-         <td>${(r.mfe_r || 0).toFixed(2)} / ${(r.mae_r || 0).toFixed(2)}</td>`
+      ? `<td class="${cls(r.pnl_r, 0.005)}">${fx(r.pnl_r, 2, true)}</td>`
       : '';
     return `<tr class="clickable" data-trade="${esc(r.id)}"
-      title="Нажмите, чтобы открыть карточку сделки">
+      title="Нажмите, чтобы раскрыть подробности сделки">
       <td>${esc(r.id)}</td>
       <td>${skey(r.strategy)}</td>
       <td class="pair">${esc(r.pair)}</td>
       <td>${side(r.direction)}</td>
-      <td>${price(r.entry)}</td>
-      <td>${price(r.exit)}</td>
-      <td>${price(r.stop)}</td>
       <td class="${cls(r.pnl)}"><b>${money(r.pnl)}</b></td>
       <td class="${cls(r.pnl_pct, 0.005)}">${fx(r.pnl_pct, 2, false)}%</td>${cells}
       <td><span class="chip">${esc(r.reason) || '—'}</span></td>
       <td>${dur(r.duration_min || 0)}</td>
-      <td>${when(r.closed)}</td>
-      <td class="why"><div title="${esc(r.why)}">${esc(r.why) || '—'}</div></td></tr>`;
+      <td>${when(r.closed)}</td></tr>`;
   }).join('')}</tbody></table>`;
 
   // Обработчик на таблице, а не на каждой строке: строк бывает три сотни,
@@ -2042,6 +2062,10 @@ function openTrade(id, quiet) {
   // запрос к бирже ради тех же данных не нужен.
   const cached = TRADE_CHARTS[String(id)];
   renderTradeCard(t, cached || null, cached ? null : 'загружаю график…');
+  // Список прокручивается в своей рамке высотой в пол-экрана. Раскрытая
+  // карточка занимает её почти целиком, и соседние сделки уезжали за нижний
+  // край — выглядело так, будто список обрезался. Подводим карточку к глазам.
+  detail.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
   if (!quiet) syncTradeUrl(id);
   if (!cached) loadTradeChart(t);
 }
