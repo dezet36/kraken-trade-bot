@@ -98,3 +98,30 @@ def test_running_mark_never_raises(tmp_path):
 
 if __name__ == '__main__':
     sys.exit(pytest.main([__file__, '-v']))
+
+
+def test_version_file_is_enough_to_be_a_release(monkeypatch, tmp_path):
+    """
+    Наличие файла VERSION само по себе означает «это выпуск».
+
+    Признак прямее, чем sys.frozen: в репозитории VERSION нет — он создаётся
+    только при сборке. У пользователя собранное приложение всё равно уходило
+    в git-ветку и сообщало «каталог не является git-репозиторием», значит на
+    один sys.frozen полагаться нельзя.
+    """
+    import updater
+    import updater_app
+
+    monkeypatch.setattr(updater_app, 'is_frozen', lambda: False)
+    monkeypatch.setattr(updater_app, 'current_version', lambda: 'v1.0.9')
+    assert updater._app_mode() is updater_app
+
+
+def test_no_version_and_not_frozen_is_source(monkeypatch):
+    """Запуск из исходников остаётся запуском из исходников."""
+    import updater
+    import updater_app
+
+    monkeypatch.setattr(updater_app, 'is_frozen', lambda: False)
+    monkeypatch.setattr(updater_app, 'current_version', lambda: '')
+    assert updater._app_mode() is None

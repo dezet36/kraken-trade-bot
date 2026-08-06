@@ -9,3 +9,5 @@
 {"at": "2026-08-06T19:18:40", "changes": [{"field": "NOTIFY.trade_opened_desktop", "from": true, "to": false}, {"field": "NOTIFY.trade_opened_telegram", "from": true, "to": false}, {"field": "NOTIFY.trade_closed_desktop", "from": true, "to": false}, {"field": "NOTIFY.trade_closed_telegram", "from": true, "to": false}, {"field": "NOTIFY.error_desktop", "from": true, "to": false}, {"field": "NOTIFY.error_telegram", "from": true, "to": false}, {"field": "NOTIFY.daily_desktop", "from": true, "to": false}, {"field": "NOTIFY.daily_telegram", "from": true, "to": false}]}
 {"at": "2026-08-06T19:41:42", "changes": [{"field": "LEVELS.sides", "from": "both", "to": "long"}]}
 {"at": "2026-08-06T19:41:42", "changes": [{"field": "LEVELS.sides", "from": "long", "to": "both"}]}
+{"at": "2026-08-06T19:50:15", "changes": [{"field": "LEVELS.sides", "from": "both", "to": "long"}]}
+{"at": "2026-08-06T19:50:15", "changes": [{"field": "LEVELS.sides", "from": "long", "to": "both"}]}

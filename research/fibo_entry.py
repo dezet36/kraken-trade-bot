@@ -180,9 +180,11 @@ def run_variant(setups, data, depth, sides, min_rr):
         return None
     stats = compute_stats(result)
     r = np.array([t['pnl'] / t['risk'] for t in trades], dtype=float)
-    planned = np.array([(t.get('meta') or {}).get('rr', 0) for t in orders],
-                       dtype=float)
-    stop_pct = np.array([(t.get('meta') or {}).get('stop_pct', 0) for t in orders],
+    # Заявка — это объект Order, а не словарь: у него meta полем, а не по
+    # ключу. Сбор статистики стоял в самом конце, поэтому весь дорогой поиск
+    # сетапов успевал пройти и обрушиться на последней строке.
+    planned = np.array([(o.meta or {}).get('rr', 0) for o in orders], dtype=float)
+    stop_pct = np.array([(o.meta or {}).get('stop_pct', 0) for o in orders],
                         dtype=float)
     return {'r': r, 'n': len(trades), 'orders': len(orders),
             'fill': len(trades) / len(orders) * 100,

@@ -142,7 +142,20 @@ def _app_mode():
         # этом надо из панели, а не по молчаливому переходу на git-ветку,
         # которая в собранном приложении всегда отвечает «не репозиторий».
         return None
-    return updater_app if updater_app.is_frozen() else None
+
+    # ДВА признака сборки, а не один. sys.frozen ставит PyInstaller, и обычно
+    # этого достаточно — но у пользователя собранное приложение сообщало
+    # «каталог не является git-репозиторием», то есть развилка ушла в
+    # git-ветку. Значит на что-то sys.frozen положиться нельзя.
+    #
+    # Файл VERSION — признак прямее: в репозитории его НЕТ, он создаётся
+    # только при сборке выпуска и кладётся внутрь .exe. Есть VERSION —
+    # это выпуск, и обновляться надо выпусками, что бы там ни думал sys.
+    if updater_app.is_frozen():
+        return updater_app
+    if updater_app.current_version():
+        return updater_app
+    return None
 
 
 def status(fetch=True):
