@@ -2369,11 +2369,21 @@ function closeTrade(keepUrl) {
   }
 }
 
+// Начало сетапа — то, от чего разворачивается окно графика. У старых записей
+// его нет: там geometry сохранялась без времён, и сервер сам возьмёт запас
+// перед входом. Возвращаем пустую строку, а не undefined, — иначе в адрес
+// уехало бы слово «undefined» и сервер принял бы его за метку времени.
+function setupStart(t) {
+  const geo = t && t.geometry;
+  return (geo && geo.from) || '';
+}
+
 async function loadTradeChart(t) {
   try {
     const url = '/api/candles?pair=' + encodeURIComponent(t.pair)
       + '&from=' + encodeURIComponent(t.opened)
-      + '&to=' + encodeURIComponent(t.closed || '');
+      + '&to=' + encodeURIComponent(t.closed || '')
+      + '&setup=' + encodeURIComponent(setupStart(t));
     const resp = await fetch(url, { cache: 'no-store' });
     const data = await resp.json();
     if (!resp.ok) throw new Error(data.error || resp.status);
@@ -2413,7 +2423,8 @@ async function loadPosChart(pos, opened) {
   const key = pos.strategy + '-' + pos.pair;
   try {
     const url = '/api/candles?pair=' + encodeURIComponent(pos.pair)
-      + '&from=' + encodeURIComponent(opened || pos.opened || '') + '&to=';
+      + '&from=' + encodeURIComponent(opened || pos.opened || '') + '&to='
+      + '&setup=' + encodeURIComponent(setupStart(pos));
     const resp = await fetch(url, { cache: 'no-store' });
     const data = await resp.json();
     if (!resp.ok) throw new Error(data.error || resp.status);
@@ -2674,39 +2685,89 @@ function tradeChart(t, data, size) {
   // собирались. Полосы и линии рисуются ПОД свечами, чтобы не закрывать их.
   const geo = t.geometry || {};
   const inView = v => v > lo && v < hi;
+  // Подписи разметки стоят у левого края, а там свечи. Обводка цветом фона
+  // под текстом — тот же приём, что у подписей на картах: буквы читаются
+  // поверх любого рисунка, и при этом ничего не закрашивается прямоугольником.
+  const HALO = ' paint-order="stroke" stroke="var(--surface)" stroke-width="2.6"'
+    + ' stroke-linejoin="round"';
   // Разметка обрезается по окну, а окно под неё НЕ расширяется: зона B и
   // начало импульса бывают далеко от цены, и ради них пришлось бы сжать все
   // свечи в полоску. Что не поместилось — не рисуем.
-  const bands = (geo.bands || []).map(b => {
+  // Полосы и линии идут ПОД свечами, а подписи к ним — НАД. Иначе свечи
+  // закрашивают текст: обводка от этого не спасает, потому что рисуется
+  // раньше. Именно так и пропадала подпись зоны B — её съедала первая же
+  // свеча у левого края.
+  const bandFills = [], bandLabels = [];
+  (geo.bands || []).forEach(b => {
     const top = Math.min(b.top, hi), bottom = Math.max(b.bottom, lo);
-    if (top <= bottom) return '';
-    return '<rect x="' + PL + '" y="' + y(top) + '" width="' + (W - PR - PL)
+    if (top <= bottom) return;
+    bandFills.push('<rect x="' + PL + '" y="' + y(top) + '" width="' + (W - PR - PL)
       + '" height="' + Math.max(y(bottom) - y(top), 1) + '" fill="var(--accent)"'
       + ' opacity=".07"/>'
       + '<line x1="' + PL + '" y1="' + y(top) + '" x2="' + (W - PR) + '" y2="' + y(top)
       + '" stroke="var(--accent)" stroke-width=".8" opacity=".35"/>'
       + '<line x1="' + PL + '" y1="' + y(bottom) + '" x2="' + (W - PR) + '" y2="'
-      + y(bottom) + '" stroke="var(--accent)" stroke-width=".8" opacity=".35"/>'
-      + '<text x="' + (PL + 4) + '" y="' + (y(top) + 10) + '" fill="var(--accent)"'
-      + ' font-size="9.5" opacity=".85">' + esc(b.label || '') + '</text>';
-  }).join('');
-  const guides = (geo.lines || []).filter(g => inView(g.price)).map(g =>
+      + y(bottom) + '" stroke="var(--accent)" stroke-width=".8" opacity=".35"/>');
+    bandLabels.push('<text x="' + (PL + 4) + '" y="' + (y(top) + 10)
+      + '" fill="var(--accent)" font-size="9.5" opacity=".9"' + HALO + '>'
+      + esc(b.label || '') + '</text>');
+  });
+  const shown = (geo.lines || []).filter(g => inView(g.price));
+  const guideLines = shown.map(g =>
     '<line x1="' + PL + '" y1="' + y(g.price) + '" x2="' + (W - PR) + '" y2="'
       + y(g.price) + '" stroke="var(--ink-4)" stroke-width=".8"'
-      + ' stroke-dasharray="1 4" opacity=".7"/>'
-    + '<text x="' + (PL + 4) + '" y="' + (y(g.price) - 3) + '" fill="var(--ink-4)"'
-    + ' font-size="9.5">' + esc(g.label || '') + '</text>').join('');
+      + ' stroke-dasharray="1 4" opacity=".7"/>').join('');
+  const guideLabels = shown.map(g =>
+    '<text x="' + (PL + 4) + '" y="' + (y(g.price) - 3) + '" fill="var(--ink-3)"'
+    + ' font-size="9.5"' + HALO + '>' + esc(g.label || '') + '</text>').join('');
+  const bands = bandFills.join(''), guides = guideLines;
+  const geoLabels = bandLabels.join('') + guideLabels;
+
+  // Сам импульс — отрезком из точки A в точку B. Горизонтали выше дают цены,
+  // но именно наклонная отвечает на вопрос «по какому сетапу вошли»: видно,
+  // откуда и куда сходила цена, а вход стоит на откате от этого хода.
+  // Рисуется по времени, а не по номеру свечи: точка A часто левее первой
+  // свечи окна, и тогда отрезок честно начинается за краем.
+  const legLine = (() => {
+    const lg = geo.leg;
+    if (!lg || !lg.from || !lg.to) return '';
+    const t0 = stamps[0], t1 = stamps[stamps.length - 1];
+    if (!(t1 > t0)) return '';
+    const xt = iso => {
+      const v = new Date(iso).getTime();
+      if (!isFinite(v)) return null;
+      return PL + (v - t0) / (t1 - t0) * (W - PL - PR);
+    };
+    const xa = xt(lg.from), xb = xt(lg.to);
+    if (xa === null || xb === null) return '';
+    const ya = y(lg.from_price), yb = y(lg.to_price);
+    // Целиком за пределами холста — не рисуем: обрезанный по краю отрезок
+    // выглядел бы как разметка, которой не было.
+    if (Math.max(xa, xb) < PL || Math.min(xa, xb) > W - PR) return '';
+    const up = lg.to_price >= lg.from_price;
+    const col = up ? 'var(--good)' : 'var(--bad)';
+    return '<line x1="' + xa + '" y1="' + ya + '" x2="' + xb + '" y2="' + yb
+      + '" stroke="' + col + '" stroke-width="1.6" opacity=".5"'
+      + ' stroke-linecap="round"/>'
+      + '<circle cx="' + xa + '" cy="' + ya + '" r="2.6" fill="' + col
+      + '" opacity=".7"/>'
+      + '<circle cx="' + xb + '" cy="' + yb + '" r="2.6" fill="' + col
+      + '" opacity=".7"/>'
+      ;
+  })();
 
   const isLong = (t.direction || '').toUpperCase() === 'LONG';
   return '<div class="tc-chart"><svg viewBox="0 0 ' + W + ' ' + H
     + '" preserveAspectRatio="xMidYMid meet" role="img" aria-label="график сделки">'
-    + bands + guides
+    + bands + guides + legLine
     + body
+    + geoLabels
     + line(t.stop, 'var(--bad)', 'стоп', true)
     + line(t.entry, 'var(--ink-3)', 'вход', false)
     + line(t.tp1, 'var(--good)', 'цель', true)
     + (t.tp2 && t.tp2 !== t.tp1 ? line(t.tp2, 'var(--good)', 'цель 2', true) : '')
     + line(t.exit, isLong ? 'var(--accent)' : 'var(--accent)', 'выход', false)
+    + mark(nearest(geo.from), 'var(--ink-4)', 'сетап')
     + mark(nearest(t.opened), 'var(--ink-4)', 'вход')
     + mark(nearest(t.closed), 'var(--ink-4)', 'выход')
     + labels()

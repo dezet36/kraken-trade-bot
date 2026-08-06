@@ -572,40 +572,42 @@ _candle_cache = {}
 _CANDLE_CACHE_MAX = 60
 
 
-# Биржа отдаёт максимум 1000 свечей от текущего момента назад. Это задаёт
-# предел досягаемости каждого таймфрейма.
 _TF_MINUTES = (('5m', 5), ('15m', 15), ('1h', 60), ('4h', 240), ('1d', 1440))
-_MAX_CANDLES = 1000
+# Больше трёх сотен свечей на холст шириной в семьсот точек — это полоски по
+# два пикселя: формально данные есть, разобрать нельзя ничего.
+_MAX_BARS = 320
 
 
-def _pick_timeframe(span_minutes, age_minutes):
+def _pick_timeframe(window_minutes):
     """
-    Таймфрейм под длительность сделки И её возраст.
+    Таймфрейм под ВСЁ окно графика — от начала сетапа до выхода с запасом.
 
-    Длительность задаёт нижнюю границу: сделку длиной в час пятиминутками
-    видно (12 свечей), а двухнедельную — уже каша из трёх тысяч.
-
-    Возраст задаёт верхнюю, и про неё легко забыть. Свечи запрашиваются
-    БЕЗ отметки начала: биржа отдаёт последние 1000 от текущего момента.
-    Пятиминутки добивают на 3.5 дня назад, часовые на 41 день. Короткая
-    сделка месячной давности при выборе только по длительности получила бы
-    пятиминутки — и пустой график вместо ошибки, которую видно.
+    Правило теперь одно, а было два. Раньше выбор зависел ещё и от возраста
+    сделки, потому что свечи запрашивались без отметки начала и биржа отдавала
+    последние 1000 от текущего момента: до месячной давности пятиминутки не
+    добивали. Теперь начало передаётся явно, и возраст ни на что не влияет —
+    остаётся единственный вопрос, влезает ли окно в читаемое число свечей.
     """
-    need_back = age_minutes + span_minutes * 1.4
     for name, minutes in _TF_MINUTES:
-        fits_detail = span_minutes / minutes <= 220
-        reaches = need_back / minutes <= _MAX_CANDLES - 20
-        if fits_detail and reaches:
+        if window_minutes / minutes <= _MAX_BARS:
             return name, minutes
     return _TF_MINUTES[-1]
 
 
-def _trade_candles(pair, opened, closed):
+def _trade_candles(pair, opened, closed, setup_from=None):
     """
-    Свечи вокруг сделки: окно расширено на 30% с каждой стороны.
+    Свечи вокруг сделки, начиная от сетапа, по которому в неё вошли.
 
-    Без запаса вход и выход упираются в края графика, и не видно, откуда
-    цена пришла и куда ушла — а это половина смысла разбора.
+    ПОЧЕМУ ОТ СЕТАПА, А НЕ ОТ ВХОДА. Окно от входа до выхода показывает, чем
+    сделка кончилась, но не показывает, ПОЧЕМУ её открыли. Импульс, который
+    размечали сеткой Фибоначчи, движение до ордер-блока, касания уровня — всё
+    это происходит ДО входа и в такое окно не попадает. График получался
+    честным и бесполезным: три линии плана и свечи вокруг них.
+
+    setup_from — время начала сетапа (начало импульса у Фибоначчи и SMC).
+    Если его нет — у старых записей и у стратегии уровней, где момент
+    образования уровня не сохраняется, — берём запас в четверть длительности
+    сделки, но не меньше часа: хоть какой-то подход к цене видно.
     """
     from datetime import timedelta
 
@@ -620,14 +622,29 @@ def _trade_candles(pair, opened, closed):
             stamp = stamp.tz_convert('UTC').tz_localize(None)
         return stamp
 
-    start = _naive(opened)
+    entry_at = _naive(opened)
     end = _naive(closed) if closed else pd.Timestamp.utcnow().tz_localize(None)
+
+    start = entry_at
+    if setup_from:
+        try:
+            candidate = _naive(setup_from)
+            # Строго раньше входа и не абсурдно раньше: битая метка из старой
+            # записи не должна растянуть окно на год и превратить график в
+            # дневки, на которых сделки не видно вовсе.
+            if candidate < entry_at and (entry_at - candidate).days <= 30:
+                start = candidate
+        except Exception:                          # noqa: BLE001
+            pass
+    if start == entry_at:
+        lead = max((end - entry_at).total_seconds() / 60 * 0.25, 60)
+        start = entry_at - timedelta(minutes=lead)
+
     span = max((end - start).total_seconds() / 60, 30)
-    age = max((pd.Timestamp.utcnow().tz_localize(None) - start).total_seconds() / 60, 0)
-    timeframe, tf_min = _pick_timeframe(span, age)
-    pad = timedelta(minutes=span * 0.35)
+    pad = timedelta(minutes=span * 0.08)
     since = start - pad
     until = end + pad
+    timeframe, tf_min = _pick_timeframe((until - since).total_seconds() / 60)
     need = int((until - since).total_seconds() / 60 / tf_min) + 5
 
     key = (pair, timeframe, since.strftime('%Y%m%d%H%M'), need)
@@ -636,7 +653,16 @@ def _trade_candles(pair, opened, closed):
 
     from exchange import fetch_ohlcv
     limit = min(max(need, 60), 1000)
-    df = fetch_ohlcv(timeframe, limit=limit, symbol=pair)
+    # Отметка начала — то, чего здесь не было и из-за чего у закрытых сделок
+    # график не строился вовсе. Берём с запасом в две свечи: биржи по-разному
+    # округляют границу, и без запаса первая свеча окна иногда не приходит.
+    # Считаем от эпохи вычитанием, а не через .timestamp(): у наивной метки
+    # трактовка зоны различается между pandas и стандартным datetime, и такая
+    # ошибка сдвинула бы окно на часовой пояс — молча, без единого исключения.
+    epoch = pd.Timestamp('1970-01-01')
+    since_ms = int((since - timedelta(minutes=2 * tf_min) - epoch)
+                   // pd.Timedelta('1ms'))
+    df = fetch_ohlcv(timeframe, limit=limit, symbol=pair, since=since_ms)
     if df is None or not len(df):
         return None
 
@@ -931,11 +957,14 @@ class _Handler(BaseHTTPRequestHandler):
             pair = (q.get('pair') or [''])[0]
             opened = (q.get('from') or [''])[0]
             closed = (q.get('to') or [''])[0]
+            # Начало сетапа: по нему окно разворачивается назад, до импульса,
+            # по которому вошли. Необязательный — у старых записей его нет.
+            setup_from = (q.get('setup') or [''])[0]
             if not pair or not opened:
                 self._fail(400, 'нужны pair и from')
                 return
             try:
-                data = _trade_candles(pair, opened, closed)
+                data = _trade_candles(pair, opened, closed, setup_from or None)
             except Exception as exc:               # noqa: BLE001
                 self._fail(502, f'свечи недоступны: {exc}')
                 return

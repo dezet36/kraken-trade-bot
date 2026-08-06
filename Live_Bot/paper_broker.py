@@ -702,21 +702,67 @@ class PaperBroker:
         """
         bands, lines = [], []
         setup = signal.get('setup') or {}
+        out = {'bands': bands, 'lines': lines}
 
         def band(low, high, label):
             if low and high and float(high) != float(low):
                 bands.append({'bottom': min(float(low), float(high)),
                               'top': max(float(low), float(high)), 'label': label})
 
+        def _iso_time(value):
+            """Метка времени в строгом ISO с зоной либо None."""
+            if not value:
+                return None
+            try:
+                import pandas as pd
+                stamp = pd.Timestamp(value)
+                if stamp.tzinfo is not None:
+                    stamp = stamp.tz_convert('UTC').tz_localize(None)
+                return stamp.strftime('%Y-%m-%dT%H:%M:%SZ')
+            except Exception:                      # noqa: BLE001
+                return None
+
         def leg(label_from, label_to):
-            if setup.get('start_price') and setup.get('end_price'):
-                lines.append({'price': float(setup['start_price']), 'label': label_from})
-                lines.append({'price': float(setup['end_price']), 'label': label_to})
+            """
+            Сам импульс: две горизонтали по его краям и, если есть время, —
+            отрезок из точки A в точку B.
+
+            Горизонтали остаются: по ним читаются цены. Но именно ОТРЕЗОК
+            отвечает на вопрос «по какому сетапу вошли» — видно, откуда куда
+            и за сколько сходила цена, а вход стоит на откате от него.
+
+            Время начала едет отдельным полем: по нему дашборд разворачивает
+            окно графика назад, до начала импульса. Без него график начинался
+            от входа, и разметка висела в воздухе — зоны есть, а движения,
+            которое их породило, за левым краем.
+            """
+            if not (setup.get('start_price') and setup.get('end_price')):
+                return
+            lines.append({'price': float(setup['start_price']), 'label': label_from})
+            lines.append({'price': float(setup['end_price']), 'label': label_to})
+            start_at = _iso_time(setup.get('start_time'))
+            end_at = _iso_time(setup.get('end_time'))
+            if start_at:
+                out['from'] = start_at
+                if end_at:
+                    out['leg'] = {
+                        'from': start_at, 'from_price': float(setup['start_price']),
+                        'to': end_at, 'to_price': float(setup['end_price']),
+                    }
 
         if strategy == 'FIBO':
             za, zb = signal.get('zone_a') or {}, signal.get('zone_b') or {}
-            band(za.get('bottom'), za.get('top'), 'зона A · 38.2–61.8%')
-            band(zb.get('bottom'), zb.get('top'), 'зона B · 61.8–88.6%')
+            # Границы в подписи берутся ИЗ КОНФИГА, а не пишутся руками.
+            # Написанная руками подпись зоны B утверждала «61.8–88.6%», тогда
+            # как зона стоит на 78.6–88.6%: на графике всё было нарисовано
+            # правильно, а прочитать с него можно было неверное число.
+            def _pct(value):
+                return f'{value * 100:.1f}'.rstrip('0').rstrip('.')
+
+            band(za.get('bottom'), za.get('top'),
+                 f'зона A · {_pct(config.ZONE_A_BOTTOM)}–{_pct(config.ZONE_A_TOP)}%')
+            band(zb.get('bottom'), zb.get('top'),
+                 f'зона B · {_pct(config.ZONE_B_BOTTOM)}–{_pct(config.ZONE_B_TOP)}%')
             leg('начало импульса', 'конец импульса')
         elif strategy == 'SMC':
             smc = signal.get('smc') or {}
@@ -731,7 +777,7 @@ class PaperBroker:
                     'price': float(lv['level']),
                     'label': f"уровень · касаний {touches}" if touches else 'уровень',
                 })
-        return {'bands': bands, 'lines': lines}
+        return out
 
     @staticmethod
     def _context(strategy, signal):

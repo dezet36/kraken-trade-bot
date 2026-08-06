@@ -121,16 +121,22 @@ def reset_exchange():
     _exchange_instance = None
 
 
-def fetch_ohlcv(timeframe, limit=500, symbol=None, client=None):
+def fetch_ohlcv(timeframe, limit=500, symbol=None, client=None, since=None):
     """
     Загружает свечи. client=None -> legacy get_exchange() (одно-юзер).
     Для платформы передавай общий market-client (make_market_client).
+
+    since — отметка начала в миллисекундах. Без неё биржа отдаёт ПОСЛЕДНИЕ
+    limit свечей от текущего момента, и запросить прошлое нельзя в принципе.
+    Именно поэтому у закрытых сделок не строился график: окно сделки лежало
+    раньше отданного куска, фильтр по времени не находил ни одной свечи, и
+    дашборд честно отвечал «свечей за этот период нет».
     """
     if symbol is None:
         symbol = config.TRADING_PAIRS[0]
     try:
         ex = client if client is not None else get_exchange()
-        ohlcv = ex.fetch_ohlcv(symbol, timeframe, limit=limit)
+        ohlcv = ex.fetch_ohlcv(symbol, timeframe, since=since, limit=limit)
         if not ohlcv or len(ohlcv) < 10:
             log(f"⚠️ Мало данных для {symbol} {timeframe}: {len(ohlcv) if ohlcv else 0} свечей")
             return None
