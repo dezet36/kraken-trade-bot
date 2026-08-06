@@ -223,6 +223,18 @@
   .note .dot { margin-top: 6px; }
 
   /* ── Ошибки ──────────────────────────────────────────────────────── */
+  /* Блок выгрузки отчёта. Кнопка не сжимается, текст переносится: на узком
+     окне подпись про чистку ключей длинная, и без flex-shrink она выдавливала
+     кнопку за край панели. */
+  .report-box { display: flex; gap: 14px; align-items: center; flex-wrap: wrap;
+    margin-top: 14px; padding: 12px 14px; border: 1px solid var(--hairline);
+    border-radius: 10px; background: var(--surface-2, transparent); }
+  .report-txt { flex: 1 1 260px; min-width: 0; display: flex;
+    flex-direction: column; gap: 3px; }
+  .report-txt b { color: var(--ink-1); font-size: 13px; }
+  .report-txt span { color: var(--ink-3); font-size: 12px; line-height: 1.45; }
+  .report-box .btn { flex: 0 0 auto; }
+
   .err-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
   .err-chip {
     font-size: 12.5px; color: var(--ink-2); background: var(--surface-2);
@@ -1760,6 +1772,20 @@ function fmtWhen(iso) {
     day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
 }
 
+// Отчёт для разбора: один файл, который можно отправить целиком, вместо
+// переписки «пришлите ошибку — а строку выше — а версию какая».
+// Собирается на сервере в момент нажатия и чистится от ключей там же.
+function reportBlock() {
+  return '<div class="report-box">'
+    + '<div class="report-txt"><b>Отчёт для разбора</b>'
+    + '<span>Версия, режим, настройки, ошибки с трассировками и хвост '
+    + 'журнала — одним файлом. Ключи и токены вырезаются автоматически, '
+    + 'но чистка не бывает полной: пробегите файл глазами перед '
+    + 'отправкой.</span></div>'
+    + '<a class="btn" href="/api/report.txt" download>Выгрузить отчёт</a>'
+    + '</div>';
+}
+
 function renderErrors() {
   const box = el('errors');
   if (!box || !ERRORS) return;
@@ -1770,7 +1796,8 @@ function renderErrors() {
       + '<div class="panel-head bare"><h2>Ошибки</h2></div>'
       + '<div class="empty">Ошибок не было. Здесь появится всё, на чём бот '
       + 'споткнулся: недоступная биржа, отказ в правах на файл, сбой '
-      + 'стратегии — с числом повторов и временем последнего случая.</div></div>';
+      + 'стратегии — с числом повторов и временем последнего случая.</div>'
+      + reportBlock() + '</div>';
     return;
   }
 
@@ -1810,6 +1837,7 @@ function renderErrors() {
     + '<div class="err-chips">' + chips + '</div>'
     + '<div class="err-list">' + rows + '</div>'
     + '<div class="ctl-foot">'
+    + '</div>' + reportBlock() + '<div class="ctl-foot">'
     + '<button type="button" class="btn ghost" id="err-reload">Обновить</button>'
     + '<button type="button" class="btn ghost" id="err-clear"'
     + (ERRORS.writable ? '' : ' disabled') + '>Очистить</button>'

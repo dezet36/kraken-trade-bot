@@ -951,6 +951,28 @@ class _Handler(BaseHTTPRequestHandler):
             self._send_file(export_paths()[0], 'text/csv; charset=utf-8')
         elif path == '/api/export.jsonl':
             self._send_file(export_paths()[1], 'application/x-ndjson; charset=utf-8')
+        elif path.startswith('/api/report.txt'):
+            # Отчёт собирается на лету, а не лежит файлом: он должен отражать
+            # состояние на момент нажатия, иначе присланное описывает не ту
+            # неполадку, из-за которой его и делали.
+            try:
+                import report
+                body = report.build().encode('utf-8')
+                name = report.filename()
+            except Exception as exc:               # noqa: BLE001
+                self._fail(500, f'отчёт не собрался: {exc}')
+                return
+            self.send_response(200)
+            self.send_header('Content-Type', 'text/plain; charset=utf-8')
+            # Имя с кириллицей — только в filename*, по RFC 5987. Простой
+            # filename с не-ASCII часть браузеров обрезает до мусора.
+            from urllib.parse import quote
+            self.send_header('Content-Disposition',
+                             f"attachment; filename=\"report.txt\"; "
+                             f"filename*=UTF-8''{quote(name)}")
+            self.send_header('Content-Length', str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
         elif path.startswith('/api/candles'):
             from urllib.parse import parse_qs, urlparse
             q = parse_qs(urlparse(self.path).query)
@@ -982,9 +1004,17 @@ class _Handler(BaseHTTPRequestHandler):
         elif path == '/api/errors':
             try:
                 import error_log
-                self._send_json({'errors': error_log.snapshot(),
-                                 'summary': error_log.summary(),
-                                 'writable': _controls_allowed()})
+                # Ошибки чистятся от ключей ДО показа, а не только в отчёте.
+                # Сообщения об отказе биржи часто содержат полный адрес
+                # запроса вместе с ключом, а трассировки — куски конфига. На
+                # экране это лежит открытым текстом, и достаточно одного
+                # скриншота, отправленного за помощью, чтобы ключ уехал.
+                import report
+                self._send_json({
+                    'errors': report.scrub_obj(error_log.snapshot()),
+                    'summary': report.scrub_obj(error_log.summary()),
+                    'writable': _controls_allowed(),
+                })
             except Exception as exc:               # noqa: BLE001
                 self._fail(500, f'журнал ошибок недоступен: {exc}')
         elif path == '/api/update':
