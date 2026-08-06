@@ -287,6 +287,18 @@
   .sh-item .k { color: var(--ink-3); }
   .sh-item .v s { color: var(--ink-4); }
 
+  /* ── Подвкладки раздела ──────────────────────────────────────────── */
+  .subtabs { margin-bottom: 16px; }
+  .subtabs button {
+    font: inherit; font-size: 13px; font-weight: 500; color: var(--ink-2);
+    background: none; border: 0; border-radius: var(--r-sm);
+    padding: 6px 14px; cursor: pointer;
+  }
+  .subtabs button[aria-current="true"] {
+    background: var(--surface); color: var(--ink); font-weight: 600;
+    box-shadow: var(--shadow);
+  }
+
   /* ── Уведомления ─────────────────────────────────────────────────── */
   .nt-head, .nt-row { display: grid; grid-template-columns: 1fr 110px 110px;
                       align-items: center; gap: 8px; }
@@ -749,22 +761,36 @@
 
       <!-- ── Управление ───────────────────────────────────────────────── -->
       <section class="page" data-page="control" hidden>
-        <div id="portfolio-limit"></div>
-        <div id="controls"></div>
-        <div id="notify"></div>
-        <div id="keys"></div>
-        <div id="settings-history"></div>
-        <div id="update"></div>
+        <!-- Вкладки внутри страницы: шесть панелей подряд занимали два
+             экрана и смешивали то, что трогают ежедневно (пауза, пределы), с
+             тем, что настраивают раз в месяц (ключи, обновление). Чтобы
+             поставить бота на паузу, приходилось листать мимо ключей биржи. -->
+        <div class="seg subtabs" id="control-tabs" role="group"></div>
+        <div class="subpage" data-sub="risk">
+          <div id="portfolio-limit"></div>
+        </div>
+        <div class="subpage" data-sub="strategies" hidden>
+          <div id="controls"></div>
+        </div>
+        <div class="subpage" data-sub="app" hidden>
+          <div id="notify"></div>
+          <div id="keys"></div>
+          <div id="update"></div>
+          <div id="settings-history"></div>
+        </div>
       </section>
 
       <!-- ── Ошибки ───────────────────────────────────────────────────── -->
-      <section class="page" data-page="errors" hidden>
-        <div id="errors"></div>
-      </section>
-
-      <!-- ── Журнал ───────────────────────────────────────────────────── -->
-      <section class="page" data-page="log" hidden>
-        <div class="panel"><pre id="log">…</pre></div>
+      <!-- Ошибки и журнал сведены в один раздел: назначение у них одно —
+           «что пошло не так», — а в меню они занимали два места из семи. -->
+      <section class="page" data-page="diag" hidden>
+        <div class="seg subtabs" id="diag-tabs" role="group"></div>
+        <div class="subpage" data-sub="errors">
+          <div id="errors"></div>
+        </div>
+        <div class="subpage" data-sub="log" hidden>
+          <div class="panel"><pre id="log">…</pre></div>
+        </div>
       </section>
     </div>
   </main>
@@ -799,6 +825,10 @@ function syncUrl() {
   if (period !== 'all') u.set('period', period);
   if (strategy !== 'ALL') u.set('strategy', strategy);
   if (page !== 'overview') u.set('page', page);
+  // Подвкладка тоже в адресе: страницу перезагружают и присылают ссылкой.
+  if (sub && SUBTABS[page] && SUBTABS[page].some(([id]) => id === sub)) {
+    u.set('sub', sub);
+  }
   const s = u.toString();
   history.replaceState(null, '', s ? '?' + s : location.pathname);
 }
@@ -1457,8 +1487,7 @@ const PAGES = [
   { id: 'history',   ic: '≡', title: 'История' },
   { id: 'analytics', ic: '◨', title: 'Аналитика' },
   { id: 'control',   ic: '⚙', title: 'Управление' },
-  { id: 'errors',    ic: '⚠', title: 'Ошибки' },
-  { id: 'log',       ic: '⌘', title: 'Журнал' },
+  { id: 'diag',      ic: '⚠', title: 'Диагностика' },
 ];
 let page = PAGES.some(p => p.id === q.get('page')) ? q.get('page') : 'overview';
 
@@ -1466,7 +1495,7 @@ function buildNav() {
   const counts = {
     positions: (DATA && (DATA.open_positions || []).length + (DATA.pending_orders || []).length) || 0,
     history: (DATA && DATA.closed_total) || 0,
-    errors: (DATA && DATA.errors && DATA.errors.groups) || 0,
+    diag: (DATA && DATA.errors && DATA.errors.groups) || 0,
   };
   document.getElementById('nav').innerHTML = PAGES.map(p => {
     const n = counts[p.id];
@@ -1483,8 +1512,44 @@ function buildNav() {
     // Настройки и журнал грузятся по требованию: держать их в общем опросе
     // значило бы затирать поле, которое оператор прямо сейчас правит.
     if (page === 'control') loadSettings();
-    if (page === 'log') refreshLog();
+    if (page === 'diag' && currentSub('diag') === 'log') refreshLog();
   };
+}
+
+/* ── Подвкладки внутри раздела ──────────────────────────────────────────── */
+/* Состояние держится в адресе (?sub=...), а не только в памяти: страницу
+   перезагружают и присылают ссылкой, и возвращаться каждый раз на первую
+   вкладку — мелкое, но ежедневное раздражение. */
+const SUBTABS = {
+  control: [['risk', 'Риск'], ['strategies', 'Стратегии'], ['app', 'Приложение']],
+  diag: [['errors', 'Ошибки'], ['log', 'Журнал']],
+};
+let sub = q.get('sub') || '';
+
+function currentSub(pageId) {
+  const list = SUBTABS[pageId];
+  if (!list) return '';
+  return list.some(([id]) => id === sub) ? sub : list[0][0];
+}
+
+function buildSubtabs(pageId) {
+  const list = SUBTABS[pageId];
+  const box = el(pageId + '-tabs');
+  if (!list || !box) return;
+  const active = currentSub(pageId);
+  box.innerHTML = list.map(([id, title]) =>
+    `<button type="button" data-sub="${id}" aria-current="${id === active}">${title}</button>`
+  ).join('');
+  box.onclick = e => {
+    const b = e.target.closest('button');
+    if (!b) return;
+    sub = b.dataset.sub;
+    syncUrl();
+    showPage();
+  };
+  document.querySelectorAll(`[data-page="${pageId}"] .subpage`).forEach(n => {
+    n.hidden = n.dataset.sub !== active;
+  });
 }
 
 function showPage() {
@@ -1500,13 +1565,14 @@ function showPage() {
   if (page === 'control') renderKeys(DATA && DATA.writable !== false);
   if (page === 'control') loadSettingsHistory();
   if (page === 'control') portfolioLimit(WRITABLE);
-  if (page === 'errors') loadErrors();
+  buildSubtabs(page);
+  if (page === 'diag' && currentSub('diag') === 'errors') loadErrors();
   // Настройки могли отрисоваться раньше, чем пришли данные бота: тогда в
   // карточках не было полей, зависящих от режима (депозит есть только в
   // фантоме) и от истории стратегии. Перерисовываем ровно один раз —
   // повторять на каждом такте нельзя, это затирало бы поле под курсором.
   if (page === 'control' && SETTINGS && CONTROLS_BLIND && DATA) renderControls();
-  if (page === 'log' && !LOG_LOADED) refreshLog();
+  if (page === 'diag' && currentSub('diag') === 'log' && !LOG_LOADED) refreshLog();
   const def = PAGES.find(p => p.id === page);
   document.getElementById('page-title').textContent = def ? def.title : '';
   buildNav();
@@ -3181,7 +3247,9 @@ function logClass(line) {
 
 async function refreshLog() {
   const box = document.getElementById('log');
-  if (page !== 'log') return;
+  // Журнал переехал в «Диагностику» подвкладкой: проверка на прежнюю
+  // страницу молча выключила бы его обновление.
+  if (page !== 'diag' || currentSub('diag') !== 'log') return;
   try {
     const d = await (await fetch('/api/log', { cache: 'no-store' })).json();
     const atEnd = box.scrollTop + box.clientHeight >= box.scrollHeight - 40;

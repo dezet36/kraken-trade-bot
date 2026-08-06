@@ -774,6 +774,25 @@ def _attention(payload):
         items.append({'level': 'warn', 'text': 'Бот на паузе — новые входы не открываются',
                       'detail': ''})
 
+    # Дневной предел. Сработавший стоп-кран обязан быть виден на первом
+    # экране: иначе «почему бот ничего не открывает» выясняется через журнал,
+    # а выглядит это как поломка.
+    portfolio = payload.get('portfolio') or {}
+    day_limit = portfolio.get('day_limit') or 0
+    day_pct = portfolio.get('day_pct') or 0
+    if portfolio.get('day_stopped'):
+        items.append({
+            'level': 'bad',
+            'text': f'Дневной предел убытка достигнут: {day_pct:.2f}% при {day_limit:.2f}%',
+            'detail': 'новые сделки до завтра не открываются, открытые ведутся как обычно',
+        })
+    elif day_limit and day_pct < 0 and -day_pct >= day_limit / 2:
+        items.append({
+            'level': 'warn',
+            'text': f'За день потеряно {abs(day_pct):.2f}% при пределе {day_limit:.2f}%',
+            'detail': 'ещё немного — и новые сделки перестанут открываться',
+        })
+
     untracked = [p for p in payload.get('open_positions') or [] if p.get('untracked')]
     if untracked:
         items.append({
