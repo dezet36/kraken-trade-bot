@@ -23,8 +23,13 @@
     --hairline-2:rgba(60,60,67,.08);
     --ink:       #1c1c1e;
     --ink-2:     #3c3c43;
-    --ink-3:     rgba(60,60,67,.6);
-    --ink-4:     rgba(60,60,67,.32);
+    /* Прозрачность подобрана по контрасту, а не на глаз. На белом фоне было:
+       ink-3 — 3.44:1, ink-4 — 1.80:1 при норме 4.5:1 для мелкого текста.
+       Именно этим цветом написаны все подсказки под полями, и читать их было
+       нечем. Стало 4.74:1 и 3.44:1: ink-3 годится для текста, ink-4 остаётся
+       для подписей на графиках и прочей вспомогательной разметки. */
+    --ink-3:     rgba(60,60,67,.72);
+    --ink-4:     rgba(60,60,67,.60);
     --accent:    #0a84ff;
     --accent-soft: rgba(10,132,255,.12);
     --good:      #248a3d;
@@ -49,7 +54,8 @@
       --sidebar: rgba(28,28,30,.72);
       --hairline: rgba(235,235,245,.16); --hairline-2: rgba(235,235,245,.08);
       --ink: #ffffff; --ink-2: #ebebf5;
-      --ink-3: rgba(235,235,245,.6); --ink-4: rgba(235,235,245,.3);
+      /* Тот же расчёт, что для светлой темы: подсказки должны читаться. */
+      --ink-3: rgba(235,235,245,.75); --ink-4: rgba(235,235,245,.55);
       --accent: #0a84ff; --accent-soft: rgba(10,132,255,.22);
       --good: #30d158; --bad: #ff453a; --warn: #ff9f0a; --ok-dot: #30d158;
       --grid: rgba(235,235,245,.10); --axis: rgba(235,235,245,.26);
@@ -250,7 +256,7 @@
     font-size: 11.5px; line-height: 1.45; white-space: pre;
   }
 
-  /* ── Сравнение стратегий ─────────────────────────────────────────── */
+/* ── Сравнение стратегий ─────────────────────────────────────────── */
   .pos-chart { margin-top: 10px; }
   .pos-chart[hidden] { display: none; }
 
@@ -517,9 +523,19 @@
   }
   .ctl-row input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
   .ctl-row input:disabled { opacity: .45; }
-  .ctl-note { font-size: 11.5px; color: var(--ink-4); padding: 0 20px 12px;
-              margin-top: -6px; line-height: 1.45; }
-  .ctl-foot { display: flex; align-items: center; gap: 12px; margin-top: 16px; }
+  /* Подсказка под полем. Отрицательный отступ подтягивал её к своему полю, и
+     это верно, пока она стоит ПОСЛЕ поля. Но такая же подсказка стоит после
+     ряда кнопок — и там она наезжала прямо на них: текст шёл сквозь
+     «Применить» и «Отключить». Подтяжка уменьшена, а для случая «после
+     кнопок» задан свой, положительный отступ. */
+  .ctl-note { font-size: 12px; color: var(--ink-3); padding: 0 20px 12px;
+              margin-top: -2px; line-height: 1.5; }
+  .ctl-foot + .ctl-note { margin-top: 10px; }
+  /* Внутри карточки с полями отступ уже есть у самой карточки: без этого
+     подсказка оказывалась сдвинутой на 40px и не совпадала с кнопками. */
+  .card-pad > .ctl-note { padding-left: 0; padding-right: 0; }
+  .ctl-foot { display: flex; align-items: center; gap: 12px; margin-top: 18px;
+              flex-wrap: wrap; }
   .saved { font-size: 13px; color: var(--good); }
   .warn-box { font-size: 12.5px; color: var(--ink-3); padding: 12px 16px;
               border-radius: var(--r-md); background: var(--surface);
@@ -711,8 +727,23 @@ function syncUrl() {
 
 /* ── Формат ─────────────────────────────────────────────────────────────── */
 const money = v => (v >= 0 ? '+' : '−') + '$' + Math.abs(v).toFixed(2);
-const pct   = v => (v >= 0 ? '+' : '−') + Math.abs(v).toFixed(2) + '%';
-const cls   = v => v > 0 ? 'pos' : (v < 0 ? 'neg' : '');
+/* Знак ставится по ОКРУГЛЁННОМУ значению, а не по исходному. Иначе результат
+   вроде −0.004% печатался как «−0.00%»: на экране ноль, но со знаком минус, и
+   читается это как убыток, которого нет. */
+const pct   = v => {
+  const shown = Math.abs(v).toFixed(2);
+  if (parseFloat(shown) === 0) return shown + '%';
+  return (v >= 0 ? '+' : '−') + shown + '%';
+};
+/* Цвет по ТОМУ ЖЕ значению, что видит человек. Результат вроде −0.004%
+   печатается как «0.00%», и красить его в красный — говорить об убытке,
+   которого на экране нет. Порог совпадает с точностью показа. */
+const cls   = (v, eps) => {
+  const value = Number(v) || 0;
+  const limit = eps == null ? 0.005 : eps;
+  if (Math.abs(value) < limit) return '';
+  return value > 0 ? 'pos' : 'neg';
+};
 const price = v => v ? v.toLocaleString('ru', { maximumFractionDigits: 8 }) : '—';
 const usd   = v => '$' + Number(v || 0).toLocaleString('ru', { maximumFractionDigits: 0 });
 const esc   = s => String(s == null ? '' : s)
@@ -2283,6 +2314,17 @@ document.addEventListener('keydown', e => {
   if (e.key === 'Escape') closeTrade();
 });
 
+/* Число со знаком. Отдельная функция нужна из-за одной мелочи с большими
+   последствиями для доверия: toFixed сохраняет минус у значений, которые
+   после округления равны нулю, и на экране появлялось «-0.00» — ноль, но со
+   знаком убытка. */
+function fx(v, digits, sign) {
+  const value = Number(v) || 0;
+  const shown = Math.abs(value).toFixed(digits);
+  if (parseFloat(shown) === 0) return shown;
+  return (value < 0 ? '−' : (sign ? '+' : '')) + shown;
+}
+
 function compareTable(byStrategy) {
   const box = el('compare');
   if (!box) return;
@@ -2324,9 +2366,9 @@ function compareTable(byStrategy) {
      v => v.toFixed(1), true],
     ['Винрейт', k => byStrategy[k].stats.winrate, v => v.toFixed(1) + '%', true],
     ['Средний R', k => byStrategy[k].stats.expectancy,
-     v => (v >= 0 ? '+' : '') + v.toFixed(3), true],
+     v => fx(v, 3, true), true],
     ['Сумма R', k => byStrategy[k].stats.sumR,
-     v => (v >= 0 ? '+' : '') + v.toFixed(1), true],
+     v => fx(v, 1, true), true],
     ['Profit factor', k => byStrategy[k].stats.pf,
      v => v === null ? '—' : v.toFixed(2), true],
     ['Просадка', k => maxDD(byStrategy[k].rows, windowStartBalance(k, byStrategy[k].rows)),
@@ -2336,7 +2378,7 @@ function compareTable(byStrategy) {
       const base = windowStartBalance(k, st.rows);
       const dd = maxDD(st.rows, base);
       return dd ? (base ? st.stats.pnl / base * 100 : 0) / dd : 0;
-    }, v => v.toFixed(2), true],
+    }, v => fx(v, 2, false), true],
     ['Медиана удержания', k => median(k), v => fmtMinutes(v), null],
     ['Издержки', k => byStrategy[k].stats.fees, v => '$' + v.toFixed(2), false],
   ];
