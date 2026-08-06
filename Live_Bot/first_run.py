@@ -43,6 +43,34 @@ def needs_setup():
     return not (key and secret)
 
 
+def _seed_env():
+    """
+    Создаёт .env из шаблона, если его ещё нет.
+
+    Окно спрашивает четыре вещи — биржу, режим и пару ключей, — а настроек в
+    боте десятки. Файл, собранный только из ответов, оставлял бы всё
+    остальное на умолчаниях, зашитых в коде, и человек даже не знал бы, что
+    там есть. Один раз это уже стоило дорого: без строки STRATEGY свежая
+    установка торговала одной стратегией из трёх.
+
+    Шаблон едет внутри сборки и приходит с комментариями: открыв файл, видно
+    и что можно менять, и что это значит.
+    """
+    if os.path.exists(ENV_PATH):
+        return
+    base = getattr(sys, '_MEIPASS', os.path.dirname(os.path.dirname(
+        os.path.abspath(__file__))))
+    for candidate in (os.path.join(base, '.env.example'),
+                      os.path.join(os.path.dirname(base), '.env.example')):
+        if os.path.exists(candidate):
+            with open(candidate, encoding='utf-8') as src:
+                text = src.read()
+            with open(ENV_PATH, 'w', encoding='utf-8') as dst:
+                dst.write(text)
+            return
+    log('шаблон .env.example не найден — файл настроек будет собран из ответов')
+
+
 def _write_env(values):
     """
     Дописывает значения в .env, сохраняя всё остальное.
@@ -253,6 +281,7 @@ def run_setup():
             # У окна нет консоли, а LIVE требует подтверждения с клавиатуры.
             # Выбор режима здесь и есть осознанное подтверждение.
             values['LIVE_CONFIRMED'] = 'YES'
+        _seed_env()
         _write_env(values)
 
         # Значения нужны прямо сейчас, в этом же процессе: бот запускается

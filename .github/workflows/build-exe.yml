@@ -63,6 +63,7 @@ jobs:
             --add-data "$root\Live_Bot\dashboard.html;." `
             --add-data "$root\Live_Bot\app_icon.ico;." `
             --add-data "$root\Live_Bot\VERSION;." `
+            --add-data "$root\.env.example;." `
             --hidden-import ccxt.bybit `
             --hidden-import ccxt.bingx `
             --hidden-import apscheduler.schedulers.blocking `
