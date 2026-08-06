@@ -237,8 +237,11 @@ def run_setup():
                         variable=mode_var).pack(side='left', padx=(0, 10))
 
     ttk.Label(frame, text='API key').grid(row=4, column=0, sticky='w', pady=(12, 0))
-    ttk.Entry(frame, textvariable=key_var, width=46).grid(row=4, column=1,
-                                                          pady=(12, 0))
+    key_entry = ttk.Entry(frame, textvariable=key_var, width=46)
+    key_entry.grid(row=4, column=1, pady=(12, 0))
+    # Курсор сразу в поле ключа: биржу и режим чаще оставляют как есть, а
+    # вставлять ключ всё равно первым делом.
+    key_entry.focus_set()
     ttk.Label(frame, text='Secret key').grid(row=5, column=0, sticky='w', pady=(6, 0))
     ttk.Entry(frame, textvariable=secret_var, width=46,
               show='•').grid(row=5, column=1, pady=(6, 0))

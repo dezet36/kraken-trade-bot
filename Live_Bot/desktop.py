@@ -208,9 +208,48 @@ def selftest():
     return 1 if failed else 0
 
 
+def diag():
+    """
+    Куда приложение смотрит и что там нашло.
+
+    Нужно затем, что почти все недоумения при работе с окном сводятся к
+    одному вопросу: КАКОЙ каталог данных приложение считает своим. Он не
+    всегда лежит рядом с .exe — машинная переменная BOT_DATA_DIR, если её
+    кто-то однажды поставил (например, установщик службы), перекрывает всё, и
+    приложение читает чужой .env, а свой не находит. Догадаться об этом по
+    поведению нельзя, а по этому отчёту — сразу.
+    """
+    import first_run
+    key = (os.getenv(f'{config.EXCHANGE_NAME.upper()}_API_KEY') or '').strip()
+    lines = [
+        f'файл приложения:      {sys.executable}',
+        f'каталог данных:       {config.DATA_DIR}',
+        f'BOT_DATA_DIR:         {os.getenv("BOT_DATA_DIR") or "(не задана)"}',
+        f'.env:                 {first_run.ENV_PATH}',
+        f'.env существует:      {os.path.exists(first_run.ENV_PATH)}',
+        f'спросит ли ключи:     {first_run.needs_setup()}',
+        f'ключ найден:          {"да, " + key[:6] + "…" if key else "нет"}',
+        f'биржа:                {config.EXCHANGE_NAME}',
+        f'режим:                {config.TRADING_MODE}',
+        f'стратегии:            {config.STRATEGY}',
+        f'пар в пуле:           {len(config.TRADING_PAIRS_POOL)}',
+        f'порт дашборда:        {config.DASHBOARD_PORT}',
+    ]
+    report = os.path.join(config.DATA_DIR, 'diag.log')
+    try:
+        with open(report, 'w', encoding='utf-8') as fh:
+            fh.write('\n'.join(lines) + '\n')
+    except OSError as exc:
+        lines.append(f'ОТЧЁТ НЕ ЗАПИСАЛСЯ: {exc}')
+    _alert(APP_TITLE, '\n'.join(lines))
+    return 0
+
+
 def main():
     if '--selftest' in sys.argv:
         sys.exit(selftest())
+    if '--diag' in sys.argv:
+        sys.exit(diag())
 
     # Ключей нет — спрашиваем окном. Без них бот падает на первом обращении к
     # бирже, а человек видит только «дашборд не поднялся»: причина настоящая,

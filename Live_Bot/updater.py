@@ -73,7 +73,11 @@ def _git(*args, timeout=TIMEOUT):
     try:
         proc = subprocess.run(
             ('git',) + args, cwd=ROOT, capture_output=True, text=True,
-            encoding='utf-8', errors='replace', timeout=timeout)
+            encoding='utf-8', errors='replace', timeout=timeout,
+            # Без этого флага каждый вызов git в оконном приложении открывает
+            # консольное окно — оно моргает или, если git задумался, висит на
+            # экране. Программе с окном такие гости не нужны.
+            creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
         return proc.returncode, proc.stdout.strip(), proc.stderr.strip()
     except FileNotFoundError:
         return 127, '', 'git не установлен'
