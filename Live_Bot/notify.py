@@ -48,6 +48,15 @@ $n = New-Object Windows.UI.Notifications.ToastNotification $t
 """
 
 
+def _allowed(event):
+    """Разрешено ли это событие в канал «рабочий стол»."""
+    try:
+        import settings_store as settings
+        return settings.notify_on(event, 'desktop')
+    except Exception:                              # noqa: BLE001
+        return True                                # настройка недоступна — не молчим
+
+
 def show(title, body):
     """
     Показывает уведомление. Ничего не возвращает и никогда не бросает.
@@ -81,15 +90,21 @@ def show(title, body):
 
 
 def trade_opened(strategy, pair, direction, entry, risk):
+    if not _allowed('trade_opened'):
+        return
     show(f'{strategy}: вход {pair}',
          f'{direction} по {entry:.8g} · риск ${risk:.2f}')
 
 
 def trade_closed(strategy, pair, pnl, pnl_r, reason):
+    if not _allowed('trade_closed'):
+        return
     sign = '+' if pnl >= 0 else '−'
     show(f'{strategy}: закрыта {pair}',
          f'{sign}${abs(pnl):.2f} ({pnl_r:+.2f} R) · {reason}')
 
 
 def error(message):
+    if not _allowed('error'):
+        return
     show('Kraken: ошибка', message)

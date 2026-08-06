@@ -955,6 +955,7 @@ class _Handler(BaseHTTPRequestHandler):
             self._send_json({
                 'settings': _strategy_settings(stored),
                 'portfolio': stored.get(settings_store.PORTFOLIO, {}),
+                'notify': stored.get(settings_store.NOTIFY, {}),
                 'limits': settings_store.LIMITS,
                 'writable': _controls_allowed()})
         elif path in ('/', '/index.html'):
@@ -1066,8 +1067,10 @@ class _Handler(BaseHTTPRequestHandler):
             # Держим настройки в согласии с состоянием счёта, иначе панель
             # покажет одно число, а брокер будет считать по другому.
             settings_store.save({changes['strategy']: {'deposit': changes['deposit']}})
+            stored = settings_store.load()
             self._send_json({'ok': True, 'message': message,
-                             'settings': _strategy_settings()})
+                             'settings': _strategy_settings(stored),
+                             'notify': stored.get(settings_store.NOTIFY, {})})
             return
 
         result = settings_store.save(changes)
@@ -1075,6 +1078,7 @@ class _Handler(BaseHTTPRequestHandler):
             _broker.apply_settings(result)
         self._send_json({'settings': _strategy_settings(result),
                          'portfolio': result.get(settings_store.PORTFOLIO, {}),
+                         'notify': result.get(settings_store.NOTIFY, {}),
                          'limits': settings_store.LIMITS,
                          'writable': True})
 

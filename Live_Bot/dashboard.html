@@ -287,6 +287,17 @@
   .sh-item .k { color: var(--ink-3); }
   .sh-item .v s { color: var(--ink-4); }
 
+  /* ── Уведомления ─────────────────────────────────────────────────── */
+  .nt-head, .nt-row { display: grid; grid-template-columns: 1fr 110px 110px;
+                      align-items: center; gap: 8px; }
+  .nt-head { margin: 10px 0 4px; }
+  .nt-head span { font-size: 11.5px; color: var(--ink-3); text-align: center; }
+  .nt-row { padding: 8px 0; border-top: 1px solid var(--hairline-2); }
+  .nt-name { font-size: 13.5px; }
+  .nt-cell { display: flex; justify-content: center; cursor: pointer; }
+  .nt-cell input { width: 17px; height: 17px; accent-color: var(--accent);
+                   cursor: pointer; }
+
   /* ── Ключи биржи ─────────────────────────────────────────────────── */
   .keys-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
                gap: 12px 18px; margin: 12px 0 14px; }
@@ -740,6 +751,7 @@
       <section class="page" data-page="control" hidden>
         <div id="portfolio-limit"></div>
         <div id="controls"></div>
+        <div id="notify"></div>
         <div id="keys"></div>
         <div id="settings-history"></div>
         <div id="update"></div>
@@ -1484,6 +1496,7 @@ function showPage() {
   // обработчик клика не срабатывал, а данные для них в общий опрос не входят.
   if (page === 'control' && !SETTINGS) loadSettings();
   if (page === 'control' && !UPDATE) loadUpdate(false);
+  if (page === 'control') renderNotify(DATA && DATA.writable !== false);
   if (page === 'control') renderKeys(DATA && DATA.writable !== false);
   if (page === 'control') loadSettingsHistory();
   if (page === 'control') portfolioLimit(WRITABLE);
@@ -1900,6 +1913,77 @@ async function sendPortfolio(risk, slots, day) {
    ошибиться: не тот файл, кавычки, пробел в конце. Здесь то же самое, но с
    проверкой на бирже до сохранения. Введённое никуда не показывается и в
    журнал не попадает. */
+/* ── Уведомления ────────────────────────────────────────────────────────── */
+/* Раздельно по событиям и каналам: «слишком много уведомлений» и «слишком
+   мало» — разные беды у одного человека. Сообщение о каждом входе на телефон
+   раздражает, а сообщение об ошибке пропускать нельзя. */
+let NOTIFY_SETTINGS = {};
+const NOTIFY_EVENTS = [
+  ['trade_opened', 'Вход в сделку'],
+  ['trade_closed', 'Закрытие сделки'],
+  ['error', 'Ошибки бота'],
+  ['daily', 'Дневная сводка'],
+];
+const NOTIFY_CHANNELS = [['desktop', 'Windows'], ['telegram', 'Telegram']];
+
+function renderNotify(writable) {
+  const box = el('notify');
+  if (!box) return;
+  const cur = NOTIFY_SETTINGS || {};
+  const on = key => cur[key] !== false;
+
+  const rows = NOTIFY_EVENTS.map(([event, label]) => `
+    <div class="nt-row">
+      <span class="nt-name">${label}</span>
+      ${NOTIFY_CHANNELS.map(([ch]) => `
+        <label class="nt-cell">
+          <input type="checkbox" data-notify="${event}_${ch}"
+            ${on(event + '_' + ch) ? 'checked' : ''} ${writable ? '' : 'disabled'}>
+        </label>`).join('')}
+    </div>`).join('');
+
+  box.innerHTML = `<div class="panel card-pad">
+    <div class="panel-head bare"><h2>Уведомления</h2>
+      <span class="hint">что присылать и куда</span></div>
+    <div class="nt-head">
+      <span></span>${NOTIFY_CHANNELS.map(([, l]) => `<span>${l}</span>`).join('')}
+    </div>
+    ${rows}
+    <div class="ctl-foot">
+      <button type="button" class="btn" id="nt-save"
+        ${writable ? '' : 'disabled'}>Применить</button>
+      <span class="saved" id="nt-msg"></span>
+    </div>
+    <div class="ctl-note">Выключенное уведомление не влияет на торговлю: событие
+      всё равно попадёт в журнал и на дашборд, просто не придёт сообщением.</div>
+  </div>`;
+
+  const save = el('nt-save');
+  if (save) save.onclick = saveNotify;
+}
+
+async function saveNotify() {
+  const msg = el('nt-msg');
+  const payload = {};
+  document.querySelectorAll('[data-notify]').forEach(inp => {
+    payload[inp.dataset.notify] = inp.checked;
+  });
+  if (msg) { msg.style.color = 'var(--ink-3)'; msg.textContent = 'сохраняю…'; }
+  try {
+    const resp = await fetch('/api/settings', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ NOTIFY: payload }),
+    });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.error || resp.status);
+    SETTINGS = data.settings || SETTINGS;
+    NOTIFY_SETTINGS = data.notify || NOTIFY_SETTINGS;
+    if (msg) { msg.style.color = 'var(--good)'; msg.textContent = 'сохранено'; }
+  } catch (e) {
+    if (msg) { msg.style.color = 'var(--bad)'; msg.textContent = e.message; }
+  }
+}
+
 function renderKeys(writable) {
   const box = el('keys');
   if (!box) return;
@@ -2915,7 +2999,9 @@ async function loadSettings() {
   try {
     const d = await (await fetch('/api/settings', { cache: 'no-store' })).json();
     SETTINGS = d.settings; LIMITS = d.limits; WRITABLE = !!d.writable;
+    NOTIFY_SETTINGS = d.notify || {};
     renderControls();
+    renderNotify(WRITABLE);
   } catch (e) { /* панель просто не появится */ }
 }
 

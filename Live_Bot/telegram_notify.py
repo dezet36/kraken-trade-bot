@@ -366,9 +366,20 @@ def daily_summary(total: int, wins: int, daily_pnl: float, balance: float):
 # одна дневная сводка без разбивки. А смысл фантома именно в сравнении
 # стратегий, поэтому имя стратегии здесь стоит первым.
 
+def _allowed(event: str) -> bool:
+    """Разрешено ли это событие в канал «телеграм»."""
+    try:
+        import settings_store as settings
+        return settings.notify_on(event, 'telegram')
+    except Exception:                              # noqa: BLE001
+        return True                                # настройка недоступна — не молчим
+
+
 def paper_trade_opened(strategy: str, pair: str, direction: str, entry: float,
                        stop: float, target: float, rr: float, risk: float,
                        why: str = ''):
+    if not _allowed('trade_opened'):
+        return
     arrow = "🟢" if direction == "LONG" else "🔴"
     tail = f"\n<i>{why}</i>" if why else ""
     _send(
@@ -384,6 +395,8 @@ def paper_trade_opened(strategy: str, pair: str, direction: str, entry: float,
 
 def paper_trade_closed(strategy: str, pair: str, reason: str, pnl: float,
                        pnl_r: float, balance: float):
+    if not _allowed('trade_closed'):
+        return
     icon = "✅" if pnl > 0 else ("⚪" if pnl == 0 else "❌")
     _send(
         f"{icon} <b>{strategy}</b> · закрыта {pair}\n"
@@ -404,6 +417,8 @@ def daily_by_strategy(rows: list, date_str: str = ''):
 
     rows: [{'strategy', 'pnl', 'pnl_r'}]
     """
+    if not _allowed('daily'):
+        return
     date_str = date_str or datetime.now().strftime("%d.%m.%Y")
     if not rows:
         _send(f"📊 <b>Итог за {date_str}</b>\nСделок не было")
@@ -445,6 +460,8 @@ def scan_result(liquid: int, candidates: int, active_positions: int):
 
 
 def error_alert(message: str, telegram_id=None):
+    if not _allowed('error'):
+        return
     _send(
         f"⚠️ <b>ОШИБКА БОТА</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"

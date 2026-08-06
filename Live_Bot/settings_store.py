@@ -50,6 +50,18 @@ PORTFOLIO = 'PORTFOLIO'
 PORTFOLIO_FIELDS = ('portfolio_risk_pct', 'portfolio_max_positions',
                     'daily_loss_pct')
 
+# Уведомления: что присылать и куда. Раздельно по событиям и каналам, потому
+# что «слишком много уведомлений» и «слишком мало» — разные беды у одного и
+# того же человека: сообщение о каждом входе на телефон раздражает, а
+# сообщение об ошибке пропускать нельзя.
+#
+# По умолчанию включено всё — так вело себя приложение до появления этой
+# настройки. Молча выключить часть сообщений значило бы, что человек
+# перестанет что-то получать и не поймёт почему.
+NOTIFY = 'NOTIFY'
+NOTIFY_EVENTS = ('trade_opened', 'trade_closed', 'error', 'daily')
+NOTIFY_CHANNELS = ('desktop', 'telegram')
+
 _lock = threading.Lock()
 _cache = None
 _mtime = None
@@ -104,6 +116,8 @@ def _defaults():
         for name in STRATEGIES
     }
     base[PORTFOLIO] = _portfolio_defaults()
+    base[NOTIFY] = {f'{event}_{channel}': True
+                    for event in NOTIFY_EVENTS for channel in NOTIFY_CHANNELS}
     return base
 
 
@@ -145,6 +159,10 @@ def load(force=False):
                     if field in stored_portfolio:
                         data[PORTFOLIO][field] = _clamp(
                             field, stored_portfolio[field], data[PORTFOLIO][field])
+                stored_notify = stored.get(NOTIFY) or {}
+                for key in data[NOTIFY]:
+                    if key in stored_notify:
+                        data[NOTIFY][key] = bool(stored_notify[key])
                 for name in STRATEGIES:
                     item = (stored.get(name) or {})
                     data[name]['enabled'] = bool(item.get('enabled', True))
@@ -174,6 +192,11 @@ def save(changes):
         if field in portfolio:
             data[PORTFOLIO][field] = _clamp(field, portfolio[field],
                                             data[PORTFOLIO][field])
+
+    notify_changes = changes.get(NOTIFY) or {}
+    for key in data[NOTIFY]:
+        if key in notify_changes:
+            data[NOTIFY][key] = bool(notify_changes[key])
 
     for name in STRATEGIES:
         item = (changes.get(name) or {})
@@ -296,6 +319,18 @@ def portfolio_risk_pct():
 def portfolio_max_positions():
     """Предел числа позиций и ордеров на весь портфель. 0 — выключен."""
     return int(load().get(PORTFOLIO, {}).get('portfolio_max_positions', 0) or 0)
+
+
+def notify_on(event, channel):
+    """
+    Присылать ли уведомление о событии в этот канал.
+
+    Неизвестное событие считается разрешённым: забытая настройка не должна
+    молча гасить сообщение, которое кто-то рассчитывал получить.
+    """
+    key = f'{event}_{channel}'
+    section = load().get(NOTIFY) or {}
+    return bool(section.get(key, True))
 
 
 def daily_loss_pct():
