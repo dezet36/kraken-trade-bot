@@ -357,6 +357,67 @@ def diag():
     return 0
 
 
+def port_busy(port, host='127.0.0.1'):
+    """
+    Занят ли порт дашборда кем-то ещё.
+
+    ПОЧЕМУ ЭТОГО НЕ ХВАТАЛО РАНЬШЕ. Готовность проверялась запросом к
+    http://127.0.0.1:порт/api/data — и запрос успешно получал ответ ОТ ЧУЖОГО
+    сервера, если тот уже слушал этот порт. Приложение считало, что поднялось,
+    и открывало окно на дашборде другого процесса. Со стороны это выглядит
+    так: запустил новую версию, а в окне старая. Именно так и вышло у
+    пользователя — семь часов работал бот, запущенный из исходников
+    (pythonw desktop.py), и новый .exe показывал его интерфейс.
+
+    Проверка «отвечает ли кто-то» отвечает не на тот вопрос. Правильный —
+    «свободен ли порт», и он решается попыткой занять его.
+    """
+    import socket
+
+    probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        # Без SO_REUSEADDR: нам нужно узнать, что порт ЗАНЯТ, а не одолжить
+        # его у чужого сокета в состоянии TIME_WAIT.
+        probe.bind((host, port))
+        return False
+    except OSError:
+        return True
+    finally:
+        probe.close()
+
+
+def port_owner(port):
+    """
+    Кто держит порт: «имя (PID)» либо пустая строка.
+
+    Спрашивается только в сообщении об ошибке, поэтому запуск двух консольных
+    команд здесь допустим — при обычном старте этот путь не выполняется.
+    """
+    if sys.platform != 'win32':
+        return ''
+    flags = getattr(subprocess, 'CREATE_NO_WINDOW', 0)
+    try:
+        out = subprocess.run(['netstat', '-ano', '-p', 'tcp'],
+                             capture_output=True, text=True, timeout=10,
+                             creationflags=flags).stdout
+        pid = ''
+        for line in out.splitlines():
+            parts = line.split()
+            if len(parts) >= 5 and parts[0].upper() == 'TCP' \
+                    and parts[1].endswith(f':{port}') and parts[3] == 'LISTENING':
+                pid = parts[4]
+                break
+        if not pid:
+            return ''
+        names = subprocess.run(['tasklist', '/FI', f'PID eq {pid}', '/NH', '/FO', 'CSV'],
+                               capture_output=True, text=True, timeout=10,
+                               creationflags=flags).stdout
+        name = names.split(',')[0].strip('" \r\n') if ',' in names else ''
+        return f'{name} (PID {pid})' if name else f'PID {pid}'
+    except Exception:                              # noqa: BLE001
+        return ''
+
+
 def main():
     if '--selftest' in sys.argv:
         sys.exit(selftest())
@@ -391,6 +452,23 @@ def main():
                   'Чтобы перейти на новую версию: закройте работающую\n'
                   'программу (или снимите Kraken.exe в диспетчере задач)\n'
                   'и запустите новый файл снова.'))
+        return
+
+    # Порт проверяем ДО запуска бота. Замок на второй экземпляр ловит только
+    # другую копию ЭТОГО приложения; бота, запущенного из исходников, он не
+    # видит вовсе — у того свой процесс и свой замок или его нет совсем. А
+    # порт один на всех, и именно он выдаёт чужого.
+    if port_busy(config.DASHBOARD_PORT):
+        owner = port_owner(config.DASHBOARD_PORT)
+        _alert(APP_TITLE,
+               f'Порт {config.DASHBOARD_PORT} уже занят'
+               + (f': {owner}.' if owner else '.') + '\n\n'
+               'Скорее всего, бот уже работает — возможно, запущенный из\n'
+               'исходников (pythonw desktop.py), а не этим приложением.\n\n'
+               'ЗАПУСТИ Я СЕЙЧАС ОКНО, вы увидели бы в нём интерфейс ТОГО\n'
+               'бота, а не этой версии. Раньше так и происходило.\n\n'
+               'Закройте работающего бота (диспетчер задач → Подробности →\n'
+               'снять задачу) и запустите это приложение снова.')
         return
 
     single_instance.mark_running(config.DATA_DIR, my_version,
