@@ -100,20 +100,37 @@ if __name__ == '__main__':
     sys.exit(pytest.main([__file__, '-v']))
 
 
-def test_version_file_is_enough_to_be_a_release(monkeypatch, tmp_path):
+def test_version_file_decides_only_outside_a_repo(monkeypatch):
     """
-    Наличие файла VERSION само по себе означает «это выпуск».
+    VERSION решает, только когда git-репозитория рядом НЕТ.
 
-    Признак прямее, чем sys.frozen: в репозитории VERSION нет — он создаётся
-    только при сборке. У пользователя собранное приложение всё равно уходило
-    в git-ветку и сообщало «каталог не является git-репозиторием», значит на
-    один sys.frozen полагаться нельзя.
+    Признак нужен на случай распакованной сборки, у которой почему-то не
+    встал sys.frozen. Но применять его безоговорочно нельзя: после локальной
+    сборки файл VERSION остаётся в рабочем каталоге, и запуск из исходников
+    начинал считать себя выпуском — обновление предлагало скачать .exe
+    поверх рабочей копии с git-историей. Ровно это я и сломал с первой
+    попытки, десятью упавшими проверками.
     """
     import updater
     import updater_app
 
     monkeypatch.setattr(updater_app, 'is_frozen', lambda: False)
     monkeypatch.setattr(updater_app, 'current_version', lambda: 'v1.0.9')
+
+    monkeypatch.setattr(updater, 'is_repo', lambda: False)
+    assert updater._app_mode() is updater_app, 'вне репозитория VERSION решает'
+
+    monkeypatch.setattr(updater, 'is_repo', lambda: True)
+    assert updater._app_mode() is None, 'в репозитории побеждает git'
+
+
+def test_frozen_wins_over_repo(monkeypatch):
+    """Собранное приложение — выпуск всегда, что бы ни лежало рядом."""
+    import updater
+    import updater_app
+
+    monkeypatch.setattr(updater_app, 'is_frozen', lambda: True)
+    monkeypatch.setattr(updater, 'is_repo', lambda: True)
     assert updater._app_mode() is updater_app
 
 
@@ -124,6 +141,7 @@ def test_no_version_and_not_frozen_is_source(monkeypatch):
 
     monkeypatch.setattr(updater_app, 'is_frozen', lambda: False)
     monkeypatch.setattr(updater_app, 'current_version', lambda: '')
+    monkeypatch.setattr(updater, 'is_repo', lambda: False)
     assert updater._app_mode() is None
 
 
