@@ -205,18 +205,27 @@ timeout /t 1 /nobreak >nul
 tasklist /fi "IMAGENAME eq {name}" | find /i "{name}" >nul
 if errorlevel 1 goto swap
 set /a TRIES+=1
-if %TRIES% LSS 30 goto wait
+if %TRIES% LSS 90 goto wait
+
+rem The app is still running after the wait: its file is locked and any move
+rem would fail. Touch nothing - the downloaded file stays for the next try.
+goto stuck
 
 :swap
 if exist "{old_exe}" del /f /q "{old_exe}"
 move /y "{exe}" "{old_exe}" >nul
+if errorlevel 1 goto stuck
 move /y "{new_exe}" "{exe}" >nul
 if errorlevel 1 (
-    rem Swap failed - put the previous app back so the user is not left
-    rem without a program at all.
+    rem Second move failed - put the previous app back so the user is not
+    rem left without a program at all.
     move /y "{old_exe}" "{exe}" >nul
 )
 start "" "{exe}"
+exit /b 0
+
+:stuck
+exit /b 1
 """
     with open(script, 'w', encoding='ascii', errors='replace') as fh:
         fh.write(body)
@@ -246,16 +255,53 @@ def apply():
                               'subject': 'предыдущая версия'},
                  'tag': info['tag']})
 
-    script = _swap_script(exe, new_exe, old_exe)
-    # DETACHED_PROCESS: сценарий должен пережить закрытие приложения, иначе
-    # он умрёт вместе с ним, не успев ничего подменить.
-    subprocess.Popen(['cmd', '/c', script],
-                     creationflags=getattr(subprocess, 'DETACHED_PROCESS', 0)
-                     | getattr(subprocess, 'CREATE_NO_WINDOW', 0),
-                     close_fds=True)
-    log(f"Обновление {info['tag']} скачано, приложение перезапускается")
+    _launch_swap(exe, new_exe, old_exe)
+    log(f"Обновление {info['tag']} скачано, приложение закрывается для подмены")
+    _close_app()
     info['restart_required'] = True
     return True, f"обновление {info['tag']} установлено, приложение перезапустится", info
+
+
+def _launch_swap(exe, new_exe, old_exe):
+    script = _swap_script(exe, new_exe, old_exe)
+    # DETACHED_PROCESS: сценарий обязан пережить закрытие приложения, иначе
+    # умрёт вместе с ним, не успев ничего подменить. С CREATE_NO_WINDOW его
+    # сочетать нельзя — CreateProcess такую пару отвергает.
+    subprocess.Popen(['cmd', '/c', script],
+                     creationflags=getattr(subprocess, 'DETACHED_PROCESS', 0),
+                     close_fds=True)
+
+
+def _close_app():
+    """
+    Закрывает приложение, чтобы оно отпустило свой файл.
+
+    Без этого шага обновление выглядело выполненным и не выполнялось: новая
+    версия скачивалась, сценарий подмены запускался, ждал полминуты, упирался
+    в занятый файл и уходил ни с чем. Единственный видимый след — лишний
+    файл .new рядом.
+
+    Сначала пробуем закрыть окно: тогда приложение завершится своим обычным
+    путём, дописав состояние на диск. Если окна нет (запуск службой или из
+    консоли), выходим принудительно — но с задержкой, чтобы дашборд успел
+    отдать ответ на нажатие, иначе человек увидит оборванное соединение
+    вместо сообщения об успехе.
+    """
+    import threading
+
+    def bye():
+        try:
+            import webview
+            windows = list(getattr(webview, 'windows', []) or [])
+            if windows:
+                for window in windows:
+                    window.destroy()
+                return
+        except Exception:                          # noqa: BLE001
+            pass
+        os._exit(0)
+
+    threading.Timer(2.0, bye).start()
 
 
 def rollback():
@@ -267,9 +313,6 @@ def rollback():
 
     # Порядок тот же, что при обновлении: текущий уезжает в сторону, на его
     # место встаёт отложенный. Разница только в том, какой из них какой.
-    script = _swap_script(exe, old_exe, exe + '.rolled')
-    subprocess.Popen(['cmd', '/c', script],
-                     creationflags=getattr(subprocess, 'DETACHED_PROCESS', 0)
-                     | getattr(subprocess, 'CREATE_NO_WINDOW', 0),
-                     close_fds=True)
+    _launch_swap(exe, old_exe, exe + '.rolled')
+    _close_app()
     return True, 'возвращаю предыдущую версию, приложение перезапустится'
