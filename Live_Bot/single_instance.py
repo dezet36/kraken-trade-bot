@@ -57,6 +57,37 @@ def acquire(data_dir):
         return True
 
 
+MARK_FILE = 'running_app.json'
+
+
+def mark_running(data_dir, version, exe_path):
+    """
+    Оставляет отметку о том, ЧТО именно сейчас работает.
+
+    Нужна второму запуску. Без неё он умеет только поднять чужое окно и
+    молча выйти — и человек, скачавший новую версию, видит открывшееся окно
+    старой и уверен, что обновился. Ровно так и вышло: новый файл скачали,
+    щёлкнули, окно появилось, а версия осталась прежней.
+    """
+    try:
+        import json
+        with open(os.path.join(data_dir, MARK_FILE), 'w', encoding='utf-8') as fh:
+            json.dump({'version': version or 'без версии', 'exe': exe_path,
+                       'pid': os.getpid()}, fh, ensure_ascii=False)
+    except Exception:                              # noqa: BLE001
+        pass                                       # отметка — удобство, не условие
+
+
+def running_info(data_dir):
+    """Что записал работающий экземпляр. Пустой словарь, если непонятно."""
+    try:
+        import json
+        with open(os.path.join(data_dir, MARK_FILE), encoding='utf-8') as fh:
+            return json.load(fh)
+    except Exception:                              # noqa: BLE001
+        return {}
+
+
 def focus_existing(title):
     """
     Поднимает окно уже работающего экземпляра.

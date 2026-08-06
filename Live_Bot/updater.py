@@ -135,7 +135,13 @@ def _app_mode():
     как именно устроено то, что она обновляет, ей незачем. Обе реализации
     отвечают словарём одной формы.
     """
-    import updater_app
+    try:
+        import updater_app
+    except Exception:                              # noqa: BLE001
+        # Модуль не уехал в сборку — обновляться будет нечем, но узнать об
+        # этом надо из панели, а не по молчаливому переходу на git-ветку,
+        # которая в собранном приложении всегда отвечает «не репозиторий».
+        return None
     return updater_app if updater_app.is_frozen() else None
 
 
@@ -151,8 +157,32 @@ def status(fetch=True):
         return app.status(fetch=fetch)
 
     if not is_repo():
+        # Отвечаем ПОДРОБНО, а не одной строкой про git. Эта же строка
+        # появлялась у собранного приложения, и по ней нельзя было понять
+        # главного: какая версия работает и почему она считает себя
+        # запущенной из исходников. Разбор превращался в переписку.
+        import sys as _sys
+
+        frozen = bool(getattr(_sys, 'frozen', False))
+        try:
+            import updater_app
+            version = updater_app.current_version() or 'файла VERSION нет'
+        except Exception as exc:                   # noqa: BLE001
+            version = f'не определилась: {exc}'
+        reason = ('Обновление недоступно: приложение считает, что запущено '
+                  f'из исходников, а каталог {ROOT} — не '
+                  'git-репозиторий.')
+        if not frozen:
+            reason += (' Если вы запускали Kraken.exe, значит работает НЕ он: '
+                       'проверьте в диспетчере задач, какой файл держит процесс.')
         return {'available': False, 'can_update': False,
-                'reason': 'каталог не является git-репозиторием'}
+                'reason': reason,
+                'current': {'commit': version, 'date': '',
+                            'subject': 'запуск из исходников' if not frozen
+                                       else 'собранное приложение'},
+                'mode': 'exe' if frozen else 'source',
+                'frozen': frozen,
+                'app_dir': ROOT}
 
     code, branch, _ = _git('rev-parse', '--abbrev-ref', 'HEAD')
     branch = branch if code == 0 else '?'

@@ -700,6 +700,10 @@
     <div class="sidebar-foot">
       <span class="state" id="state"><span class="dot"></span>подключение…</span>
       <span class="stamp" id="stamp"></span>
+      <!-- Версия на виду. Её негде было посмотреть вовсе, и на вопрос
+           «какая версия у вас работает» ответить было нечем: панель
+           обновления показывала её только когда обновление доступно. -->
+      <span class="stamp" id="ver" title="версия приложения"></span>
     </div>
   </aside>
 
@@ -2217,6 +2221,11 @@ async function loadSettingsHistory() {
 
 let UPDATE = null;
 
+// Версия нужна на любой странице — она в боковой панели. Поэтому спрашиваем
+// её один раз при запуске, не дожидаясь захода в «Управление»: именно там
+// человек и не смотрел, когда пытался понять, обновился он или нет.
+window.addEventListener('load', () => { if (!UPDATE) loadUpdate(false); });
+
 async function loadUpdate(check) {
   const box = el('update');
   if (!box) return;
@@ -2229,11 +2238,34 @@ async function loadUpdate(check) {
 }
 
 function renderUpdate(writable) {
+  const verBox = el('ver');
+  if (verBox && UPDATE) {
+    const c = UPDATE.current || {};
+    const mode = UPDATE.mode === 'exe' ? 'приложение'
+      : (UPDATE.mode === 'source' ? 'из исходников' : (UPDATE.branch || ''));
+    verBox.textContent = (c.commit ? 'версия ' + c.commit : 'версия неизвестна')
+      + (mode ? ' · ' + mode : '');
+  }
   const box = el('update');
   if (!box || !UPDATE) return;
   if (!UPDATE.available) {
+    // Раньше здесь была ОДНА строка причины — и ни версии, ни пути. По
+    // сообщению «каталог не является git-репозиторием» нельзя было понять
+    // главного: что именно работает и откуда. Показываем всё, что знаем.
+    const c = UPDATE.current || {};
     box.innerHTML = `<div class="panel card-pad"><div class="panel-head bare">
-      <h2>Обновление</h2></div><div class="empty">${esc(UPDATE.reason || '')}</div></div>`;
+      <h2>Обновление</h2></div>
+      <div class="upd-now">
+        Сейчас: <code>${esc(c.commit || 'версия неизвестна')}</code>
+        <span class="upd-msg">${esc(c.subject || '')}</span>
+      </div>
+      ${UPDATE.app_dir ? `<div class="ctl-note">Папка программы: <code>${
+        esc(UPDATE.app_dir)}</code></div>` : ''}
+      <div class="warn-box">${esc(UPDATE.reason || '')}</div>
+      <div class="ctl-note">Если это собранное приложение, обновление берётся
+        из выпусков на GitHub. Скачать вручную всегда можно здесь:
+        <code>github.com/dezet36/kraken-trade-bot/releases/latest</code></div>
+      </div>`;
     return;
   }
   const cur = UPDATE.current || {};
