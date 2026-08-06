@@ -197,15 +197,22 @@ def _swap_script(exe, new_exe, old_exe):
     # консоли, и кириллица в нём превращается в мусор на части систем.
     script = os.path.join(config.DATA_DIR, 'apply_update.bat')
     name = os.path.basename(exe)
+    # Сценарий ведёт свой журнал: он работает уже после закрытия приложения,
+    # и без следа разобраться, дошёл ли он до подмены, было бы нечем.
+    log_file = os.path.join(config.DATA_DIR, 'apply_update.log')
     body = f"""@echo off
+echo [%date% %time%] swap started >> "{log_file}"
 rem Wait until the app closes and releases its own file.
+rem Pause is done with ping, not timeout: timeout reads the console input
+rem handle and dies with "input redirection is not supported" when it does not
+rem have one - which is exactly the case for a background process.
 set TRIES=0
 :wait
-timeout /t 1 /nobreak >nul
+ping -n 2 127.0.0.1 >nul
 tasklist /fi "IMAGENAME eq {name}" | find /i "{name}" >nul
 if errorlevel 1 goto swap
 set /a TRIES+=1
-if %TRIES% LSS 90 goto wait
+if %TRIES% LSS 45 goto wait
 
 rem The app is still running after the wait: its file is locked and any move
 rem would fail. Touch nothing - the downloaded file stays for the next try.
@@ -221,10 +228,12 @@ if errorlevel 1 (
     rem left without a program at all.
     move /y "{old_exe}" "{exe}" >nul
 )
+echo [%date% %time%] swapped, starting app >> "{log_file}"
 start "" "{exe}"
 exit /b 0
 
 :stuck
+echo [%date% %time%] app still running, nothing changed >> "{log_file}"
 exit /b 1
 """
     with open(script, 'w', encoding='ascii', errors='replace') as fh:
@@ -264,12 +273,48 @@ def apply():
 
 def _launch_swap(exe, new_exe, old_exe):
     script = _swap_script(exe, new_exe, old_exe)
-    # DETACHED_PROCESS: сценарий обязан пережить закрытие приложения, иначе
-    # умрёт вместе с ним, не успев ничего подменить. С CREATE_NO_WINDOW его
-    # сочетать нельзя — CreateProcess такую пару отвергает.
+    # Потоки ввода-вывода ОБЯЗАТЕЛЬНО в пустоту.
+    #
+    # Приложение собрано с --windowed, консоли у него нет, и стандартные
+    # потоки равны None. Popen по умолчанию передаёт их дочернему процессу —
+    # тот получает недействительные дескрипторы и умирает сразу, не сказав ни
+    # слова. Popen при этом отрабатывает без ошибки, и обновление выглядит
+    # запущенным. Проверено дважды: сценарий, запущенный руками, подменял файл
+    # безупречно, а тот же сценарий из приложения не выполнялся вовсе.
+    #
+    # CREATE_NO_WINDOW, а не DETACHED_PROCESS. Отсоединённый процесс остаётся
+    # вообще без консоли, а сценарию она нужна: tasklist и find без неё не
+    # работают. Проверено — сценарий запускался, писал первую строку в журнал и
+    # обрывался в цикле ожидания. CREATE_NO_WINDOW даёт консоль, но невидимую.
+    # Закрытие приложения сценарий переживёт и так: Windows не убивает дочерние
+    # процессы вслед за родителем.
     subprocess.Popen(['cmd', '/c', script],
-                     creationflags=getattr(subprocess, 'DETACHED_PROCESS', 0),
+                     creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0),
+                     stdin=subprocess.DEVNULL,
+                     stdout=subprocess.DEVNULL,
+                     stderr=subprocess.DEVNULL,
+                     cwd=config.DATA_DIR,
+                     env=_clean_env(),
                      close_fds=True)
+
+
+def _clean_env():
+    """
+    Окружение без служебных переменных упаковщика.
+
+    Собранное приложение распаковывает себя во временную папку и сообщает её
+    путь дочерним процессам переменной _MEIPASS2. Сценарий подмены передаёт
+    окружение дальше — новому экземпляру приложения. Тот видит переменную,
+    решает, что распаковка уже сделана, и идёт грузить python313.dll из папки,
+    которую прежний экземпляр к тому моменту удалил.
+
+    Наблюдалось ровно так: файл подменялся правильно, приложение
+    перезапускалось и показывало «Failed to load Python DLL». Причём сам файл
+    был исправен — запущенный отдельно, он работал.
+    """
+    env = {k: v for k, v in os.environ.items()
+           if not k.startswith('_MEI') and not k.startswith('_PYI')}
+    return env
 
 
 def _close_app():
@@ -281,24 +326,32 @@ def _close_app():
     в занятый файл и уходил ни с чем. Единственный видимый след — лишний
     файл .new рядом.
 
-    Сначала пробуем закрыть окно: тогда приложение завершится своим обычным
-    путём, дописав состояние на диск. Если окна нет (запуск службой или из
-    консоли), выходим принудительно — но с задержкой, чтобы дашборд успел
-    отдать ответ на нажатие, иначе человек увидит оборванное соединение
-    вместо сообщения об успехе.
+    Сначала закрываем окно — оно должно исчезнуть с экрана сразу, иначе
+    происходящее выглядит как зависание. Но одного этого мало: закрытие окна
+    процесс НЕ завершает. Планировщик держит пул потоков, а интерпретатор при
+    выходе их дожидается, и приложение остаётся в памяти вместе с замком на
+    своём файле — подмена снова упирается в занятый файл. Проверено дважды на
+    собранном приложении: окно закрывалось, файл не менялся.
+
+    Поэтому после закрытия окна выходим принудительно. Состояние от этого не
+    теряется: и фантомный счёт, и позиции пишутся на диск в конце каждого
+    цикла, а не в момент выхода.
+
+    Задержка перед всем этим нужна, чтобы дашборд успел отдать ответ на
+    нажатие: иначе вместо сообщения об успехе человек увидит оборванное
+    соединение и решит, что сломалось.
     """
     import threading
+    import time
 
     def bye():
         try:
             import webview
-            windows = list(getattr(webview, 'windows', []) or [])
-            if windows:
-                for window in windows:
-                    window.destroy()
-                return
+            for window in list(getattr(webview, 'windows', []) or []):
+                window.destroy()
         except Exception:                          # noqa: BLE001
             pass
+        time.sleep(2)
         os._exit(0)
 
     threading.Timer(2.0, bye).start()
