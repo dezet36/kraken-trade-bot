@@ -3,3 +3,6 @@
 {"at": "2026-08-06T13:42:19", "changes": [{"field": "NOTIFY.trade_opened_telegram", "from": false, "to": true}]}
 {"at": "2026-08-06T18:48:15", "changes": [{"field": "LEVELS.sides", "from": "both", "to": "long"}]}
 {"at": "2026-08-06T18:48:15", "changes": [{"field": "LEVELS.sides", "from": "long", "to": "both"}]}
+{"at": "2026-08-06T19:00:04", "changes": [{"field": "FIBO.sides", "from": "both", "to": "short"}]}
+{"at": "2026-08-06T19:02:10", "changes": [{"field": "LEVELS.sides", "from": "both", "to": "long"}]}
+{"at": "2026-08-06T19:02:10", "changes": [{"field": "LEVELS.sides", "from": "long", "to": "both"}]}
