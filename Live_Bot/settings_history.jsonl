@@ -1,3 +1,5 @@
 {"at": "2026-08-06T13:22:22", "changes": [{"field": "PORTFOLIO.daily_loss_pct", "from": 0.0, "to": 3.0}]}
 {"at": "2026-08-06T13:41:52", "changes": [{"field": "NOTIFY.trade_opened_telegram", "from": true, "to": false}]}
 {"at": "2026-08-06T13:42:19", "changes": [{"field": "NOTIFY.trade_opened_telegram", "from": false, "to": true}]}
+{"at": "2026-08-06T18:48:15", "changes": [{"field": "LEVELS.sides", "from": "both", "to": "long"}]}
+{"at": "2026-08-06T18:48:15", "changes": [{"field": "LEVELS.sides", "from": "long", "to": "both"}]}

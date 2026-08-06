@@ -121,6 +121,16 @@ def _build_signal(candidate, strategy, balance):
             f"свой сетап под этим именем.")
         return None, None
 
+    # Разрешённые стороны. Проверка стоит ЗДЕСЬ, после сборки сигнала, а не в
+    # сканере: направление известно только у готового сетапа, и каждая
+    # стратегия называет его по-своему. Отказ пишется в журнал — иначе
+    # выключенное направление выглядит как «бот перестал находить сетапы».
+    direction = (signal.get('setup') or {}).get('type') or signal.get('direction')
+    if not settings.allows(strategy, direction):
+        log(f"   {strategy} {pair}: {direction} пропущен — "
+            f"в настройках разрешены только «{settings.sides(strategy)}»")
+        return None, None
+
     signal['strategy'] = strategy
     return signal, df_for_chart
 
@@ -445,6 +455,17 @@ def trading_cycle():
                                       ('score', 'score_legacy', 'rr_est', 'htf_strength',
                                        'proximity', 'size_pct')}
                     df_for_chart = candidate['df_1h']
+
+                # Та же проверка сторон, что и в фантомном пути. Живой путь
+                # собирает сигнал своим кодом, поэтому проверку приходится
+                # ставить дважды: одна на двоих означала бы, что настройка
+                # действует в наблюдении и не действует в бою.
+                direction = ((signal.get('setup') or {}).get('type')
+                             or signal.get('direction'))
+                if not settings.allows(config.STRATEGY, direction):
+                    log(f"   {pair}: {direction} пропущен — в настройках "
+                        f"разрешены только «{settings.sides(config.STRATEGY)}»")
+                    continue
 
                 signal['strategy'] = config.STRATEGY
                 log(f"СИГНАЛ на {pair}! HTF={signal['htf_trend']}")

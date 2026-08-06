@@ -247,6 +247,18 @@
     color: var(--warn, #a86a00); border: 1px solid currentColor;
     background: color-mix(in srgb, currentColor 8%, transparent); }
 
+  /* Выбор направлений внутри карточки стратегии. Кнопки не тянутся во всю
+     ширину: рядом стоят числовые поля, и растянутый переключатель ломал бы
+     их сетку. */
+  .seg.small { display: inline-flex; gap: 2px; padding: 2px; border-radius: 8px;
+    background: var(--surface-2, transparent); border: 1px solid var(--hairline); }
+  .seg-btn { padding: 4px 10px; font-size: 12px; border: 0; border-radius: 6px;
+    background: transparent; color: var(--ink-3); cursor: pointer;
+    white-space: nowrap; }
+  .seg-btn.on { background: var(--accent); color: #fff; }
+  .seg-btn:disabled { cursor: default; opacity: .5; }
+  .side-row { align-items: center; }
+
   .err-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
   .err-chip {
     font-size: 12.5px; color: var(--ink-2); background: var(--surface-2);
@@ -3244,6 +3256,25 @@ function renderControls() {
       </div>${note ? `<div class="ctl-note">${note}</div>` : ''}`;
     }).join('');
 
+    // Направления. Отдельным блоком, а не числовым полем: это не настройка
+    // величины, а выбор из трёх. Подпись объясняет цену выбора — иначе
+    // «только шорты» выглядит как способ улучшить результат бесплатно.
+    const SIDE_LABEL = { both: 'обе стороны', long: 'только лонг', short: 'только шорт' };
+    const cur = s.sides || 'both';
+    const sideBtns = ['both', 'long', 'short'].map(v =>
+      `<button type="button" class="seg-btn${v === cur ? ' on' : ''}"
+         data-side="${key}" data-val="${v}"
+         ${WRITABLE ? '' : 'disabled'}>${SIDE_LABEL[v]}</button>`).join('');
+    const sideRow = `<div class="ctl-row side-row">
+        <label>Направления</label>
+        <span class="unit"></span>
+        <span class="seg small" id="side-${key}">${sideBtns}</span>
+      </div>
+      <div class="ctl-note">Выключенная сторона — это сделки, которых не
+        будет. У Фибоначчи замеры на двух независимых периодах показали, что
+        лонги дают ровно ноль, а без них R на сделку втрое выше при потере 11%
+        сделок. У остальных стратегий такой проверки нет.</div>`;
+
     return `<div class="panel">
       <div class="ctl-head">
         <span class="key" style="background:${COLOR[key] || 'var(--muted)'}"></span>
@@ -3255,6 +3286,7 @@ function renderControls() {
                 ${WRITABLE ? '' : 'disabled'}></button>
       </div>
       ${rows}
+      ${sideRow}
     </div>`;
   }).join('');
 
@@ -3273,6 +3305,12 @@ function renderControls() {
       btn.setAttribute('aria-pressed', String(on));
       document.getElementById('lbl-' + btn.dataset.s).textContent =
         on ? 'торгует' : 'выключена';
+    };
+  });
+  box.querySelectorAll('button[data-side]').forEach(btn => {
+    btn.onclick = () => {
+      box.querySelectorAll(`button[data-side="${btn.dataset.side}"]`)
+        .forEach(other => other.classList.toggle('on', other === btn));
     };
   });
   document.getElementById('ctl-save').onclick = saveSettings;
@@ -3330,6 +3368,10 @@ async function saveSettings() {
   document.querySelectorAll('#controls input[data-f]').forEach(inp => {
     (payload[inp.dataset.s] = payload[inp.dataset.s] || {})[inp.dataset.f] =
       parseFloat(inp.value);
+  });
+  document.querySelectorAll('#controls button[data-side].on').forEach(btn => {
+    (payload[btn.dataset.side] = payload[btn.dataset.side] || {}).sides =
+      btn.dataset.val;
   });
 
   const msg = document.getElementById('ctl-msg');

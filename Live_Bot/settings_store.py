@@ -112,6 +112,12 @@ def _defaults():
             'deposit': float(config.PAPER_START_BALANCES.get(name,
                                                              config.PAPER_START_BALANCE)),
             'max_slots': _default_slots(name),
+            # Разрешённые стороны. По умолчанию ОБЕ — то, как бот вёл себя
+            # всегда. Замеры показали, что у Фибоначчи лонги дают ровно ноль
+            # на двух независимых периодах, но выключать их молча нельзя:
+            # это сделки, которых человек не досчитается, не понимая почему.
+            # Переключатель есть, решение за оператором.
+            'sides': 'both',
         }
         for name in STRATEGIES
     }
@@ -119,6 +125,20 @@ def _defaults():
     base[NOTIFY] = {f'{event}_{channel}': True
                     for event in NOTIFY_EVENTS for channel in NOTIFY_CHANNELS}
     return base
+
+
+SIDES = ('both', 'long', 'short')
+
+
+def _clean_sides(value, fallback='both'):
+    """
+    Разрешённые стороны — только из известного списка.
+
+    Незнакомое значение НЕ считается «выключить всё»: опечатка в файле
+    настроек не должна тихо остановить торговлю. Возвращаем прежнее.
+    """
+    value = str(value or '').strip().lower()
+    return value if value in SIDES else fallback
 
 
 def _clamp(field, value, fallback):
@@ -170,6 +190,8 @@ def load(force=False):
                         if field in item:
                             data[name][field] = _clamp(field, item[field],
                                                        data[name][field])
+                    data[name]['sides'] = _clean_sides(item.get('sides'),
+                                                       data[name]['sides'])
             except Exception as exc:
                 log(f"⚠️ runtime_settings.json нечитаем ({exc}) — берём значения из .env")
 
@@ -205,6 +227,8 @@ def save(changes):
         for field in ('risk_pct', 'min_stop_pct', 'deposit', 'max_slots'):
             if field in item:
                 data[name][field] = _clamp(field, item[field], data[name][field])
+        if 'sides' in item:
+            data[name]['sides'] = _clean_sides(item['sides'], data[name]['sides'])
 
     with _lock:
         try:
@@ -223,7 +247,8 @@ def save(changes):
 
     log('⚙️ Настройки изменены: ' + ', '.join(
         f"{name} {'вкл' if data[name]['enabled'] else 'ВЫКЛ'} "
-        f"риск {data[name]['risk_pct']}% стоп>={data[name]['min_stop_pct']}%"
+        f"риск {data[name]['risk_pct']}% стоп>={data[name]['min_stop_pct']}% "
+        f"стороны {data[name]['sides']}"
         for name in STRATEGIES))
     _write_history(before, data)
     return data
@@ -304,6 +329,31 @@ def min_stop_pct(strategy):
     if value is None:
         return float(config.MIN_SL_PERCENT)
     return float(value) / 100.0
+
+
+def sides(strategy):
+    """Какие стороны разрешены стратегии: both, long или short."""
+    return _clean_sides(load().get(strategy, {}).get('sides'), 'both')
+
+
+def allows(strategy, direction):
+    """
+    Можно ли этой стратегии открывать сделку в такую сторону.
+
+    Направление приходит в разных написаниях: LONG и SHORT у двух стратегий,
+    BULLISH и BEARISH у SMC. Сравнивать напрямую нельзя — фильтр по 'SHORT'
+    не узнал бы шорт у SMC и молча выпустил бы его при выключенных шортах,
+    то есть настройка врала бы ровно у той стратегии, где перекос известен.
+    """
+    allowed = sides(strategy)
+    if allowed == 'both':
+        return True
+    value = str(direction or '').upper()
+    is_long = value in ('LONG', 'BULLISH', 'BUY')
+    is_short = value in ('SHORT', 'BEARISH', 'SELL')
+    if not (is_long or is_short):
+        return True                       # непонятное направление не режем
+    return is_long if allowed == 'long' else is_short
 
 
 def deposit(strategy):
