@@ -371,7 +371,9 @@
                       white-space: normal; }
   /* Прилипает к левому краю области прокрутки: ячейка шире экрана, и без
      этого при прокрутке таблицы вбок карточка уезжала вместе с ней. */
-  .tc-wrap { position: sticky; left: 0; }
+  /* Ширина — от ячейки, а не пиксели из JS: тогда карточка сжимается вместе
+     с таблицей, а не удерживает её раздутой. */
+  .tc-wrap { width: 100%; min-width: 0; }
   .tc-box { display: grid; grid-template-columns: minmax(320px, 1.45fr) minmax(280px, 1fr);
             gap: 18px; padding: 16px 18px 18px; }
   /* Порог поднят с 1100 до 1300. Между этими ширинами карточка формально
@@ -479,7 +481,14 @@
   .scroll {
     /* Раскрытая карточка занимает почти всю рамку, и соседние сделки
        уезжали за нижний край — список выглядел обрезанным. */
-    overflow: auto; max-height: min(72vh, 760px);
+    overflow-y: auto; max-height: min(72vh, 760px);
+    /* ГОРИЗОНТАЛЬНОЙ ПРОКРУТКИ ЗДЕСЬ БЫТЬ НЕ ДОЛЖНО, и появлялась она не
+       от широкой таблицы, а от собственной вертикальной полосы: overflow
+       по обеим осям, полоса съедает 15 пикселей ширины, таблица шириной
+       100% на эти же 15 вылезает — и внизу появляется вторая полоса.
+       Замерено: «div.scroll шире на 15 (видно 961)».
+       scrollbar-gutter резервирует место заранее, и вылезать больше нечему. */
+    overflow-x: hidden; scrollbar-gutter: stable;
     background:
       linear-gradient(to right, var(--surface) 40%, transparent) left center / 30px 100% no-repeat local,
       linear-gradient(to left,  var(--surface) 40%, transparent) right center / 30px 100% no-repeat local,
@@ -509,6 +518,21 @@
   .side-s { color: var(--bad); font-weight: 600; }
   .chip { font-size: 11px; padding: 2px 8px; border-radius: 20px;
           background: var(--hairline-2); color: var(--ink-3); }
+  /* УЗКОЕ ОКНО. Десять колонок при отступах 14px перестают помещаться
+     примерно на 1150 пикселях, и таблица начинала ехать вбок. Сначала
+     поджимаем отступы, потом убираем две колонки, без которых строка
+     остаётся понятной: процент выводится из суммы, а длительность есть в
+     раскрытой карточке. Прятать «Итог» или «Причину» нельзя — ради них
+     список и открывают. */
+  @media (max-width: 1150px) {
+    thead th, td { padding-left: 9px; padding-right: 9px; }
+    table { font-size: 12.5px; }
+    td.why > div { max-width: 170px; }
+  }
+  @media (max-width: 1000px) {
+    th.opt, td.opt { display: none; }
+  }
+
   .skey { display: inline-flex; align-items: center; gap: 7px; }
   .skey .key { width: 8px; height: 8px; border-radius: 2px; flex: none; }
   .empty { color: var(--ink-4); padding: 40px 0; text-align: center; font-size: 13.5px; }
@@ -1492,8 +1516,8 @@ function closedTable(rows) {
   const extra = PAPER ? '<th>R</th>' : '';
   box.innerHTML = `<table><thead><tr>
     <th>#</th><th>Стратегия</th><th>Пара</th><th>Напр.</th>
-    <th>Итог</th><th>%</th>${extra}
-    <th>Причина</th><th>Держали</th><th>Закрыта</th>
+    <th>Итог</th><th class="opt">%</th>${extra}
+    <th>Причина</th><th class="opt">Держали</th><th>Закрыта</th>
   </tr></thead><tbody>${sorted.map(r => {
     const cells = PAPER
       ? `<td class="${cls(r.pnl_r, 0.005)}">${fx(r.pnl_r, 2, true)}</td>`
@@ -1507,9 +1531,9 @@ function closedTable(rows) {
       <td class="pair">${esc(r.pair)}</td>
       <td>${side(r.direction)}</td>
       <td class="${cls(r.pnl)}"><b>${money(r.pnl)}</b></td>
-      <td class="${cls(r.pnl_pct, 0.005)}">${fx(r.pnl_pct, 2, false)}%</td>${cells}
+      <td class="opt ${cls(r.pnl_pct, 0.005)}">${fx(r.pnl_pct, 2, false)}%</td>${cells}
       <td><span class="chip">${esc(r.reason) || '—'}</span></td>
-      <td>${dur(r.duration_min || 0)}</td>
+      <td class="opt">${dur(r.duration_min || 0)}</td>
       <td>${when(r.closed)}</td></tr>`;
   }).join('')}</tbody></table>`;
 
@@ -2418,13 +2442,13 @@ function openTrade(id, quiet) {
   row.after(detail);
   row.classList.add('open');
 
-  // Таблица шире экрана и прокручивается вбок, а ячейка с colspan всегда
-  // шириной со всю таблицу — её правая половина оказывалась за краем экрана.
-  // Ширину задаём ВЛОЖЕННОМУ блоку: табличная раскладка ширину самой ячейки
-  // не слушает, это подсказка, а не ограничение. Блок ещё и прилипает к
-  // левому краю области прокрутки, чтобы не уезжать при прокрутке вбок.
-  const wrap = detail.querySelector('.tc-wrap');
-  wrap.style.width = table.clientWidth + 'px';
+  // ШИРИНУ ЗДЕСЬ БОЛЬШЕ НЕ ЗАДАЁМ, и это была вторая причина горизонтальной
+  // прокрутки. Раньше блоку карточки прибивалась ширина в пикселях, снятая с
+  // таблицы, — костыль против того, что ячейка с colspan уезжала за край при
+  // прокрутке вбок. Но прибитая ширина сама не даёт таблице СЖАТЬСЯ: окно
+  // уменьшили, колонки поджались, а карточка держит прежние пиксели и тянет
+  // таблицу за собой. Замерено: таблица 681 при контейнере 666.
+  // Прокрутки вбок больше нет вовсе, и костыль вместе с ней не нужен.
 
   // Свечи по этой сделке уже могли быть загружены до перерисовки: повторный
   // запрос к бирже ради тех же данных не нужен.
@@ -2604,7 +2628,6 @@ function openOrder(id, quiet) {
     + '</div></td>';
   row.after(detail);
   row.classList.add('open');
-  detail.querySelector('.tc-wrap').style.width = table.clientWidth + 'px';
 
   const cached = ORDER_CHARTS[String(id)];
   renderOrderCard(order, cached || null, cached ? null : 'загружаю график…');
@@ -2693,7 +2716,12 @@ function tradeChart(t, data, size) {
   // позиции втрое уже строки истории, и один холст на двоих давал там
   // нечитаемые подписи. Поэтому холст подбирается под место.
   const W = (size && size.W) || 720, H = (size && size.H) || 300;
-  const PL = 8, PR = W < 600 ? 96 : 112, PT = 12, PB = 22;
+  // Правое поле — под самую длинную подпись цены. Замерено: при 112 текст
+  // «стоп 63 343,678» вылезал за холст на 15 точек, и SVG получал
+  // горизонтальное переполнение. Считаем от длины самой цены, а не на глаз.
+  const priceLen = Math.max(...[t.entry, t.stop, t.tp1, t.exit]
+    .filter(v => v > 0).map(v => price(v).length), 8);
+  const PL = 8, PR = Math.min(W * 0.28, 46 + priceLen * 6.2), PT = 12, PB = 22;
   const lows = candles.map(c => c[3]), highs = candles.map(c => c[2]);
   const levels = [t.entry, t.stop, t.tp1, t.tp2, t.exit].filter(v => v > 0);
   let lo = Math.min(...lows, ...levels), hi = Math.max(...highs, ...levels);
@@ -2799,13 +2827,22 @@ function tradeChart(t, data, size) {
       + esc(b.label || '') + '</text>');
   });
   const shown = (geo.lines || []).filter(g => inView(g.price));
-  const guideLines = shown.map(g =>
-    '<line x1="' + PL + '" y1="' + y(g.price) + '" x2="' + (W - PR) + '" y2="'
+  // Главная линия сетапа рисуется иначе, чем вспомогательная. У стратегии
+  // уровней сам уровень — это и есть повод для сделки, а рисовался он тем же
+  // бледным пунктиром, что и края импульса у соседей: на графике его
+  // приходилось искать глазами, хотя всё построено вокруг него.
+  const guideLines = shown.map(g => g.main
+    ? '<line x1="' + PL + '" y1="' + y(g.price) + '" x2="' + (W - PR) + '" y2="'
+      + y(g.price) + '" stroke="var(--accent)" stroke-width="1.6" opacity=".85"/>'
+    : '<line x1="' + PL + '" y1="' + y(g.price) + '" x2="' + (W - PR) + '" y2="'
       + y(g.price) + '" stroke="var(--ink-4)" stroke-width=".8"'
       + ' stroke-dasharray="1 4" opacity=".7"/>').join('');
   const guideLabels = shown.map(g =>
-    '<text x="' + (PL + 4) + '" y="' + (y(g.price) - 3) + '" fill="var(--ink-3)"'
-    + ' font-size="9.5"' + HALO + '>' + esc(g.label || '') + '</text>').join('');
+    '<text x="' + (PL + 4) + '" y="' + (y(g.price) - 4) + '" fill="'
+    + (g.main ? 'var(--accent)' : 'var(--ink-3)') + '" font-size="'
+    + (g.main ? '10.5' : '9.5') + '"'
+    + (g.main ? ' font-weight="600"' : '') + HALO + '>'
+    + esc(g.label || '') + '</text>').join('');
   const bands = bandFills.join(''), guides = guideLines;
   const geoLabels = bandLabels.join('') + guideLabels;
 
@@ -2859,8 +2896,9 @@ function tradeChart(t, data, size) {
       if (px < PL || px > W - PR) return '';
       const py = y(p.price);
       if (py < PT || py > H - PB) return '';
-      return '<circle cx="' + px + '" cy="' + py + '" r="3.4" fill="none"'
-        + ' stroke="var(--accent)" stroke-width="1.4" opacity=".9"/>';
+      return '<circle cx="' + px + '" cy="' + py + '" r="3.6"'
+        + ' fill="var(--surface)" stroke="var(--accent)" stroke-width="1.6"'
+        + ' opacity=".95"/>';
     }).join('');
   })();
 
