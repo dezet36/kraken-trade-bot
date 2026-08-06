@@ -6,3 +6,4 @@
 {"at": "2026-08-06T19:00:04", "changes": [{"field": "FIBO.sides", "from": "both", "to": "short"}]}
 {"at": "2026-08-06T19:02:10", "changes": [{"field": "LEVELS.sides", "from": "both", "to": "long"}]}
 {"at": "2026-08-06T19:02:10", "changes": [{"field": "LEVELS.sides", "from": "long", "to": "both"}]}
+{"at": "2026-08-06T19:18:40", "changes": [{"field": "NOTIFY.trade_opened_desktop", "from": true, "to": false}, {"field": "NOTIFY.trade_opened_telegram", "from": true, "to": false}, {"field": "NOTIFY.trade_closed_desktop", "from": true, "to": false}, {"field": "NOTIFY.trade_closed_telegram", "from": true, "to": false}, {"field": "NOTIFY.error_desktop", "from": true, "to": false}, {"field": "NOTIFY.error_telegram", "from": true, "to": false}, {"field": "NOTIFY.daily_desktop", "from": true, "to": false}, {"field": "NOTIFY.daily_telegram", "from": true, "to": false}]}
