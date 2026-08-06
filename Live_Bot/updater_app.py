@@ -239,7 +239,12 @@ if errorlevel 1 (
     move /y "{old_exe}" "{exe}" >nul
 )
 echo [%date% %time%] swapped, starting app >> "{log_file}"
-start "" "{exe}"
+rem --after-update: the new app may find the dashboard port still held by the
+rem previous copy - most often a source run (pythonw desktop.py), which our
+rem single-instance lock does not see at all. With this flag the app closes
+rem that copy without asking: the user pressed "Update" and waits for the new
+rem version, not for a dialog. Without it startup stopped right here.
+start "" "{exe}" --after-update
 exit /b 0
 
 :stuck

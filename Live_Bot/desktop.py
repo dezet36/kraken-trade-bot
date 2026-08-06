@@ -50,6 +50,21 @@ CHROME_PATHS = (
 
 # ── Диалоги (консоли нет, сообщать об ошибке больше нечем) ───────────────────
 
+def _ask(title, message):
+    """Вопрос «да/нет» окном. Спросить не у кого — считаем ответ «нет»."""
+    try:
+        import tkinter as tk
+        from tkinter import messagebox
+        root = tk.Tk()
+        root.withdraw()
+        answer = messagebox.askyesno(title, message)
+        root.destroy()
+        return bool(answer)
+    except Exception:                              # noqa: BLE001
+        log(f'{title}: {message} — спросить не у кого, отвечаю «нет»')
+        return False
+
+
 def _alert(title, message):
     """Показывает сообщение окном. Если tkinter недоступен — пишет в лог."""
     try:
@@ -386,37 +401,100 @@ def port_busy(port, host='127.0.0.1'):
         probe.close()
 
 
-def port_owner(port):
+def port_holder(port):
     """
-    Кто держит порт: «имя (PID)» либо пустая строка.
+    Кто держит порт: {'pid', 'name', 'cmd'} либо пустой словарь.
 
-    Спрашивается только в сообщении об ошибке, поэтому запуск двух консольных
-    команд здесь допустим — при обычном старте этот путь не выполняется.
+    Командная строка нужна не для красоты сообщения. По ней отличается СВОЯ
+    прежняя копия — бот, запущенный из исходников как `pythonw desktop.py`, —
+    от постороннего процесса, случайно занявшего тот же порт. Своего можно
+    предложить закрыть, чужого трогать нельзя.
     """
     if sys.platform != 'win32':
-        return ''
+        return {}
     flags = getattr(subprocess, 'CREATE_NO_WINDOW', 0)
     try:
         out = subprocess.run(['netstat', '-ano', '-p', 'tcp'],
-                             capture_output=True, text=True, timeout=10,
+                             capture_output=True, text=True, timeout=15,
                              creationflags=flags).stdout
         pid = ''
         for line in out.splitlines():
             parts = line.split()
-            if len(parts) >= 5 and parts[0].upper() == 'TCP' \
-                    and parts[1].endswith(f':{port}') and parts[3] == 'LISTENING':
+            if len(parts) >= 5 and parts[0].upper() == 'TCP'                     and parts[1].endswith(f':{port}') and parts[3] == 'LISTENING':
                 pid = parts[4]
                 break
         if not pid:
-            return ''
-        names = subprocess.run(['tasklist', '/FI', f'PID eq {pid}', '/NH', '/FO', 'CSV'],
-                               capture_output=True, text=True, timeout=10,
-                               creationflags=flags).stdout
-        name = names.split(',')[0].strip('" \r\n') if ',' in names else ''
-        return f'{name} (PID {pid})' if name else f'PID {pid}'
+            return {}
+        query = subprocess.run(
+            ['wmic', 'process', 'where', f'ProcessId={pid}',
+             'get', 'Name,CommandLine', '/format:list'],
+            capture_output=True, text=True, timeout=15,
+            creationflags=flags).stdout
+        name, cmd = '', ''
+        for line in query.splitlines():
+            if line.startswith('Name='):
+                name = line.split('=', 1)[1].strip()
+            elif line.startswith('CommandLine='):
+                cmd = line.split('=', 1)[1].strip()
+        if not name:
+            names = subprocess.run(
+                ['tasklist', '/FI', f'PID eq {pid}', '/NH', '/FO', 'CSV'],
+                capture_output=True, text=True, timeout=10,
+                creationflags=flags).stdout
+            name = names.split(',')[0].strip('" \r\n') if ',' in names else ''
+        return {'pid': pid, 'name': name, 'cmd': cmd}
     except Exception:                              # noqa: BLE001
-        return ''
+        return {}
 
+
+def port_owner(port):
+    """Владелец порта одной строкой — для сообщений."""
+    holder = port_holder(port)
+    if not holder:
+        return ''
+    return (f"{holder['name']} (PID {holder['pid']})" if holder.get('name')
+            else f"PID {holder['pid']}")
+
+
+def is_our_bot(holder):
+    """
+    Это наша же прежняя копия, а не посторонняя программа?
+
+    Три вида: собранное приложение, запуск из исходников через python и через
+    pythonw. Последний и мешал на практике: `pythonw desktop.py` держал порт
+    семь часов, и обновлённое приложение упиралось в него и не поднималось.
+    """
+    name = (holder.get('name') or '').lower()
+    cmd = (holder.get('cmd') or '').lower()
+    if name == 'kraken.exe':
+        return True
+    if name in ('python.exe', 'pythonw.exe'):
+        return 'desktop.py' in cmd or 'bot.py' in cmd
+    return False
+
+
+def stop_holder(holder, port, wait=25):
+    """
+    Закрывает процесс, держащий порт, и ждёт освобождения порта.
+
+    Ждать обязательно: система отпускает сокет не мгновенно, и запуск сразу
+    после завершения процесса упёрся бы в тот же занятый порт — то есть
+    выглядел бы как «не помогло».
+    """
+    import time
+
+    flags = getattr(subprocess, 'CREATE_NO_WINDOW', 0)
+    try:
+        subprocess.run(['taskkill', '/PID', str(holder['pid']), '/F', '/T'],
+                       capture_output=True, timeout=20, creationflags=flags)
+    except Exception as exc:                       # noqa: BLE001
+        log(f'не удалось закрыть процесс {holder.get("pid")}: {exc}')
+        return False
+    for _ in range(wait):
+        if not port_busy(port):
+            return True
+        time.sleep(1)
+    return not port_busy(port)
 
 def main():
     if '--selftest' in sys.argv:
@@ -459,17 +537,33 @@ def main():
     # видит вовсе — у того свой процесс и свой замок или его нет совсем. А
     # порт один на всех, и именно он выдаёт чужого.
     if port_busy(config.DASHBOARD_PORT):
-        owner = port_owner(config.DASHBOARD_PORT)
-        _alert(APP_TITLE,
-               f'Порт {config.DASHBOARD_PORT} уже занят'
-               + (f': {owner}.' if owner else '.') + '\n\n'
-               'Скорее всего, бот уже работает — возможно, запущенный из\n'
-               'исходников (pythonw desktop.py), а не этим приложением.\n\n'
-               'ЗАПУСТИ Я СЕЙЧАС ОКНО, вы увидели бы в нём интерфейс ТОГО\n'
-               'бота, а не этой версии. Раньше так и происходило.\n\n'
-               'Закройте работающего бота (диспетчер задач → Подробности →\n'
-               'снять задачу) и запустите это приложение снова.')
-        return
+        holder = port_holder(config.DASHBOARD_PORT)
+        who = port_owner(config.DASHBOARD_PORT) or 'неизвестно кем'
+        busy = f'Порт {config.DASHBOARD_PORT} занят: {who}.'
+
+        if not is_our_bot(holder):
+            # Чужую программу не трогаем: порт мог занять кто угодно, и
+            # снимать посторонний процесс из-за нашего запуска нельзя.
+            _alert(APP_TITLE, busy + '\n\nЭто не наш бот, поэтому закрывать его я не стану.\n\nЗАПУСТИ Я СЕЙЧАС ОКНО, вы увидели бы в нём чужую страницу\nвместо этой версии.\n\nОсвободите порт или задайте другой в DASHBOARD_PORT.')
+            return
+
+        # ЭТО НАША ЖЕ ПРЕЖНЯЯ КОПИЯ. После обновления закрываем её молча:
+        # человек нажал «Обновить» и ждёт новую версию, а не диалог. Именно
+        # здесь всё и застревало — файл подменялся, приложение стартовало и
+        # упиралось в прежнего бота, который продолжал держать порт. Замок на
+        # второй экземпляр этого не ловит: у запуска из исходников свой
+        # процесс, и замка у него может не быть вовсе.
+        if '--after-update' in sys.argv:
+            log(f'после обновления: закрываю прежнюю копию {who}')
+            freed = stop_holder(holder, config.DASHBOARD_PORT)
+        else:
+            freed = _ask(APP_TITLE, f'Похоже, бот уже работает: {who}.' + '\n\nДвум копиям нельзя вести одни и те же позиции: они затрут\nжурнал сделок друг друга.\n\nЗакрыть прежнюю копию и запустить эту версию?')
+            freed = freed and stop_holder(holder, config.DASHBOARD_PORT)
+
+        if not freed:
+            _alert(APP_TITLE, busy + '\n\nПрежнюю копию закрыть не удалось — снимите её вручную\n(диспетчер задач → Подробности) и запустите снова.')
+            return
+        log('порт освобождён, продолжаю запуск')
 
     single_instance.mark_running(config.DATA_DIR, my_version,
                                  os.path.abspath(sys.executable))
