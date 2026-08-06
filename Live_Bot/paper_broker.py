@@ -772,11 +772,23 @@ class PaperBroker:
         elif strategy == 'LEVELS':
             lv = signal.get('levels') or {}
             if lv.get('level'):
-                touches = lv.get('touches')
+                count = lv.get('touches')
                 lines.append({
                     'price': float(lv['level']),
-                    'label': f"уровень · касаний {touches}" if touches else 'уровень',
+                    'label': f"уровень · касаний {count}" if count else 'уровень',
                 })
+            # Сетап этой стратегии — сам уровень, а уровень сделан касаниями.
+            # Поэтому её график разворачивается до ПЕРВОГО касания, а не до
+            # начала какого-то движения: движения тут нет вовсе. Без этого
+            # окно начиналось за час до входа, подпись обещала «касаний 3», а
+            # проверить это на картинке было нечем.
+            start_at = _iso_time(setup.get('start_time'))
+            if start_at:
+                out['from'] = start_at
+            points = [p for p in (setup.get('touches_at') or [])
+                      if p.get('at') and p.get('price')]
+            if points:
+                out['touches'] = points
         return out
 
     @staticmethod

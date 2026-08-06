@@ -92,6 +92,25 @@ def _to_bot_signal(setup, pair, balance, df):
            f"касаний {setup['touches']}"
            f"{', зеркальный' if setup['mirror'] else ''}, RR {setup['rr']:.2f}")
 
+    # Номера баров превращаем во время ЗДЕСЬ: дальше по пути свечей уже нет,
+    # а дашборду и графику нужны отметки времени. Индекс, ушедший в журнал как
+    # число, через неделю не значит ничего — таблица к тому времени другая.
+    def _at(index):
+        try:
+            stamp = pd.Timestamp(df['timestamp'].iloc[int(index)])
+            if stamp.tzinfo is not None:
+                stamp = stamp.tz_convert('UTC').tz_localize(None)
+            return stamp.strftime('%Y-%m-%dT%H:%M:%SZ')
+        except Exception:                          # noqa: BLE001
+            return None
+
+    touches = []
+    for point in (setup.get('points') or []):
+        at = _at(point.get('index'))
+        if at:
+            touches.append({'at': at, 'price': float(point['price'])})
+    first_touch = _at(setup.get('first_index'))
+
     return {
         'trading_pair': pair,
         'setup': {
@@ -99,6 +118,11 @@ def _to_bot_signal(setup, pair, balance, df):
             'start_price': setup['level'],
             'end_price': setup['entry'],
             'size': abs(setup['entry'] - setup['level']),
+            # Начало сетапа у этой стратегии — не начало импульса, а ПЕРВОЕ
+            # КАСАНИЕ уровня: именно с него уровень начал существовать. По
+            # нему график сделки разворачивается назад, и касания видно.
+            'start_time': first_touch,
+            'touches_at': touches,
         },
         'params': {
             'entry': setup['entry'],

@@ -2784,11 +2784,34 @@ function tradeChart(t, data, size) {
       ;
   })();
 
+  // Касания уровня. Для стратегии уровней это и есть сетап: линия говорит
+  // «касаний 3», а кружки показывают, где именно, — и видно, настоящий это
+  // уровень или три случайные точки, попавшие в допуск.
+  const touchMarks = (() => {
+    const points = geo.touches || [];
+    if (!points.length || stamps.length < 2) return '';
+    const t0 = stamps[0], t1 = stamps[stamps.length - 1];
+    if (!(t1 > t0)) return '';
+    return points.map(p => {
+      const v = new Date(p.at).getTime();
+      if (!isFinite(v)) return '';
+      const px = PL + (v - t0) / (t1 - t0) * (W - PL - PR);
+      // Касания старше окна не рисуем у самого края: кружок на границе
+      // выглядит как касание, которого в этом окне не было.
+      if (px < PL || px > W - PR) return '';
+      const py = y(p.price);
+      if (py < PT || py > H - PB) return '';
+      return '<circle cx="' + px + '" cy="' + py + '" r="3.4" fill="none"'
+        + ' stroke="var(--accent)" stroke-width="1.4" opacity=".9"/>';
+    }).join('');
+  })();
+
   const isLong = (t.direction || '').toUpperCase() === 'LONG';
   return '<div class="tc-chart"><svg viewBox="0 0 ' + W + ' ' + H
     + '" preserveAspectRatio="xMidYMid meet" role="img" aria-label="график сделки">'
     + bands + guides + legLine
     + body
+    + touchMarks
     + geoLabels
     + line(t.stop, 'var(--bad)', 'стоп', true)
     + line(t.entry, 'var(--ink-3)', 'вход', false)

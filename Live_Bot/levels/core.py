@@ -90,6 +90,12 @@ def build_levels(high, low, tolerance_pct=None, min_touches=None):
             'touches': len(members),
             'mirror': len({m['kind'] for m in members}) > 1,
             'known_at': max(m['known_at'] for m in members),
+            # Сами касания, а не только их число. Отбор от них не зависит —
+            # это запись для разбора: на графике сделки видно, ОТКУДА взялся
+            # уровень, а «касаний 3» в подписи проверить нечем.
+            'points': [{'index': int(m['index']), 'price': float(m['price']),
+                        'kind': m['kind']} for m in members],
+            'first_index': min(m['index'] for m in members),
         })
     return levels
 
@@ -237,6 +243,9 @@ def evaluate(high, low, close, volume, at_index, levels=None, atr_values=None):
             'reclaim_index': int(i),
             'pierce_index': int(pierce_at),
             'pierce_extreme': float(extreme),
+            # Касания уровня и самое раннее из них — для графика сделки.
+            'points': list(lv.get('points') or []),
+            'first_index': int(lv.get('first_index', i)),
         }, None
 
     return None, reason
