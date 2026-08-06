@@ -71,27 +71,35 @@ jobs:
             --collect-all webview `
             --hidden-import webview.platforms.winforms `
             --hidden-import clr_loader `
+            --hidden-import first_run `
+            --hidden-import updater_app `
+            --hidden-import tkinter `
+            --hidden-import tkinter.ttk `
             --exclude-module research `
             "$root\Live_Bot\desktop.py"
           if (-not (Test-Path "$root\dist\Kraken.exe")) { throw "сборка не создала Kraken.exe" }
 
-      # Проверка, что собранное приложение вообще запускается. Без неё в выпуск
-      # мог бы уехать .exe, падающий на первой секунде: PyInstaller молча
-      # пропускает модуль, который подгружается по имени в рантайме, и узнать
-      # об этом можно только запуском.
-      - name: Проверка запуска
+      # Проверка, что внутрь .exe уехало всё нужное. PyInstaller молча
+      # пропускает модули, подгружаемые по имени в рантайме (ccxt.bybit,
+      # планировщик, движок окна), — собирается без жалоб, падает при первом
+      # обращении к бирже.
+      #
+      # Проверять это временем жизни процесса нельзя: без ключей приложение
+      # держит открытым окно настройки и «живёт» ровно так же. Поэтому
+      # --selftest импортирует всё и возвращает ненулевой код при потере.
+      - name: Самопроверка сборки
         shell: pwsh
         run: |
           $data = "$PWD\smoke"
           New-Item -ItemType Directory -Force $data | Out-Null
-          Set-Content "$data\.env" "TRADING_MODE=PAPER`nEXCHANGE=bybit`nDASHBOARD_PORT=8791`n"
           $env:BOT_DATA_DIR = $data
-          $p = Start-Process "$PWD\dist\Kraken.exe" -PassThru
-          Start-Sleep -Seconds 60
-          $alive = -not $p.HasExited
-          try { $p | Stop-Process -Force } catch {}
-          if (-not $alive) { throw "приложение завершилось само — сборка негодная" }
-          Write-Host "приложение прожило минуту — годится"
+          # Start-Process -Wait: приложение оконное, и обычный вызов через &
+          # не дождался бы его завершения — код возврата проверять было бы
+          # нечему. Отчёт приложение пишет файлом по той же причине: консоли,
+          # куда печатать, у него нет.
+          $p = Start-Process "$PWD\dist\Kraken.exe" -ArgumentList '--selftest' -Wait -PassThru
+          if (Test-Path "$data\selftest.log") { Get-Content "$data\selftest.log" -Encoding utf8 }
+          if ($p.ExitCode -ne 0) { throw "самопроверка не пройдена — сборка негодная" }
 
       - name: Выпуск
         if: startsWith(github.ref, 'refs/tags/v')

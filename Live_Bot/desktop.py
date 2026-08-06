@@ -169,17 +169,68 @@ def _open_window(url):
 
 # ── Точка входа ──────────────────────────────────────────────────────────────
 
+def selftest():
+    """
+    Проверка собранного приложения: всё ли уехало внутрь .exe.
+
+    Единственная поломка, которой славится упаковка, — потерянный модуль.
+    PyInstaller ищет импорты статически и не видит тех, что подгружаются по
+    имени в рантайме: ccxt.bybit, планировщик, движок окна. Собранное
+    приложение при этом собирается без единой жалобы и падает при первом
+    обращении к бирже.
+
+    Проверять это «приложение прожило минуту» нельзя: без ключей оно живёт
+    ровно так же — держит открытым окно настройки. Поэтому здесь импорт
+    всего, что нужно в работе, и ненулевой код при первой же потере.
+    """
+    modules = ('bot', 'exchange', 'dashboard', 'trade_manager', 'paper_broker',
+               'strategy', 'strategy_smc', 'strategy_levels', 'first_run',
+               'updater', 'updater_app', 'ccxt.bybit', 'ccxt.bingx',
+               'apscheduler.schedulers.blocking', 'tkinter', 'tkinter.ttk',
+               'webview', 'pandas', 'numpy')
+    import importlib
+    failed = []
+    for name in modules:
+        try:
+            importlib.import_module(name)
+        except Exception as exc:                   # noqa: BLE001
+            failed.append(f'{name}: {exc}')
+    # Пишем в файл, а не в stdout: приложение собрано с --windowed, консоли у
+    # него нет, и напечатанное просто пропадёт.
+    report = os.path.join(config.DATA_DIR, 'selftest.log')
+    lines = ([f'НЕ ЗАГРУЗИЛОСЬ {name}' for name in failed]
+             or [f'самопроверка пройдена: {len(modules)} модулей на месте'])
+    try:
+        with open(report, 'w', encoding='utf-8') as fh:
+            fh.write('\n'.join(lines) + '\n')
+    except OSError:
+        pass
+    return 1 if failed else 0
+
+
 def main():
-    # Боевой режим требует двойного подтверждения с клавиатуры, а у окна нет
-    # ввода. Молча пропустить подтверждение нельзя: оно и существует затем,
-    # чтобы реальные деньги не начали торговаться по двойному клику.
+    if '--selftest' in sys.argv:
+        sys.exit(selftest())
+
+    # Ключей нет — спрашиваем окном. Без них бот падает на первом обращении к
+    # бирже, а человек видит только «дашборд не поднялся»: причина настоящая,
+    # но по сообщению не угадывается.
+    import first_run
+    if first_run.needs_setup():
+        if not first_run.run_setup():
+            log('Настройка не завершена — выходим')
+            return
+
+    # Боевой режим требует подтверждения. Раньше окно его просто не пускало и
+    # отправляло в консоль — приложение оказывалось недоделанным ровно там, где
+    # важнее всего. Требование при этом осталось прежним: набрать YES руками,
+    # чтобы реальные деньги не начали торговаться по двойному щелчку.
     if config.TRADING_MODE == 'LIVE':
-        _alert(APP_TITLE,
-               'Режим LIVE (реальные деньги) из окна не запускается.\n\n'
-               'Подтверждение запуска требует ввода с клавиатуры, поэтому\n'
-               'запусти бота из консоли: start.bat\n\n'
-               'Для фантомной торговли поставь в .env  TRADING_MODE=PAPER')
-        return
+        if not first_run.confirm_live():
+            log('Запуск в LIVE отменён')
+            return
+        os.environ['LIVE_CONFIRMED'] = 'YES'
+        config.LIVE_CONFIRMED = 'YES'
 
     url = f'http://127.0.0.1:{config.DASHBOARD_PORT}/'
     dashboard.set_status('starting')
