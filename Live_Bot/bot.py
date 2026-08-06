@@ -57,10 +57,40 @@ def _build_signal(candidate, strategy, balance):
     Возвращает (signal, df_1h) либо (None, None). Контекст «почему открылась»
     кладётся в signal['scan'] — он же уходит в журнал и в дашборд, поэтому по
     закрытой сделке потом видно, на каком основании в неё зашли.
+
+    ВЕТКА ПОД КАЖДУЮ СТРАТЕГИЮ ОБЯЗАТЕЛЬНА, И ВОТ ПОЧЕМУ. Раньше здесь стояло
+    «если SMC — так, ИНАЧЕ — фибо». Стратегия уровней не подходила ни под одно
+    условие и уходила в ветку фибо: её готовый сигнал ВЫБРАСЫВАЛСЯ, а вместо
+    него на тех же свечах заново искался импульс Фибоначчи. Дальше результат
+    помечался именем LEVELS. То есть уровни либо не торговали вовсе, либо
+    торговали чужой сетап под своим именем — и в журнале это выглядело как
+    нормальная работа стратегии уровней.
+
+    Поэтому неизвестная стратегия теперь ОТКАЗЫВАЕТСЯ обслуживаться, а не
+    достаётся фибо по умолчанию. Четвёртая стратегия, добавленная когда-нибудь
+    позже, упрётся в явный отказ в журнале вместо тихой подмены.
     """
     pair = candidate['pair']
 
-    if strategy == 'SMC':
+    if strategy == 'LEVELS':
+        # Сканер уровней уже вернул готовый сигнал: он и есть результат
+        # анализа, повторять нечего.
+        signal = candidate.get('signal')
+        if not signal:
+            log(f"   LEVELS {pair}: кандидат без сигнала — пропускаю")
+            return None, None
+        lv = signal.get('levels') or {}
+        signal['scan'] = {
+            'score': candidate.get('score'),
+            'rr_est': candidate.get('rr'),
+            'touches': lv.get('touches'),
+            'volume_ratio': lv.get('volume_ratio'),
+            'mirror': lv.get('mirror'),
+        }
+        df_for_chart = candidate.get('df_1h')
+        log(f"\n[LEVELS] {pair}: уровень {lv.get('level')}, "
+            f"касаний {lv.get('touches')}, RR {candidate.get('rr', 0):.2f}")
+    elif strategy == 'SMC':
         signal = candidate['signal']
         smc_info = signal['smc']
         signal['scan'] = {
@@ -74,7 +104,7 @@ def _build_signal(candidate, strategy, balance):
         df_for_chart = candidate.get('df_1h')
         log(f"\n[SMC] {pair}: зона {candidate['poi_type']}, "
             f"confluence {candidate['score']}, RR {candidate['rr']:.2f}")
-    else:
+    elif strategy == 'FIBO':
         signal = analyze_market(candidate['df_1h'], None, pair, balance)
         if not signal:
             return None, None
@@ -85,6 +115,11 @@ def _build_signal(candidate, strategy, balance):
         df_for_chart = candidate['df_1h']
         log(f"\n[FIBO] {pair}: зона {candidate.get('zone')}, "
             f"HTF {signal['htf_trend']}")
+    else:
+        log(f"   {strategy}: нет ветки сборки сигнала — вход отменён. "
+            f"Молча отдать кандидата чужой стратегии нельзя: она откроет "
+            f"свой сетап под этим именем.")
+        return None, None
 
     signal['strategy'] = strategy
     return signal, df_for_chart
