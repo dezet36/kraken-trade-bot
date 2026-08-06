@@ -16,6 +16,23 @@ $dist   = Join-Path $root 'dist'
 python -c "import PyInstaller" 2>$null
 if (-not $?) { throw "PyInstaller не установлен. Выполни: pip install pyinstaller" }
 
+# ── Версия внутрь сборки ──────────────────────────────────────────────────────
+# Собранное приложение обновляется, сравнивая свою версию с последним выпуском
+# на GitHub. Дата файла для этого не годится: копирование и распаковка её
+# меняют. Имя берём из git-тега, а без тега — из короткого хеша с пометкой, что
+# сборка внесистемная: такую обновлятор трогать не станет.
+$version = $env:KRAKEN_VERSION
+if (-not $version) {
+    $version = (git -C $root describe --tags --exact-match 2>$null)
+}
+if (-not $version) {
+    $sha = (git -C $root rev-parse --short HEAD 2>$null)
+    $version = if ($sha) { "dev-$sha" } else { "" }
+}
+$versionFile = Join-Path $botDir 'VERSION'
+[IO.File]::WriteAllText($versionFile, "$version`n", (New-Object Text.UTF8Encoding $false))
+Write-Host "Версия сборки: $version"
+
 Write-Host "Собираю Kraken.exe (несколько минут: ccxt, pandas и matplotlib весят много)..."
 
 # --windowed: без консольного окна.
@@ -32,11 +49,17 @@ python -m PyInstaller `
     --specpath "$root\build" `
     --add-data "$botDir\dashboard.html;." `
     --add-data "$botDir\app_icon.ico;." `
+    --add-data "$versionFile;." `
     --hidden-import ccxt.bybit `
     --hidden-import ccxt.bingx `
     --hidden-import apscheduler.schedulers.blocking `
     --hidden-import apscheduler.executors.pool `
     --hidden-import apscheduler.triggers.interval `
+    --collect-all webview `
+    --hidden-import webview.platforms.winforms `
+    --hidden-import clr_loader `
+    --exclude-module tkinter.test `
+    --exclude-module research `
     "$botDir\desktop.py"
 
 if (-not (Test-Path "$dist\Kraken.exe")) { throw "Сборка не создала $dist\Kraken.exe" }

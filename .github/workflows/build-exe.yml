@@ -1,0 +1,109 @@
+# Сборка Kraken.exe и выпуск на GitHub.
+#
+# ЗАЧЕМ. Собранное приложение обновляет себя, скачивая новый .exe из последнего
+# выпуска. Значит выпуски должны появляться сами: собирать вручную и не забывать
+# приложить файл — ровно тот способ, который однажды сломается молча, и человек
+# останется со «свежей» версией, которой нет.
+#
+# КОГДА СРАБАТЫВАЕТ. На тег вида v1.2.3. Обычный коммит в main сборку не
+# запускает: выпуск — это осознанное действие, а не каждое сохранение.
+#
+#     git tag v1.0.0
+#     git push origin v1.0.0
+#
+# Собирается на windows-latest, потому что .exe для Windows кросс-сборке не
+# поддаётся: PyInstaller упаковывает интерпретатор той системы, где работает.
+
+name: Сборка приложения
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:          # и вручную, кнопкой на вкладке Actions
+
+permissions:
+  contents: write             # нужно, чтобы создать выпуск и приложить файл
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Зависимости
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Версия внутрь сборки
+        shell: pwsh
+        run: |
+          $v = "${{ github.ref_name }}"
+          if (-not $v.StartsWith('v')) { $v = "dev-$($env:GITHUB_SHA.Substring(0,7))" }
+          [IO.File]::WriteAllText("Live_Bot/VERSION", "$v`n", (New-Object Text.UTF8Encoding $false))
+          Write-Host "Версия: $v"
+
+      - name: Сборка
+        shell: pwsh
+        run: |
+          $root = $PWD.Path
+          python -m PyInstaller `
+            --noconfirm --clean --onefile --windowed `
+            --name Kraken `
+            --icon "$root\Live_Bot\app_icon.ico" `
+            --distpath "$root\dist" --workpath "$root\build" --specpath "$root\build" `
+            --paths "$root\Live_Bot" `
+            --add-data "$root\Live_Bot\dashboard.html;." `
+            --add-data "$root\Live_Bot\app_icon.ico;." `
+            --add-data "$root\Live_Bot\VERSION;." `
+            --hidden-import ccxt.bybit `
+            --hidden-import ccxt.bingx `
+            --hidden-import apscheduler.schedulers.blocking `
+            --hidden-import apscheduler.executors.pool `
+            --hidden-import apscheduler.triggers.interval `
+            --collect-all webview `
+            --hidden-import webview.platforms.winforms `
+            --hidden-import clr_loader `
+            --exclude-module research `
+            "$root\Live_Bot\desktop.py"
+          if (-not (Test-Path "$root\dist\Kraken.exe")) { throw "сборка не создала Kraken.exe" }
+
+      # Проверка, что собранное приложение вообще запускается. Без неё в выпуск
+      # мог бы уехать .exe, падающий на первой секунде: PyInstaller молча
+      # пропускает модуль, который подгружается по имени в рантайме, и узнать
+      # об этом можно только запуском.
+      - name: Проверка запуска
+        shell: pwsh
+        run: |
+          $data = "$PWD\smoke"
+          New-Item -ItemType Directory -Force $data | Out-Null
+          Set-Content "$data\.env" "TRADING_MODE=PAPER`nEXCHANGE=bybit`nDASHBOARD_PORT=8791`n"
+          $env:BOT_DATA_DIR = $data
+          $p = Start-Process "$PWD\dist\Kraken.exe" -PassThru
+          Start-Sleep -Seconds 60
+          $alive = -not $p.HasExited
+          try { $p | Stop-Process -Force } catch {}
+          if (-not $alive) { throw "приложение завершилось само — сборка негодная" }
+          Write-Host "приложение прожило минуту — годится"
+
+      - name: Выпуск
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ github.ref_name }}" "dist\Kraken.exe" `
+            --title "${{ github.ref_name }}" `
+            --notes "Приложение обновляется само: Управление -> Обновление -> Проверить."
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Kraken-${{ github.ref_name }}
+          path: dist/Kraken.exe

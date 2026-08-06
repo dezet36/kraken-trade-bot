@@ -99,15 +99,30 @@ def _wait_for_dashboard(url, timeout=STARTUP_TIMEOUT):
 # ── Окно ─────────────────────────────────────────────────────────────────────
 
 def _open_native(url):
-    """Нативное окно через pywebview. None — пакет не установлен."""
+    """
+    Своё окно через pywebview. None — открыть не удалось, зовите запасной путь.
+
+    Движок задаётся явно: edgechromium — это WebView2, встроенный в Windows 10
+    и новее. Без явного указания pywebview может выбрать mshtml, движок
+    Internet Explorer, и дашборд в нём разъедется — там нет ни grid, ни
+    современного CSS, на котором он собран.
+    """
     try:
         import webview
     except ImportError:
         return None
-    window = webview.create_window(APP_TITLE, url, width=1280, height=860,
-                                   min_size=(900, 600))
-    webview.start()          # блокирует до закрытия окна
-    return window
+
+    webview.create_window(APP_TITLE, url, width=1360, height=900,
+                          min_size=(1000, 640))
+    gui = 'edgechromium' if sys.platform == 'win32' else None
+    try:
+        webview.start(gui=gui)          # блокирует до закрытия окна
+        return True
+    except Exception as exc:            # noqa: BLE001
+        # Чаще всего это отсутствующий WebView2 на старой Windows. Падать
+        # нельзя: ниже есть запасные пути, а интерфейс нужен человеку сейчас.
+        log(f"Своё окно не открылось ({exc}) — пробую запасной способ")
+        return None
 
 
 def _open_app_window(url):
@@ -137,7 +152,7 @@ def _open_app_window(url):
 
 def _open_window(url):
     """Открывает интерфейс лучшим доступным способом и ждёт его закрытия."""
-    if _open_native(url) is not None:
+    if _open_native(url):
         return
 
     process = _open_app_window(url)

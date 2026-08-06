@@ -123,6 +123,18 @@ def _commit_info(ref='HEAD'):
     return {'commit': short, 'date': date, 'subject': subject}
 
 
+def _app_mode():
+    """
+    Приложение собрано в .exe — обновляться надо выпусками, а не git.
+
+    Развилка стоит здесь, а не в дашборде: панель обновления одна, и знать,
+    как именно устроено то, что она обновляет, ей незачем. Обе реализации
+    отвечают словарём одной формы.
+    """
+    import updater_app
+    return updater_app if updater_app.is_frozen() else None
+
+
 def status(fetch=True):
     """
     Что установлено, что доступно, можно ли обновляться.
@@ -130,6 +142,10 @@ def status(fetch=True):
     fetch=False — быстрый ответ без обращения к сети (для отрисовки
     страницы, чтобы она не ждала git по несколько секунд).
     """
+    app = _app_mode()
+    if app is not None:
+        return app.status(fetch=fetch)
+
     if not is_repo():
         return {'available': False, 'can_update': False,
                 'reason': 'каталог не является git-репозиторием'}
@@ -235,6 +251,10 @@ def apply():
 
     Возвращает (успех, сообщение, подробности).
     """
+    app = _app_mode()
+    if app is not None:
+        return app.apply()
+
     info = status(fetch=True)
     if not info.get('can_update'):
         return False, info.get('reason') or 'обновление недоступно', info
@@ -266,6 +286,10 @@ def apply():
 
 def rollback():
     """Возврат на коммит, который стоял до последнего обновления."""
+    app = _app_mode()
+    if app is not None:
+        return app.rollback()
+
     previous = _load_state().get('previous')
     if not previous:
         return False, 'нет записи о предыдущей версии'
