@@ -46,7 +46,7 @@ from exit_plan import cooldown_hours, direction_cap, tp_plan, wants_breakeven
 import settings_store as settings
 from logger import log
 
-STRATEGIES = ('FIBO', 'SMC', 'LEVELS')
+STRATEGIES = ('FIBO', 'SMC', 'LEVELS', 'RSIBB')
 
 BAR_TF = '5m'
 BAR_MS = 5 * 60 * 1000
@@ -811,6 +811,29 @@ class PaperBroker:
                       if p.get('at') and p.get('price')]
             if points:
                 out['touches'] = points
+        elif strategy == 'RSIBB':
+            bb = signal.get('rsibb') or {}
+            # Канал целиком — это и есть сетап: цена вышла за край, цель на
+            # середине. Без обеих границ на графике видно только вход и цель,
+            # а откуда они взялись — нет.
+            band(bb.get('lower'), bb.get('upper'),
+                 f"канал Боллинджера · RSI {bb['rsi']:.0f}" if bb.get('rsi')
+                 is not None else 'канал Боллинджера')
+            if bb.get('mid'):
+                lines.append({'price': float(bb['mid']),
+                              'label': 'средняя линия — цель', 'main': True})
+            if bb.get('band'):
+                lines.append({
+                    'price': float(bb['band']),
+                    'label': 'полоса — вход',
+                    # Главная линия сетапа: именно на ней стоит лимитная
+                    # заявка, и вся арифметика издержек держится на том, что
+                    # цена приходит к ней сама.
+                    'main': True,
+                })
+            start_at = _iso_time(setup.get('start_time'))
+            if start_at:
+                out['from'] = start_at
         return out
 
     @staticmethod

@@ -9,6 +9,7 @@ from exchange import get_exchange, make_market_client, fetch_ohlcv
 import dashboard
 import error_log
 import strategy_levels
+import strategy_rsibb
 import strategy_smc
 from strategy import analyze_market
 from pair_scanner import get_liquid_pairs, scan_for_setups
@@ -104,6 +105,23 @@ def _build_signal(candidate, strategy, balance):
         df_for_chart = candidate.get('df_1h')
         log(f"\n[SMC] {pair}: зона {candidate['poi_type']}, "
             f"confluence {candidate['score']}, RR {candidate['rr']:.2f}")
+    elif strategy == 'RSIBB':
+        # Сканер уже вернул готовый сигнал: он и есть результат анализа.
+        signal = candidate.get('signal')
+        if not signal:
+            log(f"   RSIBB {pair}: кандидат без сигнала — пропускаю")
+            return None, None
+        bb = signal.get('rsibb') or {}
+        signal['scan'] = {
+            'score': candidate.get('score'),
+            'rr_est': candidate.get('rr'),
+            'rsi': bb.get('rsi'),
+            'adx': bb.get('adx'),
+            'stop_pct': bb.get('stop_pct'),
+        }
+        df_for_chart = candidate.get('df_1h')
+        log(f"\n[RSIBB] {pair}: полоса {bb.get('band')}, "
+            f"RSI {bb.get('rsi', 0):.0f}, RR {candidate.get('rr', 0):.2f}")
     elif strategy == 'FIBO':
         signal = analyze_market(candidate['df_1h'], None, pair, balance)
         if not signal:
@@ -169,6 +187,8 @@ def _run_dual_strategy(liquid_pairs, balance, open_pairs):
         ('SMC', lambda: strategy_smc.scan_for_setups(liquid_pairs, trade_manager,
                                                      balance=balance)),
         ('LEVELS', lambda: strategy_levels.scan_for_setups(
+            liquid_pairs, trade_manager, balance=balance)),
+        ('RSIBB', lambda: strategy_rsibb.scan_for_setups(
             liquid_pairs, trade_manager, balance=balance)),
     )
 
@@ -280,15 +300,27 @@ def _paper_cycle():
             continue
 
         gate = broker.gate(strategy)
+        # ВЕТКА ПОД КАЖДУЮ СТРАТЕГИЮ, БЕЗ else ПО УМОЛЧАНИЮ. Здесь стояло
+        # «иначе — сканер фибо», и это та же ловушка, что однажды уже стоила
+        # месяца недостоверных наблюдений у стратегии уровней: новая стратегия
+        # молча получала бы чужих кандидатов и торговала их под своим именем.
         try:
-            if strategy == 'SMC':
+            if strategy == 'FIBO':
+                candidates = scan_for_setups(liquid_pairs, gate, client=client)
+            elif strategy == 'SMC':
                 candidates = strategy_smc.scan_for_setups(
                     liquid_pairs, gate, client=client, balance=balance)
             elif strategy == 'LEVELS':
                 candidates = strategy_levels.scan_for_setups(
                     liquid_pairs, gate, client=client, balance=balance)
+            elif strategy == 'RSIBB':
+                candidates = strategy_rsibb.scan_for_setups(
+                    liquid_pairs, gate, client=client, balance=balance)
             else:
-                candidates = scan_for_setups(liquid_pairs, gate, client=client)
+                log(f"   {strategy}: нет сканера — пропускаем. Отдать пул "
+                    f"чужому сканеру нельзя: он найдёт свои сетапы и они "
+                    f"уйдут в журнал под этим именем.")
+                continue
         except Exception as exc:
             log(f"   {strategy}: ошибка сканирования — {exc}")
             continue

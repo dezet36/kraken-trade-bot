@@ -38,11 +38,17 @@ def bollinger(close, period=None, mult=None):
     period = params.BB_PERIOD if period is None else period
     mult = params.BB_MULT if mult is None else mult
     series = pd.Series(np.asarray(close, dtype=float))
-    mid = series.rolling(period).mean().to_numpy()
+    # Копии обязательны: pandas отдаёт массив только для чтения. Без этого
+    # часть индикаторов оказывалась изменяемой (RSI, ADX), а часть нет, и
+    # запись в них падала лишь у некоторых — несогласованность, которую видно
+    # только когда до неё доберёшься.
+    mid = np.array(series.rolling(period).mean().to_numpy(), dtype=float,
+                   copy=True)
     # Отклонение популяционное (ddof=0) — так его считает сам Боллинджер и все
     # торговые платформы. Выборочное дало бы полосы чуть шире, и пороги,
     # снятые с чужих графиков, перестали бы совпадать с нашими.
-    dev = series.rolling(period).std(ddof=0).to_numpy()
+    dev = np.array(series.rolling(period).std(ddof=0).to_numpy(), dtype=float,
+                   copy=True)
     return mid, mid + mult * dev, mid - mult * dev
 
 
@@ -100,6 +106,7 @@ def indicators(open_, high, low, close, bb_period=None, bb_mult=None,
     width_window = params.WIDTH_WINDOW if width_window is None else width_window
     mid, upper, lower = bollinger(close, bb_period, bb_mult)
     width = upper - lower
+    width = np.array(width, dtype=float, copy=True)
     ratio = np.full(len(width), np.nan)
     if width_window > 1:
         mean_width = pd.Series(width).rolling(width_window).mean().to_numpy()
