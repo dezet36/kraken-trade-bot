@@ -385,8 +385,9 @@ class PaperBroker:
                    for item in book.values() if item['direction'] == direction)
 
     def free_slots(self, strategy):
-        budget = config.SLOTS_PER_STRATEGY or config.MAX_ACTIVE_PAIRS
-        return budget - self.slots_used_by(strategy)
+        """Сколько ещё можно открыть. None — предела нет."""
+        import settings_store
+        return settings_store.slots_free(strategy, self.slots_used_by(strategy))
 
     def equity(self, strategy):
         """Баланс + нереализованный результат по открытым позициям."""

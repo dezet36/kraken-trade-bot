@@ -177,11 +177,10 @@ def _run_dual_strategy(liquid_pairs, balance, open_pairs):
             log(f"\n=== {strategy}: выключена оператором, пропускаем ===")
             continue
 
-        budget = settings.max_slots(strategy)
         used = trade_manager.slots_used_by(strategy)
-        free = budget - used
-        log(f"\n=== {strategy}: занято {used}/{budget} слотов ===")
-        if free <= 0:
+        free = settings.slots_free(strategy, used)
+        log(f"\n=== {strategy}: занято {settings.slots_label(strategy, used)} слотов ===")
+        if free is not None and free <= 0:
             log(f"   {strategy}: слоты заняты, пропускаем")
             continue
 
@@ -202,7 +201,7 @@ def _run_dual_strategy(liquid_pairs, balance, open_pairs):
         log(f"   {strategy}: сетапов найдено {len(candidates)}")
         opened = 0
         for candidate in candidates:
-            if opened >= free:
+            if free is not None and opened >= free:
                 break
             pair = candidate['pair']
             if pair in taken:
@@ -261,15 +260,14 @@ def _paper_cycle():
 
         balance = broker.balance(strategy)
         used = broker.slots_used_by(strategy)
-        budget = settings.max_slots(strategy)
-        free = budget - used
+        free = settings.slots_free(strategy, used)
         equity = broker.equity(strategy)
         start = broker.start_balance(strategy)
         growth = (equity / start - 1) * 100 if start else 0.0
 
         log(f"\n=== {strategy}: депозит ${equity:,.2f} ({growth:+.2f}%) | "
-            f"слотов {used}/{budget} ===")
-        if free <= 0:
+            f"слотов {settings.slots_label(strategy, used)} ===")
+        if free is not None and free <= 0:
             log(f"   {strategy}: слоты заняты, пропускаем")
             continue
         if balance <= 0:
@@ -298,7 +296,7 @@ def _paper_cycle():
         log(f"   {strategy}: сетапов найдено {len(candidates)}")
         opened = 0
         for candidate in candidates:
-            if opened >= free:
+            if free is not None and opened >= free:
                 break
             try:
                 signal, _ = _build_signal(candidate, strategy, balance)
