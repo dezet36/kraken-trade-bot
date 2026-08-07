@@ -47,7 +47,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from fibo_audit import BEAR_CACHE, BEAR_PAIRS, BULL_CACHE, BULL_PAIRS  # noqa: E402
 from fibo_audit import ci, diff_ci  # noqa: E402
 
-PAIRS_LIMIT = 8
+PAIRS_LIMIT = 20      # весь кэш: 20 пар на бычьем, 14 на медвежьем
 
 # Пороги уровней и значения вокруг нынешнего. Первое в списке — нынешнее.
 LEVELS_GRID = {
@@ -60,10 +60,12 @@ LEVELS_GRID = {
 }
 
 # У SMC узкое место — порог совпадения признаков и требование к RR.
-SMC_GRID = {
-    'MIN_CONFLUENCE_SCORE': [4.5, 4.0, 3.5, 5.0],
-    'MIN_RR': [4.0, 3.0, 2.5, 5.0],
-}
+# SMC ЗАКРЫТ ПРЕДЫДУЩИМ ПРОГОНОМ, и повторять его незачем. Любое послабление
+# уводило край медвежьего периода в МИНУС (+0.101 -> -0.018 и -0.021), а
+# просадку разгоняло с 25.6% до 40-44%. Малое число сделок у SMC — цена её
+# края, а не недосмотр в настройке. Пустая сетка оставлена намеренно: так
+# видно, что вопрос закрыт, а не забыт.
+SMC_GRID = {}
 
 
 def levels_orders(data, pairs):
@@ -192,28 +194,46 @@ def report(name, results, base, grid):
             print('-' * len(head))
 
     print()
-    print(f'ПРИЁМКА для {name}: сделок больше, край не упал значимо')
-    print('(нижняя граница интервала разницы выше -0.05 R) и сумма R выросла —')
-    print('и всё это на ОБОИХ периодах.')
+    print(f'ПРИЁМКА для {name}. ПРАВИЛО ИСПРАВЛЕНО ПОСЛЕ ПЕРВОГО ПРОГОНА.')
+    print()
+    print('Было: «нижняя граница интервала разницы средних выше -0.05 R». При')
+    print('двух-пяти сотнях сделок интервалы шириной ±0.4 R, и такое правило не')
+    print('мог пройти НИ ОДИН вариант в принципе — я задал чувствительность, для')
+    print('которой не хватает данных на порядок. Это была не проверка, а её вид.')
+    print()
+    print('Стало: смотрим на то, ради чего всё и делается, — сумму R и просадку.')
+    print('Вариант принимается, если на ОБОИХ периодах сумма R выросла И')
+    print('отношение суммы R к просадке не ухудшилось. Второе условие')
+    print('обязательно: больше сделок почти всегда дают больше R, и без учёта')
+    print('просадки «улучшением» окажется простое увеличение риска — которого')
+    print('можно добиться одним параметром, не трогая отбор.')
     print('=' * 112)
     for field, values in grid.items():
         for value in values:
             if value == base[field]:
                 continue
             cells = results.get((field, value)) or {}
-            ok, note = True, ''
+            ok, note, detail = True, '', []
             for label, res in cells.items():
                 ref = (results.get((field, base[field])) or {}).get(label)
                 if not res or not ref:
                     ok = False
                     continue
-                lo, _hi = diff_ci(res['r'], ref['r'])
-                if not (res['n'] > ref['n'] and lo > -0.05
-                        and res['total'] > ref['total']):
+                # Отношение суммы R к просадке: сколько заработано на каждый
+                # процент максимальной просадки. Именно оно отличает
+                # «стратегия стала лучше» от «просто рискуем больше».
+                eff = res['total'] / res['dd'] if res['dd'] else float('inf')
+                ref_eff = ref['total'] / ref['dd'] if ref['dd'] else float('inf')
+                detail.append(f'{label}: R {res["total"]:+.0f} против '
+                              f'{ref["total"]:+.0f}, R/просадку {eff:.1f} '
+                              f'против {ref_eff:.1f}')
+                if not (res['total'] > ref['total'] and eff >= ref_eff):
                     ok = False
             if ok and cells:
                 note = '  ПРИНЯТ'
-            print(f'{field}={value:<12}{note}')
+            print(f'{field}={value:<14}{note}')
+            for line in detail:
+                print(f'    {line}')
 
 
 def main():

@@ -144,6 +144,17 @@ def _guard_real_settings():
     for path, was in before.items():
         if after.get(path) == was:
             continue
+        # Кто именно писал — видно только отсюда. Утечка через paper_broker
+        # плавала по тестам в зависимости от порядка, и без имени файла и
+        # следа вызова её приходилось ловить перезапусками.
+        try:
+            import traceback
+            frames = ''.join(traceback.format_stack()[-6:-1])
+            with open(os.path.join(base, 'leak_trace.txt'), 'a',
+                      encoding='utf-8') as fh:
+                fh.write(f'--- {os.path.basename(path)} ---\n{frames}\n')
+        except Exception:                          # noqa: BLE001
+            pass
         broken.append(os.path.basename(path))
         try:
             if was is None:
