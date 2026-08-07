@@ -82,12 +82,30 @@ def build_levels(high, low, tolerance_pct=None, min_touches=None):
             if abs(second['price'] - first['price']) / first['price'] * 100 <= tolerance_pct:
                 members.append(second)
                 idxs.add(j)
-        if len(members) < min_touches:
+        # РАЗНЕСЁННОСТЬ КАСАНИЙ ВО ВРЕМЕНИ. Пивот требует двух баров с каждой
+        # стороны, поэтому в узком пятачке их набирается несколько подряд, и
+        # «касаний 3» выходит там, где цена подходила к уровню ОДИН раз.
+        # Считаем только те, что отстоят от предыдущего зачтённого не меньше
+        # чем на MIN_TOUCH_GAP баров. Ноль — правило выключено, поведение
+        # прежнее.
+        ordered = sorted(members, key=lambda m: m['index'])
+        gap = params.MIN_TOUCH_GAP
+        if gap > 0:
+            spaced, last = [], None
+            for point in ordered:
+                if last is None or point['index'] - last >= gap:
+                    spaced.append(point)
+                    last = point['index']
+            touches = len(spaced)
+        else:
+            touches = len(members)
+
+        if touches < min_touches:
             continue
         used |= idxs
         levels.append({
             'price': float(np.mean([m['price'] for m in members])),
-            'touches': len(members),
+            'touches': touches,
             'mirror': len({m['kind'] for m in members}) > 1,
             'known_at': max(m['known_at'] for m in members),
             # Сами касания, а не только их число. Отбор от них не зависит —
