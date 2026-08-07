@@ -227,7 +227,7 @@ def evaluate(ind, at, rsi_low=None, rsi_high=None, adx_max=None,
 
 
 def build_trade(setup, target_frac=None, stop_frac=None, min_rr=None,
-                min_stop_pct=None):
+                min_stop_pct=None, thin_stop=None):
     """
     Вход, стоп, цель. None — геометрия не годится.
 
@@ -243,6 +243,7 @@ def build_trade(setup, target_frac=None, stop_frac=None, min_rr=None,
     stop_frac = params.STOP_FRAC if stop_frac is None else stop_frac
     min_rr = params.MIN_RR if min_rr is None else min_rr
     min_stop_pct = params.MIN_STOP_PCT if min_stop_pct is None else min_stop_pct
+    thin_stop = params.THIN_STOP if thin_stop is None else thin_stop
 
     long_side = setup['direction'] == LONG
     half = setup['half_width']
@@ -258,6 +259,19 @@ def build_trade(setup, target_frac=None, stop_frac=None, min_rr=None,
     distance = abs(entry - stop)
     floor = entry * min_stop_pct / 100
     if distance < floor:
+        # РАЗВИЛКА, КОТОРУЮ НЕЛЬЗЯ ПОДРАЗУМЕВАТЬ. Пол по стопу пришёл из
+        # стратегий с широкой геометрией, где он срабатывал изредка. Здесь
+        # канал узкий, и пол упирается почти всегда: естественный стоп 0.23%
+        # цены расширяется до 0.4%, а цель остаётся на 0.46% — отношение риска
+        # к прибыли падает с 2.0 до 1.15, и стратегия меряется не та, что
+        # задумана.
+        #
+        # 'widen' — расширить стоп, приняв худшее отношение;
+        # 'skip'  — не брать сетап вовсе: слишком узкий канал не окупает круг
+        #           комиссий, и это тот же довод, что и у самого пола.
+        # Что верно — решает замер, поэтому выбор вынесен в параметр.
+        if thin_stop == 'skip':
+            return None
         stop = entry - floor if long_side else entry + floor
         distance = floor
     if distance <= 0:

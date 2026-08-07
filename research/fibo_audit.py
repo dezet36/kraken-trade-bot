@@ -61,11 +61,32 @@ RNG = np.random.default_rng(20260806)
 PAIRS_LIMIT = 8
 
 
+# Одна выборка бутстрапа занимает BOOTSTRAP × len(values) чисел. При десяти
+# тысячах повторов и семнадцати тысячах сделок это 1.3 ГБ одним куском, и
+# скальперский замер на пятиминутках честно упал на этом. Считаем частями:
+# результат тот же, память ограничена сверху.
+CHUNK_CELLS = 20_000_000
+
+
+def _boot_means(values, size=None):
+    """Средние бутстраповых выборок. Считается частями — иначе не влезает."""
+    size = len(values) if size is None else size
+    per_chunk = max(1, CHUNK_CELLS // max(size, 1))
+    out = []
+    left = BOOTSTRAP
+    while left > 0:
+        take = min(per_chunk, left)
+        out.append(RNG.choice(values, size=(take, size),
+                              replace=True).mean(axis=1))
+        left -= take
+    return np.concatenate(out)
+
+
 def ci(values, alpha=0.05):
     v = np.asarray(values, dtype=float)
     if len(v) < 3:
         return (np.nan, np.nan)
-    draws = RNG.choice(v, size=(BOOTSTRAP, len(v)), replace=True).mean(axis=1)
+    draws = _boot_means(v)
     return tuple(np.percentile(draws, [alpha / 2 * 100, (1 - alpha / 2) * 100]))
 
 
@@ -73,9 +94,7 @@ def diff_ci(a, b, alpha=0.05):
     a, b = np.asarray(a, float), np.asarray(b, float)
     if len(a) < 3 or len(b) < 3:
         return (np.nan, np.nan)
-    da = RNG.choice(a, size=(BOOTSTRAP, len(a)), replace=True).mean(axis=1)
-    db = RNG.choice(b, size=(BOOTSTRAP, len(b)), replace=True).mean(axis=1)
-    d = da - db
+    d = _boot_means(a) - _boot_means(b)
     return tuple(np.percentile(d, [alpha / 2 * 100, (1 - alpha / 2) * 100]))
 
 
