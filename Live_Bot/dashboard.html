@@ -398,11 +398,31 @@
                overflow: auto; }
 
   /* ── Календарь по дням ───────────────────────────────────────────── */
-  .cal-head, .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr);
+  /* minmax(0, 1fr), а не 1fr, и это не придирка. Запись `1fr` означает
+     `minmax(auto, 1fr)`, а `auto` в минимуме — это размер содержимого. У
+     ячеек стоит aspect-ratio: 1, из-за чего их автоминимум определялся
+     ВЫСОТОЙ строки и раздувал дорожку сверх её доли. Замерено: сетка была
+     шире своей рамки на 164 пикселя при ЛЮБОЙ ширине окна, то есть календарь
+     наезжал на соседний блок всегда, а не только на узком экране.
+     Ноль в минимуме разрешает дорожке сжиматься до нужной доли. */
+  .cal-head, .cal-grid { display: grid;
+                         grid-template-columns: repeat(7, minmax(0, 1fr));
                          gap: 4px; max-width: 420px; }
+  /* align-items: start снимает растягивание по высоте строки. Пока ячейка
+     растягивалась, aspect-ratio: 1 брал ширину ОТ ВЫСОТЫ, а не наоборот, и
+     сетка оставалась шире рамки ещё на 23 пикселя даже после minmax(0, 1fr).
+     Со start высота выводится из ширины, как и задумано. */
+  .cal-grid { align-items: start; }
   .cal-head { margin: 10px 0 4px; }
   .cal-head span { font-size: 11px; color: var(--ink-3); text-align: center; }
-  .cal-cell { aspect-ratio: 1; border-radius: var(--r-sm); display: flex;
+  /* width: 100% здесь обязателен, и вот почему. Дорожки грид считает верно —
+     по 56.6 пикселя, — а ячейки получались по 80: при aspect-ratio высота
+     бралась от строки, а ширина ВЫВОДИЛАСЬ ИЗ ВЫСОТЫ, а не наоборот. Явная
+     ширина разворачивает эту зависимость в нужную сторону: ширину задаёт
+     дорожка, высоту — соотношение сторон. Ни minmax(0, 1fr), ни
+     align-items: start сами по себе этого не сделали — замерено. */
+  .cal-cell { aspect-ratio: 1; width: 100%; min-width: 0;
+              border-radius: var(--r-sm); display: flex;
               align-items: center; justify-content: center; font-size: 11px;
               color: var(--ink-2); background: var(--hairline-2); }
   .cal-cell.empty { background: transparent; }
@@ -670,13 +690,23 @@
       color-mix(in srgb, var(--bad) 26%, transparent) 0%,
       var(--grid) 44%, var(--grid) 56%,
       color-mix(in srgb, var(--good) 26%, transparent) 100%); }
+  /* Метки центрируются сдвигом на половину СВОЕЙ ширины, а не подобранным
+     отрицательным отступом. Прежде так был поправлен только кружок «сейчас»
+     (margin-left: -5px при ширине 10px), а засечки входа и целей стояли левым
+     краем на своей отметке — и метка на 100% выступала за дорожку. Мелочь в
+     два пикселя, но она даёт странице горизонтальную перемотку.
+     translateX(-50%) не надо пересчитывать при смене ширины метки: у
+     сработавшей цели она 3px вместо 2px, и подобранный отступ там уже врал. */
+  .track-bar .entry, .track-bar .tp, .track-bar .now {
+    transform: translateX(-50%);
+  }
   .track-bar .entry { position: absolute; top: -3px; width: 2px; height: 11px;
                       background: var(--ink-3); border-radius: 1px; }
   .track-bar .tp { position: absolute; top: -1px; width: 2px; height: 7px;
                    background: var(--good); opacity: .5; border-radius: 1px; }
   .track-bar .tp.done { opacity: 1; width: 3px; }
   .track-bar .now { position: absolute; top: -5px; width: 10px; height: 15px;
-    margin-left: -5px; border-radius: 3px; border: 2px solid var(--surface);
+    border-radius: 3px; border: 2px solid var(--surface);
     box-shadow: 0 1px 4px rgba(0,0,0,.25); }
   .track-ends { display: flex; justify-content: space-between; margin-top: 7px;
                 font-size: 11px; color: var(--ink-4); font-variant-numeric: tabular-nums; }
@@ -717,7 +747,14 @@
             margin-left: auto; }
   .legend span { display: inline-flex; align-items: center; gap: 7px; }
   .legend .line { width: 14px; height: 2px; border-radius: 2px; }
-  #plot, #under, #hist, #exits, #funnel { position: relative; }
+  /* Широкая таблица внутри блока разбора должна прокручиваться В СЕБЕ, а не
+     вылезать на соседей: замерено, что таблица выходов шире своей рамки на 17
+     пикселей и наезжала на край панели. Это то же правило, по которому уже
+     живёт список сделок, — просто оно не было применено к блокам разбора. */
+  #plot, #under, #hist, #exits, #funnel { position: relative;
+                                          overflow-x: auto; }
+  #plot > table, #under > table, #hist > table,
+  #exits > table, #funnel > table { min-width: max-content; }
   svg { display: block; width: 100%; height: auto; touch-action: none; }
   #tip {
     position: absolute; pointer-events: none; opacity: 0; transition: opacity .1s;
