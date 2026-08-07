@@ -232,6 +232,12 @@ def _to_bot_signal(setup, pair, balance, risk_scale=1.0):
             'rr_final': trade['rr_final'],
             'sweep': (setup['sweep'] or {}).get('source'),
             'sl_mode': trade['sl_mode'],
+            # ИМБАЛАНС ДОВОДИТСЯ ДО СИГНАЛА. Он участвует в отборе — входит в
+            # confluence, — но до графика не доходил, и на картинке было видно
+            # только ордер-блок. Разобрать сделку по такому графику нельзя:
+            # половина основания решения оставалась за кадром.
+            'fvg_top': (setup.get('fvg') or {}).get('top'),
+            'fvg_bottom': (setup.get('fvg') or {}).get('bottom'),
         },
     }
 

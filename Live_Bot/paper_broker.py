@@ -704,10 +704,20 @@ class PaperBroker:
         setup = signal.get('setup') or {}
         out = {'bands': bands, 'lines': lines}
 
-        def band(low, high, label):
+        def band(low, high, label, main=False):
+            """
+            Полоса на графике. main — ЗОНА, В КОТОРУЮ ВХОДИМ.
+
+            Разделение появилось потому, что все полосы рисовались одинаково
+            бледными, и на картинке нельзя было отличить зону сделки от
+            контекста. У SMC это ордер-блок против имбаланса, у Фибоначчи —
+            зона A, где стоит лимит, против зоны B, которая только показывает
+            границу инвалидации.
+            """
             if low and high and float(high) != float(low):
                 bands.append({'bottom': min(float(low), float(high)),
-                              'top': max(float(low), float(high)), 'label': label})
+                              'top': max(float(low), float(high)),
+                              'label': label, 'main': bool(main)})
 
         def _iso_time(value):
             """Метка времени в строгом ISO с зоной либо None."""
@@ -759,15 +769,21 @@ class PaperBroker:
             def _pct(value):
                 return f'{value * 100:.1f}'.rstrip('0').rstrip('.')
 
+            # Зона A — главная: именно в ней стоит лимит. Зона B показывает,
+            # где сетап перестаёт быть действительным.
             band(za.get('bottom'), za.get('top'),
-                 f'зона A · {_pct(config.ZONE_A_BOTTOM)}–{_pct(config.ZONE_A_TOP)}%')
+                 f'зона A · {_pct(config.ZONE_A_BOTTOM)}–{_pct(config.ZONE_A_TOP)}%',
+                 main=True)
             band(zb.get('bottom'), zb.get('top'),
                  f'зона B · {_pct(config.ZONE_B_BOTTOM)}–{_pct(config.ZONE_B_TOP)}%')
             leg('начало импульса', 'конец импульса')
         elif strategy == 'SMC':
             smc = signal.get('smc') or {}
             band(smc.get('poi_bottom'), smc.get('poi_top'),
-                 glossary.poi_type(smc.get('poi_type')))
+                 glossary.poi_type(smc.get('poi_type')), main=True)
+            # Имбаланс — вторая половина основания сделки. Он участвует в
+            # отборе, но на графике его не было вовсе.
+            band(smc.get('fvg_bottom'), smc.get('fvg_top'), 'имбаланс (FVG)')
             leg('начало движения', 'конец движения')
         elif strategy == 'LEVELS':
             lv = signal.get('levels') or {}
