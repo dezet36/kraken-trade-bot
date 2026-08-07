@@ -87,7 +87,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, 'Live_Bot'))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from fibo_audit import BEAR_CACHE, BEAR_PAIRS, BULL_CACHE, BULL_PAIRS, ci  # noqa: E402
+from common import BEAR_CACHE, BEAR_PAIRS, BULL_CACHE, BULL_PAIRS, ci  # noqa: E402
 from scalp_breakout import PAIRS_LIMIT, build_orders as breakout_orders  # noqa: E402
 from scalp_breakout import collect_setups  # noqa: E402
 from scalp_fade import build_orders as fade_orders  # noqa: E402

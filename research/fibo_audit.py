@@ -48,11 +48,8 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, 'Live_Bot'))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from smc_market_regime import (BEAR_CACHE, BEAR_PAIRS, BULL_CACHE,  # noqa: E402
-                               BULL_PAIRS)
-
-BOOTSTRAP = 10_000
-RNG = np.random.default_rng(20260806)
+from common import (BEAR_CACHE, BEAR_PAIRS, BOOTSTRAP, BULL_CACHE,  # noqa: E402,F401
+                    BULL_PAIRS, RNG, ci, diff_ci, hush, unhush)
 
 # Пул сокращён ради времени: поиск сетапов зовёт боевую analyze_market на
 # каждой часовой свече. Для вопроса «работает ли фильтр» этого достаточно —
@@ -60,62 +57,9 @@ RNG = np.random.default_rng(20260806)
 # пуле.
 PAIRS_LIMIT = 8
 
-
-# Одна выборка бутстрапа занимает BOOTSTRAP × len(values) чисел. При десяти
-# тысячах повторов и семнадцати тысячах сделок это 1.3 ГБ одним куском, и
-# скальперский замер на пятиминутках честно упал на этом. Считаем частями:
-# результат тот же, память ограничена сверху.
-CHUNK_CELLS = 20_000_000
-
-
-def _boot_means(values, size=None):
-    """Средние бутстраповых выборок. Считается частями — иначе не влезает."""
-    size = len(values) if size is None else size
-    per_chunk = max(1, CHUNK_CELLS // max(size, 1))
-    out = []
-    left = BOOTSTRAP
-    while left > 0:
-        take = min(per_chunk, left)
-        out.append(RNG.choice(values, size=(take, size),
-                              replace=True).mean(axis=1))
-        left -= take
-    return np.concatenate(out)
-
-
-def ci(values, alpha=0.05):
-    v = np.asarray(values, dtype=float)
-    if len(v) < 3:
-        return (np.nan, np.nan)
-    draws = _boot_means(v)
-    return tuple(np.percentile(draws, [alpha / 2 * 100, (1 - alpha / 2) * 100]))
-
-
-def diff_ci(a, b, alpha=0.05):
-    a, b = np.asarray(a, float), np.asarray(b, float)
-    if len(a) < 3 or len(b) < 3:
-        return (np.nan, np.nan)
-    d = _boot_means(a) - _boot_means(b)
-    return tuple(np.percentile(d, [alpha / 2 * 100, (1 - alpha / 2) * 100]))
-
-
-def hush():
-    """
-    Глушит журнал стратегии на время поиска.
-
-    Боевой код пишет строку на КАЖДУЮ просмотренную свечу — «нет сигнала,
-    цена вне окна входа». В работе это полезно, в замере это двести тысяч
-    записей на пару, и упирается прогон именно в них, а не в счёт. С
-    выключенным журналом одна пара считается минуты вместо десятков минут.
-    """
-    import strategy
-    saved = strategy.log
-    strategy.log = lambda *a, **k: None
-    return saved
-
-
-def unhush(saved):
-    import strategy
-    strategy.log = saved
+# Статистика, периоды и глушение журнала переехали в research/common.py. Здесь
+# они только переопубликованы, чтобы не ломать старые замеры: этот файл — аудит
+# ОДНОЙ стратегии, и двадцать чужих замеров не должны зависеть от правок в нём.
 
 
 def relax(config):

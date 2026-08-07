@@ -74,7 +74,7 @@ sys.path.insert(0, os.path.join(ROOT, 'Live_Bot'))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import wave_impulse as wi  # noqa: E402
-from fibo_audit import BEAR_CACHE, BEAR_PAIRS, BULL_CACHE, BULL_PAIRS, ci  # noqa: E402
+from common import BEAR_CACHE, BEAR_PAIRS, BULL_CACHE, BULL_PAIRS, ci  # noqa: E402
 
 # Порог опускается ниже 1.5 — туда, где волны уже нет совсем. Это и есть смысл
 # замера: увидеть, где у края максимум.

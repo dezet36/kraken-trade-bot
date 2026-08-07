@@ -69,8 +69,8 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, 'Live_Bot'))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from fibo_audit import BEAR_CACHE, BEAR_PAIRS, BULL_CACHE, BULL_PAIRS  # noqa: E402
-from fibo_audit import ci, diff_ci, hush, unhush  # noqa: E402
+from common import BEAR_CACHE, BEAR_PAIRS, BULL_CACHE, BULL_PAIRS  # noqa: E402
+from common import ci, diff_ci, hush, unhush  # noqa: E402
 
 # ВЕСЬ КЭШ, А НЕ ВОСЕМЬ ПАР. Первый прогон шёл на восьми, и у SMC с уровнями
 # набралось по 200-300 сделок — интервалы шириной в полтора R, на которых не

@@ -105,7 +105,7 @@ sys.path.insert(0, os.path.join(ROOT, 'Live_Bot'))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import wave_impulse as wi  # noqa: E402
-from fibo_audit import BEAR_CACHE, BEAR_PAIRS, BULL_CACHE, BULL_PAIRS, ci  # noqa: E402
+from common import BEAR_CACHE, BEAR_PAIRS, BULL_CACHE, BULL_PAIRS, ci  # noqa: E402
 
 # Порог 1.5 — единственный, где основной замер дал плюс на обоих периодах,
 # и 2.5 как база оттуда же. Мелкую сетку порогов уже прошли, она шум.

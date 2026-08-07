@@ -54,8 +54,8 @@ sys.path.insert(0, os.path.join(ROOT, 'Live_Bot'))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import direction_across as da  # noqa: E402
-from fibo_audit import BEAR_CACHE, BEAR_PAIRS, BULL_CACHE, BULL_PAIRS  # noqa: E402
-from fibo_audit import ci, hush, unhush  # noqa: E402
+from common import BEAR_CACHE, BEAR_PAIRS, BULL_CACHE, BULL_PAIRS  # noqa: E402
+from common import ci, hush, unhush  # noqa: E402
 from smc_market_regime import load_period  # noqa: E402
 
 # Цель задаётся парой: ('r', X) — X единиц риска от входа;

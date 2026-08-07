@@ -41,7 +41,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, 'Live_Bot'))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from fibo_audit import BULL_CACHE, BULL_PAIRS, BEAR_CACHE, BEAR_PAIRS, ci  # noqa: E402
+from common import BULL_CACHE, BULL_PAIRS, BEAR_CACHE, BEAR_PAIRS, ci  # noqa: E402
 
 PAIRS_LIMIT = 6          # 5-минутки: 115 тысяч баров на пару, дороже не нужно
 BAR_MS = 5 * 60 * 1000
