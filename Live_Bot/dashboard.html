@@ -2918,12 +2918,50 @@ function tradeChart(t, data, size) {
     }).join('');
   })();
 
+  // ХОД ЦЕНЫ ВНУТРИ СДЕЛКИ. В карточке он есть числами — «ходила в плюс
+  // +2.40 R», — но ради этих двух чисел и открывают график: было ли до цели
+  // два шага или стоп зацепило тенью и цена ушла куда надо. Числа заставляют
+  // достраивать картинку в голове, хотя картинка прямо перед глазами.
+  //
+  // Цены считаются ТОЧНО, а не приблизительно: R задан расстоянием до стопа,
+  // поэтому максимум хода это вход плюс mfe_r таких расстояний.
+  const excursion = (() => {
+    const risk = Math.abs((t.entry || 0) - (t.stop || 0));
+    if (!(risk > 0) || (t.mfe_r == null && t.mae_r == null)) return '';
+    const long = (t.direction || '').toUpperCase() === 'LONG';
+    const sign = long ? 1 : -1;
+    const best = t.mfe_r != null ? t.entry + sign * Math.abs(t.mfe_r) * risk : null;
+    const worst = t.mae_r != null ? t.entry - sign * Math.abs(t.mae_r) * risk : null;
+    const from = nearest(t.opened), to = nearest(t.closed);
+    if (from === null) return '';
+    const x1 = x(from), x2 = to === null ? (W - PR) : x(to);
+    if (x2 <= x1) return '';
+
+    const edge = (price, color, text) => {
+      if (!(price > 0) || price < lo || price > hi) return '';
+      return '<line x1="' + x1 + '" y1="' + y(price) + '" x2="' + x2 + '" y2="'
+        + y(price) + '" stroke="' + color + '" stroke-width="1.1"'
+        + ' stroke-dasharray="3 3" opacity=".75"/>'
+        + '<text x="' + (x1 + 4) + '" y="' + (y(price) - 3) + '" fill="' + color
+        + '" font-size="9"' + HALO + '>' + text + '</text>';
+    };
+    const top = Math.min(Math.max(best ?? -Infinity, worst ?? -Infinity), hi);
+    const bottom = Math.max(Math.min(best ?? Infinity, worst ?? Infinity), lo);
+    const fill = (top > bottom)
+      ? '<rect x="' + x1 + '" y="' + y(top) + '" width="' + (x2 - x1)
+        + '" height="' + Math.max(y(bottom) - y(top), 1)
+        + '" fill="var(--ink-4)" opacity=".05"/>' : '';
+    return fill
+      + edge(best, 'var(--good)', 'дошла до ' + fx(t.mfe_r, 2, true) + ' R')
+      + edge(worst, 'var(--bad)', 'проседала до ' + fx(-Math.abs(t.mae_r), 2, true) + ' R');
+  })();
+
   const isLong = (t.direction || '').toUpperCase() === 'LONG';
   return '<div class="tc-chart"><svg viewBox="0 0 ' + W + ' ' + H
     + '" preserveAspectRatio="xMidYMid meet" role="img" aria-label="график сделки">'
     + bands + guides + legLine
     + body
-    + touchMarks
+    + excursion + touchMarks
     + geoLabels
     + line(t.stop, 'var(--bad)', 'стоп', true)
     + line(t.entry, 'var(--ink-3)', 'вход', false)
@@ -2953,6 +2991,21 @@ function renderTradeCard(t, data, note) {
     ? row('Ходила в плюс', '+' + Number(t.mfe_r).toFixed(2) + ' R', 'pos') : '';
   const mae = t.mae_r != null
     ? row('Ходила в минус', '−' + Math.abs(Number(t.mae_r)).toFixed(2) + ' R', 'neg') : '';
+
+  // ОЖИДАНИЕ СТРАТЕГИИ РЯДОМ С РЕЗУЛЬТАТОМ. «−1.00 R» само по себе не говорит
+  // ничего: это обычная сделка или выброс? Ответ есть в сводке той же
+  // стратегии — средний результат на сделку, — но лежит он на другой странице,
+  // и держать его в голове при разборе не выходит.
+  const stats = ((DATA || {}).strategies || {})[t.strategy] || {};
+  const expect = stats.expectancy_r;
+  // Подпись короткая намеренно: в строке карточки слева метка, справа
+  // значение, и длинная метка обрезала значение — то есть съедала как раз то,
+  // ради чего строка добавлена.
+  const context = (expect == null) ? '' : row(
+    'Средний R стратегии',
+    fx(expect, 2, true) + (r == null ? '' :
+      ' · <span class="' + (r >= expect ? 'pos' : 'neg') + '">'
+      + (r >= expect ? 'лучше' : 'хуже') + '</span>'));
 
   cell.innerHTML = '<div class="tc-box">'
     // Предупреждение стоит ПЕРВЫМ и во всю ширину: если сделка посчитана по
@@ -2984,7 +3037,7 @@ function renderTradeCard(t, data, note) {
         row('Риск', money(t.risk))
         + row('Плановый RR', (t.rr || 0).toFixed(2))
         + row('Издержки', '$' + ((t.fees || 0) + (t.funding || 0)).toFixed(2), 'neg'))
-    + (mfe || mae ? group('Ход цены', mfe + mae) : '')
+    + (mfe || mae || context ? group('Ход цены', mfe + mae + context) : '')
     + '</div>'
     + (t.why ? '<div class="tc-why"><div class="k">Почему вошли</div>'
         + esc(t.why) + '</div>' : '')
