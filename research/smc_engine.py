@@ -455,6 +455,12 @@ def run_portfolio(orders, exec_data, risk_pct=1.0, max_positions=5,
         balance += result['pnl']
         result['balance'] = balance
         result['risk_scale'] = scale
+        # Ключ заявки в результате нужен для ПАРНОГО сравнения: когда варианты
+        # отличаются только выходом, одна и та же заявка даёт сделку в каждом
+        # из них, и разницу можно считать по совпадающим ключам. Непарное
+        # сравнение на тех же данных требует эффекта в разы крупнее, чтобы
+        # отделиться от нуля, — то есть попросту не увидело бы улучшения.
+        result['key'] = order.key
         result['pnl_pct'] = result['pnl'] / (balance - result['pnl']) * 100
         trades.append(result)
         equity_curve.append((result['exit_time'], balance))
