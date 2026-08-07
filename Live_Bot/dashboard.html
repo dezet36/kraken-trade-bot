@@ -193,6 +193,93 @@
   .toggle[aria-pressed="true"]::after { transform: translateX(20px); }
   .toggle:disabled { opacity: .45; cursor: default; }
 
+  /* ── Описание стратегии ──────────────────────────────────────────────
+     Кнопка-вопрос в шапке карточки и окно поверх страницы. Описание живёт
+     в окне, а не на карточке, по одной причине: панель управления читают
+     каждый день, а «как устроена стратегия» — раз в месяц. Постоянный текст
+     на карточке вытеснил бы то, ради чего на неё смотрят. */
+  .help-btn {
+    width: 22px; height: 22px; flex: none; border-radius: 50%;
+    border: 1px solid var(--hairline); background: var(--surface-2);
+    color: var(--ink-3); font: inherit; font-size: 12px; font-weight: 650;
+    line-height: 1; cursor: pointer; display: inline-flex;
+    align-items: center; justify-content: center;
+    transition: background .15s ease, color .15s ease;
+  }
+  .help-btn:hover { background: var(--accent); color: #fff;
+                    border-color: transparent; }
+  .help-btn:focus-visible { outline: 2px solid var(--accent);
+                            outline-offset: 2px; }
+
+  .sheet-back {
+    position: fixed; inset: 0; z-index: 90; display: flex;
+    align-items: center; justify-content: center; padding: 24px;
+    background: rgba(0,0,0,.35); backdrop-filter: blur(3px);
+    animation: sheet-fade .16s ease;
+  }
+  .sheet {
+    background: var(--surface); border-radius: var(--r-lg);
+    box-shadow: 0 24px 64px -20px rgba(0,0,0,.5);
+    width: min(680px, 100%); max-height: min(84vh, 760px);
+    display: flex; flex-direction: column; overflow: hidden;
+    animation: sheet-rise .18s cubic-bezier(.2,.8,.3,1);
+  }
+  @keyframes sheet-fade { from { opacity: 0 } }
+  @keyframes sheet-rise { from { opacity: 0; transform: translateY(12px) } }
+  @media (prefers-reduced-motion: reduce) {
+    .sheet-back, .sheet { animation: none; }
+  }
+  .sheet-head {
+    display: flex; align-items: center; gap: 10px;
+    padding: 18px 22px; border-bottom: 1px solid var(--hairline-2);
+  }
+  .sheet-head .key { width: 10px; height: 10px; border-radius: 3px; flex: none; }
+  .sheet-head h3 { margin: 0; font-size: 16px; font-weight: 650; }
+  .sheet-head .tag {
+    font-size: 11px; font-weight: 600; padding: 3px 8px; border-radius: 999px;
+    background: var(--surface-2); color: var(--ink-3);
+  }
+  .sheet-head .tag.trial { background: var(--warn); color: #fff; }
+  .sheet-close {
+    margin-left: auto; width: 28px; height: 28px; border: 0; cursor: pointer;
+    border-radius: 50%; background: var(--surface-2); color: var(--ink-2);
+    font: inherit; font-size: 15px; line-height: 1;
+  }
+  .sheet-close:hover { background: var(--bad); color: #fff; }
+  /* Прокрутка ТОЛЬКО по вертикали: длинные строки переносятся, а не уезжают
+     вбок. Горизонтальная перемотка внутри окна — то же неудобство, которое
+     уже вычищали со страницы целиком. */
+  .sheet-body { padding: 4px 22px 20px; overflow-y: auto; overflow-x: hidden; }
+  .sheet-lead {
+    font-size: 14px; line-height: 1.55; color: var(--ink-2);
+    padding: 16px 0 4px;
+  }
+  .sheet-step { display: flex; gap: 14px; padding: 14px 0;
+                border-top: 1px solid var(--hairline-2); }
+  .sheet-step .num {
+    width: 22px; height: 22px; flex: none; border-radius: 50%;
+    background: var(--surface-2); color: var(--ink-3);
+    font-size: 11.5px; font-weight: 700; display: flex;
+    align-items: center; justify-content: center; margin-top: 1px;
+  }
+  .sheet-step h4 { margin: 0 0 4px; font-size: 13.5px; font-weight: 640; }
+  .sheet-step p { margin: 0; font-size: 13px; line-height: 1.55;
+                  color: var(--ink-3); }
+  .sheet-step code {
+    font-size: 12px; padding: 1px 5px; border-radius: 4px;
+    background: var(--surface-2); color: var(--ink-2);
+  }
+  .sheet-fact {
+    margin-top: 16px; padding: 13px 15px; border-radius: var(--r-sm);
+    background: var(--surface-2); font-size: 12.5px; line-height: 1.55;
+    color: var(--ink-3);
+  }
+  .sheet-fact b { color: var(--ink-2); font-weight: 620; }
+  @media (max-width: 560px) {
+    .sheet-back { padding: 0; align-items: flex-end; }
+    .sheet { max-height: 92vh; border-radius: var(--r-lg) var(--r-lg) 0 0; }
+  }
+
   /* ── Панели ──────────────────────────────────────────────────────── */
   .panel {
     background: var(--surface); border-radius: var(--r-lg);
@@ -878,6 +965,113 @@ const NAMES  = { FIBO: 'Фибоначчи', SMC: 'Smart Money', LEVELS: 'Уро
 // «фибо синяя», будет введён в заблуждение.
 const COLOR  = { FIBO: 'var(--fibo)', SMC: 'var(--smc)', LEVELS: 'var(--levels)',
                  RSIBB: 'var(--rsibb)' };
+/* ── Описания стратегий ──────────────────────────────────────────────────
+   Числа здесь — НЕ круглые примеры, а фактические значения из кода: пороги
+   импульса, множитель полос, доли отката. Описание, разошедшееся с кодом,
+   хуже отсутствующего: по нему принимают решения, а проверить его нечем.
+   Меняя параметр в params.py, поменяйте и здесь.
+
+   «Проверено» — только то, что прошло приёмку на ДВУХ независимых периодах.
+   Там, где проверки не было, так и написано. */
+const GUIDE = {
+  FIBO: {
+    tf: 'часовой график',
+    lead: `Ищет резкое направленное движение и входит на откате от него,
+           рассчитывая, что движение продолжится.`,
+    steps: [
+      ['Что считается сетапом', `Импульс не меньше <code>3%</code> цены,
+        уложившийся в <code>24</code> часовые свечи, со скоростью не ниже
+        <code>0.30%</code> размера на свечу. Медленное расползание на те же
+        три процента сетапом не считается.`],
+      ['Где вход', `Лимитная заявка на <code>50%</code> отката импульса.
+        Глубина выбрана замером: на 38.2% заявка наливается реже и хуже, на
+        61.8% — чаще, но сделки слабее.`],
+      ['Где стоп', `За началом импульса. Уход туда означает, что движения,
+        ради которого входили, больше нет.`],
+      ['Где выход', `Цель на <code>25%</code> дальше конца импульса. При
+        возврате цены к концу импульса стоп переводится в безубыток.`],
+    ],
+    fact: `Самая частая стратегия проекта — около четырёх пятых всех сделок.
+           Замер на 20 парах показал, что <b>шорты у неё втрое сильнее
+           лонгов</b> на обоих периодах, и это свойство рынка, а не ошибка
+           расчёта: проверено тремя способами нормировки импульса.`,
+  },
+  SMC: {
+    tf: 'от дневного к пятиминутному',
+    lead: `Работает по логике «умных денег»: ищет, где крупный участник
+           набирал позицию, и входит в ту же зону при возврате цены.`,
+    steps: [
+      ['Что считается сетапом', `Совпадение нескольких признаков сразу, с
+        суммарным весом не ниже <code>4.5</code>: слом структуры, зона
+        интереса (ордер-блок), разрыв цен (имбаланс), вынос ликвидности за
+        предыдущий экстремум с возвратом.`],
+      ['Как читает рынок', `Направление берётся с дневного графика, структура
+        с четырёхчасового, зоны ищутся на часовом, уточняются на
+        пятнадцатиминутном. Одна зона — четыре масштаба.`],
+      ['Где вход', `Лимитная заявка в зоне интереса. Цена приходит к ней
+        сама — комиссия мейкерская.`],
+      ['Где выход', `Цель ставится так, чтобы отношение прибыли к риску было
+        не ниже <code>4</code>. Отсюда низкая доля попаданий при высокой
+        отдаче: выигрывает каждая четвёртая сделка, но крупно.`],
+    ],
+    fact: `Самая избирательная стратегия: около <b>400 сделок</b> за период
+           против четырёх тысяч у Фибоначчи. На бычьем периоде даёт лучший
+           результат на сделку из всех четырёх, на медвежьем — слабее
+           остальных при просадке 34%.`,
+  },
+  LEVELS: {
+    tf: 'часовой график',
+    lead: `Торгует отбой от горизонтального уровня — но не сам подход к нему,
+           а неудачную попытку его пробить.`,
+    steps: [
+      ['Что считается уровнем', `Цена, к которой рынок возвращался не меньше
+        <code>2</code> раз. Уровень существует не потому, что красиво
+        выглядит, а потому что его уже проверяли.`],
+      ['Что считается сетапом', `Прокол уровня минимум на <code>0.15</code>
+        ATR и возврат обратно в течение <code>4</code> свечей, с объёмом на
+        возврате не ниже <code>1.5</code> от среднего. Тень за уровень — это
+        ещё не сигнал: значение имеет то, где свеча закрылась.`],
+      ['Где вход', `Стоп-ордер на возврате внутрь. Заявка срабатывает только
+        если цена подтвердила отбой движением.`],
+      ['Где выход', `Ближайший встречный уровень, но не ближе чем на
+        <code>1.75</code> риска. Если следующий уровень слишком близко,
+        сделка не берётся вовсе.`],
+    ],
+    fact: `Самая ровная из четырёх: <b>просадка 6-7%</b> против 15-34% у
+           остальных, и результат на сделку выше всех на медвежьем периоде.
+           Сделок мало — примерно одна на пару в неделю.`,
+  },
+  RSIBB: {
+    tf: 'часовой график',
+    trial: true,
+    lead: `Возврат к средней после выхода за полосу Боллинджера. Читает RSI
+           ОБРАТНО учебнику — и это главное в ней.`,
+    steps: [
+      ['Что считается сетапом', `Цена задела полосу, отстоящую на
+        <code>2.5</code> стандартных отклонения от средней за
+        <code>20</code> свечей. Учебные 2.0 заменены на 2.5 замером: выход за
+        более далёкую полосу реже, но возвращается чаще.`],
+      ['Почему RSI наоборот', `Канон требует перепроданности для покупки. На
+        наших данных это ухудшает результат: к средней возвращаются
+        <code>16%</code> таких случаев против <code>26%</code> вообще без
+        фильтра. RSI на полосе помечает не истощение продавца, а действующий
+        импульс. Поэтому лонг берётся при RSI <b>выше</b> 50, а не ниже 30.`],
+      ['Где вход', `Лимитная заявка на самой полосе. Вся арифметика держится
+        на мейкерской комиссии: вход по рынку сделал бы стратегию заведомо
+        убыточной.`],
+      ['Где выход', `Цель на средней линии канала, стоп на такую же
+        полуширину за полосой. Отношение прибыли к риску равно единице, и
+        весь край стратегии — это запас доли попаданий сверх 53%.`],
+    ],
+    fact: `<b>Это кандидат, а не принятая стратегия.</b> Её результат
+           положителен на обоих исторических периодах, но доверительный
+           интервал накрывает ноль — то есть отличить её от нуля данными пока
+           нельзя. Включена ради наблюдений вне выборки. Фильтр по ADX,
+           который источники называют обязательным, на наших данных не
+           работает вовсе.`,
+  },
+};
+
 const PERIODS = [
   { id: 'today', label: 'Сегодня', days: 0 },
   { id: '7d',    label: '7 дней',  days: 7 },
@@ -3442,6 +3636,9 @@ function renderControls() {
       <div class="ctl-head">
         <span class="key" style="background:${COLOR[key] || 'var(--muted)'}"></span>
         <span class="nm">${esc(NAMES[key] || key)}</span>
+        ${GUIDE[key] ? `<button type="button" class="help-btn" data-help="${key}"
+             aria-label="Как торгует ${esc(NAMES[key] || key)}"
+             title="Описание стратегии">?</button>` : ''}
         <span style="margin-left:auto;font-size:12px;color:var(--text-secondary)"
               id="lbl-${key}">${s.enabled ? 'торгует' : 'выключена'}</span>
         <button type="button" class="toggle" data-s="${key}"
@@ -3481,6 +3678,77 @@ function renderControls() {
   box.querySelectorAll('button[data-dep]').forEach(btn => {
     btn.onclick = () => applyDeposit(btn);
   });
+  box.querySelectorAll('button[data-help]').forEach(btn => {
+    btn.onclick = () => openGuide(btn.dataset.help, btn);
+  });
+}
+
+/* ── Окно с описанием стратегии ──────────────────────────────────────────
+   Закрывается тремя способами: крестиком, Esc и щелчком по фону. Любой из
+   них должен работать — иначе окно, открытое случайно, приходится закрывать
+   перезагрузкой страницы.
+
+   Фокус возвращается на кнопку, которая окно открыла: без этого читающий с
+   клавиатуры после закрытия оказывается в начале страницы. */
+let GUIDE_OPENER = null;
+
+function closeGuide() {
+  const back = document.getElementById('guide-back');
+  if (!back) return;
+  back.remove();
+  document.removeEventListener('keydown', guideKeys);
+  if (GUIDE_OPENER) { GUIDE_OPENER.focus(); GUIDE_OPENER = null; }
+}
+
+function guideKeys(event) {
+  if (event.key === 'Escape') { event.preventDefault(); closeGuide(); }
+}
+
+function openGuide(key, opener) {
+  const guide = GUIDE[key];
+  if (!guide) return;
+  closeGuide();
+  GUIDE_OPENER = opener || null;
+
+  const steps = guide.steps.map(([title, text], i) => `
+    <div class="sheet-step">
+      <span class="num">${i + 1}</span>
+      <div>
+        <h4>${title}</h4>
+        <p>${text}</p>
+      </div>
+    </div>`).join('');
+
+  const back = document.createElement('div');
+  back.className = 'sheet-back';
+  back.id = 'guide-back';
+  back.innerHTML = `
+    <div class="sheet" role="dialog" aria-modal="true"
+         aria-labelledby="guide-title">
+      <div class="sheet-head">
+        <span class="key" style="background:${COLOR[key] || 'var(--muted)'}"></span>
+        <h3 id="guide-title">${esc(NAMES[key] || key)}</h3>
+        <span class="tag">${guide.tf}</span>
+        ${guide.trial ? '<span class="tag trial">кандидат</span>' : ''}
+        <button type="button" class="sheet-close" aria-label="Закрыть">×</button>
+      </div>
+      <div class="sheet-body">
+        <div class="sheet-lead">${guide.lead}</div>
+        ${steps}
+        <div class="sheet-fact">${guide.fact}</div>
+      </div>
+    </div>`;
+
+  // Щелчок по ФОНУ закрывает, щелчок внутри окна — нет. Проверка на сам
+  // элемент, а не на промах мимо содержимого: иначе окно закрывалось бы
+  // при выделении текста, если отпустить кнопку мыши за его краем.
+  back.addEventListener('mousedown', event => {
+    if (event.target === back) closeGuide();
+  });
+  back.querySelector('.sheet-close').onclick = closeGuide;
+  document.body.appendChild(back);
+  document.addEventListener('keydown', guideKeys);
+  back.querySelector('.sheet-close').focus();
 }
 
 /**
