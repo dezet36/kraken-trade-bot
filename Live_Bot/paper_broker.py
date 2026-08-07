@@ -79,6 +79,12 @@ COLUMNS = [
 ]
 
 
+def _bar_hours(timeframe: str) -> float:
+    """Длина свечи в часах. Незнакомый шаг считаем часовым."""
+    return {'1m': 1 / 60, '5m': 1 / 12, '15m': 0.25, '30m': 0.5,
+            '1h': 1.0, '4h': 4.0, '1d': 24.0}.get(timeframe, 1.0)
+
+
 def _fmt_p(price: float) -> str:
     """Цена с разумным числом знаков: BTC и SHIB в одном логе."""
     if price >= 1000:   return f"{price:.2f}"
@@ -652,7 +658,13 @@ class PaperBroker:
             # состоянии живут в разных часовых поясах, и разница вылезает
             # позже как «позиция открыта 3 часа назад, а ордер стоял 6».
             'placed_at': _iso(now),
-            'expires_ts': now + int(config.PENDING_ORDER_MAX_HOURS * 3_600_000),
+            # Тип входа объявляет стратегия. До этого поле существовало у всех
+            # четырёх и не читалось НИКЕМ: и брокер, и боевой исполнитель шли
+            # по своему пути. Уровням это стоило противоположного условия
+            # налива — см. _process_pending.
+            'entry_type': ((signal.get('trigger') or {}).get('entry_type')
+                           or 'LIMIT'),
+            'expires_ts': now + int(self._expiry_hours(strategy) * 3_600_000),
             'last_ts': now - BAR_MS,      # начинаем со свечи, идущей сейчас
             'balance_before': balance,
             'context': self._context(strategy, signal),
@@ -966,13 +978,16 @@ class PaperBroker:
         for ts, _open, high, low, close, _vol in candles:
             pending = self.pending(strategy).get(pair)
             if pending and ts > pending['last_ts']:
+                # Открытие свечи нужно входу ПО ХОДУ движения: при разрыве
+                # через уровень он исполняется по открытию, а не по своей цене.
                 pending['last_ts'] = ts
                 # Цена нужна дашборду, чтобы показать, далеко ли ордеру до
                 # заполнения: висящий лимит в двух процентах от рынка и в
                 # десятых долях процента — совершенно разные новости.
                 pending['last_price'] = close
                 touched = True
-                self._process_pending(strategy, pair, pending, ts, high, low)
+                self._process_pending(strategy, pair, pending, ts, high, low,
+                                      open_price=_open)
 
             position = self.positions(strategy).get(pair)
             if position and ts > position['last_ts']:
@@ -983,15 +998,62 @@ class PaperBroker:
                 self._process_position(strategy, pair, position, ts, high, low, close)
         return touched
 
-    def _process_pending(self, strategy, pair, order, ts, high, low):
+    @staticmethod
+    def _expiry_hours(strategy):
+        """
+        Сколько живёт неналитая заявка. У КАЖДОЙ стратегии своё.
+
+        Здесь стояло config.PENDING_ORDER_MAX_HOURS — 72 часа, параметр
+        Фибоначчи, — и применялся ко всем. Уровни при этом мерились на 24
+        часах, а Боллинджер на шести: их заявки жили втрое и вдвенадцатеро
+        дольше, чем в замере. Долгая жизнь заявки не безобидна — она занимает
+        слот и держит кулдаун по паре.
+        """
+        try:
+            if strategy == 'LEVELS':
+                from levels import params
+                return float(params.EXPIRY_HOURS)
+            if strategy == 'RSIBB':
+                from rsibb import params
+                return float(params.EXPIRY_BARS) * _bar_hours(params.TIMEFRAME)
+        except Exception:                          # noqa: BLE001
+            pass
+        return float(config.PENDING_ORDER_MAX_HOURS)
+
+    def _process_pending(self, strategy, pair, order, ts, high, low,
+                         open_price=None):
         is_long = order['direction'] == 'LONG'
         limit = order['limit_price']
+        # Тип входа берётся У СТРАТЕГИИ. Пока он игнорировался, все четыре
+        # исполнялись как лимит на откате — и для стратегии УРОВНЕЙ это было
+        # ровно наоборот тому, что мерилось.
+        #
+        # Уровни входят ПО ХОДУ движения: замер ставил им stop-заявку, которая
+        # срабатывает, когда цена пробивает уровень возврата в сторону сделки.
+        # Лимит же наливается только если цена вернётся НАЗАД. Условия
+        # противоположные, и последствие было злым: когда сделка шла как надо,
+        # заявка не наливалась, а потом снималась с пометкой «цена дошла до
+        # цели без нас». То есть уровни систематически пропускали именно свои
+        # удачные сценарии.
+        stop_entry = str(order.get('entry_type', '')).upper() in ('MARKET', 'STOP')
 
-        # Заполнение проверяем ПЕРВЫМ: чтобы цена дошла до инвалидации, она
-        # обязана была пройти через лимит, который лежит ближе к рынку.
-        filled = (low <= limit) if is_long else (high >= limit)
+        # Заполнение проверяем ПЕРВЫМ: чтобы цена дошла до инвалидации или до
+        # цели, она обязана была пройти через цену срабатывания.
+        if stop_entry:
+            filled = (high >= limit) if is_long else (low <= limit)
+        else:
+            filled = (low <= limit) if is_long else (high >= limit)
         if filled:
-            self._fill(strategy, pair, order, ts, limit)
+            price = limit
+            # Разрыв через уровень: стоп-заявка исполняется по открытию свечи,
+            # а не по своей цене. Считать иначе значило бы дарить стратегии
+            # лучшую цену ровно тогда, когда рынок ушёл против неё. Тем же
+            # правилом живёт движок замеров.
+            if stop_entry and open_price is not None:
+                gapped = (open_price > limit) if is_long else (open_price < limit)
+                if gapped:
+                    price = open_price
+            self._fill(strategy, pair, order, ts, price, taker=stop_entry)
             return
 
         if ts >= order['expires_ts']:
@@ -1019,12 +1081,20 @@ class PaperBroker:
         self.state['pending'][strategy].pop(pair, None)
         log(f"   👻 [{strategy}] {pair}: ордер снят — {reason}")
 
-    def _fill(self, strategy, pair, order, ts, price):
-        """Лимит заполнен: превращаем ордер в позицию, списываем комиссию мейкера."""
+    def _fill(self, strategy, pair, order, ts, price, taker=False):
+        """
+        Заявка заполнена: превращаем её в позицию и списываем комиссию.
+
+        Комиссия зависит от типа входа, а не от стратегии: лимит на откате
+        добавляет ликвидность и платит мейкера, вход по ходу движения её
+        забирает и платит тейкера. Разница почти втрое, и при стопе около
+        процента это заметная доля результата.
+        """
         self.state['pending'][strategy].pop(pair, None)
 
         size = order['size']
-        fee = size * price * config.PAPER_FEE_MAKER
+        fee = size * price * (config.PAPER_FEE_TAKER if taker
+                              else config.PAPER_FEE_MAKER)
         trade_id = self.state['next_trade_id']
         self.state['next_trade_id'] = trade_id + 1
 
