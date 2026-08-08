@@ -33,6 +33,7 @@ import urllib.request
 import config
 
 from . import params
+from .base import FAILED, SignalModule, SignalResult, Validation
 
 CALIBRATION = os.path.join(config.DATA_DIR, 'polymarket_data',
                            'weather_bias.json')
@@ -264,3 +265,52 @@ def signals(markets, forecasts=None):
                     'cost': client.entry_cost(price, rate),
                     'liquidity': float(m.get('liquidity') or 0)})
     return out
+
+
+class WeatherSignal(SignalModule):
+    """
+    Стратегия 3: температурные корзины. Отдельная от Стратегии 1 сознательно.
+
+    В спецификации погода перечислена среди категорий сигнального бота, но
+    природа сигнала здесь другая: не чужой рынок, оценивший ту же
+    неопределённость, а физическая модель плюс поправка на конкретную станцию.
+    Разные источники ошибок, разная проверка, разный потолок по числу рынков —
+    и, главное, разный статус валидации. Держать их в одном модуле значило бы
+    смешать проверенное с непроверенным.
+
+    УВЕРЕННОСТЬ ПАДАЕТ С РОСТОМ РАЗБРОСА СТАНЦИИ. При разбросе 0.5 градуса
+    распределение почти целиком ложится в одну корзину, при 1.2 — размазывается
+    на пять. Расхождение с ценой в обоих случаях может быть одинаковым, а верить
+    им надо по-разному.
+    """
+
+    name = 'WEATHER'
+    validation = Validation(
+        FAILED,
+        'навык против климата подтверждён (Брайер 0.6697 против 0.9555, '
+        'попадание 43.6% против 7.5%), но против ЦЕНЫ рынок точнее нас '
+        '(0.0503 против 0.0558). Ставки на отобранных расхождениях дали +0.433 '
+        'на месячном окне, однако лучшие пять ставок из 250 составили 39% '
+        'суммы — результат хвостозависимый и на одном месяце',
+        checked_at='2026-08-08')
+
+    def scan(self, markets):
+        out = []
+        for row in signals(markets):
+            fit = calibration().get(row['city']) or {}
+            sigma = float(fit.get('sigma') or params.MAX_SIGMA)
+            # Уверенность обратна разбросу: 0.5 градуса — почти единица,
+            # предельный разброс — треть.
+            confidence = max(0.3, min(1.0, 0.6 / sigma))
+            out.append(SignalResult(
+                model_probability=row['model'],
+                market_probability=row['price'],
+                confidence=confidence,
+                data_sources=['open-meteo:forecast', 'iem:metar',
+                              'polymarket:gamma'],
+                market=row['market'],
+                cost=row['cost'],
+                liquidity=row['liquidity'],
+                note=f'{row["city"]}, прогноз {row["forecast_c"]:.1f}°C, '
+                     f'смещение {fit.get("bias", 0):+.2f}, разброс {sigma:.2f}'))
+        return out

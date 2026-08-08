@@ -242,3 +242,162 @@ class TestApiTraps:
         with open(source, encoding='utf-8') as fh:
             text = fh.read()
         assert 'if data is None:\n        return None' in text
+
+
+# ── Три стратегии на общем контракте ─────────────────────────────────────────
+
+from polymarket import base, runner  # noqa: E402
+from polymarket.longshot import LongshotSignal  # noqa: E402
+from polymarket.signal_crypto import (CryptoSignal, digital_probability,  # noqa: E402
+                                      parse_market, touch_probability)
+from polymarket.weather import WeatherSignal  # noqa: E402
+
+
+class TestThreeStrategies:
+
+    def test_all_three_declare_a_validation_status(self):
+        """
+        Ни одна стратегия не может существовать без статуса проверки.
+
+        Это не формальность: статус читается кодом перед выпуском на реальные
+        деньги, и отсутствующий означал бы «непроверенная торгует как
+        проверенная».
+        """
+        for factory in (CryptoSignal, LongshotSignal, WeatherSignal):
+            module = factory()
+            assert module.name and module.name != 'без имени'
+            assert module.validation.status in (base.PASSED, base.FAILED,
+                                                base.UNTESTED)
+            assert len(module.validation.note) > 40, 'причина обязана быть'
+
+    def test_none_of_them_may_touch_real_money_yet(self):
+        """Ни одна из трёх не прошла валидацию — значит живых денег нет."""
+        for factory in (CryptoSignal, LongshotSignal, WeatherSignal):
+            assert factory().allows_real_money() is False
+
+    def test_bankrolls_are_separate_and_unknown_gets_nothing(self):
+        """
+        Раздельные счета: смешав их, нельзя сказать, кто заработал.
+
+        Незнакомое имя получает ноль, а не весь капитал — опечатка в названии
+        не должна отдавать стратегии всё.
+        """
+        total = 10_000
+        parts = {name: params.bankroll_for(name, total)
+                 for name in ('WEATHER', 'CRYPTO', 'LONGSHOT')}
+        assert abs(sum(parts.values()) - total) < 1e-6
+        assert all(v > 0 for v in parts.values())
+        assert params.bankroll_for('НЕТ ТАКОЙ', total) == 0.0
+
+    def test_risk_input_shape_is_identical_across_modules(self):
+        """
+        Слой риска получает ОДИН формат от всех трёх.
+
+        Разные ключи у разных модулей — самый тихий способ получить разные
+        лимиты там, где задуманы одинаковые.
+        """
+        sample = base.SignalResult(0.7, 0.5, 0.9, ['src'],
+                                   market={'id': 'X', 'feeType': 'weather_fees'})
+        keys = set(sample.as_risk_input('WEATHER'))
+        assert {'strategy', 'price', 'model', 'confidence', 'cost',
+                'liquidity', 'market', 'event', 'category'} <= keys
+
+
+class TestCryptoMath:
+
+    def test_touch_probability_exceeds_terminal(self):
+        """
+        Вероятность КОСНУТЬСЯ выше вероятности закрыться за барьером.
+
+        Спутав их, мы объявили бы половину рынков недооценёнными. Проверено
+        симуляцией: для 100→90 при воле 0.6 на неделю формула даёт 0.216
+        против 0.110 у цифрового варианта.
+        """
+        years = 7 / 365
+        touch = touch_probability(100, 90, 0.60, years, 'down')
+        terminal = digital_probability(100, 90, 0.60, years, 'down')
+        assert touch > terminal * 1.7
+        assert 0.20 < touch < 0.23, f'ждали ~0.216, вышло {touch}'
+        assert 0.10 < terminal < 0.12
+
+    def test_touch_is_certain_when_barrier_already_passed(self):
+        assert touch_probability(100, 110, 0.5, 0.1, 'down') == 1.0
+        assert touch_probability(100, 90, 0.5, 0.1, 'up') == 1.0
+
+    def test_probabilities_stay_inside_zero_and_one(self):
+        for sigma in (0.1, 0.6, 2.0):
+            for days in (1, 30, 365):
+                p = touch_probability(100, 80, sigma, days / 365, 'down')
+                assert 0.0 <= p <= 1.0
+
+    def test_parser_separates_touch_from_terminal(self):
+        touch = parse_market('Will XRP dip to $0.90 August 3-9?')
+        assert touch['kind'] == 'touch' and touch['direction'] == 'down'
+        assert touch['symbol'] == 'XRP' and abs(touch['strike'] - 0.90) < 1e-9
+
+        term = parse_market('Will Bitcoin be above $120,000 on June 30?')
+        assert term['kind'] == 'terminal' and term['direction'] == 'up'
+        assert term['strike'] == 120_000
+
+    def test_parser_refuses_markets_it_cannot_price(self):
+        """
+        Похожий по виду вопрос без доступного спота — не считается.
+
+        «Will Glean's valuation hit $10B» выглядит как ценовой рынок, но ни
+        спота, ни волатильности для него этим способом не достать, и
+        посчитанная вероятность была бы выдумкой.
+        """
+        assert parse_market("Will Glean's valuation hit $10B by December 31?") is None
+        assert parse_market('Will NVIDIA be the largest company?') is None
+        assert parse_market('Will the highest temperature be 34°C?') is None
+
+    def test_confidence_falls_with_horizon(self):
+        """На длинном сроке риск-нейтральная мера расходится с реальной."""
+        def fake_vol(symbol):
+            return {'spot': 100.0, 'sigma_annual': 0.6, 'bars': 500}
+
+        module = CryptoSignal(vol_source=fake_vol)
+        near = {'question': 'Will Bitcoin be above $110 on X?',
+                'endDate': '2026-08-10T00:00:00Z',
+                'outcomePrices': json.dumps(['0.4', '0.6']),
+                'feeType': 'crypto_fees_v2', 'liquidity': 5000}
+        far = dict(near, endDate='2027-06-01T00:00:00Z')
+        results = module.scan([near, far])
+        assert len(results) == 2
+        assert results[0].confidence > results[1].confidence
+
+
+class TestRunner:
+
+    def test_unvalidated_proposals_are_marked_paper_only(self, monkeypatch,
+                                                         tmp_path):
+        """
+        Пометка ставится в оркестраторе, а не в каждом модуле.
+
+        Забыть её в одном из трёх — вопрос времени, а последствие — реальная
+        сделка по непроверенной стратегии.
+        """
+        from polymarket import store as store_mod
+
+        monkeypatch.setattr(store_mod, 'SNAPSHOTS', str(tmp_path / 's.jsonl'))
+        monkeypatch.setattr(store_mod, 'DECISIONS', str(tmp_path / 'd.jsonl'))
+
+        class Fake(base.SignalModule):
+            name = 'WEATHER'
+            validation = base.Validation(base.UNTESTED, 'проверка не проводилась')
+
+            def scan(self, markets):
+                return [base.SignalResult(
+                    0.85, 0.60, 1.0, ['test'],
+                    market={'id': 'M', 'feeType': 'weather_fees',
+                            'question': 'вопрос', 'events': [{'id': 'E'}]},
+                    cost=0.02, liquidity=50_000)]
+
+        monkeypatch.setattr(runner, 'collect_markets', lambda *a, **k: [{'id': 'M'}])
+        proposals = runner.run_once(total_bankroll=10_000,
+                                    modules=[(Fake, ('weather_fees',))])
+        assert len(proposals) == 1
+        assert proposals[0]['decision'].details['paper_only'] is True
+        assert proposals[0]['decision'].reason.startswith('ТОЛЬКО БУМАГА')
+        # Отказы и предложения обязаны попадать в журнал решений.
+        assert store_mod.read(store_mod.DECISIONS)

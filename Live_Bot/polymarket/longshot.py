@@ -40,6 +40,7 @@
 import json
 
 from . import client, params
+from .base import FAILED, SignalModule, SignalResult, Validation
 
 VALIDATION_PASSED = False
 VALIDATION_NOTE = (
@@ -110,3 +111,35 @@ def evaluate(signal, manager, open_positions=None):
 def live_trading_allowed():
     """Всегда False, пока валидация не пройдена. Читается исполнителем."""
     return bool(VALIDATION_PASSED) and not params.PAPER
+
+
+class LongshotSignal(SignalModule):
+    """
+    Стратегия 2: продажа дешёвых лонгшотов. ВАЛИДАЦИЯ ПРОВАЛЕНА.
+
+    Живые деньги недоступны независимо от настроек: `allows_real_money`
+    возвращает False, пока статус не станет пройденным, а стать им он может
+    только после нового замера с достаточной выборкой — которой взять негде.
+    """
+
+    name = 'LONGSHOT'
+    validation = Validation(
+        FAILED, VALIDATION_NOTE, checked_at='2026-08-08')
+
+    def scan(self, markets):
+        out = []
+        for row in candidates(markets):
+            # Уверенность НИЗКАЯ и постоянная, и это не осторожность на глаз:
+            # заявленное смещение замером не подтвердилось, а в целевом
+            # диапазоне оказалось обратным. Ставить сюда полную уверенность
+            # значило бы противоречить собственному измерению.
+            out.append(SignalResult(
+                model_probability=row['model'],
+                market_probability=row['price'],
+                confidence=0.2,
+                data_sources=['polymarket:gamma'],
+                market=row['market'],
+                cost=row['cost'],
+                liquidity=row['liquidity'],
+                note='сторона NO; ВАЛИДАЦИЯ ПРОВАЛЕНА, только бумага'))
+        return out
