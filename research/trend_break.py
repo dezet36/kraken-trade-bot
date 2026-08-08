@@ -197,11 +197,22 @@ def build_orders(marks, cfg):
     return orders, breaks
 
 
-def run(marks, data, cfg):
+def run(marks, data, cfg, orders=None, breaks=None):
+    """
+    Прогон портфеля. Готовые заявки можно передать снаружи.
+
+    Параметр `orders` нужен замерам, которые ОТСЕИВАЮТ часть заявок — например
+    проверке фильтра по открытому интересу. Без него им пришлось бы повторить
+    здешнюю сборку заявок у себя, а две реализации одной геометрии в этом
+    проекте уже стоили месяца недостоверных наблюдений у стратегии уровней.
+    По умолчанию поведение прежнее.
+    """
     from smc_engine import compute_stats, run_portfolio
     from trend import params
 
-    orders, breaks = build_orders(marks, cfg)
+    if orders is None:
+        orders, breaks = build_orders(marks, cfg)
+    breaks = len(orders) if breaks is None else breaks
     if len(orders) < 10:
         return None
     result = run_portfolio(
