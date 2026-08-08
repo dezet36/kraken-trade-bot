@@ -325,7 +325,7 @@ class MarketContext:
         poi_score, best, best_gap = scored[0]
 
         # 7) Confluence по чек-листу §23
-        factors, score = self._confluence(
+        factors, score, structure_break = self._confluence(
             df, at_index, best, leg, bias, swept, best_gap, timestamp
         )
         # Порог у покупок может быть выше: замер на двух независимых периодах и
@@ -360,6 +360,13 @@ class MarketContext:
             'leg': leg,
             'sweep': swept,
             'fvg': best_gap,
+            # СОБЫТИЕ СЛОМА ДОВОДИТСЯ ДО СЕТАПА, А НЕ ГАСНЕТ ВНУТРИ ПОДСЧЁТА.
+            # Оно и так вычислялось при сборе confluence, но использовалось как
+            # одно «да/нет» и терялось. Между тем структура — это половина
+            # ответа на вопрос «почему здесь»: пробитый уровень и его тип (BOS
+            # или CHoCH) объясняют, откуда взялось направление. На графике их
+            # не было вовсе, и разобрать сделку по картинке было нельзя.
+            'structure': structure_break,
             'factors': factors,
             'confluence': round(score, 2),
             'params': trade,
@@ -397,7 +404,11 @@ class MarketContext:
             'law_of_effort': fib.law_of_effort(leg, correction_bars),
         }
         score = sum(weights.get(name, 0.0) for name, ok in factors.items() if ok)
-        return factors, score
+        # Событие слома возвращается наружу целиком. Считать его второй раз в
+        # вызывающем коде было бы дешевле по строкам и дороже по правде: это
+        # ДВА обращения к структуре в разные моменты, и разойтись они могут
+        # молча. Одно вычисление — один ответ.
+        return factors, score, recent_break
 
     def _build_trade(self, candidate, leg, direction, swept, at_index, balance):
         """

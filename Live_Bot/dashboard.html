@@ -503,6 +503,9 @@
               border-radius: var(--r-md); padding: 6px 8px 2px; }
   .tc-chart svg { width: 100%; height: auto; display: block; }
   .tc-tf { text-align: right; font-size: 11px; color: var(--ink-4); padding: 2px 4px; }
+  /* Пояснение про несохранённую разметку. Цвет предупреждения, а не ошибки:
+     это не поломка, а свойство старых записей. */
+  .tc-tf .warn { color: var(--warn); }
   .tc-note { background: var(--surface); border: 1px solid var(--hairline);
              border-radius: var(--r-md); padding: 40px 20px; text-align: center;
              color: var(--ink-4); font-size: 12.5px; }
@@ -3103,6 +3106,20 @@ function tradeChart(t, data, size) {
   const bands = bandFills.join(''), guides = guideLines;
   const geoLabels = bandLabels.join('') + guideLabels;
 
+  // ПУСТАЯ РАЗМЕТКА ОБЪЯСНЯЕТСЯ, А НЕ ПОКАЗЫВАЕТСЯ МОЛЧА. Разметка пишется в
+  // момент входа и задним числом не пересчитывается — иначе разбор сделки
+  // превратился бы в разбор сегодняшних настроек. Следствие: у сделок,
+  // записанных до появления разбора, её нет вовсе, и график выглядел так,
+  // будто стратегия ни на чём не основана. Отличить «не сохраняли» от «не
+  // нарисовалось» было нечем, и именно на этом сложилось впечатление, что у
+  // SMC не показывают ордер-блок.
+  const geoEmpty = !(geo.bands || []).length && !(geo.lines || []).length
+    && !geo.leg && !(geo.touches || []).length;
+  const geoNote = geoEmpty
+    ? ' · <span class="warn">разметка сетапа не сохранена: сделка записана'
+      + ' до появления разбора</span>'
+    : '';
+
   // Сам импульс — отрезком из точки A в точку B. Горизонтали выше дают цены,
   // но именно наклонная отвечает на вопрос «по какому сетапу вошли»: видно,
   // откуда и куда сходила цена, а вход стоит на откате от этого хода.
@@ -3219,7 +3236,7 @@ function tradeChart(t, data, size) {
     + mark(nearest(t.closed), 'var(--ink-4)', 'выход')
     + labels()
     + '</svg><div class="tc-tf">' + esc(data.timeframe) + ' · '
-    + candles.length + ' свечей</div></div>';
+    + candles.length + ' свечей' + geoNote + '</div></div>';
 }
 
 function renderTradeCard(t, data, note) {

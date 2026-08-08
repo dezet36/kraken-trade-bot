@@ -37,6 +37,22 @@ POI_TYPES = {
     'FVG': 'имбаланс',
 }
 
+# События структуры (§2.2-2.5). Подпись на графике должна читаться без
+# знания жаргона: аббревиатура остаётся в скобках для тех, кто его знает.
+STRUCTURE_EVENTS = {
+    'BOS': 'слом структуры (BOS)',
+    'CHOCH': 'смена характера (CHoCH)',
+    'MBOS': 'слом внутренней структуры (mBOS)',
+    'MCHOCH': 'смена характера внутри (mCHoCH)',
+}
+
+# Стороны снятой ликвидности. BSL и SSL — то, ЧТО снимали: скопление стопов
+# над максимумами либо под минимумами.
+LIQUIDITY_SIDES = {
+    'BSL': 'ликвидность над максимумами',
+    'SSL': 'ликвидность под минимумами',
+}
+
 # Зоны фибо-стратегии
 ZONES = {
     'Zone_A': 'зона A (коррекция 38.2–61.8%)',
@@ -72,6 +88,14 @@ def factor(name):
 
 def poi_type(name):
     return POI_TYPES.get(name, name or '—')
+
+
+def structure_event(name):
+    return STRUCTURE_EVENTS.get(name, name or '—')
+
+
+def liquidity_side(name):
+    return LIQUIDITY_SIDES.get(name, name or '—')
 
 
 def zone(name):
