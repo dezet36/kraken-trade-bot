@@ -260,7 +260,7 @@ def main():
                               max_positions=getattr(config, 'MAX_OPEN_POSITIONS', 5),
                               cooldown_hours=getattr(config, 'COOLDOWN_HOURS', 12),
                               max_same=getattr(config, 'MAX_SAME_DIRECTION', 0))),
-                'LEVELS': (orders_levels(data, pairs), exec_1h,
+                'LEVELS': (orders_levels(data, pairs), exec_5m,
                            dict(risk_pct=LP.RISK_PCT, max_positions=LP.MAX_POSITIONS,
                                 cooldown_hours=LP.COOLDOWN_HOURS,
                                 max_same=LP.MAX_SAME_DIRECTION,

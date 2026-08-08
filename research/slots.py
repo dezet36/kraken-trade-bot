@@ -111,7 +111,7 @@ def books_for(label, data, smc_period):
                           cooldown_hours=getattr(config, 'COOLDOWN_HOURS', 12),
                           max_same=getattr(config, 'MAX_SAME_DIRECTION', 0)),
                      getattr(config, 'MAX_OPEN_POSITIONS', 5), None),
-            'LEVELS': (da.orders_levels(data, pairs), exec_1h,
+            'LEVELS': (da.orders_levels(data, pairs), exec_5m,
                        dict(risk_pct=LP.RISK_PCT,
                             cooldown_hours=LP.COOLDOWN_HOURS,
                             max_same=LP.MAX_SAME_DIRECTION),
