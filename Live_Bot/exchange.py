@@ -8,6 +8,96 @@ _market_client = None           # общий keyless клиент для market-
 
 SUPPORTED_EXCHANGES = ('bybit', 'bingx')
 
+# ── Символы ──────────────────────────────────────────────────────────────────
+# Пул задан биржевыми символами Bybit ('BTCUSDT'). BingX называет тот же рынок
+# иначе ('BTC-USDT') и на 'BTCUSDT' отвечает BadSymbol — проверено запросом.
+# Общая для обеих запись — единый символ ccxt ('BTC/USDT:USDT'), и приведение к
+# нему делается ровно на границе с биржей.
+#
+# Без этого вторая биржа не работает вообще: ни свечи, ни ордера. Ошибка при
+# этом не тихая, а громкая, что редкая удача, — но чинить её надо один раз в
+# одном месте, а не в каждом вызове.
+_symbol_cache = {}          # (id биржи, наш символ) -> символ для этой биржи
+
+
+def market_symbol(pair, client):
+    """
+    Наш символ в записи КОНКРЕТНОЙ биржи.
+
+    Сопоставление идёт по биржевому id рынка, а не по разбору строки: 'SHIB1000'
+    у одной биржи и '1000SHIB' у другой — не то, что можно надёжно вывести
+    правилом. Если рынка нет, возвращается None, и вызывающая сторона обязана
+    это учесть: у BingX нет одной из наших пар.
+    """
+    if client is None:
+        return pair
+    key = (getattr(client, 'id', '?'), pair)
+    if key in _symbol_cache:
+        return _symbol_cache[key]
+
+    resolved = None
+    try:
+        if not client.markets:
+            client.load_markets()
+        # 1. Прямое совпадение по биржевому id — самый надёжный путь.
+        for symbol, market in client.markets.items():
+            if market.get('id') == pair:
+                resolved = symbol
+                break
+        # 2. Иначе собираем единый символ из базовой валюты.
+        if resolved is None and pair.endswith('USDT'):
+            base = pair[:-4]
+            for candidate in (f'{base}/USDT:USDT', f'{base}/USDT'):
+                if candidate in client.markets:
+                    resolved = candidate
+                    break
+    except Exception as exc:                       # noqa: BLE001
+        log(f'⚠️ не удалось сопоставить {pair}: {exc}')
+    _symbol_cache[key] = resolved
+    return resolved
+
+
+def available_pairs(pairs, client):
+    """
+    Какие из наших пар биржа вообще знает.
+
+    У BingX из 21 пары пула нет одной. Молча отправлять её в запросы значило бы
+    получать ошибку на каждом цикле по паре, которой там просто не существует.
+    """
+    return [pair for pair in pairs if market_symbol(pair, client)]
+
+
+# ── Возможности бирж ─────────────────────────────────────────────────────────
+# Не все биржи отдают одно и то же, и различия существенные. Замерено запросом:
+#
+#     возможность                    bybit   bingx
+#     открытый интерес, история        да     нет
+#     соотношение лонг/шорт            да     нет
+#     премия над индексом              да     нет
+#     фандинг, история                 да      да
+#
+# Сборщик позиционирования обязан это учитывать: иначе на BingX он каждый час
+# писал бы в журнал отказы по трём источникам из четырёх.
+CAPABILITIES = ('fetchOpenInterestHistory', 'fetchLongShortRatioHistory',
+                'fetchPremiumIndexOHLCV', 'fetchFundingRateHistory')
+
+
+def supports(client, capability):
+    """
+    Отдаёт ли эта биржа такие данные.
+
+    При невозможности выяснить отвечаем ДА, а не НЕТ. Разница принципиальная:
+    «биржа не умеет» — это её свойство, о котором молчат, а «не удалось
+    спросить» — это сбой, который обязан проявиться. Осторожный ответ «нет»
+    привёл бы к тому, что упавшая биржа тихо отключала бы весь сбор данных, и
+    в журнале не осталось бы ни строчки. Отвечая «да», мы даём запросу
+    состояться и настоящей ошибке дойти до журнала.
+    """
+    try:
+        return bool(client.has.get(capability))
+    except Exception:                              # noqa: BLE001
+        return True
+
 
 # ── Хелперы постройки клиента ────────────────────────────────────────────────
 def _apply_bybit_demo(client):
@@ -80,6 +170,38 @@ def validate_credentials(exchange_name: str, api_key: str, api_secret: str, mode
 
 
 # ── Legacy single-user (используется текущим ботом до перехода на платформу) ──
+def configured_exchanges():
+    """
+    У каких бирж есть ключи. Переключаться можно только на настроенную.
+
+    Ключи живут в .env и НЕ принимаются через дашборд сознательно: у него нет
+    пароля (о чём отдельно написано в списке дел перед реальным счётом), и
+    приём секретов по открытому HTTP был бы дырой, а не удобством.
+    """
+    out = {}
+    out['bybit'] = bool(config.BYBIT_API_KEY and config.BYBIT_SECRET_KEY)
+    out['bingx'] = bool(config.BINGX_API_KEY and config.BINGX_SECRET_KEY)
+    return out
+
+
+def active_exchange_name():
+    """
+    Какая биржа выбрана сейчас: настройка с панели, иначе .env.
+
+    Настройка перекрывает .env, но только если у выбранной биржи есть ключи:
+    иначе бот при старте упал бы на выборе, сделанном когда-то мышкой.
+    """
+    name = (config.EXCHANGE_NAME or 'bybit').lower()
+    try:
+        import settings_store
+        chosen = (settings_store.exchange_name() or '').lower()
+        if chosen in SUPPORTED_EXCHANGES and configured_exchanges().get(chosen):
+            name = chosen
+    except Exception:                              # noqa: BLE001
+        pass
+    return name
+
+
 def get_exchange():
     """Кешированное подключение из .env (legacy, одно-юзерный режим)."""
     global _exchange_instance
@@ -93,7 +215,7 @@ def get_exchange():
     # падали, а с боевыми — читал реальный счёт, чего от фантома никто не ждёт.
     endpoint_mode = 'DEMO' if config.TRADING_MODE in ('DEMO', 'PAPER') else 'LIVE'
 
-    if config.EXCHANGE_NAME.lower() == 'bybit':
+    if active_exchange_name() == 'bybit':
         if not config.BYBIT_API_KEY or not config.BYBIT_SECRET_KEY:
             raise Exception("BYBIT_API_KEY или BYBIT_SECRET_KEY не загружены из .env!")
         _exchange_instance = make_client('bybit', config.BYBIT_API_KEY, config.BYBIT_SECRET_KEY,
@@ -136,7 +258,13 @@ def fetch_ohlcv(timeframe, limit=500, symbol=None, client=None, since=None):
         symbol = config.TRADING_PAIRS[0]
     try:
         ex = client if client is not None else get_exchange()
-        ohlcv = ex.fetch_ohlcv(symbol, timeframe, since=since, limit=limit)
+        # Приведение к записи ЭТОЙ биржи. Без него BingX отвечает BadSymbol на
+        # каждый запрос: наш пул записан символами Bybit.
+        native = market_symbol(symbol, ex)
+        if native is None:
+            log(f'⚠️ {symbol}: нет такого рынка на {getattr(ex, "id", "бирже")}')
+            return None
+        ohlcv = ex.fetch_ohlcv(native, timeframe, since=since, limit=limit)
         if not ohlcv or len(ohlcv) < 10:
             log(f"⚠️ Мало данных для {symbol} {timeframe}: {len(ohlcv) if ohlcv else 0} свечей")
             return None

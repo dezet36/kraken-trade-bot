@@ -969,6 +969,7 @@
           <div id="controls"></div>
         </div>
         <div class="subpage" data-sub="app" hidden>
+          <div id="exchange"></div>
           <div id="notify"></div>
           <div id="keys"></div>
           <div id="update"></div>
@@ -3602,9 +3603,100 @@ async function loadSettings() {
     const d = await (await fetch('/api/settings', { cache: 'no-store' })).json();
     SETTINGS = d.settings; LIMITS = d.limits; WRITABLE = !!d.writable;
     NOTIFY_SETTINGS = d.notify || {};
+    EXCHANGE_STATE = d.exchange || null;
     renderControls();
     renderNotify(WRITABLE);
+    renderExchange(WRITABLE);
   } catch (e) { /* панель просто не появится */ }
+}
+
+/* ── Подключение к бирже ──────────────────────────────────────────────────
+   Панель ПЕРЕКЛЮЧАЕТ между биржами, ключи которых уже прописаны в .env, и
+   никогда не принимает сами ключи. Дашборд слушает без пароля, и секрет,
+   прошедший через него, следовало бы считать скомпрометированным.
+
+   Возможности показываются рядом с выбором не для полноты: биржи расходятся
+   сильно. У BingX из четырёх источников данных о позиционировании есть только
+   фандинг — человек должен видеть, что теряет, переключаясь, а не обнаружить
+   это через неделю по пустому хранилищу. */
+let EXCHANGE_STATE = null;
+
+const EX_NAMES = { bybit: 'Bybit', bingx: 'BingX' };
+const CAP_NAMES = {
+  fetchOpenInterestHistory: 'открытый интерес',
+  fetchLongShortRatioHistory: 'соотношение лонг/шорт',
+  fetchPremiumIndexOHLCV: 'премия над индексом',
+  fetchFundingRateHistory: 'ставки фандинга',
+};
+
+function renderExchange(writable) {
+  const box = el('exchange');
+  if (!box) return;
+  const state = EXCHANGE_STATE;
+  if (!state) { box.innerHTML = ''; return; }
+
+  const buttons = (state.supported || []).map(name => {
+    const ready = !!(state.configured || {})[name];
+    const on = name === state.active;
+    const title = ready ? '' : 'Ключи не прописаны в .env';
+    return `<button type="button" class="seg-btn${on ? ' on' : ''}"
+        data-ex="${name}" title="${title}"
+        ${writable && ready ? '' : 'disabled'}>${EX_NAMES[name] || name}${
+      ready ? '' : ' · нет ключей'}</button>`;
+  }).join('');
+
+  const caps = state.capabilities || {};
+  const rows = caps.error
+    ? `<div class="ctl-note">Подключение не проверено: ${esc(caps.error)}</div>`
+    : Object.keys(CAP_NAMES).map(key => `<div class="ctl-row">
+         <label>${CAP_NAMES[key]}</label>
+         <span class="unit"></span>
+         <b class="${caps[key] ? 'pos' : 'neg'}">${caps[key] ? 'есть' : 'нет'}</b>
+       </div>`).join('');
+
+  box.innerHTML = `<div class="panel">
+    <div class="ctl-head">
+      <span class="nm">Биржа</span>
+      <span style="margin-left:auto;font-size:12px;color:var(--ink-3)">
+        сейчас ${EX_NAMES[state.active] || state.active}</span>
+    </div>
+    <div class="ctl-row">
+      <label>Подключение</label>
+      <span class="unit"></span>
+      <span class="seg small" id="ex-pick">${buttons}</span>
+    </div>
+    <div class="ctl-note">Ключи задаются в файле <code>.env</code> и через эту
+      страницу не принимаются: дашборд слушает без пароля, и секрет, прошедший
+      через него, пришлось бы считать скомпрометированным. Здесь только выбор
+      между уже настроенными.</div>
+    <div class="ctl-head" style="border-top:1px solid var(--hairline-2)">
+      <span class="nm" style="font-size:13.5px">Что отдаёт эта биржа</span>
+    </div>
+    ${rows}
+    <div class="ctl-note">Биржи расходятся сильно. Эти данные не участвуют в
+      торговле — они копятся для будущей проверки стратегий на позиционировании
+      участников. Пропавший источник означает, что накопление по нему
+      остановится.</div>
+  </div>`;
+
+  box.querySelectorAll('button[data-ex]').forEach(btn => {
+    btn.onclick = () => saveExchange(btn.dataset.ex);
+  });
+}
+
+async function saveExchange(name) {
+  try {
+    await fetch('/api/settings', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ EXCHANGE: { name } }),
+    });
+    // Смена биржи вступает в силу с перезапуском: клиент уже подключён, и
+    // менять его на ходу посреди цикла означало бы оставить открытые ордера
+    // на одной бирже, а управление ими увести на другую.
+    alert('Биржа выбрана. Изменение вступит в силу после перезапуска бота: '
+        + 'менять подключение на ходу нельзя, пока есть открытые ордера.');
+    loadSettings();
+  } catch (e) { /* оставляем как было */ }
 }
 
 function renderControls() {

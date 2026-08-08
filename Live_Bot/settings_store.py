@@ -61,6 +61,14 @@ PORTFOLIO = 'PORTFOLIO'
 PORTFOLIO_FIELDS = ('portfolio_risk_pct', 'portfolio_max_positions',
                     'daily_loss_pct')
 
+# Выбранная биржа. Отдельным разделом: она не принадлежит ни одной стратегии и
+# не является пределом риска. КЛЮЧИ ЗДЕСЬ НЕ ХРАНЯТСЯ И НЕ ПРИНИМАЮТСЯ — они
+# живут в .env. У дашборда нет пароля (см. docs/Перед_реальным_счётом.md), и
+# приём секретов по открытому HTTP был бы дырой, а не удобством. Через панель
+# можно только ПЕРЕКЛЮЧИТЬСЯ на биржу, ключи которой уже прописаны.
+EXCHANGE = 'EXCHANGE'
+EXCHANGES = ('bybit', 'bingx')
+
 # Уведомления: что присылать и куда. Раздельно по событиям и каналам, потому
 # что «слишком много уведомлений» и «слишком мало» — разные беды у одного и
 # того же человека: сообщение о каждом входе на телефон раздражает, а
@@ -142,6 +150,7 @@ def _defaults():
         for name in STRATEGIES
     }
     base[PORTFOLIO] = _portfolio_defaults()
+    base[EXCHANGE] = {'name': (config.EXCHANGE_NAME or 'bybit').lower()}
     base[NOTIFY] = {f'{event}_{channel}': True
                     for event in NOTIFY_EVENTS for channel in NOTIFY_CHANNELS}
     return base
@@ -199,6 +208,9 @@ def load(force=False):
                     if field in stored_portfolio:
                         data[PORTFOLIO][field] = _clamp(
                             field, stored_portfolio[field], data[PORTFOLIO][field])
+                chosen = ((stored.get(EXCHANGE) or {}).get('name') or '').lower()
+                if chosen in EXCHANGES:
+                    data[EXCHANGE]['name'] = chosen
                 stored_notify = stored.get(NOTIFY) or {}
                 for key in data[NOTIFY]:
                     if key in stored_notify:
@@ -234,6 +246,10 @@ def save(changes):
         if field in portfolio:
             data[PORTFOLIO][field] = _clamp(field, portfolio[field],
                                             data[PORTFOLIO][field])
+
+    chosen = ((changes.get(EXCHANGE) or {}).get('name') or '').lower()
+    if chosen in EXCHANGES:
+        data[EXCHANGE]['name'] = chosen
 
     notify_changes = changes.get(NOTIFY) or {}
     for key in data[NOTIFY]:
@@ -379,6 +395,12 @@ def allows(strategy, direction):
 def deposit(strategy):
     return float(load().get(strategy, {}).get('deposit',
                                               config.PAPER_START_BALANCE))
+
+
+def exchange_name():
+    """Выбранная биржа. Ключи здесь не хранятся — только выбор."""
+    return (load().get(EXCHANGE, {}).get('name')
+            or (config.EXCHANGE_NAME or 'bybit')).lower()
 
 
 def portfolio_risk_pct():

@@ -36,9 +36,21 @@ import os
 import time
 
 import config
+import exchange
 from logger import log
 
 SOURCES = ('open_interest', 'long_short', 'funding', 'premium')
+
+# Какая возможность ccxt нужна каждому источнику. Биржи расходятся, и сильно:
+# у BingX из четырёх есть только фандинг (проверено запросом). Без этой таблицы
+# сборщик на второй бирже писал бы в журнал отказы по трём источникам каждый
+# час — и это выглядело бы как поломка, а не как отсутствие данных.
+NEEDS = {
+    'open_interest': 'fetchOpenInterestHistory',
+    'long_short': 'fetchLongShortRatioHistory',
+    'funding': 'fetchFundingRateHistory',
+    'premium': 'fetchPremiumIndexOHLCV',
+}
 
 # Раз в час: шаг самих данных часовой, а история отдаётся с запасом в 8 дней —
 # даже суточный перерыв не создаст дыры. Частить незачем, это только запросы.
@@ -102,7 +114,13 @@ def _append(source, rows):
 
 
 def _fetch(client, source, pair):
-    """Сырые записи одного источника по одной паре в общем виде."""
+    """
+    Сырые записи одного источника по одной паре в общем виде.
+
+    Символ приводится к записи ЭТОЙ биржи: пул задан символами Bybit, а другая
+    биржа на них отвечает отказом.
+    """
+    pair = exchange.market_symbol(pair, client) or pair
     if source == 'open_interest':
         raw = client.fetch_open_interest_history(pair, '1h', limit=LIMIT)
         return [{'ts': r['timestamp'],
@@ -142,6 +160,10 @@ def collect(client, pairs=None, sources=SOURCES):
     written = {source: 0 for source in sources}
 
     for source in sources:
+        # Биржа, которая таких данных не отдаёт, — это не сбой, а её свойство.
+        # Молчим и идём дальше: у BingX из четырёх источников есть только один.
+        if not exchange.supports(client, NEEDS[source]):
+            continue
         fresh, failed, reason = [], [], ''
         for pair in pairs:
             try:

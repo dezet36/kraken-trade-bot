@@ -746,6 +746,43 @@ def _strategy_settings(stored=None):
     return {k: v for k, v in stored.items() if k in settings_store.STRATEGIES}
 
 
+def _exchange_state(stored=None):
+    """
+    Состояние подключения к биржам: выбранная, настроенные, их возможности.
+
+    КЛЮЧИ ОТСЮДА НЕ ОТДАЮТСЯ И НЕ ПРИНИМАЮТСЯ — только признак «настроена».
+    Дашборд слушает без пароля, и секрет, прошедший через него, считался бы
+    скомпрометированным. Ключи живут в .env; панель лишь переключает между
+    теми биржами, что уже настроены.
+
+    Возможности показываются потому, что биржи расходятся сильно: у BingX из
+    четырёх источников данных о позиционировании есть только фандинг. Человек,
+    переключивший биржу, должен видеть, что именно он теряет, — а не
+    обнаружить это через неделю по пустому хранилищу.
+    """
+    import exchange as ex_mod
+
+    stored = settings_store.load() if stored is None else stored
+    configured = ex_mod.configured_exchanges()
+    active = ex_mod.active_exchange_name()
+
+    caps = {}
+    try:
+        client = ex_mod.get_exchange()
+        caps = {name: ex_mod.supports(client, name)
+                for name in ex_mod.CAPABILITIES}
+    except Exception as exc:                       # noqa: BLE001
+        caps = {'error': str(exc)[:80]}
+
+    return {
+        'active': active,
+        'configured': configured,
+        'supported': list(ex_mod.SUPPORTED_EXCHANGES),
+        'capabilities': caps,
+        'chosen': (stored.get(settings_store.EXCHANGE) or {}).get('name'),
+    }
+
+
 def _errors_summary():
     """Короткая сводка по ошибкам — для значка в меню."""
     try:
@@ -1092,6 +1129,7 @@ class _Handler(BaseHTTPRequestHandler):
                 'portfolio': stored.get(settings_store.PORTFOLIO, {}),
                 'notify': stored.get(settings_store.NOTIFY, {}),
                 'limits': settings_store.LIMITS,
+                'exchange': _exchange_state(stored),
                 'writable': _controls_allowed()})
         elif path in ('/', '/index.html'):
             self._send_html()

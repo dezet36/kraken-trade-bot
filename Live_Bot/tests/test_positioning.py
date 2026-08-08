@@ -33,12 +33,29 @@ def store(tmp_path, monkeypatch):
 
 
 class FakeClient:
-    """Биржа, отдающая предсказуемые записи. Может ломаться по требованию."""
+    """
+    Биржа, отдающая предсказуемые записи. Может ломаться по требованию.
 
-    def __init__(self, rows=3, fail=()):
+    Объявляет ВОЗМОЖНОСТИ и рынки, как настоящий клиент ccxt: сборщик теперь
+    спрашивает `has` перед обращением к источнику (у BingX три источника из
+    четырёх отсутствуют), а символы приводит к записи конкретной биржи.
+    Подделка без этих полей выглядела бы биржей, не умеющей ничего.
+    """
+
+    def __init__(self, rows=3, fail=(), caps=None):
         self.rows = rows
         self.fail = set(fail)
         self.calls = 0
+        self.id = 'fake'
+        self.markets = {'BTC/USDT:USDT': {'id': 'BTCUSDT'},
+                        'ETH/USDT:USDT': {'id': 'ETHUSDT'},
+                        'SOL/USDT:USDT': {'id': 'SOLUSDT'}}
+        self.has = {name: True for name in (caps or (
+            'fetchOpenInterestHistory', 'fetchLongShortRatioHistory',
+            'fetchFundingRateHistory', 'fetchPremiumIndexOHLCV'))}
+
+    def load_markets(self):
+        return self.markets
 
     def _series(self, kind):
         self.calls += 1
