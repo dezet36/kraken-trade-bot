@@ -39,18 +39,36 @@ def market_symbol(pair, client):
     try:
         if not client.markets:
             client.load_markets()
-        # 1. Прямое совпадение по биржевому id — самый надёжный путь.
-        for symbol, market in client.markets.items():
-            if market.get('id') == pair:
+        # СНАЧАЛА БЕССРОЧНЫЕ КОНТРАКТЫ, И ЭТО НЕ ПРЕДПОЧТЕНИЕ, А ИСПРАВЛЕНИЕ.
+        # У Bybit спотовый рынок 'XRP/USDT' и бессрочный 'XRP/USDT:USDT' имеют
+        # ОДИН И ТОТ ЖЕ биржевой id 'XRPUSDT'. Поиск по id без разбора брал
+        # первый попавшийся, и для части пар это оказывался спот — а у спота
+        # нет ни фандинга, ни открытого интереса, и биржа отвечала «символ не
+        # поддерживает этот тип рынка». Проявлялось выборочно, по одним парам
+        # и не по другим, то есть выглядело как сбой связи.
+        #
+        # Бот торгует исключительно бессрочные, поэтому спот здесь не запасной
+        # вариант, а источник ошибок.
+        def _rank(market):
+            return (bool(market.get('swap')), bool(market.get('linear')))
+
+        matches = [(symbol, market) for symbol, market in client.markets.items()
+                   if market.get('id') == pair]
+        matches.sort(key=lambda item: _rank(item[1]), reverse=True)
+        for symbol, market in matches:
+            if market.get('swap'):
                 resolved = symbol
                 break
-        # 2. Иначе собираем единый символ из базовой валюты.
+        # 2. Иначе собираем единый символ из базовой валюты — бессрочный первым.
         if resolved is None and pair.endswith('USDT'):
             base = pair[:-4]
             for candidate in (f'{base}/USDT:USDT', f'{base}/USDT'):
                 if candidate in client.markets:
                     resolved = candidate
                     break
+        # 3. Последняя попытка: совпадение по id вообще, каким бы ни был тип.
+        if resolved is None and matches:
+            resolved = matches[0][0]
     except Exception as exc:                       # noqa: BLE001
         log(f'⚠️ не удалось сопоставить {pair}: {exc}')
     _symbol_cache[key] = resolved

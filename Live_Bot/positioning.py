@@ -39,7 +39,7 @@ import config
 import exchange
 from logger import log
 
-SOURCES = ('open_interest', 'long_short', 'funding', 'premium')
+SOURCES = ('open_interest', 'long_short', 'funding', 'premium', 'delta')
 
 # Какая возможность ccxt нужна каждому источнику. Биржи расходятся, и сильно:
 # у BingX из четырёх есть только фандинг (проверено запросом). Без этой таблицы
@@ -50,7 +50,28 @@ NEEDS = {
     'long_short': 'fetchLongShortRatioHistory',
     'funding': 'fetchFundingRateHistory',
     'premium': 'fetchPremiumIndexOHLCV',
+    'delta': 'fetchTrades',
 }
+
+# ДЕЛЬТА — ОСОБЫЙ СЛУЧАЙ, И ПОТОМУ О НЁМ ОТДЕЛЬНО.
+#
+# Дельта — это разница между агрессивными покупками и агрессивными продажами:
+# сколько объёма прошло в стакан продавца, а сколько в стакан покупателя. Из
+# обычной свечи она не выводится, там только суммарный объём.
+#
+# Историю её достать НЕЛЬЗЯ. Замерено: лента отдаёт 1000 сделок, это девять
+# минут на BTC, и запрос в прошлое биржа игнорирует — возвращает то же окно.
+# Заменитель, считаемый из свечи (положение закрытия в диапазоне, взвешенное
+# объёмом), даёт связь со следующим баром −0.008, то есть ничего.
+#
+# Значит единственный путь тот же, что и с позиционированием: копить самим.
+# Девять минут за запрос при цикле бота в пять минут дают почти сплошное
+# покрытие — но только пока бот работает, и каждый пропущенный час потерян
+# навсегда. Поэтому сбор идёт с ПЕРВОГО дня, задолго до самой стратегии.
+DELTA_LIMIT = int(os.getenv('POSITIONING_DELTA_LIMIT', 1000))
+# Дельта пишется поминутно, а не посделочно: сделок тысячи в минуту, и
+# хранить их поштучно значило бы получить гигабайты вместо данных.
+DELTA_BUCKET_MS = 60_000
 
 # Раз в час: шаг самих данных часовой, а история отдаётся с запасом в 8 дней —
 # даже суточный перерыв не создаст дыры. Частить незачем, это только запросы.
@@ -59,8 +80,17 @@ INTERVAL_SEC = int(os.getenv('POSITIONING_INTERVAL_SEC', 3600))
 # сами, а повторы отсеиваются по ключу.
 LIMIT = int(os.getenv('POSITIONING_LIMIT', 200))
 
-_last_run = 0.0
+_last_run = {}          # источник -> когда собирали в последний раз
 _seen = None            # {source: set((pair, timestamp))}
+
+# У дельты СВОЁ расписание, и это не мелочь. Лента отдаёт девять минут, а
+# остальные источники — от восьми дней до года. Часовой опрос дельты терял бы
+# 51 минуту из каждых 60 безвозвратно, поэтому она собирается каждый цикл.
+DELTA_INTERVAL_SEC = int(os.getenv('POSITIONING_DELTA_INTERVAL_SEC', 240))
+
+
+def _interval(source):
+    return DELTA_INTERVAL_SEC if source == 'delta' else INTERVAL_SEC
 
 
 def store_dir():
@@ -91,7 +121,12 @@ def _load_seen():
                     except ValueError:
                         continue          # оборванная строка — пропускаем
                     key = (row.get('pair'), row.get('ts'))
-                    if key[0] and key[1]:
+                    # Снова проверка на ОТСУТСТВИЕ, а не на ложность. С
+                    # `if key[1]` запись с отметкой ноль не попадала в список
+                    # известных, и после перезапуска дописывалась заново —
+                    # то есть отсев повторов тихо переставал работать ровно
+                    # для одной записи из каждой ленты.
+                    if key[0] is not None and key[1] is not None:
                         seen[source].add(key)
         except OSError as exc:
             log(f'⚠️ позиционирование: не читается {source} — {exc}')
@@ -141,7 +176,50 @@ def _fetch(client, source, pair):
         # на конец часа.
         return [{'ts': row[0], 'value': row[4]}
                 for row in raw if row and row[0]]
+    if source == 'delta':
+        raw = client.fetch_trades(pair, limit=DELTA_LIMIT)
+        return _fold_delta(raw)
     return []
+
+
+def _fold_delta(trades):
+    """
+    Свёртка ленты сделок в поминутную дельту.
+
+    Хранится не сама лента, а три числа на минуту: купленный объём, проданный
+    и число сделок. Лента — это тысячи записей в минуту; поштучно она даёт
+    гигабайты и становится непригодной для замера, а вся нужная информация
+    сводится к тому, чей объём перевесил.
+
+    ПОСЛЕДНЯЯ МИНУТА ОТБРАСЫВАЕТСЯ. Она ещё формируется, и записать её значило
+    бы сохранить половину минуты как целую — с заниженным объёмом и смещённой
+    дельтой. Та же причина, по которой стратегии выбрасывают незакрытую свечу.
+    """
+    buckets = {}
+    for trade in trades or []:
+        stamp = trade.get('timestamp')
+        amount = trade.get('amount')
+        # Проверка на ОТСУТСТВИЕ, а не на ложность: отметка времени ноль —
+        # допустимое значение, и `if not stamp` молча выбрасывал бы такую
+        # сделку. На бирже такое не встречается, но правило «ноль это не
+        # пусто» нарушать нельзя нигде: однажды оно выстрелит там, где ноль
+        # осмыслен.
+        if stamp is None or amount is None:
+            continue
+        key = int(stamp) // DELTA_BUCKET_MS * DELTA_BUCKET_MS
+        cell = buckets.setdefault(key, {'buy': 0.0, 'sell': 0.0, 'n': 0})
+        if trade.get('side') == 'buy':
+            cell['buy'] += float(amount)
+        else:
+            cell['sell'] += float(amount)
+        cell['n'] += 1
+    if not buckets:
+        return []
+    newest = max(buckets)
+    return [{'ts': key, 'value': cell['buy'] - cell['sell'],
+             'buy': round(cell['buy'], 6), 'sell': round(cell['sell'], 6),
+             'trades': cell['n']}
+            for key, cell in sorted(buckets.items()) if key != newest]
 
 
 def collect(client, pairs=None, sources=SOURCES):
@@ -201,18 +279,24 @@ def collect_if_due(client, pairs=None):
     """
     global _last_run
     now = time.time()
-    if now - _last_run < INTERVAL_SEC:
+    due = [name for name in SOURCES
+           if now - _last_run.get(name, 0) >= _interval(name)]
+    if not due:
         return None
-    _last_run = now
+    for name in due:
+        _last_run[name] = now
     try:
-        written = collect(client, pairs)
+        written = collect(client, pairs, sources=tuple(due))
     except Exception as exc:                       # noqa: BLE001
         log(f'⚠️ позиционирование: сбор не удался — {exc}')
         return None
-    total = sum(written.values())
-    if total:
+    # Дельта пишется каждые несколько минут, и сообщать о ней каждый раз
+    # значило бы забить журнал. Говорим только о том, что случается редко.
+    loud = {name: count for name, count in written.items()
+            if count and name != 'delta'}
+    if loud:
         log('📊 Позиционирование: записей добавлено — ' + ', '.join(
-            f'{name} {count}' for name, count in written.items() if count))
+            f'{name} {count}' for name, count in loud.items()))
     return written
 
 

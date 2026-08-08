@@ -44,7 +44,15 @@ class FakeExchange:
         self.loaded += 1
         for native in self._ids:
             base = native.replace('-', '').replace('USDT', '')
-            self.markets[f'{base}/USDT:USDT'] = {'id': native,
+            # СПОТ ИДЁТ ПЕРВЫМ НАМЕРЕННО. У Bybit спотовый и бессрочный рынки
+            # делят один биржевой id, и порядок словаря — это ровно то, на чём
+            # код однажды поскользнулся: брался первый попавшийся, и для части
+            # пар это был спот, у которого нет ни фандинга, ни открытого
+            # интереса.
+            self.markets[f'{base}/USDT'] = {'id': native, 'spot': True,
+                                            'symbol': f'{base}/USDT'}
+            self.markets[f'{base}/USDT:USDT'] = {'id': native, 'swap': True,
+                                                 'linear': True,
                                                  'symbol': f'{base}/USDT:USDT'}
         return self.markets
 
@@ -69,6 +77,18 @@ class TestSymbolMapping:
         bingx = FakeExchange('bingx', BINGX_IDS)
         assert ex.market_symbol('BTCUSDT', bybit) == 'BTC/USDT:USDT'
         assert ex.market_symbol('BTCUSDT', bingx) == 'BTC/USDT:USDT'
+
+    def test_prefers_perpetual_over_spot(self, ex):
+        """
+        Спот и бессрочный делят биржевой id. Спот отдаёт свечи, но не отдаёт
+        ни фандинга, ни открытого интереса, и биржа отвечает «символ не
+        поддерживает этот тип рынка» — выборочно, по одним парам и не по
+        другим, то есть выглядит как сбой связи, а не как ошибка выбора.
+        """
+        bybit = FakeExchange('bybit', BYBIT_IDS)
+        symbol = ex.market_symbol('BTCUSDT', bybit)
+        assert symbol == 'BTC/USDT:USDT'
+        assert bybit.markets[symbol].get('swap') is True
 
     def test_missing_market_returns_none(self, ex):
         """

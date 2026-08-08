@@ -28,7 +28,9 @@ def store(tmp_path, monkeypatch):
         sys.modules.pop(module, None)
     import positioning
     positioning._seen = None
-    positioning._last_run = 0.0
+    # Расписание теперь ПОИСТОЧНИКОВОЕ: у дельты своё, потому что лента
+    # отдаёт девять минут, а остальное — от восьми дней.
+    positioning._last_run = {}
     return positioning
 
 
@@ -52,7 +54,8 @@ class FakeClient:
                         'SOL/USDT:USDT': {'id': 'SOLUSDT'}}
         self.has = {name: True for name in (caps or (
             'fetchOpenInterestHistory', 'fetchLongShortRatioHistory',
-            'fetchFundingRateHistory', 'fetchPremiumIndexOHLCV'))}
+            'fetchFundingRateHistory', 'fetchPremiumIndexOHLCV',
+            'fetchTrades'))}
 
     def load_markets(self):
         return self.markets
@@ -83,12 +86,26 @@ class FakeClient:
         n = self._series('premium')
         return [[1_000 + i * 3_600_000, 1, 1, 1, 0.02, 0] for i in range(n)]
 
+    def fetch_trades(self, pair, limit=None):
+        """Лента: по две сделки в минуту, покупка крупнее продажи."""
+        n = self._series('delta')
+        out = []
+        for i in range(n):
+            base = i * 60_000
+            out.append({'timestamp': base + 1_000, 'side': 'buy', 'amount': 3.0})
+            out.append({'timestamp': base + 2_000, 'side': 'sell', 'amount': 1.0})
+        return out
+
 
 class TestCollection:
     def test_writes_every_source(self, store):
         written = store.collect(FakeClient(), pairs=['BTCUSDT'])
         assert set(written) == set(store.SOURCES)
-        assert all(count == 3 for count in written.values())
+        # У дельты на одну запись меньше: последняя минута ещё формируется и
+        # сознательно отбрасывается.
+        assert written['delta'] == 2
+        assert all(count == 3 for name, count in written.items()
+                   if name != 'delta')
         for source in store.SOURCES:
             assert os.path.exists(store.path_for(source))
 
@@ -111,7 +128,9 @@ class TestNoDuplicates:
         client = FakeClient(rows=5)
         first = store.collect(client, pairs=['BTCUSDT'])
         second = store.collect(client, pairs=['BTCUSDT'])
-        assert all(count == 5 for count in first.values())
+        assert first['delta'] == 4          # последняя минута отброшена
+        assert all(count == 5 for name, count in first.items()
+                   if name != 'delta')
         assert all(count == 0 for count in second.values())
 
     def test_only_new_records_appended(self, store):
@@ -171,13 +190,63 @@ class TestFailuresAreContained:
         assert written['funding'] == 2
 
 
+class TestDelta:
+    """
+    Дельта — разница агрессивных покупок и продаж. Хранится поминутно: лента
+    даёт тысячи сделок в минуту, и поштучно это гигабайты вместо данных.
+    """
+
+    def test_folds_tape_into_minutes(self, store):
+        store.collect(FakeClient(rows=4), pairs=['BTCUSDT'],
+                      sources=('delta',))
+        with open(store.path_for('delta'), encoding='utf-8') as fh:
+            rows = [json.loads(line) for line in fh]
+        # Четыре минуты в ленте, последняя отброшена как незавершённая.
+        assert len(rows) == 3
+        assert all(r['value'] == pytest.approx(2.0) for r in rows)
+        assert all(r['buy'] == pytest.approx(3.0) for r in rows)
+        assert all(r['trades'] == 2 for r in rows)
+
+    def test_last_minute_dropped(self, store):
+        """
+        Последняя минута ещё формируется. Записать её значило бы сохранить
+        половину минуты как целую — с заниженным объёмом и смещённой дельтой.
+        """
+        rows = store._fold_delta([
+            {'timestamp': 0, 'side': 'buy', 'amount': 1},
+            {'timestamp': 60_000, 'side': 'buy', 'amount': 1},
+            {'timestamp': 120_000, 'side': 'sell', 'amount': 1},
+        ])
+        assert [r['ts'] for r in rows] == [0, 60_000]
+
+    def test_empty_tape_is_not_an_error(self, store):
+        assert store._fold_delta([]) == []
+        assert store._fold_delta(None) == []
+
+
 class TestSchedule:
     def test_runs_once_per_interval(self, store, monkeypatch):
         client = FakeClient(rows=2)
         assert store.collect_if_due(client, pairs=['BTCUSDT']) is not None
         assert store.collect_if_due(client, pairs=['BTCUSDT']) is None
-        store._last_run -= store.INTERVAL_SEC + 1
+        for name in store.SOURCES:
+            store._last_run[name] -= store.INTERVAL_SEC + 1
         assert store.collect_if_due(client, pairs=['BTCUSDT']) is not None
+
+    def test_delta_runs_more_often_than_the_rest(self, store):
+        """
+        Лента отдаёт девять минут, остальные источники — от восьми дней. При
+        общем часовом расписании дельта теряла бы 51 минуту из каждых 60.
+        """
+        assert store.DELTA_INTERVAL_SEC < store.INTERVAL_SEC
+        client = FakeClient(rows=3)
+        store.collect_if_due(client, pairs=['BTCUSDT'])
+        # Прошло время дельты, но не остальных.
+        for name in store.SOURCES:
+            store._last_run[name] -= store.DELTA_INTERVAL_SEC + 1
+        written = store.collect_if_due(client, pairs=['BTCUSDT'])
+        assert written is not None
+        assert set(written) == {'delta'}
 
 
 class TestSummary:
