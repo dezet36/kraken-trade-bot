@@ -112,6 +112,13 @@ def main():
     results = {}
     for label, cache, pairs in PERIODS:
         usable = pairs[:da.PAIRS_LIMIT]
+        # Режим рынка SMC считает по дневным биткойна. Биткойн попадает ровно
+        # в одну половину, и брать режим из торгуемого набора нельзя: вторая
+        # половина осталась бы без него. Подсунуть биткойн в обе половины тоже
+        # нельзя — одна пара протекла бы через отложенную. Поэтому дневные
+        # грузятся ОТДЕЛЬНО и в торговлю не идут.
+        regime_bars = da.load(cache, ['BTCUSDT'], f'{label} · режим')
+        regime_bars = (regime_bars.get('BTCUSDT') or {}).get('1d')
         for part, subset in (('настройка', usable[0::2]),
                              ('проверка', usable[1::2])):
             tag = f'{label} · {part}'
@@ -119,7 +126,8 @@ def main():
             if not data:
                 print(f'   {tag}: данных нет')
                 continue
-            smc = load_period(cache, list(data), tag + ' · smc')
+            smc = load_period(cache, list(data), tag + ' · smc',
+                              regime_bars=regime_bars)
             for name, (orders, exec_data, kwargs) in books(data, smc).items():
                 results[(name, label, part)] = da.run_side(
                     orders, exec_data, BOTH, **kwargs)

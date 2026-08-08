@@ -161,7 +161,7 @@ def build_lookup(regimes):
 
 # ── Загрузка и прогон ────────────────────────────────────────────────────────
 
-def load_period(cache_dir, pairs, label):
+def load_period(cache_dir, pairs, label, regime_bars=None):
     os.environ['SMC_CACHE_DIR'] = cache_dir
     for module in ('backtest_smc', 'smc_sweep'):
         sys.modules.pop(module, None)
@@ -178,7 +178,19 @@ def load_period(cache_dir, pairs, label):
         contexts[pair] = smc_signal.build_context({
             'bias': loaded['1d'], 'htf': loaded['4h'], 'poi': loaded['1h'],
         }, pair=pair)
-    regimes, threshold = regime_series(data['BTCUSDT']['1d'])
+    # РЕЖИМ РЫНКА СЧИТАЕТСЯ ПО БИТКОЙНУ, А НЕ ПО ТОРГУЕМОМУ НАБОРУ. Это
+    # свойство рынка целиком, и оно не должно зависеть от того, какие пары
+    # попали в замер. Раньше дневные брались из `data`, то есть из самого
+    # набора, — и замер с делением пула пополам падал, потому что биткойн
+    # оказывался только в одной половине. Подсунуть его в обе значило бы
+    # протащить одну пару через отложенную половину и испортить проверку.
+    if regime_bars is None:
+        if 'BTCUSDT' not in data:
+            raise SystemExit(
+                f'[{label}] режим рынка считается по BTCUSDT, а его в наборе '
+                'нет. Передайте дневные свечи биткойна параметром regime_bars')
+        regime_bars = data['BTCUSDT']['1d']
+    regimes, threshold = regime_series(regime_bars)
     lookup = build_lookup(regimes)
     print(f'   пар: {len(data)} | порог направленности ER = {threshold:.3f}', flush=True)
     return {'data': data, 'contexts': contexts, 'bt': bt, 'regime': lookup,
