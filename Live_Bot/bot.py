@@ -8,6 +8,7 @@ from telegram_bot import controller
 from exchange import get_exchange, make_market_client, fetch_ohlcv
 import dashboard
 import error_log
+import positioning
 import strategy_levels
 import strategy_rsibb
 import strategy_smc
@@ -255,6 +256,13 @@ def _paper_cycle():
     # срабатывают. Делаем это ДО проверки паузы — пауза запрещает новые входы,
     # а не ведение позиций.
     broker.update()
+
+    # Сбор данных о позиционировании: раз в час, молча, и НИКОГДА не мешая
+    # торговле — все ошибки гасятся внутри. Идёт до проверки паузы намеренно:
+    # пауза останавливает сделки, а не наблюдение за рынком. Данные копятся
+    # впрок, потому что биржа отдаёт их с пределом по числу записей, и
+    # медвежий период 2022-23 недостижим никаким запросом.
+    positioning.collect_if_due(broker.client)
 
     if controller.is_paused():
         log("⏸ Бот на паузе — новые фантомные входы пропускаем")
