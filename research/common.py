@@ -35,7 +35,16 @@ sys.path.insert(0, os.path.join(ROOT, 'Live_Bot'))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from smc_market_regime import (BEAR_CACHE, BEAR_PAIRS, BULL_CACHE,  # noqa: E402,F401
-                               BULL_PAIRS)
+                               BULL_PAIRS, RISING_CACHES, RISING_PAIRS)
+
+# ИМЕНА BULL/BEAR ВВОДЯТ В ЗАБЛУЖДЕНИЕ, И ЭТО ИЗМЕРЕНО: у «бычьего» периода
+# BTC −39.8%, у «медвежьего» −34.7%. Оба падающие. Подробности и цифры — в
+# smc_market_regime, где эти имена определены.
+#
+# Практический вывод для нового замера: двух этих периодов НЕДОСТАТОЧНО.
+# Независимость там только по времени, не по режиму, и вывод «работает на двух
+# независимых периодах» ничего не говорит о растущем рынке. Для полноты нужны
+# RISING_CACHES — BTC +106.0% и +49.6%.
 
 # ── Статистика ───────────────────────────────────────────────────────────────
 BOOTSTRAP = 10_000

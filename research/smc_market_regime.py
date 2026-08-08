@@ -37,8 +37,37 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, 'Live_Bot'))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+# ВНИМАНИЕ: ИМЕНА BULL/BEAR ВВОДЯТ В ЗАБЛУЖДЕНИЕ, И ЭТО ИЗМЕРЕНО.
+#
+#     кэш                          период               BTC       медиана пула
+#     backtest_cache_bear   2022-01 .. 2023-06        −34.7%        −60.2%
+#     backtest_cache_12m    2025-05 .. 2026-07        −39.8%        −48.6%
+#
+# «Бычий» период вырос со 104 854 до 126 150 и упал до 57 756, закончив на
+# 63 130. По итогу это ПАДЕНИЕ, причём более глубокое, чем у «медвежьего».
+#
+# Значит оба исторических периода проекта — падающие, и двусторонняя приёмка
+# всё это время давала независимость ПО ВРЕМЕНИ, но не по режиму. Всё принятое
+# на них могло оказаться отобранным под падающий рынок. Отсюда же и «шорты
+# сильнее лонгов»: это свойство двух падавших периодов, а не рынка вообще.
+#
+# Имена оставлены как есть НАМЕРЕННО: их читают двадцать замеров, и
+# переименование ради точности сломало бы их все разом. Вместо этого добавлены
+# растущие периоды — backtest_cache_mid1 (BTC +106.0%) и mid2 (+49.6%), — и
+# новые замеры обязаны включать их, а не ограничиваться этими двумя.
 BULL_CACHE = os.path.join(ROOT, 'research', 'backtest_cache_12m')
 BEAR_CACHE = os.path.join(ROOT, 'research', 'backtest_cache_bear')
+
+# Растущие периоды: то, чего у проекта не было НИКОГДА. Пары — те, что
+# торговались в середине 2023 года.
+RISING_CACHES = (os.path.join(ROOT, 'research', 'backtest_cache_mid1'),
+                 os.path.join(ROOT, 'research', 'backtest_cache_mid2'))
+RISING_PAIRS = [
+    'BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'XRPUSDT', 'BNBUSDT', 'DOGEUSDT',
+    'ADAUSDT', 'AVAXUSDT', 'LINKUSDT', 'LTCUSDT', 'ARBUSDT', 'DOTUSDT',
+    'XLMUSDT', 'NEARUSDT', 'UNIUSDT', 'AAVEUSDT', 'COTIUSDT', 'BICOUSDT',
+    'SHIB1000USDT',
+]
 
 BULL_PAIRS = [
     'BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'XRPUSDT', 'DOGEUSDT', 'HYPEUSDT',
