@@ -1,9 +1,14 @@
 """
 Маркет-мейкер: отбор рынков и торговый цикл.
 
-ЧТО ДЕЛАЕТ. Держит двусторонние котировки на многих рынках сразу, исполняет их
-по ленте биржи, ведёт запас и результат. Работает в бумаге; живое исполнение
-требует отдельного модуля с подписью заявок, которого здесь нет намеренно.
+ЧТО ДЕЛАЕТ. Держит двусторонние котировки на многих рынках сразу, ведёт запас и
+результат. Работает в бумаге всегда; при явном разрешении дополнительно
+отправляет те же заявки на биржу.
+
+БУМАЖНЫЙ РАСЧЁТ НЕ ВЫКЛЮЧАЕТСЯ ДАЖЕ В ЖИВОМ РЕЖИМЕ. Он остаётся моделью, с
+которой сверяется реальность: если наши исполнения по ленте расходятся с
+настоящими, значит модель очереди ошибается. Узнать это надо раньше, чем
+вырастет размер, а не после.
 
 ОТБОР РЫНКОВ ИДЁТ ПО НАГРАДЕ, А НЕ ПО ОБОРОТУ, и это исправление уже сделанной
 ошибки. Первый замер смотрел сотню крупнейших по обороту рынков, нашёл награды
@@ -21,8 +26,11 @@
     срок удержания               доход здесь спред, а не исход; застрявшая
                                  позиция превращает мейкера в предсказателя
 
-ЧЕГО ЗДЕСЬ НЕТ. Отправки заявок на биржу. Ни ключа, ни подписи, ни POST —
-по построению, а не по настройке.
+ЖИВОЙ РЕЖИМ ТРЕБУЕТ СЕМИ УСЛОВИЙ СРАЗУ (см. executor.can_trade), и ни одно не
+выводится из другого: разрешение PM_LIVE, ключ и счёт в окружении, поднявшийся
+клиент, отсутствие файла аварийной остановки, дневной убыток ниже предела,
+размер заявки под потолком и цена в допустимом диапазоне. Любая одиночная
+ошибка — опечатка, забытый флаг, сбой модуля — не приводит к сделке.
 
 Запуск:
     python -m polymarket.mm            один цикл
@@ -34,7 +42,7 @@ import sys
 import time
 
 from . import book as book_mod
-from . import client, engine, params, store, strategy
+from . import client, engine, executor, params, store, strategy, wallet
 
 CANDIDATES = None          # кэш отбора внутри процесса
 
@@ -89,76 +97,129 @@ def select_markets(limit=None, min_liquidity=None, refresh=False):
     return CANDIDATES
 
 
-def step(maker, markets):
-    """Один проход по всем рынкам: исполнения, затем новые котировки."""
-    marks, placed, fills, skipped = {}, 0, [], {}
-    exposure = maker.exposure(marks)
+def step(maker, markets, live=False, day_loss=0.0):
+    """
+    Один проход: стаканы пачкой, исполнения, новые котировки.
 
-    for market in markets:
-        token = market['token_id']
-        live = book_mod.fetch(token)
-        if live is None:
+    СТАКАНЫ БЕРУТСЯ ОДНИМ ЗАПРОСОМ НА ВСЕ РЫНКИ. Поодиночке двадцать пять
+    рынков занимали семь секунд, сотня — почти полминуты, и котировка успевала
+    устареть раньше, чем её выставляли. Пачкой те же двадцать пять приходят за
+    полсекунды: замерено 0.49 против 7.
+
+    ЖИВОЕ ИСПОЛНЕНИЕ ЗЕРКАЛИТ БУМАЖНОЕ, А НЕ ЗАМЕНЯЕТ ЕГО. Бумажный движок
+    считает всегда — он остаётся моделью, с которой сверяется реальность.
+    Расхождение между ними и есть самое ценное, что даст живой режим: если наши
+    исполнения по ленте не совпадают с настоящими, значит модель очереди
+    ошибается, и знать это надо раньше, чем размер вырастет.
+    """
+    by_token = {m['token_id']: m for m in markets}
+    books = book_mod.fetch_many(list(by_token))
+    marks, placed, fills, skipped, sent = {}, 0, [], {}, 0
+
+    for token, market in by_token.items():
+        live_book = books.get(str(token))
+        if not live_book:
             skipped['стакан не пришёл'] = skipped.get('стакан не пришёл', 0) + 1
             continue
-        top = book_mod.top(live)
+        top = book_mod.top(live_book)
         if not top or top['bid'] is None or top['ask'] is None:
             skipped['стакан односторонний'] = skipped.get('стакан односторонний', 0) + 1
             continue
         marks[str(token)] = top['mid']
 
+    exposure = maker.exposure(marks)
+
+    for token, market in by_token.items():
+        live_book = books.get(str(token))
+        if not live_book or str(token) not in marks:
+            continue
+        top = book_mod.top(live_book)
+
         # СНАЧАЛА исполнения, потом новые котировки. Обратный порядок выставил
         # бы заявку и тут же проверил её по ленте, где она физически не могла
         # исполниться, — и дал бы себе фору в один цикл.
-        tape = book_mod.tape(market['condition_id'], limit=200)
-        for done in maker.process_fills(token, market['condition_id'], tape):
-            store._append(engine.FILLS, done)
-            fills.append(done)
-
         slot = maker._slot(token)
+        if (slot.get('orders') or {}).get('bid') or (slot.get('orders') or {}).get('ask'):
+            tape = book_mod.tape(market['condition_id'], limit=200)
+            for done in maker.process_fills(token, market['condition_id'], tape):
+                store._append(engine.FILLS, done)
+                fills.append(done)
+
         quote = strategy.desired_quote(top, market, position=slot['position'],
                                        max_position=params.MM_MAX_POSITION)
         if not quote or quote.get('reason'):
-            skipped[(quote or {}).get('reason') or 'котировка не собралась'] = \
-                skipped.get((quote or {}).get('reason') or 'котировка не собралась', 0) + 1
+            reason = (quote or {}).get('reason') or 'котировка не собралась'
+            skipped[reason] = skipped.get(reason, 0) + 1
             continue
 
-        # Потолок вложенного: при его превышении котируем ТОЛЬКО сокращающую
+        # Потолок вложенного: при превышении котируем ТОЛЬКО сокращающую
         # сторону. Полная остановка была бы хуже — запас остался бы висеть.
         if exposure > params.MM_MAX_EXPOSURE_USD and not quote.get('only'):
             quote['only'] = 'ask' if slot['position'] > 0 else 'bid'
 
-        maker.place(token, quote, top, live)
+        before = json.dumps(slot.get('orders') or {}, sort_keys=True)
+        maker.place(token, quote, top, live_book)
         placed += 1
-        time.sleep(params.PAUSE)
+
+        if live and before != json.dumps(slot.get('orders') or {}, sort_keys=True):
+            for side in ('bid', 'ask'):
+                order = (slot.get('orders') or {}).get(side)
+                if not order or order.get('live_id'):
+                    continue
+                out = executor.place(token, side, order['price'], order['size'],
+                                     day_loss_usd=day_loss, tick=market['tick'])
+                if out.get('ok'):
+                    order['live_id'] = out.get('order_id')
+                    sent += 1
+                else:
+                    order['live_error'] = out.get('why')
 
     report = maker.mark_to_market(marks)
     store._append(engine.EQUITY, {'at': engine._stamp(), **report,
-                                  'markets': placed, 'fills': len(fills)})
+                                  'markets': placed, 'fills': len(fills),
+                                  'sent': sent, 'live': bool(live)})
     maker.save()
     return {'placed': placed, 'fills': fills, 'report': report,
-            'skipped': skipped, 'marks': marks}
+            'skipped': skipped, 'marks': marks, 'sent': sent}
 
 
 def main(loop=False):
     markets = select_markets()
-    maker = PaperMaker = engine.PaperMaker()
+    maker = engine.PaperMaker()
+    state = wallet.status()
+    live = state['can_trade_live']
+
     print(f'капитал маркет-мейкера: ${maker.bankroll:,.0f}')
     print(f'рынков отобрано: {len(markets)}')
-    for m in markets[:6]:
-        print(f'   ${m["rewards_daily"]:>5.0f}/день  ликв ${m["liquidity"]:>9,.0f}  '
-              f'{str(m["question"])[:50]}')
-    while True:
-        out = step(maker, markets)
-        r = out['report']
-        print(f'[{engine._stamp()}] котировок {out["placed"]}, '
-              f'исполнений {len(out["fills"])}, '
-              f'капитал ${r["equity"]:,.2f} '
-              f'(зафикс ${r["realized"]:+,.2f}, запас ${r["inventory"]:,.2f})')
-        if out['skipped']:
-            print('   пропущено:', dict(out['skipped']))
-        if not loop:
-            return out
-        time.sleep(params.MM_POLL_SECONDS)
+    print(f'кошелёк: {"подключён " + str(state["address"]) if state["configured"] else "НЕ подключён"}')
+    print(f'режим: {"ЖИВЫЕ ДЕНЬГИ" if live else "бумага"}')
+    if state['configured'] and not state['live_enabled']:
+        print('   ключ есть, но PM_LIVE не включён — заявки на биржу не уходят')
+    if executor.kill_switch_on():
+        print('   ВНИМАНИЕ: включена аварийная остановка (файл STOP)')
+
+    try:
+        while True:
+            report_before = maker.mark_to_market({})
+            day_loss = max(0.0, -report_before['pnl'])
+            out = step(maker, markets, live=live, day_loss=day_loss)
+            r = out['report']
+            print(f'[{engine._stamp()}] котировок {out["placed"]}, '
+                  f'исполнений {len(out["fills"])}, '
+                  f'отправлено на биржу {out["sent"]}, '
+                  f'капитал ${r["equity"]:,.2f} '
+                  f'(зафикс ${r["realized"]:+,.2f}, запас ${r["inventory"]:,.2f})')
+            if out['skipped']:
+                print('   пропущено:', dict(out['skipped']))
+            if not loop:
+                return out
+            time.sleep(params.MM_POLL_SECONDS)
+    finally:
+        # ЗАЯВКИ СНИМАЮТСЯ ПРИ ЛЮБОМ ВЫХОДЕ, включая аварийный. Оставленные без
+        # присмотра — худшее состояние: мы не котируем, но нас продолжают
+        # исполнять, причём тогда, когда это выгодно встречной стороне.
+        if live:
+            print('снимаю заявки с биржи...', executor.cancel_all())
 
 
 if __name__ == '__main__':
