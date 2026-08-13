@@ -230,3 +230,71 @@ class PaperMaker:
         return [token for token, slot in self.state['books'].items()
                 if slot['position'] and slot.get('opened_ts')
                 and now - slot['opened_ts'] > limit]
+
+    def apply_exchange_trades(self, trades, seen_ids=None):
+        """
+        Проводит НАСТОЯЩИЕ сделки с биржи. Источник правды в живом режиме.
+
+        В бумаге исполнение оценивается по ленте и модели очереди — иначе
+        никак. Как только заявки уходят на биржу, такая оценка становится
+        вредной: она отвечает «исполнилось бы», а биржа знает «исполнилось».
+        Разойдутся они обязательно, потому что очередь оценивается
+        приблизительно, и учёт поехал бы вслед за оценкой.
+
+        Повторы отсекаются по идентификатору сделки: тот же ответ придёт и в
+        следующем цикле, а провести его дважды значит удвоить позицию.
+        """
+        seen = set(seen_ids or self.state.setdefault('seen_trades', []))
+        done = []
+        for trade in trades or []:
+            key = str(trade.get('id') or '')
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            slot = self._slot(trade['token'])
+            self._apply_fill(slot, trade['side'], trade['price'], trade['size'])
+            cash = -trade['price'] * trade['size'] if trade['side'] == 'bid' \
+                else trade['price'] * trade['size']
+            self.state['cash'] += cash
+            # Заявка, по которой прошло исполнение, у биржи уже закрыта.
+            for side in ('bid', 'ask'):
+                order = (slot.get('orders') or {}).get(side)
+                if order and order.get('live_id') == trade.get('order_id'):
+                    slot['orders'][side] = None
+            done.append({'at': _stamp(), 'source': 'exchange',
+                         'token': trade['token'], 'side': trade['side'],
+                         'price': trade['price'], 'size': trade['size'],
+                         'trade_id': key,
+                         'position_after': slot['position'],
+                         'realized_after': round(slot['realized'], 4)})
+        # Список виденных обрезается: он нужен только чтобы не провести сделку
+        # дважды, а храниться вечно ему незачем.
+        self.state['seen_trades'] = list(seen)[-5000:]
+        return done
+
+    def live_order_ids(self):
+        """Биржевые номера всех наших заявок — для сверки с биржей."""
+        out = {}
+        for token, slot in self.state['books'].items():
+            for side, order in (slot.get('orders') or {}).items():
+                if order and order.get('live_id'):
+                    out[str(order['live_id'])] = (token, side, order['price'])
+        return out
+
+    def forget_orders(self, order_ids):
+        """
+        Забывает заявки, которых на бирже уже нет.
+
+        Вызывается по итогам сверки. Держать у себя заявку, которой биржа не
+        знает, опаснее, чем не держать: мы считаем, что котируем эту сторону, и
+        не выставляем её заново — то есть перестаём сокращать запас, полагая,
+        что сокращаем.
+        """
+        gone = {str(i) for i in (order_ids or [])}
+        dropped = 0
+        for slot in self.state['books'].values():
+            for side, order in list((slot.get('orders') or {}).items()):
+                if order and str(order.get('live_id')) in gone:
+                    slot['orders'][side] = None
+                    dropped += 1
+        return dropped

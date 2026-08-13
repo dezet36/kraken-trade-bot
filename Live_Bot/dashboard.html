@@ -960,6 +960,18 @@
       </section>
 
       <!-- ── Управление ───────────────────────────────────────────────── -->
+
+      <!-- ── Polymarket: маркет-мейкер ────────────────────────────────── -->
+      <section class="page" data-page="polymarket" hidden>
+        <div class="panel-head bare">
+          <h2>Маркет-мейкер Polymarket</h2>
+          <span class="hint" id="pm-hint"></span>
+          <div class="row-end">
+            <button type="button" class="btn ghost sm" id="pm-stop">Аварийная остановка</button>
+          </div>
+        </div>
+        <div id="pm-body">загружаю…</div>
+      </section>
       <section class="page" data-page="control" hidden>
         <!-- Вкладки внутри страницы: шесть панелей подряд занимали два
              экрана и смешивали то, что трогают ежедневно (пауза, пределы), с
@@ -1879,6 +1891,7 @@ const PAGES = [
   { id: 'positions', ic: '▤', title: 'Позиции' },
   { id: 'history',   ic: '≡', title: 'История' },
   { id: 'analytics', ic: '◨', title: 'Аналитика' },
+  { id: 'polymarket', ic: '◈', title: 'Polymarket' },
   { id: 'control',   ic: '⚙', title: 'Управление' },
   { id: 'diag',      ic: '⚠', title: 'Диагностика' },
 ];
@@ -1959,6 +1972,9 @@ function showPage() {
   if (page === 'control') loadSettingsHistory();
   if (page === 'control') portfolioLimit(WRITABLE);
   buildSubtabs(page);
+  // Маркет-мейкер живёт отдельным процессом, и его состояние не входит в общий
+  // опрос: тянем при открытии вкладки, а дальше обновляем по такту.
+  if (page === 'polymarket') loadPolymarket();
   if (page === 'diag' && currentSub('diag') === 'errors') loadErrors();
   // Настройки могли отрисоваться раньше, чем пришли данные бота: тогда в
   // карточках не было полей, зависящих от режима (депозит есть только в
@@ -2167,6 +2183,126 @@ function reportBlock() {
     + '<span class="hint" id="export-note-report"></span>'
     + '</div>';
 }
+
+/* ── Polymarket: маркет-мейкер ──────────────────────────────────────────── */
+/* Данные читаются ИЗ ФАЙЛОВ маркет-мейкера, а не из его процесса: он живёт
+   отдельно, и панель не должна ни ждать его, ни падать вместе с ним. */
+let PM = null;
+
+async function loadPolymarket() {
+  const box = el('pm-body');
+  if (!box) return;
+  try {
+    const resp = await fetch('/api/polymarket', { cache: 'no-store' });
+    PM = await resp.json();
+  } catch (e) {
+    box.innerHTML = '<div class="warn-box">не читается: ' + esc(e.message) + '</div>';
+    return;
+  }
+  renderPolymarket();
+}
+
+function pmMoney(v) {
+  if (v === null || v === undefined) return '—';
+  return '$' + Number(v).toLocaleString('ru-RU',
+    { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function renderPolymarket() {
+  const box = el('pm-body');
+  if (!box || !PM) return;
+
+  if (!PM.running) {
+    box.innerHTML = '<div class="warn-box">Маркет-мейкер не запускался. '
+      + 'Запуск: <code>python -m polymarket.mm --loop</code> из папки Live_Bot.'
+      + (PM.error ? '<br>Ошибка: ' + esc(PM.error) : '') + '</div>';
+    return;
+  }
+
+  const w = PM.wallet || {};
+  const eq = PM.equity || {};
+  /* СОСТОЯНИЕ КОШЕЛЬКА ПОКАЗЫВАЕТСЯ АДРЕСОМ, А НЕ КЛЮЧОМ. Ключ сюда не
+     приходит и прийти не может: сервер его не отдаёт. */
+  const mode = w.can_trade_live
+    ? '<b style="color:var(--bad)">ЖИВЫЕ ДЕНЬГИ</b>'
+    : (w.configured ? 'кошелёк подключён, живой режим выключен' : 'бумага');
+
+  const cards = [
+    ['Режим', mode],
+    ['Капитал', pmMoney(eq.equity)],
+    ['Зафиксировано', pmMoney(eq.realized)],
+    ['В запасе', pmMoney(eq.inventory)],
+    ['Котируется рынков', PM.quoting_markets || 0],
+    ['Позиций открыто', PM.positions_total || 0],
+  ];
+  /* Классы взяты СУЩЕСТВУЮЩИЕ (.kpis/.kpi), а не заведены свои: вкладка
+     обязана выглядеть как остальная панель, а не почти как она. */
+  let html = '<div class="panel card-pad"><div class="kpis">' + cards.map(([k, v]) =>
+    `<div class="kpi"><div class="k">${k}</div><div class="v">${v}</div></div>`
+  ).join('') + '</div></div>';
+
+  if (PM.kill_switch) {
+    html += '<div class="warn-box">Включена аварийная остановка: заявки на '
+      + 'биржу не уходят. Снять — удалить файл STOP в папке данных.</div>';
+  }
+  if (w.configured && w.address) {
+    html += '<div class="hint" style="padding:8px 4px">Кошелёк: <code>' + esc(w.address) + '</code>'
+      + (w.funder ? ' · счёт <code>' + esc(w.funder) + '</code>' : '') + '</div>';
+  }
+
+  /* Исполнения — главное, чего ждём: пока их нет, неизвестно, переживает ли
+     захваченный спред неблагоприятный отбор. */
+  if (!(PM.fills || []).length) {
+    html += '<div class="warn-box">Исполнений пока нет. Это не поломка: мы '
+      + 'стоим в конце очереди на рынках, где проходит порядка двух сделок в '
+      + 'час. Пока их не наберётся, судить о доходности нечем.</div>';
+  } else {
+    html += '<h3 style="margin:18px 0 8px">Последние исполнения</h3><div class="scroll">'
+      + '<table><thead><tr><th>время</th><th>сторона</th><th>цена</th>'
+      + '<th>размер</th><th>позиция после</th><th>зафиксировано</th></tr></thead><tbody>'
+      + PM.fills.slice(0, 25).map(f => `<tr>
+          <td>${esc((f.at || '').slice(11, 19))}</td>
+          <td>${f.side === 'bid' ? 'купили' : 'продали'}</td>
+          <td>${Number(f.price).toFixed(3)}</td>
+          <td>${Number(f.size).toFixed(0)}</td>
+          <td>${Number(f.position_after).toFixed(0)}</td>
+          <td>${pmMoney(f.realized_after)}</td></tr>`).join('')
+      + '</tbody></table></div>';
+  }
+
+  if ((PM.positions || []).length) {
+    html += '<h3 style="margin:18px 0 8px">Запас по рынкам</h3><div class="scroll">'
+      + '<table><thead><tr><th>токен</th><th>позиция</th><th>средняя</th>'
+      + '<th>зафиксировано</th><th>сделок</th></tr></thead><tbody>'
+      + PM.positions.map(p => `<tr>
+          <td><code>${esc(String(p.token).slice(0, 12))}…</code></td>
+          <td>${Number(p.position).toFixed(0)}</td>
+          <td>${Number(p.avg_cost).toFixed(3)}</td>
+          <td>${pmMoney(p.realized)}</td>
+          <td>${p.trades}</td></tr>`).join('')
+      + '</tbody></table></div>';
+  }
+
+  box.innerHTML = html;
+  const hint = el('pm-hint');
+  if (hint) hint.textContent = eq.at ? 'обновлено ' + eq.at.slice(11, 19) : '';
+}
+
+document.addEventListener('click', async ev => {
+  const btn = ev.target.closest('#pm-stop');
+  if (!btn) return;
+  /* Остановка создаёт тот же файл, что и рука: маркет-мейкер проверяет его
+     перед каждой заявкой, поэтому действует со следующей секунды. */
+  const stopping = !(PM && PM.kill_switch);
+  const url = stopping ? '/api/polymarket/stop' : '/api/polymarket/resume';
+  btn.disabled = true;
+  try {
+    await fetch(url, { cache: 'no-store' });
+    await loadPolymarket();
+  } finally {
+    btn.disabled = false;
+  }
+});
 
 function renderErrors() {
   const box = el('errors');
@@ -4195,6 +4331,9 @@ async function refresh() {
 showPage();
 refresh();
 setInterval(refresh, 15000);
+// Маркет-мейкер обновляется только когда его вкладка открыта: опрашивать его
+// файлы постоянно незачем, а при закрытой вкладке это чистая трата.
+setInterval(() => { if (page === 'polymarket') loadPolymarket(); }, 15000);
 // Журнал обновляем чаще: в окне приложения он заменяет консоль, и по нему
 // видно, что бот жив, даже когда сделок нет неделю.
 setInterval(refreshLog, 5000);

@@ -115,6 +115,7 @@ def step(maker, markets, live=False, day_loss=0.0):
     by_token = {m['token_id']: m for m in markets}
     books = book_mod.fetch_many(list(by_token))
     marks, placed, fills, skipped, sent, cancelled = {}, 0, [], {}, 0, 0
+    mismatch = None
 
     for token, market in by_token.items():
         live_book = books.get(str(token))
@@ -126,6 +127,29 @@ def step(maker, markets, live=False, day_loss=0.0):
             skipped['стакан односторонний'] = skipped.get('стакан односторонний', 0) + 1
             continue
         marks[str(token)] = top['mid']
+
+    # ЖИВЫЕ СДЕЛКИ И СВЕРКА — ДО ВСЕГО ОСТАЛЬНОГО. Сначала узнаём у биржи, что
+    # уже произошло, и только потом решаем, что делать дальше. Обратный порядок
+    # считал бы позицию по устаревшим данным.
+    if live:
+        got = executor.own_trades()
+        if got:
+            for done in maker.apply_exchange_trades(got):
+                store._append(engine.FILLS, done)
+                fills.append(done)
+        check = executor.reconcile(maker.live_order_ids())
+        if check:
+            # Призраки — заявки, которые есть у нас и которых нет на бирже.
+            # Опаснее сирот: мы считаем, что котируем сторону, а её нет, и
+            # перестаём сокращать запас, полагая, что сокращаем.
+            if check['ghost']:
+                maker.forget_orders(check['ghost'])
+            # Сироты — неснятые старые. Снимаем: нас исполнят по цене, которую
+            # мы уже забыли.
+            for orphan in check['orphan']:
+                executor.cancel(orphan)
+                cancelled += 1
+            mismatch = check
 
     exposure = maker.exposure(marks)
 
@@ -139,7 +163,13 @@ def step(maker, markets, live=False, day_loss=0.0):
         # бы заявку и тут же проверил её по ленте, где она физически не могла
         # исполниться, — и дал бы себе фору в один цикл.
         slot = maker._slot(token)
-        if (slot.get('orders') or {}).get('bid') or (slot.get('orders') or {}).get('ask'):
+        # ИСТОЧНИК ИСПОЛНЕНИЙ ЗАВИСИТ ОТ РЕЖИМА. В бумаге его приходится
+        # оценивать по общей ленте и модели очереди — иначе никак. Как только
+        # заявки уходят на биржу, оценка становится вредной: она отвечает
+        # «исполнилось бы», а биржа знает «исполнилось», и расходятся они
+        # обязательно. Живые сделки берутся ниже, одним запросом на все рынки.
+        if not live and ((slot.get('orders') or {}).get('bid')
+                         or (slot.get('orders') or {}).get('ask')):
             tape = book_mod.tape(market['condition_id'], limit=200)
             for done in maker.process_fills(token, market['condition_id'], tape):
                 store._append(engine.FILLS, done)
@@ -190,7 +220,7 @@ def step(maker, markets, live=False, day_loss=0.0):
     maker.save()
     return {'placed': placed, 'fills': fills, 'report': report,
             'skipped': skipped, 'marks': marks, 'sent': sent,
-            'cancelled': cancelled}
+            'cancelled': cancelled, 'mismatch': mismatch}
 
 
 def main(loop=False):
@@ -221,6 +251,12 @@ def main(loop=False):
                   f'(зафикс ${r["realized"]:+,.2f}, запас ${r["inventory"]:,.2f})')
             if out['skipped']:
                 print('   пропущено:', dict(out['skipped']))
+            if out.get('mismatch') and (out['mismatch']['ghost']
+                                        or out['mismatch']['orphan']):
+                m = out['mismatch']
+                print(f'   СВЕРКА: призраков {len(m["ghost"])}, '
+                      f'сирот {len(m["orphan"])} '
+                      f'(у нас {m["our_count"]}, на бирже {m["live_count"]})')
             if not loop:
                 return out
             time.sleep(params.MM_POLL_SECONDS)

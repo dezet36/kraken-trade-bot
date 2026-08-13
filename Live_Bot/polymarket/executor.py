@@ -209,3 +209,73 @@ def scoring(order_ids):
         return api.are_orders_scoring(OrdersScoringParams(orderIds=list(order_ids)))
     except Exception:                                       # noqa: BLE001
         return None
+
+
+def own_trades(after_ts=None):
+    """
+    НАШИ сделки по мнению биржи. Источник правды в живом режиме.
+
+    ПОЧЕМУ НЕ ЛЕНТА. В бумаге исполнение определяется по общей ленте и модели
+    очереди — иначе никак. В живом режиме такая оценка становится не только
+    лишней, но и вредной: она отвечает «исполнилось бы», тогда как биржа знает
+    «исполнилось». Разойдутся они обязательно (очередь оценивается
+    приблизительно), и учёт поехал бы, а вслед за ним — размер позиции.
+
+    Возвращает None, если спросить не удалось. Пустой список и «не спросили» —
+    разные вещи: на первом можно строить решение, на втором нельзя.
+    """
+    api = wallet.client()
+    if api is None:
+        return None
+    try:
+        from py_clob_client.clob_types import TradeParams
+        params_obj = TradeParams(after=int(after_ts)) if after_ts else None
+        rows = api.get_trades(params_obj)
+    except Exception:                                       # noqa: BLE001
+        return None
+    out = []
+    for row in rows or []:
+        try:
+            out.append({
+                'id': row.get('id'),
+                'token': str(row.get('asset_id') or ''),
+                'side': 'bid' if str(row.get('side', '')).upper() == 'BUY' else 'ask',
+                'price': float(row.get('price')),
+                'size': float(row.get('size')),
+                'ts': int(row.get('match_time') or row.get('timestamp') or 0),
+                'order_id': row.get('taker_order_id') or row.get('maker_order_id'),
+                'status': row.get('status'),
+            })
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
+def reconcile(expected_orders):
+    """
+    Сверка нашего представления с биржей.
+
+    expected_orders — {биржевой номер: (токен, сторона, цена)}. Возвращает
+    расхождения обеих сторон:
+
+        'ghost'   заявка есть у нас, но её нет на бирже. Опаснее второго: мы
+                  считаем, что котируем, а на деле нет — и не котируем ту
+                  сторону, которой рассчитывали сокращать запас.
+        'orphan'  заявка есть на бирже, но не у нас. Это неснятая старая: нас
+                  исполнят по цене, которую мы уже забыли.
+
+    None — сверка не состоялась. Отсутствие расхождений и невозможность
+    спросить биржу — разные вещи, и путать их нельзя.
+    """
+    rows = open_orders()
+    if rows is None:
+        return None
+    live_ids = set()
+    for row in rows or []:
+        oid = row.get('id') or row.get('orderID')
+        if oid:
+            live_ids.add(str(oid))
+    ours = {str(k) for k in (expected_orders or {})}
+    return {'ghost': sorted(ours - live_ids),
+            'orphan': sorted(live_ids - ours),
+            'live_count': len(live_ids), 'our_count': len(ours)}

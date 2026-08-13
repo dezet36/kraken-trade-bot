@@ -1047,6 +1047,31 @@ class _Handler(BaseHTTPRequestHandler):
             self._send_file(export_paths()[1], 'application/x-ndjson; charset=utf-8')
         elif path == '/api/export/save':
             self._save_export()
+        elif path == '/api/polymarket':
+            # Читается из файлов маркет-мейкера, а не из его процесса: он живёт
+            # отдельно, и панель не должна ни ждать его, ни падать вместе с ним.
+            try:
+                import polymarket
+                self._send_json(polymarket.snapshot())
+            except Exception as exc:               # noqa: BLE001
+                self._send_json({'running': False, 'error': str(exc)[:200]})
+        elif path == '/api/polymarket/stop':
+            # Аварийная остановка ИЗ ПАНЕЛИ. Она создаёт тот же файл, что и
+            # рука: маркет-мейкер проверяет его перед каждой заявкой, поэтому
+            # действует со следующей секунды, а не с перезапуска.
+            try:
+                from polymarket import executor
+                executor.engage_kill_switch('нажато в панели')
+                self._send_json({'ok': True, 'stopped': True})
+            except Exception as exc:               # noqa: BLE001
+                self._fail(500, f'не удалось: {exc}')
+        elif path == '/api/polymarket/resume':
+            try:
+                from polymarket import executor
+                executor.release_kill_switch()
+                self._send_json({'ok': True, 'stopped': False})
+            except Exception as exc:               # noqa: BLE001
+                self._fail(500, f'не удалось: {exc}')
         elif path.startswith('/api/report.txt'):
             # Отчёт собирается на лету, а не лежит файлом: он должен отражать
             # состояние на момент нажатия, иначе присланное описывает не ту

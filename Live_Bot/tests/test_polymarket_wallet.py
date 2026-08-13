@@ -249,3 +249,174 @@ class TestShutdownCancelsOrders:
         assert 'OrderType.GTC' in text
         assert 'create_market_order' not in text
         assert 'OrderType.FOK' not in text
+
+
+class TestLiveFillsComeFromTheExchange:
+    """
+    В живом режиме источник исполнений — биржа, а не лента.
+
+    В бумаге исполнение приходится ОЦЕНИВАТЬ по общей ленте и модели очереди:
+    другого способа нет. Как только заявки уходят на биржу, такая оценка
+    становится вредной — она отвечает «исполнилось бы», а биржа знает
+    «исполнилось». Разойдутся они обязательно, потому что очередь оценивается
+    приблизительно, и следом поедет позиция.
+    """
+
+    def _maker(self, tmp_path):
+        from polymarket import engine
+        return engine.PaperMaker(bankroll=1000,
+                                 state_path=str(tmp_path / 's.json'))
+
+    def test_exchange_trade_updates_position_and_cash(self, tmp_path):
+        maker = self._maker(tmp_path)
+        trades = [{'id': 'A1', 'token': 'T', 'side': 'bid', 'price': 0.20,
+                   'size': 100, 'ts': 1, 'order_id': 'O1'}]
+        done = maker.apply_exchange_trades(trades)
+        assert len(done) == 1 and done[0]['source'] == 'exchange'
+        assert maker._slot('T')['position'] == 100.0
+        assert maker.state['cash'] == pytest.approx(1000 - 20.0)
+
+    def test_the_same_trade_is_never_applied_twice(self, tmp_path):
+        """
+        Тот же ответ придёт и в следующем цикле.
+
+        Провести его дважды значит удвоить позицию, которой на бирже нет, — и
+        дальше котировать против выдуманного запаса.
+        """
+        maker = self._maker(tmp_path)
+        trades = [{'id': 'A1', 'token': 'T', 'side': 'bid', 'price': 0.20,
+                   'size': 100, 'ts': 1, 'order_id': 'O1'}]
+        maker.apply_exchange_trades(trades)
+        assert maker.apply_exchange_trades(trades) == []
+        assert maker._slot('T')['position'] == 100.0
+
+    def test_tape_model_is_skipped_in_live_mode(self):
+        """Оценка по ленте в живом режиме не вызывается вовсе."""
+        source = os.path.join(ROOT, 'polymarket', 'mm.py')
+        with open(source, encoding='utf-8') as fh:
+            text = fh.read()
+        assert 'if not live and ((slot.get(' in text
+        assert 'maker.apply_exchange_trades(got)' in text
+
+
+class TestReconciliation:
+    """
+    Расхождение с биржей находится сверкой, а не по балансу.
+
+    Призрак — заявка есть у нас, но не на бирже. Опаснее сироты: мы считаем,
+    что котируем сторону, а её нет, и перестаём сокращать запас, полагая, что
+    сокращаем. Сирота — неснятая старая: нас исполнят по забытой цене.
+    """
+
+    def test_ghosts_and_orphans_are_separated(self, monkeypatch):
+        monkeypatch.setattr(executor, 'open_orders',
+                            lambda: [{'id': 'LIVE-1'}, {'id': 'ORPHAN'}])
+        out = executor.reconcile({'LIVE-1': ('T', 'bid', 0.2),
+                                  'GHOST': ('T', 'ask', 0.3)})
+        assert out['ghost'] == ['GHOST']
+        assert out['orphan'] == ['ORPHAN']
+
+    def test_unreachable_exchange_gives_none_not_empty(self, monkeypatch):
+        """
+        «Расхождений нет» и «не смог спросить» — разные вещи.
+
+        На первом можно строить решение, на втором нельзя: пустой ответ
+        означал бы, что все наши заявки живы, тогда как мы просто не дозвонились.
+        """
+        monkeypatch.setattr(executor, 'open_orders', lambda: None)
+        assert executor.reconcile({'X': ('T', 'bid', 0.2)}) is None
+
+    def test_forgetting_ghosts_frees_the_side_for_requoting(self, tmp_path):
+        from polymarket import engine
+        maker = engine.PaperMaker(bankroll=1000,
+                                  state_path=str(tmp_path / 's.json'))
+        slot = maker._slot('T')
+        slot['orders'] = {'bid': {'price': 0.2, 'size': 100, 'ts': 1,
+                                  'queue': 0, 'live_id': 'GHOST'}, 'ask': None}
+        assert maker.forget_orders(['GHOST']) == 1
+        assert maker._slot('T')['orders']['bid'] is None
+
+    def test_reconciliation_runs_before_quoting(self):
+        """Сначала узнаём у биржи, что произошло, потом решаем, что делать."""
+        source = os.path.join(ROOT, 'polymarket', 'mm.py')
+        with open(source, encoding='utf-8') as fh:
+            text = fh.read()
+        assert text.index('executor.reconcile(') < text.index('maker.place(')
+
+
+class TestAutostart:
+    """
+    Автозапуск выключен по умолчанию и не может уронить торговлю на бирже.
+
+    Polymarket — другая площадка и другие деньги. Его неудача не имеет права
+    остановить основного бота, а его успех не должен наступать сам собой:
+    бумажный прогон пока не дал исполнений, и включать по умолчанию то, о чём
+    нечего сказать числами, значит навязывать непроверенное.
+    """
+
+    def test_disabled_unless_explicitly_enabled(self, monkeypatch):
+        from polymarket import service
+        monkeypatch.delenv('PM_AUTOSTART', raising=False)
+        assert service.autostart_enabled() is False
+        assert service.start() is False
+        monkeypatch.setenv('PM_AUTOSTART', '1')
+        assert service.autostart_enabled() is True
+
+    def test_bot_catches_every_failure(self):
+        """
+        Бот ловит ВСЁ при запуске маркет-мейкера.
+
+        Пакет может отсутствовать в сборке, зависимость не встать, ключ
+        оказаться негодным. В любом случае торговля на бирже обязана
+        продолжиться, а причина — попасть в журнал.
+        """
+        source = os.path.join(ROOT, 'bot.py')
+        with open(source, encoding='utf-8') as fh:
+            text = fh.read()
+        block = text[text.index('def _start_polymarket'):]
+        block = block[:block.index('\ndef ')]
+        assert 'except Exception' in block
+        assert 'продолжается' in block
+
+    def test_second_start_does_not_double_quote(self, monkeypatch):
+        """
+        Повторный запуск не поднимает второй поток.
+
+        Два потока котировали бы одни рынки, перебивая заявки друг друга и
+        удваивая размер — то есть и риск.
+        """
+        from polymarket import service
+        monkeypatch.setenv('PM_AUTOSTART', '1')
+        monkeypatch.setattr(service, '_thread', None)
+
+        started = []
+        class FakeThread:
+            def __init__(self, *a, **k):
+                started.append(1)
+            def start(self):
+                pass
+            def is_alive(self):
+                return True
+
+        monkeypatch.setattr(service.threading, 'Thread', FakeThread)
+        assert service.start() is True
+        assert service.start() is True
+        assert len(started) == 1
+
+
+class TestDashboardNeverExposesTheKey:
+
+    def test_snapshot_has_address_but_no_key(self, monkeypatch):
+        """
+        Снимок для панели уходит по сети. Ключа в нём быть не может.
+
+        Панель слушает без пароля; всё, что она отдаёт, надо считать
+        общедоступным.
+        """
+        import polymarket
+        monkeypatch.setenv('PM_PRIVATE_KEY', TEST_KEY)
+        monkeypatch.setenv('PM_FUNDER', '0x' + '1' * 40)
+        snap = polymarket.snapshot()
+        assert TEST_KEY not in str(snap)
+        assert snap['wallet']['address'] is not None
+        assert 'private' not in str(snap).lower()
