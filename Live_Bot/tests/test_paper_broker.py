@@ -38,6 +38,13 @@ def broker_env(tmp_path, monkeypatch):
     monkeypatch.setenv('BOT_DATA_DIR', str(tmp_path))
     monkeypatch.setenv('TRADING_MODE', 'PAPER')
     monkeypatch.setenv('PAPER_START_BALANCE', '10000')
+    # ДЕПОЗИТЫ ВЫРАВНИВАЮТСЯ ЯВНО, и это не упрощение ради удобства. Доли
+    # капитала между стратегиями теперь измерены (FIBO 50%, LEVELS 23%,
+    # SMC 17%, RSIBB 10%) и живут в config; механика брокера от них не зависит
+    # и зависеть не должна. Без выравнивания эти тесты проверяли бы заодно и
+    # политику распределения — а она проверяется отдельно, в test_capital_split.
+    for _name in ('FIBO', 'SMC', 'LEVELS', 'RSIBB'):
+        monkeypatch.setenv(f'PAPER_START_BALANCE_{_name}', '10000')
     monkeypatch.setenv('PAPER_FUNDING', 'false')
     for module in ('config', 'paper_broker', 'dashboard'):
         sys.modules.pop(module, None)
