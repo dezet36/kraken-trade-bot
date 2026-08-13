@@ -114,7 +114,7 @@ def step(maker, markets, live=False, day_loss=0.0):
     """
     by_token = {m['token_id']: m for m in markets}
     books = book_mod.fetch_many(list(by_token))
-    marks, placed, fills, skipped, sent = {}, 0, [], {}, 0
+    marks, placed, fills, skipped, sent, cancelled = {}, 0, [], {}, 0, 0
 
     for token, market in by_token.items():
         live_book = books.get(str(token))
@@ -158,8 +158,16 @@ def step(maker, markets, live=False, day_loss=0.0):
             quote['only'] = 'ask' if slot['position'] > 0 else 'bid'
 
         before = json.dumps(slot.get('orders') or {}, sort_keys=True)
-        maker.place(token, quote, top, live_book)
+        _, replaced = maker.place(token, quote, top, live_book)
         placed += 1
+
+        # СНАЧАЛА снимаем старое, потом ставим новое. Обратный порядок оставил
+        # бы обе заявки в стакане одновременно: двойной размер и двойной риск
+        # ровно в тот момент, когда цена уже сдвинулась.
+        if live:
+            for order_id in replaced:
+                executor.cancel(order_id)
+                cancelled += 1
 
         if live and before != json.dumps(slot.get('orders') or {}, sort_keys=True):
             for side in ('bid', 'ask'):
@@ -177,10 +185,12 @@ def step(maker, markets, live=False, day_loss=0.0):
     report = maker.mark_to_market(marks)
     store._append(engine.EQUITY, {'at': engine._stamp(), **report,
                                   'markets': placed, 'fills': len(fills),
-                                  'sent': sent, 'live': bool(live)})
+                                  'sent': sent, 'cancelled': cancelled,
+                                  'live': bool(live)})
     maker.save()
     return {'placed': placed, 'fills': fills, 'report': report,
-            'skipped': skipped, 'marks': marks, 'sent': sent}
+            'skipped': skipped, 'marks': marks, 'sent': sent,
+            'cancelled': cancelled}
 
 
 def main(loop=False):
@@ -206,7 +216,7 @@ def main(loop=False):
             r = out['report']
             print(f'[{engine._stamp()}] котировок {out["placed"]}, '
                   f'исполнений {len(out["fills"])}, '
-                  f'отправлено на биржу {out["sent"]}, '
+                  f'отправлено {out["sent"]}, снято {out["cancelled"]}, '
                   f'капитал ${r["equity"]:,.2f} '
                   f'(зафикс ${r["realized"]:+,.2f}, запас ${r["inventory"]:,.2f})')
             if out['skipped']:

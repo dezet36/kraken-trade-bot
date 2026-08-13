@@ -161,22 +161,34 @@ class PaperMaker:
         пересчитывается: она и есть то, что нам придётся пропустить. Обновляя
         её каждый цикл, мы бы вечно «подходили к началу» и рисовали себе
         исполнения.
+
+        Возвращает (заявки, список биржевых номеров на снятие).
         """
         slot = self._slot(token)
         orders = slot.setdefault('orders', {})
+        # Заявки, которые заменяются или снимаются, возвращаются наружу СО
+        # СВОИМ биржевым номером. Без этого старая живая заявка осталась бы
+        # лежать в стакане по устаревшей цене: мы бы её не видели, а исполнить
+        # нас по ней могли — и именно тогда, когда это выгодно встречной
+        # стороне. За смену часов таких заявок накопились бы сотни.
+        replaced = []
         for side in ('bid', 'ask'):
+            current = orders.get(side)
             if quote.get('only') and quote['only'] != side:
+                if current and current.get('live_id'):
+                    replaced.append(current['live_id'])
                 orders[side] = None
                 continue
             price = quote[side]
-            current = orders.get(side)
             if current and abs(current['price'] - price) < 1e-9:
                 continue                        # цена не изменилась — не трогаем
+            if current and current.get('live_id'):
+                replaced.append(current['live_id'])
             orders[side] = {
                 'price': price, 'size': quote['size'], 'ts': _now(),
                 'queue': book_mod.depth_ahead(book, side, price),
             }
-        return orders
+        return orders, replaced
 
     # ── Отчётность ───────────────────────────────────────────────────────────
 

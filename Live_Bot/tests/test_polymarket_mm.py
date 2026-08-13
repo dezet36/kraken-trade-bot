@@ -218,7 +218,7 @@ class TestOrdersAndFills:
         рисовали себе исполнения, которых не будет.
         """
         quote = {'bid': 0.20, 'ask': 0.24, 'size': 100, 'only': None}
-        orders = maker.place('T', quote, None, self._book())
+        orders, _ = maker.place('T', quote, None, self._book())
         assert orders['bid']['queue'] == 500.0
         assert orders['ask']['queue'] == 400.0
 
@@ -228,13 +228,13 @@ class TestOrdersAndFills:
         maker.place('T', quote, None, self._book())
         first_ts = maker._slot('T')['orders']['bid']['ts']
         maker.place('T', quote, None, {'bids': [(0.20, 9999.0)],
-                                       'asks': [(0.24, 400.0)]})
+                                        'asks': [(0.24, 400.0)]})
         assert maker._slot('T')['orders']['bid']['ts'] == first_ts
         assert maker._slot('T')['orders']['bid']['queue'] == 500.0
 
     def test_one_sided_quote_cancels_the_other_side(self, maker):
         quote = {'bid': 0.20, 'ask': 0.24, 'size': 100, 'only': 'ask'}
-        orders = maker.place('T', quote, None, self._book())
+        orders, _ = maker.place('T', quote, None, self._book())
         assert orders['bid'] is None and orders['ask'] is not None
 
     def test_fill_updates_position_and_cash(self, maker):
@@ -305,3 +305,60 @@ class TestRiskLimits:
                 text = fh.read().lower()
             assert 'private_key' not in text, name
             assert 'post_order' not in text, name
+
+
+class TestStaleLiveOrdersAreCancelled:
+    """
+    Заменяемая живая заявка обязана вернуться на снятие.
+
+    БЕЗ ЭТОГО ЖИВОЙ РЕЖИМ НЕПРИГОДЕН. Старая заявка осталась бы лежать в
+    стакане по устаревшей цене: мы бы её не видели, а исполнить нас по ней
+    могли — и именно тогда, когда это выгодно встречной стороне. За смену
+    часов таких заявок накопились бы сотни, и каждая несла бы полный размер.
+    """
+
+    @pytest.fixture
+    def maker(self, tmp_path):
+        return engine.PaperMaker(bankroll=1000,
+                                 state_path=str(tmp_path / 'state.json'))
+
+    def _book(self):
+        return {'bids': [(0.20, 500.0)], 'asks': [(0.24, 400.0)]}
+
+    def test_price_change_returns_the_old_order_id(self, maker):
+        first = {'bid': 0.20, 'ask': 0.24, 'size': 100, 'only': None}
+        orders, replaced = maker.place('T', first, None, self._book())
+        assert replaced == []
+        orders['bid']['live_id'] = 'ORDER-1'
+        second = {'bid': 0.21, 'ask': 0.24, 'size': 100, 'only': None}
+        _, replaced = maker.place('T', second, None, self._book())
+        assert replaced == ['ORDER-1']
+
+    def test_going_one_sided_returns_the_cancelled_side(self, maker):
+        quote = {'bid': 0.20, 'ask': 0.24, 'size': 100, 'only': None}
+        orders, _ = maker.place('T', quote, None, self._book())
+        orders['bid']['live_id'] = 'ORDER-BID'
+        one_sided = dict(quote, only='ask')
+        _, replaced = maker.place('T', one_sided, None, self._book())
+        assert replaced == ['ORDER-BID']
+
+    def test_unchanged_price_cancels_nothing(self, maker):
+        quote = {'bid': 0.20, 'ask': 0.24, 'size': 100, 'only': None}
+        orders, _ = maker.place('T', quote, None, self._book())
+        orders['bid']['live_id'] = 'ORDER-1'
+        _, replaced = maker.place('T', quote, None, self._book())
+        assert replaced == []
+
+    def test_cycle_cancels_before_placing(self):
+        """
+        Снятие идёт ДО выставления нового.
+
+        Обратный порядок оставил бы обе заявки в стакане одновременно: двойной
+        размер и двойной риск ровно тогда, когда цена уже сдвинулась.
+        """
+        source = os.path.join(ROOT, 'polymarket', 'mm.py')
+        with open(source, encoding='utf-8') as fh:
+            text = fh.read()
+        cancel_at = text.index('executor.cancel(order_id)')
+        place_at = text.index('out = executor.place(')
+        assert cancel_at < place_at
