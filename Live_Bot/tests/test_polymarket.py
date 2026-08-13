@@ -357,11 +357,19 @@ class TestCryptoMath:
             return {'spot': 100.0, 'sigma_annual': 0.6, 'bars': 500}
 
         module = CryptoSignal(vol_source=fake_vol)
+        # Даты СЧИТАЮТСЯ ОТ СЕГОДНЯ, а не вписаны числом: прошитая дата
+        # однажды становится прошлым, срок обращается в ноль, и тест падает не
+        # потому, что код сломался.
+        import time as _time
+        soon = _time.strftime('%Y-%m-%dT00:00:00Z',
+                              _time.gmtime(_time.time() + 3 * 86400))
+        later = _time.strftime('%Y-%m-%dT00:00:00Z',
+                               _time.gmtime(_time.time() + 300 * 86400))
         near = {'question': 'Will Bitcoin be above $110 on X?',
-                'endDate': '2026-08-10T00:00:00Z',
+                'endDate': soon,
                 'outcomePrices': json.dumps(['0.4', '0.6']),
                 'feeType': 'crypto_fees_v2', 'liquidity': 5000}
-        far = dict(near, endDate='2027-06-01T00:00:00Z')
+        far = dict(near, endDate=later)
         results = module.scan([near, far])
         assert len(results) == 2
         assert results[0].confidence > results[1].confidence
@@ -401,3 +409,43 @@ class TestRunner:
         assert proposals[0]['decision'].reason.startswith('ТОЛЬКО БУМАГА')
         # Отказы и предложения обязаны попадать в журнал решений.
         assert store_mod.read(store_mod.DECISIONS)
+
+
+class TestSigmaUnits:
+    """
+    Разброс сравнивается в ШИРИНАХ КОРЗИНЫ, а не в градусах.
+
+    Пока предел применялся к градусам, фаренгейтовые рынки проходили отбор
+    незаслуженно: корзина там вдвое уже, и то же значение в °C означает вдвое
+    более размазанное распределение. Замер по городам вскрыл это тремя
+    станциями, где вышло по одной ставке и все три проиграли полностью.
+    """
+
+    def test_fahrenheit_sigma_counts_nearly_double(self):
+        assert weather.sigma_in_buckets(1.0, 'C') == 1.0
+        assert abs(weather.sigma_in_buckets(1.0, 'F') - 1.8) < 1e-9
+
+    def test_new_york_is_refused_like_the_worst_station(self):
+        """
+        Нью-Йорк с 0.83°C — это 1.49 корзины, то есть уровень Амстердама.
+
+        По градусам он проходил как середина списка. Число взято из обученной
+        поправки, а не придумано.
+        """
+        ny = weather.sigma_in_buckets(0.83, 'F')
+        amsterdam = weather.sigma_in_buckets(1.49, 'C')
+        assert ny > params.MAX_SIGMA
+        assert abs(ny - amsterdam) < 0.05
+
+    def test_good_celsius_cities_still_pass(self):
+        for sigma in (0.59, 0.61, 0.67):
+            assert weather.sigma_in_buckets(sigma, 'C') <= params.MAX_SIGMA
+
+    def test_gate_uses_bucket_units_not_degrees(self):
+        """Отбор в signals() читает единицу корзины, а не только станцию."""
+        source = os.path.join(ROOT, 'polymarket', 'weather.py')
+        with open(source, encoding='utf-8') as fh:
+            text = fh.read()
+        assert "spread_buckets = sigma_in_buckets(fit['sigma'], bucket['unit'])" in text
+        assert "if not fit or fit['sigma'] > params.MAX_SIGMA:" not in text, \
+            'старый отбор по градусам обязан быть убран'

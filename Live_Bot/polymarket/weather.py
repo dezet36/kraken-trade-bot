@@ -223,6 +223,26 @@ def city_of(question):
     return question.split(' in ', 1)[1].split(' be ')[0].strip()
 
 
+def sigma_in_buckets(sigma_c, unit):
+    """
+    Разброс, выраженный В ШИРИНАХ КОРЗИНЫ, а не в градусах Цельсия.
+
+    ЭТО ИСПРАВЛЕНИЕ ЕДИНИЦ, А НЕ ТОНКОСТЬ. Корзина в Фаренгейтах шириной 1°F —
+    это 0.56°C. При одном и том же разбросе в Цельсиях распределение на
+    фаренгейтовом рынке размазано ВДВОЕ шире по числу корзин:
+
+        Цельсий,   разброс 0.8:  три значимые корзины, у центральной 0.468
+        Фаренгейт, разброс 0.8:  семь корзин,          у центральной 0.269
+
+    Пока предел применялся к градусам, Нью-Йорк с разбросом 0.83°C проходил как
+    середина списка, тогда как на деле это 1.50 корзины — хуже худшей станции.
+    Замер по городам вскрыл это тремя рынками в Фаренгейтах, где вышло по одной
+    ставке и все три проиграли полностью.
+    """
+    width_c = 5.0 / 9.0 if unit == 'F' else 1.0
+    return sigma_c / width_c
+
+
 def signals(markets, forecasts=None):
     """
     Расхождения между нашей вероятностью и ценой по списку рынков.
@@ -239,10 +259,17 @@ def signals(markets, forecasts=None):
     for m in markets:
         city = city_of(m.get('question'))
         fit = fitted.get(city)
-        if not fit or fit['sigma'] > params.MAX_SIGMA:
+        if not fit:
             continue
         bucket = parse_bucket(m.get('question'))
         if not bucket:
+            continue
+        # Предел применяется к разбросу В КОРЗИНАХ, и порядок проверок поэтому
+        # изменён: единицу корзины знает только разобранный вопрос, а не
+        # станция. Сравнивать градусы между рынками с разной шириной корзины
+        # неверно само по себе, независимо от того, что показал замер.
+        spread_buckets = sigma_in_buckets(fit['sigma'], bucket['unit'])
+        if spread_buckets > params.MAX_SIGMA:
             continue
         end = str(m.get('endDate') or '')[:10]
         if not end:
@@ -263,6 +290,7 @@ def signals(markets, forecasts=None):
                     'forecast_c': forecast, 'model': model, 'price': price,
                     'edge': model - price,
                     'cost': client.entry_cost(price, rate),
+                    'sigma_buckets': spread_buckets,
                     'liquidity': float(m.get('liquidity') or 0)})
     return out
 
@@ -298,10 +326,13 @@ class WeatherSignal(SignalModule):
         out = []
         for row in signals(markets):
             fit = calibration().get(row['city']) or {}
-            sigma = float(fit.get('sigma') or params.MAX_SIGMA)
-            # Уверенность обратна разбросу: 0.5 градуса — почти единица,
-            # предельный разброс — треть.
-            confidence = max(0.3, min(1.0, 0.6 / sigma))
+            # Уверенность считается по разбросу В КОРЗИНАХ, а не в градусах:
+            # именно число корзин определяет, насколько уверенно можно назвать
+            # вероятность. У фаренгейтовых рынков одна и та же ошибка в
+            # градусах даёт вдвое более размазанное распределение.
+            spread = float(row.get('sigma_buckets')
+                           or fit.get('sigma') or params.MAX_SIGMA)
+            confidence = max(0.3, min(1.0, 0.6 / spread))
             out.append(SignalResult(
                 model_probability=row['model'],
                 market_probability=row['price'],
@@ -312,5 +343,6 @@ class WeatherSignal(SignalModule):
                 cost=row['cost'],
                 liquidity=row['liquidity'],
                 note=f'{row["city"]}, прогноз {row["forecast_c"]:.1f}°C, '
-                     f'смещение {fit.get("bias", 0):+.2f}, разброс {sigma:.2f}'))
+                     f'смещение {fit.get("bias", 0):+.2f}, '
+                     f'разброс {spread:.2f} корзины'))
         return out
