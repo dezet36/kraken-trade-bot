@@ -283,11 +283,22 @@ class TestThreeStrategies:
         не должна отдавать стратегии всё.
         """
         total = 10_000
+        # Сумма считается по ВСЕМ стратегиям из таблицы, а не по трём знакомым:
+        # с появлением маркет-мейкера список вырос, и проверка, перечисляющая
+        # имена руками, объявила бы капитал потерянным.
         parts = {name: params.bankroll_for(name, total)
-                 for name in ('WEATHER', 'CRYPTO', 'LONGSHOT')}
+                 for name in params.BANKROLL_SPLIT}
         assert abs(sum(parts.values()) - total) < 1e-6
         assert all(v > 0 for v in parts.values())
+        assert {'WEATHER', 'CRYPTO', 'LONGSHOT', 'MM'} <= set(parts)
         assert params.bankroll_for('НЕТ ТАКОЙ', total) == 0.0
+
+        # Маркет-мейкер получает больше остальных, и это не предпочтение:
+        # у трёх других источник дохода — угаданный исход, и ни одна проверку
+        # не прошла. Здесь источник — разница комиссий мейкера и тейкера,
+        # то есть механика биржи.
+        assert parts['MM'] > max(parts['WEATHER'], parts['CRYPTO'],
+                                 parts['LONGSHOT'])
 
     def test_risk_input_shape_is_identical_across_modules(self):
         """
