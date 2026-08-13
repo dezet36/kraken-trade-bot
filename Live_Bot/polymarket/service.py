@@ -22,7 +22,8 @@ import threading
 import time
 
 _thread = None
-_state = {'running': False, 'cycles': 0, 'last_error': None, 'last_at': None}
+_state = {'running': False, 'cycles': 0, 'last_error': None,
+          'last_at': None, 'stopping': False}
 
 
 def autostart_enabled():
@@ -30,7 +31,23 @@ def autostart_enabled():
 
 
 def status():
-    return dict(_state)
+    """Состояние потока. alive отвечает на вопрос «работает ли ПРЯМО СЕЙЧАС»."""
+    out = dict(_state)
+    out['alive'] = bool(_thread is not None and _thread.is_alive())
+    out['autostart'] = autostart_enabled()
+    return out
+
+
+def stop():
+    """
+    Просит поток завершиться и снимает заявки.
+
+    Останавливать поток насильно нельзя: он может быть в середине отправки, и
+    прерывание оставило бы заявку на бирже без записи о ней. Поэтому ставится
+    признак, а поток выходит на следующем такте, сняв за собой всё.
+    """
+    _state['stopping'] = True
+    return True
 
 
 def _loop(poll_seconds):
@@ -55,6 +72,9 @@ def _loop(poll_seconds):
 
     try:
         while True:
+            if _state.get('stopping'):
+                log('◈ Polymarket: остановка по запросу')
+                return
             try:
                 before = maker.mark_to_market({})
                 out = mm.step(maker, markets, live=live,
@@ -77,20 +97,27 @@ def _loop(poll_seconds):
             log(f"◈ Polymarket: снимаю заявки — {executor.cancel_all()}")
 
 
-def start(poll_seconds=None):
+def start(poll_seconds=None, force=False):
     """
     Поднимает маркет-мейкер фоновым потоком. Возвращает True, если запущен.
+
+    force=True — запуск ПО ПРЯМОМУ ДЕЙСТВИЮ человека, минуя PM_AUTOSTART.
+    Переменная отвечает на вопрос «поднимать ли самому при старте бота», а
+    нажатие кнопки — это уже ответ, и спрашивать второй раз незачем. Без этого
+    на сервере с собранным приложением запустить маркет-мейкер было бы нечем:
+    консоли там нет, а совет «выполните команду из папки» к делу не относится.
 
     Повторный вызов ничего не делает: два потока котировали бы одни и те же
     рынки, перебивая заявки друг друга и удваивая размер.
     """
     global _thread
-    if not autostart_enabled():
+    if not force and not autostart_enabled():
         return False
     if _thread is not None and _thread.is_alive():
         return True
     from . import params
     seconds = int(poll_seconds or params.MM_POLL_SECONDS)
+    _state['stopping'] = False
     _thread = threading.Thread(target=_loop, args=(seconds,), daemon=True,
                                name='polymarket-mm')
     _thread.start()

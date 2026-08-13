@@ -292,7 +292,17 @@ def selftest():
                'strategy', 'strategy_smc', 'strategy_levels', 'first_run',
                'updater', 'updater_app', 'ccxt.bybit', 'ccxt.bingx',
                'apscheduler.schedulers.blocking', 'tkinter', 'tkinter.ttk',
-               'webview', 'pandas', 'numpy')
+               'webview', 'pandas', 'numpy',
+               # ПАКЕТ POLYMARKET ПРОВЕРЯЕТСЯ ОТДЕЛЬНО, И ЭТО НЕ ИЗБЫТОЧНОСТЬ.
+               # Он импортируется только внутри функций и под try/except —
+               # так задумано, чтобы его отсутствие не роняло торговлю на
+               # бирже. Обратная сторона: PyInstaller такие импорты находит
+               # ненадёжно, а пойманное исключение превращает пропажу в тихую
+               # строку журнала. На сервере это выглядело как «маркет-мейкер
+               # не запускался» без объяснения причины.
+               'polymarket', 'polymarket.mm', 'polymarket.service',
+               'polymarket.wallet', 'polymarket.executor',
+               'polymarket.engine', 'polymarket.book')
     import importlib
     failed = []
     for name in modules:

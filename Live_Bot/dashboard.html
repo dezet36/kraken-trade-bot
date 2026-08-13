@@ -967,6 +967,7 @@
           <h2>Маркет-мейкер Polymarket</h2>
           <span class="hint" id="pm-hint"></span>
           <div class="row-end">
+            <button type="button" class="btn sm" id="pm-run">Запустить</button>
             <button type="button" class="btn ghost sm" id="pm-stop">Аварийная остановка</button>
           </div>
         </div>
@@ -2212,10 +2213,19 @@ function renderPolymarket() {
   const box = el('pm-body');
   if (!box || !PM) return;
 
+  const svc = PM.service || {};
   if (!PM.running) {
-    box.innerHTML = '<div class="warn-box">Маркет-мейкер не запускался. '
-      + 'Запуск: <code>python -m polymarket.mm --loop</code> из папки Live_Bot.'
-      + (PM.error ? '<br>Ошибка: ' + esc(PM.error) : '') + '</div>';
+    /* СОВЕТА «ВЫПОЛНИТЕ КОМАНДУ» ЗДЕСЬ БОЛЬШЕ НЕТ. На сервере работает
+       собранное приложение, консоли там не бывает, и такой совет отсылал
+       человека туда, куда он попасть не может. Запуск — кнопкой. */
+    let why = 'Маркет-мейкер остановлен. Нажмите «Запустить» — он поднимется '
+      + 'фоновым потоком и начнёт котировать в бумаге.';
+    if (svc.last_error) why += '<br>Последняя ошибка: ' + esc(svc.last_error);
+    if (PM.has_history) why += '<br>Данные прошлых запусков сохранены.';
+    if (PM.error) why += '<br>Не читается: ' + esc(PM.error);
+    box.innerHTML = '<div class="warn-box">' + why + '</div>';
+    const runBtn = el('pm-run');
+    if (runBtn) runBtn.textContent = 'Запустить';
     return;
   }
 
@@ -2234,6 +2244,7 @@ function renderPolymarket() {
     ['В запасе', pmMoney(eq.inventory)],
     ['Котируется рынков', PM.quoting_markets || 0],
     ['Позиций открыто', PM.positions_total || 0],
+    ['Тактов', svc.cycles || 0],
   ];
   /* Классы взяты СУЩЕСТВУЮЩИЕ (.kpis/.kpi), а не заведены свои: вкладка
      обязана выглядеть как остальная панель, а не почти как она. */
@@ -2286,9 +2297,26 @@ function renderPolymarket() {
   box.innerHTML = html;
   const hint = el('pm-hint');
   if (hint) hint.textContent = eq.at ? 'обновлено ' + eq.at.slice(11, 19) : '';
+  const run = el('pm-run');
+  if (run) run.textContent = PM.running ? 'Остановить' : 'Запустить';
 }
 
 document.addEventListener('click', async ev => {
+  const run = ev.target.closest('#pm-run');
+  if (run) {
+    /* Кнопка одна на два действия: пока не работает — «Запустить», как
+       заработал — «Остановить». Две кнопки, из которых одна всегда лишняя,
+       заставляют думать над выбором там, где выбора нет. */
+    run.disabled = true;
+    try {
+      const url = (PM && PM.running) ? '/api/polymarket/halt'
+                                     : '/api/polymarket/start';
+      await fetch(url, { cache: 'no-store' });
+      await new Promise(r => setTimeout(r, 1200));
+      await loadPolymarket();
+    } finally { run.disabled = false; }
+    return;
+  }
   const btn = ev.target.closest('#pm-stop');
   if (!btn) return;
   /* Остановка создаёт тот же файл, что и рука: маркет-мейкер проверяет его

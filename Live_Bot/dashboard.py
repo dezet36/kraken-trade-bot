@@ -1055,6 +1055,25 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send_json(polymarket.snapshot())
             except Exception as exc:               # noqa: BLE001
                 self._send_json({'running': False, 'error': str(exc)[:200]})
+        elif path == '/api/polymarket/start':
+            # ЗАПУСК ПО КНОПКЕ, минуя PM_AUTOSTART. Переменная отвечает на
+            # вопрос «поднимать ли самому при старте бота»; нажатие — это уже
+            # ответ. На сервере с собранным приложением другого способа нет:
+            # консоли там не бывает.
+            try:
+                from polymarket import service
+                started = service.start(force=True)
+                self._send_json({'ok': True, 'started': started,
+                                 'state': service.status()})
+            except Exception as exc:               # noqa: BLE001
+                self._fail(500, f'не запустился: {exc}')
+        elif path == '/api/polymarket/halt':
+            try:
+                from polymarket import service
+                service.stop()
+                self._send_json({'ok': True, 'state': service.status()})
+            except Exception as exc:               # noqa: BLE001
+                self._fail(500, f'не остановился: {exc}')
         elif path == '/api/polymarket/stop':
             # Аварийная остановка ИЗ ПАНЕЛИ. Она создаёт тот же файл, что и
             # рука: маркет-мейкер проверяет его перед каждой заявкой, поэтому

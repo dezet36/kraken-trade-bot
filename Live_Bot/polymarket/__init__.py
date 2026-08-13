@@ -29,7 +29,7 @@ def snapshot(limit_markets=20, limit_fills=30):
     import json
     import os
 
-    from . import engine, executor, store, wallet
+    from . import engine, executor, service, store, wallet
 
     def _tail(path, count):
         if not os.path.exists(path):
@@ -75,8 +75,13 @@ def snapshot(limit_markets=20, limit_fills=30):
                   if (slot.get('orders') or {}).get('bid')
                   or (slot.get('orders') or {}).get('ask'))
 
+    # СОСТОЯНИЕ БЕРЁТСЯ У ПОТОКА, А НЕ ПО НАЛИЧИЮ ФАЙЛОВ. Файлы остаются от
+    # прошлых запусков, и по ним «работает» показывалось бы и после остановки.
+    thread = service.status()
     return {
-        'running': bool(equity),
+        'running': bool(thread.get('alive')),
+        'has_history': bool(equity),
+        'service': thread,
         'started': state.get('started'),
         'wallet': wallet.status(),
         'kill_switch': executor.kill_switch_on(),

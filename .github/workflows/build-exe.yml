@@ -74,6 +74,24 @@ jobs:
             --hidden-import clr_loader `
             --hidden-import first_run `
             --hidden-import updater_app `
+            --hidden-import polymarket `
+            --hidden-import polymarket.params `
+            --hidden-import polymarket.client `
+            --hidden-import polymarket.book `
+            --hidden-import polymarket.store `
+            --hidden-import polymarket.strategy `
+            --hidden-import polymarket.engine `
+            --hidden-import polymarket.mm `
+            --hidden-import polymarket.service `
+            --hidden-import polymarket.wallet `
+            --hidden-import polymarket.executor `
+            --hidden-import polymarket.observer `
+            --hidden-import polymarket.weather `
+            --hidden-import polymarket.longshot `
+            --hidden-import polymarket.risk `
+            --hidden-import polymarket.base `
+            --hidden-import polymarket.signal_crypto `
+            --collect-all py_clob_client `
             --hidden-import tkinter `
             --hidden-import tkinter.ttk `
             --exclude-module research `
@@ -84,6 +102,13 @@ jobs:
       # пропускает модули, подгружаемые по имени в рантайме (ccxt.bybit,
       # планировщик, движок окна), — собирается без жалоб, падает при первом
       # обращении к бирже.
+      #
+      # ПАКЕТ POLYMARKET ПЕРЕЧИСЛЕН ПОМОДУЛЬНО, И ЭТО НЕ ПЕРЕСТРАХОВКА. Он
+      # импортируется только ВНУТРИ функций и под try/except — так задумано,
+      # чтобы его отсутствие не роняло торговлю на бирже. Обратная сторона: при
+      # статическом разборе PyInstaller такие импорты находит ненадёжно, а
+      # пойманное исключение превращает пропажу в тихую строку журнала. На
+      # сервере это выглядело как «маркет-мейкер не запускался» без причины.
       #
       # Проверять это временем жизни процесса нельзя: без ключей приложение
       # держит открытым окно настройки и «живёт» ровно так же. Поэтому
