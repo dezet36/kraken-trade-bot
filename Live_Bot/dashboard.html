@@ -921,8 +921,9 @@
         <div class="panel-head bare">
           <h2>Закрытые сделки</h2><span class="hint" id="closed-hint"></span>
           <div class="row-end">
-            <a class="btn ghost sm" href="/api/export.csv" download>Выгрузить CSV</a>
-            <a class="btn ghost sm" href="/api/export.jsonl" download>Полный дамп</a>
+            <button type="button" class="btn ghost sm" data-export="csv">Выгрузить CSV</button>
+            <button type="button" class="btn ghost sm" data-export="jsonl">Полный дамп</button>
+            <span class="hint" id="export-note"></span>
           </div>
         </div>
         <div class="panel"><div class="scroll" id="closed"></div></div>
@@ -1352,6 +1353,87 @@ function maxDD(rows, startBalance) {
   }
   return worst;
 }
+
+/* ── Выгрузки ───────────────────────────────────────────────────────────── */
+/* ССЫЛКА СО СВОЙСТВОМ download В ОКНЕ ПРИЛОЖЕНИЯ НЕ РАБОТАЕТ, и это была
+   настоящая поломка, а не придирка. Приложение открывается через pywebview с
+   движком WebView2, где обработчик загрузок не зарегистрирован: нажатие
+   проходит впустую, файл не появляется нигде, и выглядит это как отказ
+   сервера. Сервер при этом исправен — все три выгрузки отдают 200 с
+   правильными заголовками, проверено запросом.
+
+   Поэтому способ выбирается по тому, ЧЕМ открыта страница. pywebview кладёт в
+   окно объект `pywebview` — по нему и различаем: в своём окне просим сервер
+   сохранить файл на диск и показываем путь, в браузере скачиваем как обычно.
+   Признак взят у самого pywebview, а не у строки агента: агент подделывается
+   и меняется от версии к версии, а объект есть ровно тогда, когда есть его
+   мост. */
+const EXPORT_KINDS = {
+  csv:    { url: '/api/export.csv',    title: 'таблица сделок' },
+  jsonl:  { url: '/api/export.jsonl',  title: 'полный дамп' },
+  report: { url: '/api/report.txt',    title: 'отчёт' },
+};
+
+function inAppWindow() {
+  return typeof window.pywebview !== 'undefined';
+}
+
+function exportNote(kind, text, bad) {
+  const box = el(kind === 'report' ? 'export-note-report' : 'export-note');
+  if (!box) return;
+  box.textContent = text;
+  box.style.color = bad ? 'var(--bad)' : 'var(--ink-4)';
+}
+
+async function saveExport(kind) {
+  const spec = EXPORT_KINDS[kind];
+  if (!spec) return;
+  exportNote(kind, 'готовлю ' + spec.title + '…');
+  try {
+    const resp = await fetch('/api/export/save?kind=' + encodeURIComponent(kind),
+                             { cache: 'no-store' });
+    const data = await resp.json();
+    if (!resp.ok || !data.ok) throw new Error(data.error || resp.status);
+    const kb = Math.max(Math.round(data.bytes / 1024), 1);
+    exportNote(kind, 'сохранено (' + kb + ' КБ): ' + data.path);
+  } catch (e) {
+    exportNote(kind, 'не сохранилось: ' + e.message, true);
+  }
+}
+
+function downloadExport(kind) {
+  const spec = EXPORT_KINDS[kind];
+  if (!spec) return;
+  /* Через blob, а не переходом по ссылке: при переходе ошибка сервера
+     открылась бы страницей вместо файла, и человек увидел бы пустой экран
+     вместо причины. */
+  exportNote(kind, 'готовлю ' + spec.title + '…');
+  fetch(spec.url, { cache: 'no-store' })
+    .then(r => { if (!r.ok) throw new Error('сервер ответил ' + r.status);
+                 return r.blob().then(b => [b, r]); })
+    .then(([blob, resp]) => {
+      const disp = resp.headers.get('Content-Disposition') || '';
+      const star = /filename\*=UTF-8''([^;]+)/i.exec(disp);
+      const plain = /filename="([^"]+)"/i.exec(disp);
+      const name = star ? decodeURIComponent(star[1])
+                        : (plain ? plain[1] : kind + '.txt');
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = name;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 10000);
+      exportNote(kind, 'скачано: ' + name);
+    })
+    .catch(e => exportNote(kind, 'не скачалось: ' + e.message, true));
+}
+
+document.addEventListener('click', ev => {
+  const btn = ev.target.closest('[data-export]');
+  if (!btn) return;
+  ev.preventDefault();
+  const kind = btn.getAttribute('data-export');
+  if (inAppWindow()) saveExport(kind); else downloadExport(kind);
+});
 
 /* ── Отрисовка: график с перекрестием ───────────────────────────────────── */
 let CHART = null;
@@ -2081,7 +2163,8 @@ function reportBlock() {
     + 'журнала — одним файлом. Ключи и токены вырезаются автоматически, '
     + 'но чистка не бывает полной: пробегите файл глазами перед '
     + 'отправкой.</span></div>'
-    + '<a class="btn" href="/api/report.txt" download>Выгрузить отчёт</a>'
+    + '<button type="button" class="btn" data-export="report">Выгрузить отчёт</button>'
+    + '<span class="hint" id="export-note-report"></span>'
     + '</div>';
 }
 

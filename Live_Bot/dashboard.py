@@ -1045,6 +1045,8 @@ class _Handler(BaseHTTPRequestHandler):
             self._send_file(export_paths()[0], 'text/csv; charset=utf-8')
         elif path == '/api/export.jsonl':
             self._send_file(export_paths()[1], 'application/x-ndjson; charset=utf-8')
+        elif path == '/api/export/save':
+            self._save_export()
         elif path.startswith('/api/report.txt'):
             # Отчёт собирается на лету, а не лежит файлом: он должен отражать
             # состояние на момент нажатия, иначе присланное описывает не ту
@@ -1278,6 +1280,50 @@ class _Handler(BaseHTTPRequestHandler):
         self.send_header('Content-Length', str(len(body)))
         self.end_headers()
         self.wfile.write(body)
+
+    def _save_export(self):
+        """
+        Сохраняет выгрузку НА ДИСК и отвечает путём к ней.
+
+        ЗАЧЕМ ЭТО ПОМИМО ОБЫЧНОГО СКАЧИВАНИЯ. Приложение открывается в своём
+        окне через pywebview с движком WebView2, а там ссылка со свойством
+        `download` не делает НИЧЕГО: обработчик загрузок не зарегистрирован, и
+        нажатие проходит впустую. Со стороны это выглядит как поломка сервера,
+        хотя сервер отвечает исправно — проверено, все три выгрузки отдают 200 с
+        правильными заголовками.
+
+        Здесь файл пишется сам, и в ответ уходит полный путь: человеку остаётся
+        его открыть. Работает одинаково и в окне приложения, и в браузере, и по
+        сети — в отличие от скачивания, которое зависит от того, чем открыли.
+        """
+        from urllib.parse import parse_qs, urlparse
+
+        kind = (parse_qs(urlparse(self.path).query).get('kind') or ['csv'])[0]
+        folder = os.path.join(config.DATA_DIR, 'exports')
+        try:
+            os.makedirs(folder, exist_ok=True)
+            stamp = datetime.now().strftime('%Y%m%d-%H%M')
+            if kind == 'report':
+                import report
+                body = report.build().encode('utf-8')
+                name = report.filename()
+            else:
+                source = export_paths()[1 if kind == 'jsonl' else 0]
+                if not os.path.exists(source):
+                    self._fail(404, 'История пока пуста — сохранять нечего')
+                    return
+                with open(source, 'rb') as fh:
+                    body = fh.read()
+                name = f'{stamp}-{os.path.basename(source)}'
+            target = os.path.join(folder, name)
+            with open(target, 'wb') as fh:
+                fh.write(body)
+        except Exception as exc:                   # noqa: BLE001
+            self._fail(500, f'не удалось сохранить: {exc}')
+            return
+        self._send_json({'ok': True, 'path': os.path.abspath(target),
+                         'folder': os.path.abspath(folder),
+                         'bytes': len(body)})
 
     def _send_file(self, path, content_type):
         """Отдаёт файл истории на скачивание (для анализа в Excel / pandas)."""
