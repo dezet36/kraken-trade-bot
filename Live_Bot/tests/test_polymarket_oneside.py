@@ -154,3 +154,90 @@ class TestPlanNamesTheWorstCase:
         rows = [{'cost': 0.6, 'size': 5, 'tick': 0.01, 'trades_per_hour': 1.0}
                 for _ in range(500)]
         assert oneside.plan(rows, budget=100)['used'] <= 100.0
+
+
+class TestTwoWayFlowIsRequired:
+    """
+    Порог на двусторонний поток. Добавлен ПОСЛЕ замера, и без него стратегия
+    была бы убыточной.
+
+    По ленте на дешёвых рынках медианная доля выходов равна НУЛЮ: продавцы по
+    нашей цене входа есть, покупателей по цене выхода нет вовсе. «Milei out as
+    President», «Will Arc launch a token» — по две продажи в час и ни одной
+    покупки выше. Купив там, мы не вышли бы никогда и получили ровно те 2 236
+    висящих позиций разобранного кошелька.
+
+    Дешёвый лонгшот тем и дёшев, что все хотят из него выйти.
+    """
+
+    def _row(self, ins=10.0, outs=10.0, size_flow=200.0, bid=0.10):
+        return {'condition_id': 'C', 'token_id': 'T', 'tick': 0.01,
+                'order_min': 5, 'bid_usd': 1000.0, 'question': 'рынок',
+                'top': {'bid': bid, 'ask': bid + 0.03,
+                        'mid': bid + 0.015, 'spread': 0.03},
+                'in_per_hour': ins, 'out_per_hour': outs,
+                'in_size_per_hour': size_flow,
+                'exit_share': min(1.0, outs / ins) if ins else 0.0}
+
+    def test_one_way_market_is_rejected(self):
+        assert oneside.keep_two_way([self._row(ins=10.0, outs=0.0)]) == []
+
+    def test_two_way_market_is_kept(self):
+        assert len(oneside.keep_two_way([self._row(ins=10.0, outs=8.0)])) == 1
+
+    def test_market_without_any_entries_is_rejected(self):
+        """Ни одной продажи по нашей цене — котировать нечего и незачем."""
+        assert oneside.keep_two_way([self._row(ins=0.0, outs=5.0)]) == []
+
+    def test_half_the_exits_is_the_line(self):
+        """
+        Порог 0.5 при арифметической нужде в 0.25 — запас вдвое.
+
+        Замер прикладывает сегодняшний стакан ко вчерашним сделкам и потому
+        приблизителен; половина вместо четверти оплачивает эту неточность.
+        """
+        assert oneside.keep_two_way([self._row(ins=10.0, outs=4.0)]) == []
+        assert len(oneside.keep_two_way([self._row(ins=10.0, outs=5.0)])) == 1
+
+
+class TestSizeFollowsTheFlow:
+    """
+    Размер считается от ПОТОКА, а не пятёркой на всё подряд.
+
+    Жёсткая пятёрка оставляла 97% счёта без дела: после порога остаётся горстка
+    рынков, и на них уходило $2.39 из ста. Поток продаж по нашим ценам — 299
+    контрактов в час, чужая сделка бывает и в 357 контрактов.
+    """
+
+    def _row(self, flow=200.0, bid_usd=1000.0, bid=0.10):
+        return {'in_size_per_hour': flow, 'bid_usd': bid_usd, 'order_min': 5,
+                'tick': 0.01, 'top': {'bid': bid}}
+
+    def test_size_grows_with_the_flow(self):
+        small = oneside.size_for(self._row(flow=20.0), budget=100)
+        big = oneside.size_for(self._row(flow=400.0), budget=100)
+        assert big > small
+
+    def test_flow_is_counted_in_contracts_not_trades(self):
+        """
+        Ошибка, пойманная на себе: поток считался в СДЕЛКАХ, и размер выходил
+        впятеро меньше минимального. Сделок в час бывает 1.3, а контрактов в
+        той же сделке — 357.
+        """
+        assert oneside.size_for(self._row(flow=300.0), budget=100) > 5
+
+    def test_one_market_never_takes_a_large_share_of_the_account(self):
+        """Разрешение одного рынка не должно быть событием для всего счёта."""
+        got = oneside.size_for(self._row(flow=1e6), budget=100)
+        assert got * 0.11 <= 100 * params.OS_MAX_MARKET_SHARE + 1e-6
+
+    def test_we_never_become_most_of_the_book(self):
+        """
+        Быть большей частью бида значит двигать цену собой и остаться
+        единственным покупателем, когда придёт продавец, который знает больше.
+        """
+        got = oneside.size_for(self._row(flow=1e6, bid_usd=100.0), budget=1e6)
+        assert got * 0.11 <= 100.0 * params.OS_MAX_BOOK_SHARE + 1e-6
+
+    def test_size_never_falls_below_the_exchange_minimum(self):
+        assert oneside.size_for(self._row(flow=0.1), budget=100) == 5
