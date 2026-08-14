@@ -347,3 +347,62 @@ class TestPairingIsGuessedNotAsked:
         connect.save(GOOD, funder='0x' + 'd' * 40)
         assert written['PM_FUNDER'] == '0xПОДОБРАННЫЙ'
         assert written['PM_SIGNATURE_TYPE'] == '2'
+
+
+class TestSavedSignatureDoesNotLockDetection:
+    """
+    Сохранённый тип подписи задаёт ПОРЯДОК перебора, но не приговор.
+
+    ЭТО И БЫЛО ПРИЧИНОЙ «ОСТАТОК $0.00» У ЧЕЛОВЕКА, У КОТОРОГО РАБОТАЛО ВСЁ
+    ОСТАЛЬНОЕ: библиотека на месте, биржа отвечает, клиент поднялся, адрес
+    верный — и ноль на счету, где лежало сорок два доллара.
+
+    Прежняя версия подбирала тип из 0, 1, 2 (тогда ещё не было известно, что
+    нужен третий) и записывала найденный в настройки. Следующая версия читала
+    записанное и слепо ему следовала, хотя знала верный ответ по умолчанию.
+    Замер на живом счёте: типы 0-2 дают $0.00, тип 3 — $42.42.
+
+    Настройка, однажды записанная, не должна отменять узнанное позже.
+    """
+
+    def test_stale_type_does_not_block_the_working_one(self, monkeypatch):
+        seen = []
+        monkeypatch.setenv('PM_SIGNATURE_TYPE', '0')
+        monkeypatch.setattr(wallet, 'address', lambda: '0x' + 'c' * 40)
+        monkeypatch.setattr(wallet, 'client', lambda force=False: object())
+
+        def balance():
+            sig = os.environ['PM_SIGNATURE_TYPE']
+            seen.append(sig)
+            return 42.0 if sig == '3' else 0.0
+        monkeypatch.setattr(wallet, 'balance', balance)
+        ok, _, why = connect.check(GOOD)
+        assert ok is True
+        assert '42' in why
+        assert connect._FOUND['type'] == 3, 'подбор обязан дойти до рабочего'
+
+    def test_saved_type_is_tried_first(self, monkeypatch):
+        """
+        Порядок он всё же задаёт: если сохранённый работает, лишних обращений
+        к бирже не делаем.
+        """
+        seen = []
+        monkeypatch.setenv('PM_SIGNATURE_TYPE', '1')
+        monkeypatch.setattr(wallet, 'address', lambda: '0x' + 'c' * 40)
+        monkeypatch.setattr(wallet, 'client', lambda force=False: object())
+
+        def balance():
+            seen.append(os.environ['PM_SIGNATURE_TYPE'])
+            return 7.0
+        monkeypatch.setattr(wallet, 'balance', balance)
+        connect.check(GOOD)
+        assert seen[0] == '1', 'сохранённый идёт первым'
+        assert len(seen) == 1, 'нашли на первом — дальше не ходим'
+
+    def test_broken_saved_type_is_ignored(self, monkeypatch):
+        monkeypatch.setenv('PM_SIGNATURE_TYPE', 'не число')
+        monkeypatch.setattr(wallet, 'address', lambda: '0x' + 'c' * 40)
+        monkeypatch.setattr(wallet, 'client', lambda force=False: object())
+        monkeypatch.setattr(wallet, 'balance', lambda: 5.0)
+        ok, _, _ = connect.check(GOOD)
+        assert ok is True
