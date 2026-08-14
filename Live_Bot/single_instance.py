@@ -42,6 +42,17 @@ def acquire(data_dir):
     Дескриптор намеренно НЕ закрывается и складывается в модуль: пока он
     открыт, мьютекс существует. Освободится он при завершении процесса, что и
     требуется.
+
+    А ВОТ ЧУЖОЙ ДЕСКРИПТОР ЗАКРЫВАТЬ ОБЯЗАТЕЛЬНО, и на этом всё ломалось.
+    CreateMutexW отдаёт дескриптор ДАЖЕ КОГДА мьютекс уже существует — просто
+    сообщает об этом кодом ошибки. Раньше мы в этом случае возвращали False и
+    дескриптор бросали открытым. Пока он открыт, объект живёт: прежняя копия
+    давно закрыта, а замок всё ещё «занят» — нами же. Второй вызов из того же
+    процесса не проходил уже никогда.
+
+    Из-за этого «закрыть прежнюю копию и продолжить» было невозможно в
+    принципе: сколько ни жди, замок не освободится. Проверено — пять попыток
+    подряд после гибели прежней копии отвечали False.
     """
     if sys.platform != 'win32':
         return True
@@ -50,11 +61,52 @@ def acquire(data_dir):
         if not handle:
             return True                      # не смогли — не мешаем работать
         if ctypes.windll.kernel32.GetLastError() == ERROR_ALREADY_EXISTS:
+            ctypes.windll.kernel32.CloseHandle(handle)
             return False
         acquire._handle = handle             # держим до конца жизни процесса
         return True
     except Exception:                        # noqa: BLE001
         return True
+
+
+def close_previous(data_dir, wait=25):
+    """
+    Закрывает прежнюю копию и забирает замок. True — замок наш.
+
+    ЗАЧЕМ ЭТО ОТДЕЛЬНО ОТ ОСВОБОЖДЕНИЯ ПОРТА. Замок и порт держат разные вещи,
+    и прежняя копия может держать замок, УЖЕ отпустив порт: окно закрыто,
+    сервер остановлен, а процесс ещё доживает свои секунды. Запуск после
+    обновления в этот момент упирался в замок — до проверки порта дело даже не
+    доходило, — показывал «Программа уже работает» и выходил. Человеку
+    оставался диспетчер задач, и он это и делал.
+
+    Закрываем строго по PID, который копия записала о себе САМА в running_app.
+    Это не догадка по имени процесса: файл пишем мы, и никто другой в него не
+    попадает.
+    """
+    import subprocess
+    import time
+
+    info = running_info(data_dir)
+    try:
+        pid = int(info.get('pid') or 0)
+    except (TypeError, ValueError):
+        pid = 0
+    if not pid or pid == os.getpid():
+        return acquire(data_dir)
+
+    flags = getattr(subprocess, 'CREATE_NO_WINDOW', 0)
+    try:
+        subprocess.run(['taskkill', '/PID', str(pid), '/F', '/T'],
+                       capture_output=True, timeout=20, creationflags=flags)
+    except Exception:                        # noqa: BLE001
+        pass                                 # не вышло — всё равно подождём
+
+    for _ in range(max(1, wait)):
+        if acquire(data_dir):
+            return True
+        time.sleep(1)
+    return acquire(data_dir)
 
 
 MARK_FILE = 'running_app.json'

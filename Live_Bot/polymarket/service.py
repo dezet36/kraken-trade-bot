@@ -25,6 +25,11 @@ _thread = None
 _state = {'running': False, 'cycles': 0, 'last_error': None,
           'last_at': None, 'stopping': False}
 
+# Сон между тактами прерываемый. Обычный time.sleep держал бы поток до конца
+# такта — до полуминуты, — а всё это время на Polymarket стоят наши заявки.
+# При закрытии программы это ровно то время, которое они висят без присмотра.
+_wake = threading.Event()
+
 
 def autostart_enabled():
     return (os.getenv('PM_AUTOSTART', '') or '').strip().lower() in ('1', 'true', 'да')
@@ -47,6 +52,7 @@ def stop():
     признак, а поток выходит на следующем такте, сняв за собой всё.
     """
     _state['stopping'] = True
+    _wake.set()
     return True
 
 
@@ -93,7 +99,7 @@ def _loop(poll_seconds):
                 # останутся висеть, а мы перестанем их вести.
                 _state['last_error'] = str(exc)[:200]
                 log(f"⚠️ Polymarket: такт не прошёл ({str(exc)[:120]})")
-            time.sleep(poll_seconds)
+            _wake.wait(poll_seconds)
     finally:
         _state['running'] = False
         if live:
@@ -139,6 +145,7 @@ def start(poll_seconds=None, force=False):
         return False
     seconds = int(poll_seconds or params.MM_POLL_SECONDS)
     _state['stopping'] = False
+    _wake.clear()
     try:
         _thread = threading.Thread(target=_loop, args=(seconds,), daemon=True,
                                    name='polymarket-mm')
