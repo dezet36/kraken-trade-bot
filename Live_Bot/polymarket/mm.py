@@ -45,55 +45,31 @@ from . import book as book_mod
 from . import client, engine, executor, params, store, strategy, wallet
 
 CANDIDATES = None          # кэш отбора внутри процесса
+LAST_PLAN = {}             # последняя раскладка бюджета, для панели
 
 
-def select_markets(limit=None, min_liquidity=None, refresh=False):
+def select_markets(limit=None, min_liquidity=None, refresh=False, budget=None):
     """
-    Рынки, где вообще имеет смысл стоять.
+    Рынки под наш капитал. Отбор живёт в selector — здесь только кэш.
 
-    Условия: платится награда, стакан двусторонний, ликвидности достаточно,
-    и до разрешения ещё есть время. Последнее важно: за час до конца стакан
-    становится односторонним, а исполнение — почти всегда неблагоприятным.
+    ОТБОР ЗАВИСИТ ОТ РАЗМЕРА СЧЁТА, и это не тонкость. При большом капитале
+    доход даёт захват спреда, и чем больше исполнений, тем лучше. При сотне
+    долларов наоборот: исполнение приносит запас, который нечем нести — одна
+    позиция в $20 это пятая часть счёта. Поэтому рынки берутся те, где мы
+    попадём в зачёт награды минимальным размером и где спред уже порога, то
+    есть встать у лучшей цены безопасно.
     """
     global CANDIDATES
     if CANDIDATES is not None and not refresh:
         return CANDIDATES
-    limit = limit or params.MM_MARKETS
-    min_liquidity = min_liquidity or params.MM_MIN_LIQUIDITY
-    rows = []
-    for page in range(25):
-        chunk = client._get(f'{params.GAMMA}/markets?limit=100'
-                            f'&offset={page * 100}&closed=false')
-        if not isinstance(chunk, list) or not chunk:
-            break
-        for m in chunk:
-            daily = sum(float(r.get('rewardsDailyRate') or 0)
-                        for r in (m.get('clobRewards') or []))
-            if daily <= 0 or float(m.get('liquidity') or 0) < min_liquidity:
-                continue
-            try:
-                tokens = json.loads(m.get('clobTokenIds') or '[]')
-            except Exception:                              # noqa: BLE001
-                continue
-            if not tokens:
-                continue
-            rows.append({
-                'id': m.get('id'), 'question': m.get('question'),
-                'condition_id': m.get('conditionId'), 'token_id': tokens[0],
-                'tick': float(m.get('orderPriceMinTickSize') or 0.001),
-                'rewards_daily': daily,
-                'rewardsMinSize': m.get('rewardsMinSize'),
-                'rewardsMaxSpread': m.get('rewardsMaxSpread'),
-                'liquidity': float(m.get('liquidity') or 0),
-                'end': m.get('endDate'), 'fee_type': m.get('feeType'),
-            })
-        time.sleep(params.PAUSE)
-    # Награда, отнесённая к уже стоящей ликвидности: там наша доля в пуле
-    # будет заметной. Брать награду как есть нельзя — крупный пул обычно и
-    # поделен на большее число участников.
-    rows.sort(key=lambda r: r['rewards_daily'] / max(r['liquidity'], 1),
-              reverse=True)
-    CANDIDATES = rows[:limit]
+    from . import selector
+
+    money = float(budget if budget is not None else params.bankroll_for('MM'))
+    rows = selector.scan(budget=money, limit=limit or params.MM_MARKETS)
+    plan = selector.allocate(rows, budget=money)
+    CANDIDATES = plan['markets']
+    LAST_PLAN.clear()
+    LAST_PLAN.update(plan)
     return CANDIDATES
 
 
@@ -231,6 +207,13 @@ def main(loop=False):
 
     print(f'капитал маркет-мейкера: ${maker.bankroll:,.0f}')
     print(f'рынков отобрано: {len(markets)}')
+    if LAST_PLAN:
+        print(f'вложено ${LAST_PLAN["used"]:,.2f}, свободно ${LAST_PLAN["free"]:,.2f}, '
+              f'предел на рынок ${LAST_PLAN["cap_per_market"]:,.2f}')
+        print(f'ожидаемая награда: ${LAST_PLAN["expected_daily"]:.3f} в день, '
+              f'${LAST_PLAN["expected_monthly"]:.2f} в месяц '
+              f'(оценка грубая: доля считается по деньгам в стакане, '
+              f'а зачёт идёт по очкам, которых мы не видим)')
     print(f'кошелёк: {"подключён " + str(state["address"]) if state["configured"] else "НЕ подключён"}')
     print(f'режим: {"ЖИВЫЕ ДЕНЬГИ" if live else "бумага"}')
     if state['configured'] and not state['live_enabled']:

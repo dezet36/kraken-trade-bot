@@ -29,7 +29,7 @@ def snapshot(limit_markets=20, limit_fills=30):
     import json
     import os
 
-    from . import engine, executor, service, store, wallet
+    from . import engine, executor, mm, service, store, wallet
 
     def _tail(path, count):
         if not os.path.exists(path):
@@ -96,4 +96,9 @@ def snapshot(limit_markets=20, limit_fills=30):
         'fills_total': sum(1 for _ in fills),
         'orders_log': list(reversed(orders))[:20],
         'quoting_markets': quoting,
+        # Раскладка бюджета: во что вложено и на что рассчитываем. Без неё
+        # человек видит «работает» и не знает, чего ждать, а ждать при сотне
+        # долларов приходится единиц долларов в месяц — и лучше знать это
+        # заранее, чем обнаружить через месяц.
+        'plan': {k: v for k, v in (mm.LAST_PLAN or {}).items() if k != 'markets'},
     }

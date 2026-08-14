@@ -2246,12 +2246,25 @@ function renderPolymarket() {
     ['Позиций открыто', PM.positions_total || 0],
     ['Тактов', svc.cycles || 0],
   ];
+  const plan = PM.plan || {};
+  if (plan.expected_monthly !== undefined) {
+    cards.push(['Вложено', pmMoney(plan.used)]);
+    cards.push(['Награда, оценка', pmMoney(plan.expected_monthly) + '/мес']);
+  }
   /* Классы взяты СУЩЕСТВУЮЩИЕ (.kpis/.kpi), а не заведены свои: вкладка
      обязана выглядеть как остальная панель, а не почти как она. */
   let html = '<div class="panel card-pad"><div class="kpis">' + cards.map(([k, v]) =>
     `<div class="kpi"><div class="k">${k}</div><div class="v">${v}</div></div>`
   ).join('') + '</div></div>';
 
+  if (plan.expected_monthly !== undefined) {
+    /* ОЦЕНКА НАЗЫВАЕТСЯ ОЦЕНКОЙ. Доля в пуле считается по деньгам в стакане,
+       а зачитывается по очкам, которых мы не видим: ошибиться она может в обе
+       стороны. Показать её без оговорки значило бы выдать прикидку за обещание. */
+    html += '<div class="hint" style="padding:8px 4px">Оценка награды груба: '
+      + 'доля в пуле считается по деньгам в стакане, а зачёт идёт по очкам, '
+      + 'которых мы не видим. Проверяется только живыми деньгами.</div>';
+  }
   if (PM.kill_switch) {
     html += '<div class="warn-box">Включена аварийная остановка: заявки на '
       + 'биржу не уходят. Снять — удалить файл STOP в папке данных.</div>';
