@@ -133,3 +133,48 @@ class TestVerdict:
                             lambda: [preflight._line(preflight.OK, 'бюджет $20')])
         _, bad = preflight.run()
         assert bad == 0
+
+
+class TestBuildAndSelftestAgree:
+    """
+    Список для упаковщика и список самопроверки обязаны совпадать.
+
+    ПОЙМАНО СБОРКОЙ, А НЕ ТЕСТОМ, И ЭТО СТОИЛО ВЫПУСКА. Модули добавлены в
+    самопроверку, но не в скрытые импорты — PyInstaller их не положил, и .exe
+    не собрался. Самопроверка отработала верно: она для того и написана.
+
+    Но узнавать об этом от сборки на семь минут позже, чем от теста, незачем.
+    Пакет polymarket импортируется только внутри функций и под try/except —
+    так задумано, чтобы его отсутствие не роняло торговлю на бирже. Обратная
+    сторона: упаковщик такие импорты находит ненадёжно, и каждый новый модуль
+    надо называть дважды. Значит списки будут расходиться и впредь.
+    """
+
+    def _lists(self):
+        import re
+        root = os.path.dirname(ROOT)
+        flow = os.path.join(root, '.github', 'workflows', 'build-exe.yml')
+        if not os.path.exists(flow):
+            return None, None
+        packed = set(re.findall(r'--hidden-import (polymarket[.\w]*)',
+                                open(flow, encoding='utf-8').read()))
+        text = open(os.path.join(ROOT, 'desktop.py'), encoding='utf-8').read()
+        start = text.find("'polymarket', 'polymarket.mm'")
+        checked = set(re.findall(r"'(polymarket[.\w]*)'",
+                                 text[start:text.find(')', start)]))
+        return packed, checked
+
+    def test_every_checked_module_is_also_packed(self):
+        packed, checked = self._lists()
+        if packed is None:
+            return
+        missing = sorted(checked - packed)
+        assert not missing, f'самопроверка ждёт, упаковщик не кладёт: {missing}'
+
+    def test_the_new_modules_are_in_both(self):
+        packed, checked = self._lists()
+        if packed is None:
+            return
+        for name in ('polymarket.preflight', 'polymarket.selector',
+                     'polymarket.oneside', 'polymarket.oneside_run'):
+            assert name in packed, f'{name} не попадёт в .exe'
