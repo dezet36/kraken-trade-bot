@@ -118,6 +118,7 @@ def start(poll_seconds=None, force=False):
         return False
     if _thread is not None and _thread.is_alive():
         return True
+    _state['last_error'] = None
 
     # ЗАМОК БЕРЁТСЯ И ЗДЕСЬ. Проверка на живой поток ловит только повтор внутри
     # приложения, а маркет-мейкер запускается ещё и командой из консоли — и это
@@ -138,7 +139,13 @@ def start(poll_seconds=None, force=False):
         return False
     seconds = int(poll_seconds or params.MM_POLL_SECONDS)
     _state['stopping'] = False
-    _thread = threading.Thread(target=_loop, args=(seconds,), daemon=True,
-                               name='polymarket-mm')
-    _thread.start()
+    try:
+        _thread = threading.Thread(target=_loop, args=(seconds,), daemon=True,
+                                   name='polymarket-mm')
+        _thread.start()
+    except Exception as exc:                                # noqa: BLE001
+        # Молчаливый отказ здесь неотличим от «кнопка не работает»: человек
+        # жмёт, поток не поднимается, и на экране ровно ничего.
+        _state['last_error'] = f'{type(exc).__name__}: {str(exc)[:160]}'
+        return False
     return True

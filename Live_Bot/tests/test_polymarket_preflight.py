@@ -305,3 +305,55 @@ class TestJournalsDoNotAlarmWithoutReason:
         (tmp_path / 'mm_state.json').write_text('{}', encoding='utf-8')
         monkeypatch.setattr(os, 'access', lambda p, m: False)
         assert any(r['mark'] == preflight.BAD for r in preflight.check_data())
+
+
+class TestStartDoesNotFailSilently:
+    """
+    «Нажимаю Запустить, и ничего не происходит».
+
+    ТРИ МОЛЧАЛИВЫХ ОТКАЗА СРАЗУ, и каждый выглядел как неработающая кнопка.
+
+    ПЕРВЫЙ, И ОН РЕШАЮЩИЙ: на свежей установке папки данных ещё нет, и запись
+    замка падала с «нет такого файла» — ПЕРВОЙ же строкой, до всякой торговли.
+    Служба умирала раньше, чем успевала что-либо сказать.
+
+    ВТОРОЙ: у кнопки не было перехвата ошибки. Запрос падал, обработчик
+    обрывался, кнопка возвращалась в исходное — и на экране ровно ничего.
+
+    ТРЕТИЙ: отказ «управление доступно только с этой машины» ничего не
+    объясняет человеку, который сидит за той самой машиной по удалённому
+    столу. Дело не в том, откуда он смотрит, а в том, на каком адресе слушает
+    сервер.
+    """
+
+    def test_lock_creates_the_folder_it_needs(self, tmp_path, monkeypatch):
+        from polymarket import mm
+        missing = os.path.join(str(tmp_path), 'ещё-нет-такой')
+        monkeypatch.setattr(mm.store, 'DIR', missing)
+        assert mm._single_instance() is True
+        assert os.path.isdir(missing), 'папка обязана создаться сама'
+
+    def test_start_failure_is_reported_not_swallowed(self, monkeypatch):
+        from polymarket import service
+        monkeypatch.setattr(service, '_thread', None)
+        monkeypatch.setattr(service.threading, 'Thread',
+                            lambda **kw: (_ for _ in ()).throw(
+                                RuntimeError('поток не поднялся')))
+        from polymarket import mm
+        monkeypatch.setattr(mm, '_single_instance', lambda: True)
+        assert service.start(force=True) is False
+        assert 'поток не поднялся' in (service.status().get('last_error') or '')
+
+    def test_the_button_shows_what_went_wrong(self):
+        html = open(os.path.join(ROOT, 'dashboard.html'), encoding='utf-8').read()
+        spot = html.index("closest('#pm-run')")
+        block = html[spot:spot + 2000]
+        assert 'catch (e)' in block, 'ошибка обязана перехватываться'
+        assert 'не вышло' in block.lower()
+
+    def test_refusal_names_the_setting_that_fixes_it(self):
+        py = open(os.path.join(ROOT, 'dashboard.py'), encoding='utf-8').read()
+        spot = py.index('_controls_allowed():', py.index('def do_POST'))
+        block = py[spot:spot + 1200]
+        assert 'DASHBOARD_ALLOW_CONTROL' in block
+        assert 'DASHBOARD_HOST' in block
