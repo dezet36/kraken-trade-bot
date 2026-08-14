@@ -585,3 +585,29 @@ class TestRotation:
                             lambda **kw: [self._m(x) for x in 'CDEFG'])
         keep, left = mm.rotate(maker, old)
         assert len(keep) == len(old)
+
+
+class TestFillsAreAttributableToTheirRun:
+    """
+    Каждое исполнение помечено прогоном, в котором случилось.
+
+    Журнал исполнений не чистится при перезапуске, а состояние сбрасывается.
+    Дважды за разбор записи прежних прогонов едва не были выданы за новые:
+    файл показывал исполнение, состояние — ноль позиций и нетронутые деньги.
+    Отличить их можно было только сравнением времени вручную.
+    """
+
+    @pytest.fixture
+    def maker(self, tmp_path):
+        return engine.PaperMaker(bankroll=100,
+                                 state_path=str(tmp_path / 'state.json'))
+
+    def test_fill_carries_the_run_stamp(self, maker, monkeypatch):
+        slot = maker._slot('T')
+        slot['orders'] = {'bid': {'price': 0.20, 'size': 5, 'ts': 0,
+                                  'queue': 0}}
+        monkeypatch.setattr(engine.book_mod, 'would_fill',
+                            lambda *a, **k: {'filled': True, 'ts': 10,
+                                             'consumed': 5, 'queue_ahead': 0})
+        done = maker.process_fills('T', 'C', [{'ts': 5}])
+        assert done and done[0]['run'] == maker.state['started']

@@ -146,7 +146,13 @@ class PaperMaker:
             cash = -order['price'] * order['size'] if side == 'bid' \
                 else order['price'] * order['size']
             self.state['cash'] += cash
-            done.append({'at': _stamp(), 'token': token,
+            done.append({'at': _stamp(),
+                         # ПОМЕТКА ПРОГОНА. Журнал исполнений не чистится при
+                         # перезапуске, и записи прежних прогонов дважды едва
+                         # не были выданы за новые: состояние сбрасывается, а
+                         # журнал остаётся. Без пометки отличить их можно было
+                         # только сравнением времени вручную.
+                         'run': self.state.get('started'), 'token': token,
                          'condition': condition_id, 'side': side,
                          'price': order['price'], 'size': order['size'],
                          'queue_ahead': order['queue'],
