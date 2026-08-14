@@ -34,6 +34,9 @@ from . import client, params, store, strategy
 STATE = os.path.join(store.DIR, 'mm_state.json')
 FILLS = os.path.join(store.DIR, 'mm_fills.jsonl')
 EQUITY = os.path.join(store.DIR, 'mm_equity.jsonl')
+# Снос цены после наших исполнений — то единственное число, которое решает,
+# работает ли затея. Спред известен заранее; неблагоприятный отбор — нет.
+DRIFT = os.path.join(store.DIR, 'mm_drift.jsonl')
 
 
 def _now():
@@ -152,6 +155,58 @@ class PaperMaker:
                          'realized_after': round(slot['realized'], 4)})
             slot['orders'][side] = None
         return done
+
+    def watch_drift(self, fills, marks):
+        """
+        Ставит исполнение на учёт: куда ушла цена ПОСЛЕ того, как нас исполнили.
+
+        ЭТО ЕДИНСТВЕННОЕ ЧИСЛО, КОТОРОЕ РЕШАЕТ, РАБОТАЕТ ЛИ ЗАТЕЯ. Спред мы
+        знаем заранее и он выглядит щедро; чего мы не знаем — сколько из него
+        отбирает неблагоприятный отбор. Нас исполняют не в случайный момент, а
+        ровно тогда, когда встречной стороне это выгодно, то есть когда цена
+        уже пошла против нас. Мейкер зарабатывает разницу между спредом и этим
+        сносом, и если снос больше — не помогут ни частота, ни число рынков.
+
+        Меряется просто: запоминаем середину рынка в момент исполнения и
+        сравниваем её же через полчаса. Купили и середина упала — снос против
+        нас. Продали и середина выросла — то же самое.
+        """
+        for fill in fills or []:
+            mid = marks.get(str(fill['token']))
+            if mid is None:
+                continue
+            self.state.setdefault('drift_pending', []).append({
+                'token': str(fill['token']), 'side': fill['side'],
+                'price': fill['price'], 'size': fill['size'],
+                'mid_at_fill': mid, 'ts': _now()})
+
+    def measure_drift(self, marks, minutes=None):
+        """
+        Закрывает созревшие замеры сноса и возвращает их.
+
+        Незрелые не трогаются, а рынки без цены ЖДУТ, а не выбрасываются:
+        выбросив их, мы бы выбрасывали ровно те случаи, где книга опустела
+        после нашего исполнения, — то есть худшие из возможных.
+        """
+        wait = float(minutes if minutes is not None
+                     else params.MM_DRIFT_MINUTES) * 60
+        ripe, pending = [], []
+        for item in self.state.get('drift_pending', []):
+            mid = marks.get(item['token'])
+            if _now() - item['ts'] < wait or mid is None:
+                pending.append(item)
+                continue
+            moved = mid - item['mid_at_fill']
+            # Знак приводится к нашей выгоде: после покупки рост — в плюс,
+            # после продажи рост — в минус.
+            gain = moved if item['side'] == 'bid' else -moved
+            ripe.append({'at': _stamp(), **item, 'mid_now': mid,
+                         'moved': round(moved, 6),
+                         'gain_per_contract': round(gain, 6),
+                         'gain_usd': round(gain * item['size'], 4),
+                         'minutes': round((_now() - item['ts']) / 60, 1)})
+        self.state['drift_pending'] = pending
+        return ripe
 
     def place(self, token, quote, top, book):
         """

@@ -36,6 +36,7 @@
 
 import json
 import time
+from datetime import datetime, timezone
 
 from . import book as book_mod
 from . import client, params
@@ -58,6 +59,19 @@ def quote_cost(size, price):
     return float(size) * float(price) + float(size) * (1 - float(price))
 
 
+def _hours_left(end):
+    """Часов до разрешения. Без даты возвращает бесконечность, а не ноль."""
+    if not end:
+        return float('inf')
+    try:
+        stamp = str(end).replace('Z', '+00:00')
+        left = (datetime.fromisoformat(stamp)
+                - datetime.now(timezone.utc)).total_seconds() / 3600.0
+    except Exception:                                      # noqa: BLE001
+        return float('inf')
+    return left
+
+
 def _candidates(pages, min_volume, price_lo, price_hi):
     """Первичный отсев по метаданным. Стакан здесь ещё не смотрим."""
     rows = []
@@ -78,6 +92,17 @@ def _candidates(pages, min_volume, price_lo, price_hi):
             if not price_lo < price < price_hi:
                 continue
             if float(m.get('volume') or 0) < min_volume:
+                continue
+            # РЫНОК ПЕРЕД РАЗРЕШЕНИЕМ НЕ КОТИРУЕМ, и это самый крупный риск во
+            # всей затее. Мейкер зарабатывает полтора цента на контракте; при
+            # разрешении контракт становится нулём или единицей ЦЕЛИКОМ. Один
+            # запас в пять контрактов по 0.20, застигнутый разрешением не в ту
+            # сторону, стоит доллар — то есть тринадцать удачных кругов.
+            #
+            # Наклон против запаса разгружает нас за часы, а не за минуты, и
+            # перед самым разрешением разгружать уже некому: ликвидность
+            # уходит первой. Поэтому порог по времени, а не надежда на выход.
+            if _hours_left(m.get('endDate')) < params.MM_MIN_HOURS_LEFT:
                 continue
             rows.append({
                 'id': m.get('id'), 'question': m.get('question'),
@@ -136,6 +161,18 @@ def scan(budget=None, limit=None, pages=30, min_volume=None,
             continue
         balance = min(bid_usd, ask_usd) / max(bid_usd, ask_usd, 1e-9)
         if balance < min_balance:
+            continue
+
+        # СПРЕД ДОЛЖЕН ВМЕЩАТЬ ШАГ ВНУТРЬ. Условие здесь ТО ЖЕ, что в стратегии,
+        # и это не дублирование, а согласование: без него отбор обещал 90
+        # рынков и $450 вложений, а котировалось 22 — на остальных стратегия
+        # отказывалась вставать в конец очереди, и план расходился с делом.
+        #
+        # Узкий спред не изъян рынка, а отсутствие места для нас: при спреде в
+        # один тик заработать нечего, а встать можно только за очередь из 152
+        # контрактов по медиане.
+        ticks = int(round(top['spread'] / row['tick'])) if row['tick'] > 0 else 0
+        if ticks < params.MM_MIN_TICKS_TO_STEP_IN:
             continue
 
         size = max(row['order_min'], params.MM_MIN_ORDER_SIZE)

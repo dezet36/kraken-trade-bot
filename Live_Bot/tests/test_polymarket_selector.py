@@ -21,6 +21,7 @@
 import json
 import os
 import sys
+from datetime import datetime, timedelta, timezone
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
@@ -67,7 +68,10 @@ class TestScanLooksAtTheRealBook:
         monkeypatch.setattr(selector.params, 'PAUSE', 0)
         # Стакан подставляется: отбор смотрит настоящую книгу, и без неё ни
         # один рынок не проходит — именно этого мы и добивались.
-        default = {'bids': [(0.49, 2000.0)], 'asks': [(0.51, 2000.0)]}
+        # Спред в ТРИ тика: ровно столько нужно, чтобы шагнуть внутрь с обеих
+        # сторон и что-то оставить себе. При двух тиках отбор откажет — и это
+        # проверяется отдельно ниже.
+        default = {'bids': [(0.49, 2000.0)], 'asks': [(0.52, 2000.0)]}
         monkeypatch.setattr(selector.book_mod, 'fetch_many',
                             lambda tokens: {str(t): (book or default)
                                             for t in tokens})
@@ -109,10 +113,47 @@ class TestScanLooksAtTheRealBook:
         """Стакан можно нарисовать; оборот — нет."""
         assert self._scan(monkeypatch, [_market(volume=10)]) == []
 
+    def test_market_near_resolution_is_rejected(self, monkeypatch):
+        """
+        Рынок накануне разрешения не котируем — это самый крупный риск затеи.
+
+        Мейкер зарабатывает полтора цента на контракте, а разрешение делает
+        контракт нулём или единицей ЦЕЛИКОМ. Запас в пять контрактов по 0.20,
+        застигнутый разрешением не в ту сторону, стоит доллар — тринадцать
+        удачных кругов. Наклон против запаса разгружает за часы, а перед самым
+        разрешением разгружать уже не у кого: ликвидность уходит первой.
+        """
+        soon = datetime.now(timezone.utc) + timedelta(hours=5)
+        market = dict(_market(), endDate=soon.strftime('%Y-%m-%dT%H:%M:%SZ'))
+        assert self._scan(monkeypatch, [market]) == []
+
+    def test_market_far_from_resolution_is_kept(self, monkeypatch):
+        far = datetime.now(timezone.utc) + timedelta(days=90)
+        market = dict(_market(), endDate=far.strftime('%Y-%m-%dT%H:%M:%SZ'))
+        assert len(self._scan(monkeypatch, [market])) == 1
+
+    def test_missing_date_does_not_silently_drop_the_market(self):
+        """Отсутствие даты — не «ноль часов», иначе отсеялось бы всё подряд."""
+        assert selector._hours_left(None) == float('inf')
+        assert selector._hours_left('не дата') == float('inf')
+
     def test_too_narrow_spread_is_rejected(self, monkeypatch):
         """Спред в один тик не покроет даже проскальзывания."""
         narrow = {'bids': [(0.4999, 5000.0)], 'asks': [(0.5001, 5000.0)]}
         assert self._scan(monkeypatch, [_market()], book=narrow) == []
+
+    def test_two_tick_spread_is_rejected_because_we_cannot_step_inside(
+            self, monkeypatch):
+        """
+        Двух тиков мало: шаг внутрь с обеих сторон сводит цены вместе.
+
+        Условие здесь ТО ЖЕ, что в стратегии, и это намеренно. Пока его тут не
+        было, отбор обещал 90 рынков и $450 вложений, а котировалось 22:
+        стратегия отказывалась вставать в конец очереди на остальных 68. План
+        расходился с делом ровно вчетверо.
+        """
+        two_ticks = {'bids': [(0.49, 2000.0)], 'asks': [(0.51, 2000.0)]}
+        assert self._scan(monkeypatch, [_market()], book=two_ticks) == []
 
     def test_too_wide_spread_is_rejected(self, monkeypatch):
         """

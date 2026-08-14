@@ -26,7 +26,7 @@ sys.path.insert(0, ROOT)
 
 import pytest  # noqa: E402
 
-from polymarket import engine, params, strategy  # noqa: E402
+from polymarket import engine, mm, params, strategy  # noqa: E402
 
 
 def _top(bid=0.20, ask=0.24, bid_size=100, ask_size=100):
@@ -87,11 +87,38 @@ class TestInventorySkew:
 
 class TestQuoting:
 
-    def test_symmetric_quote_when_flat(self):
+    def test_flat_quote_steps_inside_the_spread(self):
+        """
+        Без запаса встаём ВНУТРЬ спреда, а не на лучшую цену.
+
+        Прежде этот тест требовал обратного — встать ровно на 0.20 и 0.24, то
+        есть на лучшие цены рынка. Требование было ошибочным и стоило нам всех
+        исполнений: вставая на чужую цену, мы попадаем в КОНЕЦ чужой очереди.
+        На 4 852 наблюдениях впереди стояло 152 контракта по медиане и больше
+        пяти в 96% случаев — заявка на пять контрактов там не исполнится.
+
+        Шаг внутрь создаёт новый уровень, где мы одни, и очередь нулевая.
+        """
         q = strategy.desired_quote(_top(), _market(), position=0,
                                    max_position=300)
-        assert q['bid'] <= 0.20 + 1e-9 and q['ask'] >= 0.24 - 1e-9
+        assert q['bid'] > 0.20 and q['ask'] < 0.24, 'должны быть внутри рынка'
+        assert q['bid'] < q['ask']
         assert q['only'] is None
+
+    def test_narrow_spread_is_declined_instead_of_queued(self):
+        """
+        При узком спреде рынок ПРОПУСКАЕТСЯ, а не берётся в конец очереди.
+
+        Шагнуть внутрь нельзя — цены сойдутся и заявка станет тейкерской.
+        Встать на лучшую цену можно, но это значит держать $5 за очередью из
+        152 контрактов, ничего не зарабатывая. При бюджете в сотню долларов
+        это двадцатая часть счёта, простаивающая там, где мы заведомо не
+        первые. Отказ освобождает её для рынка с нулевой очередью.
+        """
+        for bid, ask in ((0.20, 0.21), (0.20, 0.22)):
+            q = strategy.desired_quote(_top(bid, ask), _market(tick=0.01), 0, 300)
+            assert q.get('reason'), 'узкий спред обязан быть назван причиной'
+            assert 'очеред' in q['reason']
 
     def test_long_inventory_lowers_the_ask(self):
         flat = strategy.desired_quote(_top(), _market(), 0, 300)
@@ -120,9 +147,25 @@ class TestQuoting:
             if q and not q.get('reason'):
                 assert q['bid'] < q['ask']
 
-    def test_size_respects_the_market_threshold(self):
+    def test_size_is_the_exchange_minimum_not_the_reward_threshold(self):
+        """
+        Размер берётся минимальный ДОПУСТИМЫЙ БИРЖЕЙ, а не наградный порог.
+
+        Прежде тест требовал поднимать размер до rewardsMinSize (20-200). Это
+        порог НАГРАДЫ, а не торговли, и он разорял малый счёт: на 90 рынках по
+        100-200 контрактов выходило около $9 000 обязательств при $450 денег.
+        В бумаге это не жгло только потому, что не исполнялось ни разу.
+
+        Награда теперь идёт сверх, а не ведёт отбор, — значит и её порог не
+        должен диктовать размер заявки.
+        """
         q = strategy.desired_quote(_top(), _market(min_size=200), 0, 300)
-        assert q['size'] >= 200
+        assert q['size'] == 5, 'наградный порог больше не раздувает заявку'
+
+    def test_size_respects_the_exchange_minimum_when_it_is_higher(self):
+        """Если биржа требует больше пяти — подчиняемся бирже."""
+        market = dict(_market(), order_min=15)
+        assert strategy.desired_quote(_top(), market, 0, 300)['size'] == 15
 
 
 class TestAccounting:
@@ -362,3 +405,106 @@ class TestStaleLiveOrdersAreCancelled:
         cancel_at = text.index('executor.cancel(order_id)')
         place_at = text.index('out = executor.place(')
         assert cancel_at < place_at
+
+
+class TestSingleInstance:
+    """
+    Замок на единственный экземпляр. ПОЙМАНО НА СЕБЕ, отсюда и тесты.
+
+    Три процесса разом писали в одно состояние: один со старым кодом в памяти,
+    два с новым. Вышла смесь — заявки по 5, 100 и 200 контрактов вперемешку,
+    число рынков скакало 46, 90, 48 от цикла к циклу. В бумаге это путаница;
+    на бирже это двойные заявки, двойной запас и снятие чужих номеров.
+    """
+
+    def test_second_start_is_refused(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(mm.store, 'DIR', str(tmp_path))
+        assert mm._single_instance() is True
+        # Чужой ЖИВОЙ процесс: подставляем номер, который заведомо жив.
+        lock = tmp_path / 'mm.lock'
+        lock.write_text('999999999', encoding='utf-8')
+        monkeypatch.setattr(mm, '_alive', lambda pid: True)
+        assert mm._single_instance() is False
+
+    def test_dead_lock_does_not_block_forever(self, tmp_path, monkeypatch):
+        """
+        Мёртвый замок обязан сниматься сам.
+
+        Иначе одно аварийное завершение — отключение питания, снятие процесса —
+        и бот больше не запустится никогда, причём молча.
+        """
+        monkeypatch.setattr(mm.store, 'DIR', str(tmp_path))
+        (tmp_path / 'mm.lock').write_text('999999999', encoding='utf-8')
+        monkeypatch.setattr(mm, '_alive', lambda pid: False)
+        assert mm._single_instance() is True
+
+    def test_damaged_lock_does_not_crash(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(mm.store, 'DIR', str(tmp_path))
+        (tmp_path / 'mm.lock').write_text('не число', encoding='utf-8')
+        assert mm._single_instance() is True
+
+
+class TestAdverseSelection:
+    """
+    Замер сноса цены после исполнения — число, решающее судьбу затеи.
+
+    Спред известен заранее и выглядит щедро: 15% от ставки по медиане. Чего
+    нельзя узнать заранее — сколько из него отбирает неблагоприятный отбор.
+    Нас исполняют не в случайный момент, а тогда, когда встречной стороне это
+    выгодно, то есть когда цена уже пошла против нас. Если снос больше спреда,
+    не помогут ни частота, ни число рынков, ни размер счёта.
+    """
+
+    @pytest.fixture
+    def maker(self, tmp_path):
+        return engine.PaperMaker(bankroll=100,
+                                 state_path=str(tmp_path / 'state.json'))
+
+    def _fill(self, side='bid', price=0.20, size=5):
+        return {'token': 'T', 'side': side, 'price': price, 'size': size}
+
+    def test_price_falling_after_our_buy_counts_against_us(self, maker):
+        """Купили, и середина упала — это снос против нас, а не случайность."""
+        maker.watch_drift([self._fill('bid')], {'T': 0.20})
+        maker.state['drift_pending'][0]['ts'] -= 3600
+        got = maker.measure_drift({'T': 0.15})
+        assert len(got) == 1
+        assert got[0]['gain_per_contract'] < 0
+        assert got[0]['gain_usd'] == pytest.approx(-0.25)
+
+    def test_price_rising_after_our_sell_counts_against_us(self, maker):
+        maker.watch_drift([self._fill('ask')], {'T': 0.20})
+        maker.state['drift_pending'][0]['ts'] -= 3600
+        got = maker.measure_drift({'T': 0.25})
+        assert got[0]['gain_per_contract'] < 0
+
+    def test_price_rising_after_our_buy_counts_for_us(self, maker):
+        maker.watch_drift([self._fill('bid')], {'T': 0.20})
+        maker.state['drift_pending'][0]['ts'] -= 3600
+        assert maker.measure_drift({'T': 0.25})[0]['gain_per_contract'] > 0
+
+    def test_unripe_measurement_is_not_closed_early(self, maker):
+        """
+        Замер до срока не закрывается: за минуту снос ещё не проявится, и
+        ранний ответ был бы шумом, выданным за результат.
+        """
+        maker.watch_drift([self._fill()], {'T': 0.20})
+        assert maker.measure_drift({'T': 0.10}) == []
+        assert len(maker.state['drift_pending']) == 1
+
+    def test_market_without_price_waits_instead_of_being_dropped(self, maker):
+        """
+        Рынок без цены ЖДЁТ, а не выбрасывается.
+
+        Выбросив его, мы выбросили бы ровно те случаи, где книга опустела после
+        нашего исполнения, — то есть худшие из возможных, и замер стал бы
+        заведомо оптимистичным.
+        """
+        maker.watch_drift([self._fill()], {'T': 0.20})
+        maker.state['drift_pending'][0]['ts'] -= 3600
+        assert maker.measure_drift({}) == []
+        assert len(maker.state['drift_pending']) == 1
+
+    def test_fill_without_a_mark_is_not_registered(self, maker):
+        maker.watch_drift([self._fill()], {})
+        assert maker.state.get('drift_pending', []) == []

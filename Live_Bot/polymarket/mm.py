@@ -37,7 +37,9 @@
     python -m polymarket.mm --loop     непрерывно
 """
 
+import atexit
 import json
+import os
 import sys
 import time
 
@@ -129,6 +131,15 @@ def step(maker, markets, live=False, day_loss=0.0):
 
     exposure = maker.exposure(marks)
 
+    # ОБЯЗАТЕЛЬСТВА СЧИТАЮТСЯ ПРОТИВ ДЕНЕГ, А НЕ ПРОТИВ ОТДЕЛЬНОГО ПОТОЛКА.
+    # Двусторонняя котировка стоит РОВНО размер при любой цене (покупка берёт
+    # p, продажа — (1-p)), поэтому обещанное складывается просто. Без этого
+    # счётчика бот выставлял на 90 рынках по 100-200 контрактов — около $9 000
+    # обещаний при $450 денег. Каждая заявка в отдельности выглядела скромно;
+    # опасна была только сумма, а сумму никто не считал.
+    committed = 0.0
+    budget = float(maker.state['cash'])
+
     for token, market in by_token.items():
         live_book = books.get(str(token))
         if not live_book or str(token) not in marks:
@@ -163,6 +174,18 @@ def step(maker, markets, live=False, day_loss=0.0):
         if exposure > params.MM_MAX_EXPOSURE_USD and not quote.get('only'):
             quote['only'] = 'ask' if slot['position'] > 0 else 'bid'
 
+        # ДЕНЬГИ КОНЧИЛИСЬ — ДАЛЬШЕ НЕ КОТИРУЕМ. Рынки идут по убыванию
+        # оборота, поэтому обрезается хвост, а не середина. Сокращающую
+        # сторону оставляем: она не тратит денег, а высвобождает их.
+        need = float(quote['size']) if not quote.get('only') else 0.0
+        if committed + need > budget:
+            if slot['position']:
+                quote['only'] = 'ask' if slot['position'] > 0 else 'bid'
+            else:
+                skipped['бюджет исчерпан'] = skipped.get('бюджет исчерпан', 0) + 1
+                continue
+        committed += need
+
         before = json.dumps(slot.get('orders') or {}, sort_keys=True)
         _, replaced = maker.place(token, quote, top, live_book)
         placed += 1
@@ -188,10 +211,21 @@ def step(maker, markets, live=False, day_loss=0.0):
                 else:
                     order['live_error'] = out.get('why')
 
+    # СНОС ЦЕНЫ ПОСЛЕ НАШИХ ИСПОЛНЕНИЙ. Ставится на учёт здесь, а снимается
+    # через полчаса — то есть отвечает не «сколько мы взяли спреда», а «сколько
+    # его отобрали обратно». Без этого числа все расчёты доходности остаются
+    # потолком: спред виден заранее, а неблагоприятный отбор — только так.
+    maker.watch_drift(fills, marks)
+    drift = maker.measure_drift(marks)
+    for row in drift:
+        store._append(engine.DRIFT, row)
+
     report = maker.mark_to_market(marks)
     store._append(engine.EQUITY, {'at': engine._stamp(), **report,
                                   'markets': placed, 'fills': len(fills),
                                   'sent': sent, 'cancelled': cancelled,
+                                  'drift_measured': len(drift),
+                                  'drift_pending': len(maker.state.get('drift_pending', [])),
                                   'live': bool(live)})
     maker.save()
     return {'placed': placed, 'fills': fills, 'report': report,
@@ -199,7 +233,50 @@ def step(maker, markets, live=False, day_loss=0.0):
             'cancelled': cancelled, 'mismatch': mismatch}
 
 
+def _single_instance():
+    """
+    Не даёт запустить второго маркет-мейкера поверх первого.
+
+    ПОЙМАНО НА СЕБЕ, И ИМЕННО ПОЭТОМУ ЗАМОК ЗДЕСЬ. Три процесса разом писали в
+    одно состояние: один со старым кодом в памяти, два с новым. Состояние
+    вышло смешанным — заявки по 5, 100 и 200 контрактов вперемешку, число
+    рынков скакало 46, 90, 48 от цикла к циклу. В бумаге это путаница; на
+    бирже это двойные заявки, двойной запас и снятие чужих номеров.
+
+    Замок — файл с номером процесса. Мёртвый номер не считается: иначе после
+    аварийного завершения бот больше не запустился бы никогда.
+    """
+    path = os.path.join(store.DIR, 'mm.lock')
+    if os.path.exists(path):
+        try:
+            older = int(open(path, encoding='utf-8').read().strip())
+        except Exception:                                  # noqa: BLE001
+            older = None
+        if older and older != os.getpid() and _alive(older):
+            print(f'уже работает маркет-мейкер (процесс {older}). '
+                  f'Второй запуск отменён: два процесса пишут в одно '
+                  f'состояние и мешают друг другу.')
+            return False
+    with open(path, 'w', encoding='utf-8') as fh:
+        fh.write(str(os.getpid()))
+    atexit.register(lambda: os.path.exists(path) and os.remove(path))
+    return True
+
+
+def _alive(pid):
+    """Жив ли процесс. Мёртвый замок обязан сниматься сам."""
+    try:
+        os.kill(pid, 0)
+    except OSError:
+        return False
+    except Exception:                                      # noqa: BLE001
+        return True
+    return True
+
+
 def main(loop=False):
+    if not _single_instance():
+        return
     markets = select_markets()
     maker = engine.PaperMaker()
     state = wallet.status()
