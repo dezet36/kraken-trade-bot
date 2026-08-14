@@ -2544,6 +2544,48 @@ function renderPolymarket() {
     : `<span style="color:var(--${pnl >= 0 ? 'good' : 'bad'})">`
       + (pnl >= 0 ? '+' : '') + pmMoney(pnl) + '</span>';
 
+  /* ФАКТ ОТ БИРЖИ ИДЁТ ПЕРВЫМ, РАСЧЁТ БОТА — ВТОРЫМ, И ЭТО ГЛАВНАЯ ПРАВКА
+     ЭТОЙ ПАНЕЛИ. Раньше всё вперемешку показывало бумажную модель, и она
+     выглядела бы точно так же, даже если бы ни одна заявка до биржи не дошла.
+     Человек читал «стоим на трёх рынках», открывал Polymarket, не видел там
+     ничего — и не мог понять, кто из двоих врёт. Теперь слева факт, справа
+     расчёт, и подписаны они именно так. */
+  const ex = PM.exchange || {};
+  const plan = PM.plan || {};
+  let html = '';
+
+  if (w.configured) {
+    const num = (x) => (x === null || x === undefined) ? '—' : x;
+    const factCards = [
+      ['Деньги на счёте', ex.balance === null || ex.balance === undefined
+        ? '—' : pmMoney(ex.balance)],
+      ['Заявок стоит', num(ex.orders)],
+      ['Сделок было', num(ex.trades)],
+    ];
+    html += '<h3 style="margin:2px 0 8px">Что видно на бирже</h3>'
+      + '<div class="panel card-pad"><div class="kpis">'
+      + factCards.map(([k, v]) =>
+          `<div class="kpi"><div class="k">${k}</div><div class="v">${v}</div></div>`
+        ).join('')
+      + '</div></div>';
+    if (!ex.asked) {
+      html += '<div class="warn-box">Биржу спросить не вышло: '
+        + esc(ex.why || 'причина неизвестна') + '. Числа ниже — расчёт бота, '
+        + 'а не то, что происходит на Polymarket.</div>';
+    } else if (ex.orders === 0 && (PM.standing || []).length) {
+      /* РАСХОЖДЕНИЕ НАЗЫВАЕТСЯ ПРЯМО. Бот считает, что котирует, а биржа наших
+         заявок не видит — это либо отвергнутая отправка, либо живой режим
+         выключен. Молчать об этом нельзя: именно здесь и рождается вопрос
+         «почему на Polymarket пусто». */
+      html += '<div class="warn-box">Бот считает, что стоит на '
+        + (PM.standing || []).length + ' рынках, а биржа НИ ОДНОЙ нашей заявки '
+        + 'не видит. ' + (w.can_trade_live
+            ? 'Значит отправка отвергается — причина в столбце «на бирже» ниже.'
+            : 'Живой режим выключен: заявки считаются, но на биржу не уходят.')
+        + '</div>';
+    }
+  }
+
   const cards = [
     ['Режим', mode],
     ['Итог', pnlText],
@@ -2552,19 +2594,19 @@ function renderPolymarket() {
     ['В запасе', pmMoney(eq.inventory)],
     ['Кругов завершено', PM.rounds_total || 0],
     ['Заработано кругами', pmMoney(PM.rounds_gain_usd)],
-    ['Стоим на рынках', (PM.standing || []).length],
+    ['Котируем рынков', (PM.standing || []).length],
     ['Позиций открыто', PM.positions_total || 0],
     ['Тактов', svc.cycles || 0],
   ];
-  const plan = PM.plan || {};
   if (plan.used !== undefined) {
-    cards.push(['Вложено', pmMoney(plan.used)]);
+    cards.push(['Разложено по рынкам', pmMoney(plan.used)]);
     cards.push(['Потолок за оборот', pmMoney(plan.ceiling_per_round_usd)]);
     cards.push(['Награда сверх', pmMoney(plan.rewards_monthly) + '/мес']);
   }
   /* Классы взяты СУЩЕСТВУЮЩИЕ (.kpis/.kpi), а не заведены свои: вкладка
      обязана выглядеть как остальная панель, а не почти как она. */
-  let html = '<div class="panel card-pad"><div class="kpis">' + cards.map(([k, v]) =>
+  html += '<h3 style="margin:18px 0 8px">Расчёт бота</h3>'
+    + '<div class="panel card-pad"><div class="kpis">' + cards.map(([k, v]) =>
     `<div class="kpi"><div class="k">${k}</div><div class="v">${v}</div></div>`
   ).join('') + '</div></div>';
 
@@ -2582,9 +2624,20 @@ function renderPolymarket() {
     html += '<div class="warn-box">Включена аварийная остановка: заявки на '
       + 'биржу не уходят. Снять — удалить файл STOP в папке данных.</div>';
   }
+  /* КАКОЙ АДРЕС ЗА ЧТО ОТВЕЧАЕТ — ВОПРОС, КОТОРЫЙ ЗАДАЛИ ПРЯМО. Раньше здесь
+     стояли два адреса подряд без пояснения, а у кошелька из расширения они
+     ещё и совпадают — строка выглядела как повтор и не отвечала ни на что. */
   if (w.configured && w.address) {
-    html += '<div class="hint" style="padding:8px 4px">Кошелёк: <code>' + esc(w.address) + '</code>'
-      + (w.funder ? ' · счёт <code>' + esc(w.funder) + '</code>' : '') + '</div>';
+    const same = w.funder && w.funder.toLowerCase() === (w.address || '').toLowerCase();
+    html += '<div class="hint" style="padding:8px 4px">'
+      + '<b>Подписывает заявки</b> ключ адреса <code>' + esc(w.address) + '</code>'
+      + '<br><b>Деньги списываются со счёта</b> <code>'
+      + esc(w.funder || '—') + '</code>'
+      + (same ? ' — тот же адрес: так и должно быть у кошелька из расширения '
+                + '(Metamask, Phantom). У счёта, заведённого на самом '
+                + 'Polymarket через почту, адрес был бы другим.' : '')
+      + '<br>Проверить можно на polymarket.com — там этот счёт и его сделки.'
+      + '</div>';
   }
 
   /* ЧТО БОТ ДЕЛАЕТ ПРЯМО СЕЙЧАС. Раньше на этот вопрос ответить было нечем:
@@ -2592,15 +2645,27 @@ function renderPolymarket() {
      мейкер большую часть времени именно СТОИТ, и это его работа. */
   if ((PM.standing || []).length) {
     html += '<h3 style="margin:18px 0 8px">Где стоим сейчас</h3><div class="scroll">'
-      + '<table><thead><tr><th>рынок</th><th>бид</th><th>аск</th>'
+      + '<table><thead><tr><th>рынок</th><th>на бирже</th><th>бид</th><th>аск</th>'
       + '<th>держим</th><th>размер</th><th>очередь</th>'
       + '<th>стоит</th><th>ждали</th><th>позиция</th></tr></thead><tbody>'
       + PM.standing.slice(0, 20).map(q => {
           /* Расхождение «стоит» и «ждали» — первый признак, что модель врёт.
              Поэтому оба числа рядом, а не в разных таблицах. */
           const late = q.expected_min && q.standing_min > q.expected_min * 2;
+          /* СТОЛБЕЦ «НА БИРЖЕ» ОТВЕЧАЕТ НА ГЛАВНЫЙ ВОПРОС строки: это заявка,
+             которую видит Polymarket, или только расчёт бота. Причина отказа
+             записывалась и раньше — но не читалась никем. */
+          let where;
+          if (q.live_error) {
+            where = `<span style="color:var(--bad)" title="${esc(q.live_error)}">не ушла</span>`;
+          } else if (q.live_ids) {
+            where = `<span style="color:var(--good)">да (${q.live_ids})</span>`;
+          } else {
+            where = '<span class="muted">только расчёт</span>';
+          }
           return `<tr>
             <td>${esc((q.question || '—').slice(0, 40))}</td>
+            <td>${where}</td>
             <td>${q.bid === null ? '—' : Number(q.bid).toFixed(3)}</td>
             <td>${q.ask === null ? '—' : Number(q.ask).toFixed(3)}</td>
             <td>${q.spread_kept === null ? '—' : Number(q.spread_kept).toFixed(3)}</td>
@@ -2611,10 +2676,13 @@ function renderPolymarket() {
             <td>${Number(q.position || 0).toFixed(0)}</td></tr>`;
         }).join('')
       + '</tbody></table></div>'
-      + '<div class="hint" style="padding:6px 4px">«Держим» — что останется '
-      + 'нам, если исполнятся обе стороны. «Очередь» — сколько контрактов '
-      + 'впереди нас: ноль значит, что мы первые. Красное время означает, что '
-      + 'заявка стоит вдвое дольше расчётного — модель ожидания ошиблась.</div>';
+      + '<div class="hint" style="padding:6px 4px">«На бирже» — приняла ли '
+      + 'Polymarket нашу заявку: «да» и число сторон, «не ушла» с причиной при '
+      + 'наведении, «только расчёт» — если живой режим выключен. «Держим» — '
+      + 'что останется нам, если исполнятся обе стороны. «Очередь» — сколько '
+      + 'контрактов впереди нас: ноль значит, что мы первые. Красное время '
+      + 'означает, что заявка стоит вдвое дольше расчётного — модель '
+      + 'ожидания ошиблась.</div>';
   }
 
   /* ЗАВЕРШЁННЫЕ КРУГИ — главная мерка. Отдельные исполнения не говорят

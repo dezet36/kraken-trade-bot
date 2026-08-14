@@ -165,10 +165,21 @@ class TestScanLooksAtTheRealBook:
         assert selector._hours_left(None) == float('inf')
         assert selector._hours_left('не дата') == float('inf')
 
-    def test_too_narrow_spread_is_rejected(self, monkeypatch):
-        """Спред в один тик не покроет даже проскальзывания."""
+    def test_too_narrow_spread_earns_nothing(self, monkeypatch):
+        """
+        Спред в один тик отбрасывается ДЕНЬГАМИ, а не шириной.
+
+        Отбор по ширине спреда был ошибкой и уже исправлен: самые быстрые рынки
+        биржи как раз однотиковые, и выбрасывать их — значит выбрасывать
+        лучшее. Но и брать такой рынок не за чем: взять там нечего. Решает
+        нижний порог дохода в раскладке — рынок может пройти отбор и не попасть
+        в план, и это разные вещи.
+        """
         narrow = {'bids': [(0.4999, 5000.0)], 'asks': [(0.5001, 5000.0)]}
-        assert self._scan(monkeypatch, [_market()], book=narrow) == []
+        got = self._scan(monkeypatch, [_market()], book=narrow)
+        for row in got:
+            assert row['usd_per_hour'] < params.MM_MIN_USD_PER_HOUR
+        assert selector.allocate(got, budget=100)['markets'] == []
 
     def test_two_tick_spread_is_taken_at_the_touch(self, monkeypatch):
         """
@@ -198,10 +209,45 @@ class TestScanLooksAtTheRealBook:
 
 class TestAllocationSpreadsRisk:
 
-    def _rows(self, count, cost_each=5.0, spread_share=0.1):
-        return [{'id': str(i), 'cost': cost_each, 'spread_share': spread_share,
+    def _rows(self, count, cost_each=5.0, spread_share=0.1, per_hour=1.0):
+        """
+        Рынки для раскладки. РАЗМЕР ЗАДАЁТСЯ МИНИМУМОМ БИРЖИ, а не стоимостью:
+        стоимость теперь считает сама раскладка, ей и решать. При цене 0.5
+        двусторонняя котировка в N контрактов стоит ровно $N.
+        """
+        return [{'id': str(i), 'spread_share': spread_share, 'price': 0.5,
+                 'order_min': cost_each, 'size': cost_each, 'cost': cost_each,
+                 'usd_per_hour': per_hour, 'our_gain': 0.01,
+                 'flow_in': 0.0, 'flow_out': 0.0, 'queue_in': 0.0,
+                 'queue_out': 0.0, 'bid_usd': 0.0, 'ask_usd': 0.0,
                  'rewards_daily': 0.0, 'liquidity': 1000.0,
                  'question': f'рынок {i}'} for i in range(count)]
+
+    def test_weak_markets_do_not_take_money_from_working_ones(self, monkeypatch):
+        """
+        «Ещё один рынок» звучит как разнообразие, а это деньги, вынутые из
+        работающих. Замерено на 1 243 рынках: при $100 четырнадцать рынков
+        вместо восьми снижали расчётный доход с $1.30 до $1.09 в час.
+        """
+        monkeypatch.setattr(params, 'MM_MAX_MARKET_SHARE', 1.0)
+        rows = (self._rows(3, per_hour=1.0)
+                + self._rows(30, per_hour=params.MM_MIN_USD_PER_HOUR / 10))
+        plan = selector.allocate(rows, budget=100)
+        assert len(plan['markets']) == 3, 'слабые рынки не должны попадать в план'
+
+    def test_coverage_comes_before_size(self, monkeypatch):
+        """
+        СНАЧАЛА ОХВАТ, ПОТОМ ДОБАВКА — иначе сорок долларов уходят в три рынка.
+
+        Так и было: размер считался как доля счёта (34%), и человек спрашивал
+        «почему у меня только три направления». Добавка сверх минимума почти
+        ничего не даёт там, где перед нами нет очереди: время ожидания растёт
+        вместе с размером, и доход в час от размера не зависит вовсе.
+        """
+        monkeypatch.setattr(params, 'MM_MAX_MARKET_SHARE', 0.34)
+        plan = selector.allocate(self._rows(20, cost_each=5.0), budget=40)
+        assert len(plan['markets']) == 8, 'сорок долларов — это восемь рынков по $5'
+        assert all(m['size'] == 5 for m in plan['markets'])
 
     def test_budget_spreads_over_many_markets(self, monkeypatch):
         """

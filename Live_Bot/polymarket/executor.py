@@ -204,13 +204,26 @@ def cancel_all():
 
 
 def open_orders():
-    """Наши заявки, как их видит биржа. Источник правды при расхождении."""
+    """
+    Наши заявки, как их видит биржа. Источник правды при расхождении.
+
+    МЕТОД НАЗЫВАЕТСЯ get_open_orders, И ЭТО БЫЛА ТИХАЯ ПОЛОМКА. У клиента
+    второго поколения такого имени, как раньше, нет вовсе; вызов падал с
+    «object has no attribute get_orders», исключение глоталось, и функция
+    честно возвращала None. Следствие серьёзнее опечатки: сверка с биржей
+    (reconcile) получала None и молча пропускалась КАЖДЫЙ такт. Бот ни разу не
+    проверил, существуют ли его заявки на самом деле, — а панель показывала
+    «стоим на трёх рынках» из бумажной модели. Человек смотрел на Polymarket,
+    не видел там ничего и не понимал, кто из двоих врёт.
+    """
     api = wallet.client()
     if api is None:
         return None
     try:
-        return api.get_orders()
-    except Exception:                                       # noqa: BLE001
+        return api.get_open_orders()
+    except Exception as exc:                                # noqa: BLE001
+        _log({'at': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
+              'action': 'ASK_FAILED', 'why': str(exc)[:200]})
         return None
 
 

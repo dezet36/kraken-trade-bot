@@ -194,12 +194,53 @@ class TestDashboardShowsWhatMatters:
     def _html(self):
         return open(os.path.join(ROOT, 'dashboard.html'), encoding='utf-8').read()
 
+    def test_the_exchange_speaks_first(self):
+        """
+        ФАКТ ОТ БИРЖИ ВЫШЕ РАСЧЁТА БОТА, и порядок здесь — суть, а не вёрстка.
+
+        Раньше панель показывала бумажную модель и выглядела бы точно так же,
+        даже если бы ни одна заявка до биржи не дошла. Человек читал «стоим на
+        трёх рынках», открывал Polymarket, не видел там ничего — и не мог
+        понять, кто из двоих врёт.
+        """
+        html = self._html()
+        spot = html.index('function renderPolymarket()')
+        block = html[spot:spot + 6000]
+        assert 'Что видно на бирже' in block
+        assert 'Расчёт бота' in block
+        assert (block.index('Что видно на бирже')
+                < block.index('Расчёт бота')), 'факт идёт раньше расчёта'
+
     def test_the_bottom_line_comes_first(self):
         html = self._html()
         spot = html.index('function renderPolymarket()')
-        block = html[spot:spot + 3000]
+        block = html[spot:spot + 6000]
         assert "['Итог'" in block
         assert 'Было / стало' in block, 'начальная сумма показана рядом'
+
+    def test_a_quote_says_whether_the_exchange_took_it(self):
+        """
+        Вопрос строки: это заявка на Polymarket или только расчёт бота.
+
+        Причина отказа записывалась и раньше — и не читалась никем. Строка
+        выглядела одинаково и когда заявка стоит на бирже, и когда она не ушла
+        туда вовсе.
+        """
+        html = self._html()
+        spot = html.index('Где стоим сейчас')
+        block = html[spot:spot + 3000]
+        assert 'live_error' in block and 'live_ids' in block
+        assert 'только расчёт' in block
+
+    def test_the_two_addresses_are_explained(self):
+        """
+        «Не вижу, какой адрес отвечает за сделки» — вопрос задан прямо. Два
+        адреса подряд без пояснения на него не отвечали, а у кошелька из
+        расширения они ещё и совпадают.
+        """
+        html = self._html()
+        assert 'Подписывает заявки' in html
+        assert 'Деньги списываются со счёта' in html
 
     def test_standing_quotes_are_shown(self):
         html = self._html()

@@ -28,6 +28,75 @@ def _connect_state():
         return None
 
 
+_EXCHANGE_CACHE = {'at': 0.0, 'view': None}
+_EXCHANGE_TTL = 20          # секунд; панель опрашивается чаще, биржа — нет
+
+
+def exchange_view(force=False):
+    """
+    ЧТО ВИДИТ САМА БИРЖА: остаток, стоящие заявки, сделки.
+
+    ЗАЧЕМ ЭТО ОТДЕЛЬНО ОТ ВСЕГО ОСТАЛЬНОГО. Панель до сих пор показывала
+    БУМАЖНУЮ модель — и показывала бы ровно то же самое, даже если бы ни одна
+    заявка до биржи не дошла. Человек смотрел на «стоим на трёх рынках»,
+    открывал Polymarket, не видел там ничего и не мог понять, кто из двоих
+    врёт. Правильный ответ — спросить биржу и показать её ответ рядом, назвав
+    вещи своими именами: слева факт, справа расчёт.
+
+    Ответ кэшируется: панель обновляется каждые несколько секунд, а три
+    сетевых запроса на каждое обновление — это лишняя нагрузка и на биржу, и
+    на панель.
+    """
+    import time as _time
+
+    fresh = _EXCHANGE_CACHE['view']
+    if fresh and not force and _time.time() - _EXCHANGE_CACHE['at'] < _EXCHANGE_TTL:
+        return fresh
+
+    from . import engine, executor, wallet
+
+    state = wallet.status()
+    view = {'at': engine._stamp(), 'asked': False,
+            'signer': state.get('address'), 'funder': state.get('funder'),
+            'balance': None, 'orders': None, 'trades': None, 'why': ''}
+
+    if not state['configured']:
+        view['why'] = 'кошелёк не подключён — спрашивать биржу не о чем'
+        _EXCHANGE_CACHE.update({'at': _time.time(), 'view': view})
+        return view
+
+    if wallet.client() is None:
+        view['why'] = wallet.explain_failure() or 'торговый клиент не поднялся'
+        _EXCHANGE_CACHE.update({'at': _time.time(), 'view': view})
+        return view
+
+    view['balance'] = wallet.balance()
+    rows = executor.open_orders()
+    if rows is not None:
+        view['orders'] = len(rows)
+        view['orders_detail'] = [{
+            'token': str(r.get('asset_id') or ''),
+            'side': 'bid' if str(r.get('side', '')).upper() == 'BUY' else 'ask',
+            'price': r.get('price'),
+            'size': r.get('original_size'),
+            'matched': r.get('size_matched'),
+        } for r in rows[:20]]
+    done = executor.own_trades()
+    if done is not None:
+        view['trades'] = len(done)
+    view['asked'] = True
+    _EXCHANGE_CACHE.update({'at': _time.time(), 'view': view})
+    return view
+
+
+def _exchange_safely():
+    """Опрос биржи не должен ронять весь снимок: сеть бывает недоступна."""
+    try:
+        return exchange_view()
+    except Exception as exc:                                # noqa: BLE001
+        return {'asked': False, 'why': f'{type(exc).__name__}: {str(exc)[:120]}'}
+
+
 def _standing_quotes(books, planned):
     """
     Где бот стоит сейчас: цены, сторона, сколько ждёт и чего ждёт.
@@ -53,7 +122,17 @@ def _standing_quotes(books, planned):
         market = by_token.get(str(token)) or {}
         oldest = min([o['ts'] for o in (bid, ask) if o] or [now])
         keep = (ask['price'] - bid['price']) if (bid and ask) else None
+        # ДОШЛА ЛИ ЗАЯВКА ДО БИРЖИ. Номер от биржи есть — значит она её
+        # приняла; есть текст ошибки — значит отвергла, и причину надо
+        # показать. Прежде обе эти вещи записывались и не читались никем:
+        # строка выглядела одинаково и когда заявка стоит на Polymarket, и
+        # когда она не ушла туда вовсе.
+        sent = [o for o in (bid, ask) if o and o.get('live_id')]
+        failed = [o.get('live_error') for o in (bid, ask)
+                  if o and o.get('live_error')]
         rows.append({
+            'live_ids': len(sent),
+            'live_error': failed[0] if failed else None,
             'token': str(token),
             'question': market.get('question') or '—',
             'bid': bid['price'] if bid else None,
@@ -258,6 +337,10 @@ def snapshot(limit_markets=20, limit_fills=30):
         # подписать.
         'connect': _connect_state(),
         'kill_switch': executor.kill_switch_on(),
+        # ФАКТ ОТ БИРЖИ РЯДОМ С РАСЧЁТОМ БОТА. Без этого панель отвечала
+        # моделью на вопрос о деньгах, и расхождение с Polymarket выглядело
+        # как ложь одной из сторон.
+        'exchange': _exchange_safely(),
         'equity': equity[-1] if equity else None,
         'equity_series': [{'at': e.get('at'), 'equity': e.get('equity'),
                            'realized': e.get('realized'),
