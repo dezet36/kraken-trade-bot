@@ -97,6 +97,7 @@ jobs:
             --hidden-import polymarket.base `
             --hidden-import polymarket.signal_crypto `
             --collect-all py_clob_client `
+            --collect-all py_clob_client_v2 `
             --hidden-import tkinter `
             --hidden-import tkinter.ttk `
             --exclude-module research `

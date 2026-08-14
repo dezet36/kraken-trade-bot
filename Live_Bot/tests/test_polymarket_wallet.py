@@ -508,3 +508,70 @@ class TestServiceTakesTheLockToo:
                                 'is_alive': lambda self: True})())
         assert service.start(force=True) is True
         assert started.get('да')
+
+
+class TestSecondGenerationClient:
+    """
+    Живой путь работает на клиенте ВТОРОГО поколения и типе подписи 3.
+
+    ВЫЯСНЕНО ОТПРАВКОЙ НАСТОЯЩЕЙ ЗАЯВКИ, а не чтением документации, и это
+    главный урок эпизода. Всё, что проверялось раньше — 792 теста, проверка
+    готовности, сквозные прогоны, — останавливалось перед последним шагом. Там
+    и оказалась поломка:
+
+        старая библиотека     заархивирована разработчиками площадки; биржа
+                              отвечает ей «invalid order version»
+        старый залог          площадка перешла с USDC.e на собственный pUSD, и
+                              старый клиент показывал ноль при полном счёте
+        типы подписи 0,1,2    проходят вход, но на отправке отвечают «maker
+                              address not allowed» — все три, при любом счёте
+        тип 3 (POLY_1271)     принят: заявка ушла, встала в стакан, снялась
+
+    Старый клиент типа 3 не знал вовсе, поэтому подобрать его перебором было
+    нельзя — только сменив библиотеку.
+    """
+
+    def test_live_path_uses_the_new_client(self):
+        for name in ('wallet.py', 'executor.py'):
+            text = open(os.path.join(ROOT, 'polymarket', name),
+                        encoding='utf-8').read()
+            live = [ln for ln in text.splitlines()
+                    if 'py_clob_client' in ln and not ln.strip().startswith('#')]
+            assert live, name
+            for line in live:
+                assert 'py_clob_client_v2' in line, f'{name}: {line.strip()}'
+
+    def test_signature_type_defaults_to_the_one_that_works(self, monkeypatch):
+        monkeypatch.delenv('PM_SIGNATURE_TYPE', raising=False)
+        assert wallet.signature_type() == 3
+
+    def test_broken_setting_falls_back_to_the_working_type(self, monkeypatch):
+        monkeypatch.setenv('PM_SIGNATURE_TYPE', 'не число')
+        assert wallet.signature_type() == 3
+
+    def test_detection_tries_the_working_type_first(self):
+        """
+        Перебор начинается с типа 3: остальные три дают отказ на отправке,
+        и ставить их первыми значит тратить обращения впустую.
+        """
+        from polymarket import connect
+        assert connect.SIGNATURE_TYPES[0] == 3
+        assert set(connect.SIGNATURE_TYPES) == {0, 1, 2, 3}
+
+    def test_cancel_passes_the_right_type(self):
+        """
+        В новом клиенте снятие ждёт OrderPayload, а не голую строку: строка
+        проходит молча и заявка остаётся висеть — худшее из состояний.
+        """
+        text = open(os.path.join(ROOT, 'polymarket', 'executor.py'),
+                    encoding='utf-8').read()
+        assert 'OrderPayload(orderID=' in text
+        assert 'api.cancel(' not in text
+
+    def test_both_clients_are_declared_for_the_build(self):
+        root = os.path.dirname(ROOT)
+        reqs = open(os.path.join(root, 'requirements.txt'), encoding='utf-8').read()
+        assert 'py-clob-client-v2' in reqs
+        flow = os.path.join(root, '.github', 'workflows', 'build-exe.yml')
+        if os.path.exists(flow):
+            assert 'py_clob_client_v2' in open(flow, encoding='utf-8').read()

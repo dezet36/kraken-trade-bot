@@ -145,12 +145,14 @@ def place(token_id, side, price, size, day_loss_usd=0.0, tick=0.001):
     _recent.append(time.time())
 
     try:
-        from py_clob_client.clob_types import OrderArgs, OrderType
-        from py_clob_client.order_builder.constants import BUY, SELL
+        # КЛИЕНТ ВТОРОГО ПОКОЛЕНИЯ. Старая библиотека заархивирована, и биржа
+        # отвечает ей «invalid order version» — выяснено отправкой настоящей
+        # заявки, а не чтением документации.
+        from py_clob_client_v2.clob_types import OrderArgsV2, OrderType
         api = wallet.client()
-        signed = api.create_order(OrderArgs(
+        signed = api.create_order(OrderArgsV2(
             token_id=str(token_id), price=float(price), size=float(size),
-            side=BUY if side == 'bid' else SELL))
+            side='BUY' if side == 'bid' else 'SELL'))
         answer = api.post_order(signed, OrderType.GTC)
     except Exception as exc:                                # noqa: BLE001
         _log({'at': stamp, 'action': 'ERROR', 'token': token_id,
@@ -170,7 +172,10 @@ def cancel(order_id):
     if api is None:
         return {'ok': False, 'why': 'клиента нет'}
     try:
-        answer = api.cancel(order_id)
+        # Снятие принимает СВОЙ тип, а не голую строку: в новом клиенте
+        # cancel_order ждёт OrderPayload, и передача строки молча падает.
+        from py_clob_client_v2.clob_types import OrderPayload
+        answer = api.cancel_order(OrderPayload(orderID=str(order_id)))
     except Exception as exc:                                # noqa: BLE001
         return {'ok': False, 'why': str(exc)[:120]}
     _log({'at': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
@@ -221,7 +226,7 @@ def scoring(order_ids):
     if api is None or not order_ids:
         return None
     try:
-        from py_clob_client.clob_types import OrdersScoringParams
+        from py_clob_client_v2.clob_types import OrdersScoringParams
         return api.are_orders_scoring(OrdersScoringParams(orderIds=list(order_ids)))
     except Exception:                                       # noqa: BLE001
         return None
@@ -244,7 +249,7 @@ def own_trades(after_ts=None):
     if api is None:
         return None
     try:
-        from py_clob_client.clob_types import TradeParams
+        from py_clob_client_v2.clob_types import TradeParams
         params_obj = TradeParams(after=int(after_ts)) if after_ts else None
         rows = api.get_trades(params_obj)
     except Exception:                                       # noqa: BLE001

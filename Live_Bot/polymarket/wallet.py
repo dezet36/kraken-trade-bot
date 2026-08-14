@@ -54,10 +54,23 @@ def funder():
 
 
 def signature_type():
+    """
+    Тип подписи. По умолчанию 3 — единственный, который принимает биржа.
+
+    ПРОВЕРЕНО ОТПРАВКОЙ НАСТОЯЩЕЙ ЗАЯВКИ, а не рассуждением. Площадка перешла
+    на CTF Exchange v2 и требует подпись смарт-контрактом (POLY_1271, тип 3).
+    Типы 0, 1 и 2 проходят проверку подлинности, но на отправке отвечают
+    «maker address not allowed, please use the deposit wallet flow» — все три,
+    при любом счёте. Именно этим объясняется недоумение в десятке обращений к
+    разработчикам площадки: вход работает, торговля нет.
+
+    Старый клиент типа 3 не знал вовсе — там были только 0, 1, 2, — поэтому
+    подобрать его перебором было нельзя.
+    """
     try:
-        return int(os.getenv('PM_SIGNATURE_TYPE', '1'))
+        return int(os.getenv('PM_SIGNATURE_TYPE', '3'))
     except (TypeError, ValueError):
-        return 1
+        return 3
 
 
 def live_enabled():
@@ -114,10 +127,21 @@ def client(force=False):
     if not configured():
         return None
     try:
-        from py_clob_client.client import ClobClient
+        # КЛИЕНТ ВТОРОГО ПОКОЛЕНИЯ, И СТАРЫЙ БОЛЬШЕ НЕ ГОДИТСЯ. Библиотека
+        # py-clob-client заархивирована самими разработчиками площадки; на
+        # отправку заявки биржа отвечает ей «invalid order version, please use
+        # the latest clob-client». Выяснено отправкой, а не чтением
+        # документации: чтение остатка и вход работали и на старой.
+        #
+        # Заодно у нового клиента верный залог. Площадка перешла с USDC.e на
+        # собственный pUSD, а старый клиент искал деньги в прежнем токене — и
+        # показывал ноль при полном счёте.
+        from py_clob_client_v2.client import ClobClient
         made = ClobClient(host=HOST, chain_id=CHAIN_ID, key=private_key(),
                           signature_type=signature_type(), funder=funder())
-        made.set_api_creds(made.create_or_derive_api_creds())
+        # Ключ API ВЫВОДИТСЯ, а не создаётся: создание отвечает отказом, если
+        # ключ уже выпущен, а это обычное состояние при каждом перезапуске.
+        made.set_api_creds(made.derive_api_key())
         _client = made
         return _client
     except Exception:                                       # noqa: BLE001
@@ -136,7 +160,8 @@ def balance():
     if api is None:
         return None
     try:
-        from py_clob_client.clob_types import AssetType, BalanceAllowanceParams
+        from py_clob_client_v2.clob_types import (AssetType,
+                                                 BalanceAllowanceParams)
         raw = api.get_balance_allowance(
             BalanceAllowanceParams(asset_type=AssetType.COLLATERAL))
         value = (raw or {}).get('balance')
