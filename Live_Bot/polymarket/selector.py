@@ -132,7 +132,7 @@ def scan(budget=None, limit=None, pages=30, min_volume=None,
     наша заявка окажется единственной со своей стороны и её снимут немедленно.
     """
     budget = float(budget if budget is not None else params.bankroll_for('MM'))
-    limit = limit or params.MM_MARKETS
+    limit = int(limit or params.MM_MARKETS)
     min_volume = float(min_volume if min_volume is not None
                        else params.MM_MIN_VOLUME)
     min_depth = float(min_depth if min_depth is not None
@@ -234,7 +234,7 @@ def measure_activity(rows, limit=None):
     """
     day = 24 * 3600
     now = time.time()
-    for row in rows[:limit] if limit else rows:
+    for row in rows[:int(limit)] if limit else rows:
         trades = book_mod.tape(row['condition_id'], limit=500) or []
         fresh = [t for t in trades if now - t['ts'] < day]
         row['trades_per_hour'] = round(len(fresh) / 24.0, 2)
