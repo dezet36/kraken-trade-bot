@@ -681,3 +681,49 @@ class TestBudgetChangeReachesTheState:
         path = str(tmp_path / 'state.json')
         engine.PaperMaker(bankroll=450, state_path=path).save()
         assert engine.PaperMaker(bankroll=450, state_path=path).budget_note == ''
+
+
+class TestLockDoesNotJamForever:
+    """
+    Замок протухает по времени, а не только по смерти процесса.
+
+    НОМЕРА ПРОЦЕССОВ ПЕРЕИСПОЛЬЗУЮТСЯ. Достаточно, чтобы после аварийного
+    завершения система выдала тот же номер чему угодно постороннему — и
+    «процесс жив» станет правдой навсегда, а маркет-мейкер не запустится
+    больше никогда, причём с сообщением о чужой копии, которой нет. Убрать
+    замок из панели нельзя: он лежит файлом рядом с данными.
+
+    Работающий цикл трогает файл каждый такт. Нетронутый дольше срока —
+    брошенный, кто бы ни носил сейчас его номер.
+    """
+
+    def test_fresh_lock_of_a_live_process_blocks(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(mm.store, 'DIR', str(tmp_path))
+        monkeypatch.setattr(mm, '_alive', lambda pid: True)
+        (tmp_path / 'mm.lock').write_text('999999999', encoding='utf-8')
+        assert mm._single_instance() is False
+
+    def test_stale_lock_is_taken_over_even_if_the_pid_looks_alive(
+            self, tmp_path, monkeypatch):
+        """
+        Главный случай: номер «жив», потому что его занял кто-то посторонний.
+        Без протухания запуск был бы заблокирован навсегда.
+        """
+        import os
+        import time
+        monkeypatch.setattr(mm.store, 'DIR', str(tmp_path))
+        monkeypatch.setattr(mm, '_alive', lambda pid: True)
+        lock = tmp_path / 'mm.lock'
+        lock.write_text('999999999', encoding='utf-8')
+        old = time.time() - mm._LOCK_STALE_SECONDS - 60
+        os.utime(str(lock), (old, old))
+        assert mm._single_instance() is True
+
+    def test_the_loop_touches_the_lock(self):
+        """Без отметки живости замок работающего цикла протухал бы сам."""
+        text = open(os.path.join(ROOT, 'polymarket', 'mm.py'),
+                    encoding='utf-8').read()
+        assert '_touch_lock()' in text
+        service = open(os.path.join(ROOT, 'polymarket', 'service.py'),
+                       encoding='utf-8').read()
+        assert '_touch_lock()' in service, 'служба тоже работает циклом'

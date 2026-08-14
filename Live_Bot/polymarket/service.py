@@ -80,6 +80,9 @@ def _loop(poll_seconds):
                 out = mm.step(maker, markets, live=live,
                               day_loss=max(0.0, -before['pnl']))
                 _state['cycles'] += 1
+                # Отметка живости на замке: без неё замок службы протухал бы
+                # через пять минут, и вторая копия сочла бы его брошенным.
+                mm._touch_lock()
                 _state['last_at'] = engine._stamp()
                 _state['last_error'] = None
                 if out['fills']:

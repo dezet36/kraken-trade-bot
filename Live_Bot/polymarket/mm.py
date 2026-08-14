@@ -53,6 +53,11 @@ SHADOW = os.path.join(store.DIR, 'mm_shadow.jsonl')
 # вместо названий рынков и «неизвестно» вместо ожидаемого времени круга.
 PLAN_FILE = os.path.join(store.DIR, 'mm_plan.json')
 
+# Через сколько замок считается брошенным. Работающий цикл трогает файл каждый
+# такт (тридцать секунд), поэтому пять минут — с большим запасом на медленный
+# отбор рынков, который занимает до минуты.
+_LOCK_STALE_SECONDS = 300
+
 CANDIDATES = None          # кэш отбора внутри процесса
 LAST_PLAN = {}             # последняя раскладка бюджета, для панели
 
@@ -351,15 +356,43 @@ def _single_instance():
             older = int(open(path, encoding='utf-8').read().strip())
         except Exception:                                  # noqa: BLE001
             older = None
-        if older and older != os.getpid() and _alive(older):
+        # ЗАМОК ПРОТУХАЕТ ПО ВРЕМЕНИ, А НЕ ТОЛЬКО ПО СМЕРТИ ПРОЦЕССА.
+        #
+        # Номера процессов ПЕРЕИСПОЛЬЗУЮТСЯ. Достаточно, чтобы после
+        # аварийного завершения система выдала тот же номер чему угодно
+        # постороннему — и «процесс жив» станет правдой навсегда, а
+        # маркет-мейкер не запустится больше никогда, причём с сообщением о
+        # чужой копии, которой нет. Убрать замок из панели нельзя: он лежит
+        # файлом рядом с данными.
+        #
+        # Работающий цикл трогает файл каждый такт. Нетронутый дольше срока —
+        # брошенный, кто бы ни носил сейчас его номер.
+        stale = (time.time() - os.path.getmtime(path)) > _LOCK_STALE_SECONDS
+        if older and older != os.getpid() and _alive(older) and not stale:
             print(f'уже работает маркет-мейкер (процесс {older}). '
                   f'Второй запуск отменён: два процесса пишут в одно '
                   f'состояние и мешают друг другу.')
             return False
+        if stale:
+            print('замок остался от прежнего запуска и протух — забираю')
     with open(path, 'w', encoding='utf-8') as fh:
         fh.write(str(os.getpid()))
     atexit.register(lambda: os.path.exists(path) and os.remove(path))
     return True
+
+
+def _touch_lock():
+    """
+    Отмечает, что цикл жив. По этой отметке и протухает замок.
+
+    Без неё замок «жив, пока жив процесс», а номера процессов
+    переиспользуются: чужой процесс с тем же номером запирал бы запуск
+    навсегда.
+    """
+    try:
+        os.utime(os.path.join(store.DIR, 'mm.lock'), None)
+    except Exception:                                      # noqa: BLE001
+        pass
 
 
 def _alive(pid):
@@ -427,6 +460,7 @@ def main(loop=False):
                 print(f'   СВЕРКА: призраков {len(m["ghost"])}, '
                       f'сирот {len(m["orphan"])} '
                       f'(у нас {m["our_count"]}, на бирже {m["live_count"]})')
+            _touch_lock()
             if not loop:
                 return out
 
