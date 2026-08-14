@@ -160,7 +160,18 @@ def scan(budget=None, limit=None, pages=30, min_volume=None,
         ask_usd = sum(size * (1 - price) for price, size in live['asks'])
         if bid_usd < min_depth or ask_usd < min_depth:
             continue
-        balance = min(bid_usd, ask_usd) / max(bid_usd, ask_usd, 1e-9)
+        # ПЕРЕКОС МЕРЯЕТСЯ В КОНТРАКТАХ, А НЕ В ДЕНЬГАХ. В деньгах он врёт по
+        # построению: при РАВНОЙ глубине в контрактах бид на цене 0.90 стоит
+        # $900, а аск — $100, и книга выглядит перекошенной девятикратно, хотя
+        # она идеально симметрична. Так отбраковывался КАЖДЫЙ рынок дороже 0.80
+        # и дешевле 0.20 — независимо от того, что в нём на самом деле.
+        #
+        # Глубина по-прежнему считается в деньгах: там вопрос «сколько стоит
+        # эта сторона», и ответ на него денежный. Перекос спрашивает другое —
+        # «одинаково ли готовы покупать и продавать», и это про контракты.
+        bid_lots = sum(size for _, size in live['bids'])
+        ask_lots = sum(size for _, size in live['asks'])
+        balance = min(bid_lots, ask_lots) / max(bid_lots, ask_lots, 1e-9)
         if balance < min_balance:
             continue
 
@@ -172,9 +183,12 @@ def scan(budget=None, limit=None, pages=30, min_volume=None,
         # Узкий спред не изъян рынка, а отсутствие места для нас: при спреде в
         # один тик заработать нечего, а встать можно только за очередь из 152
         # контрактов по медиане.
+        # ОДНОТИКОВЫЕ РЫНКИ БОЛЬШЕ НЕ ОТБРАСЫВАЮТСЯ ЗДЕСЬ. Прежде отсев шёл по
+        # ширине спреда, и это была ошибка: замер по 53 рынкам показал, что у
+        # шести ожидание меньше часа, медиана 23 минуты, и почти все они как
+        # раз однотиковые. Спред узок там потому, что торгуют. Решение теперь
+        # принимает время ожидания — ниже, после замера потока.
         ticks = int(round(top['spread'] / row['tick'])) if row['tick'] > 0 else 0
-        if ticks < params.MM_MIN_TICKS_TO_STEP_IN:
-            continue
 
         size = max(row['order_min'], params.MM_MIN_ORDER_SIZE)
         cost = quote_cost(size, top['mid'])
@@ -195,9 +209,21 @@ def scan(budget=None, limit=None, pages=30, min_volume=None,
         })
         good.append(row)
 
+    # НИЖНЕГО ПОРОГА ПО ДОЛЕ СПРЕДА БОЛЬШЕ НЕТ. Он отбраковывал дорогие рынки:
+    # спред в восемь тиков при цене 0.80 составляет всего 1% от неё, и рынок с
+    # ожиданием в СЕМЬ МИНУТ и доходом $0.25 в час отсеивался как «узкий».
+    # Достаточно требовать, чтобы после нашего шага что-то оставалось, — это
+    # проверяет our_gain ниже.
+    #
+    # Верхний порог остаётся: слишком широкий спред означает, что рынок не
+    # знает цены, и исполнят нас там ровно тогда, когда узнает.
+    good = [r for r in good if r['spread_share'] <= params.MM_MAX_SPREAD_SHARE]
+    good = measure_wait(good, books, limit=limit * 3)
+    # ОТСЕВ ПО ВРЕМЕНИ, А НЕ ПО ШИРИНЕ СПРЕДА. Рынок, где круг занимает сутки,
+    # бесполезен при любом спреде: деньги стоят, а разрешение приближается.
     good = [r for r in good
-            if r['spread_share'] >= params.MM_MIN_SPREAD_SHARE
-            and r['spread_share'] <= params.MM_MAX_SPREAD_SHARE]
+            if r['wait_hours'] <= params.MM_MAX_WAIT_HOURS
+            and r['our_gain'] > 0]
 
     # ПОРЯДОК ПО ДЕНЬГАМ В ЧАС, а не по обороту и не по ширине спреда.
     #
@@ -214,9 +240,120 @@ def scan(budget=None, limit=None, pages=30, min_volume=None,
     #
     # Заработок — произведение того и другого. Меряем частоту по ЛЕНТЕ, а не
     # по обороту, и ставим наверх рынки с наибольшим ожидаемым доходом в час.
-    good = measure_activity(good, limit=limit * 2)
     good.sort(key=lambda r: -r['usd_per_hour'])
-    return _cap_per_event(good)[:limit]
+    good = _cap_per_event(good)[:limit]
+    # РАЗМЕР ПО ПОТОКУ, А НЕ ПЯТЁРКА. Рынков после отсева остаётся немного, и с
+    # жёсткой пятёркой из сотни долларов работали тридцать: остальное стояло.
+    # Поток мерится в контрактах в час; берём его долю, чтобы заявка успевала
+    # исполниться, а не висела остатком.
+    for row in good:
+        row['size'] = size_for(row, budget)
+        row['cost'] = round(quote_cost(row['size'], row['price']), 2)
+        row['usd_per_hour'] = round(
+            row['size'] * row['our_gain'] / row['wait_hours'], 5)             if row['wait_hours'] not in (0, float('inf')) else 0.0
+    return good
+
+
+def size_for(row, budget):
+    """
+    Размер заявки от ПОТОКА рынка, с тремя потолками.
+
+    Пятёрка на всё подряд оставляла деньги без дела: после отсева по времени
+    остаётся горстка рынков, и на них уходило $30 из ста. Поток при этом
+    измерен и известен — по нему и считаем.
+
+    ТРИ ПОТОЛКА, КАЖДЫЙ ОТ СВОЕЙ БЕДЫ. Доля потока: больше, чем рынок
+    пропускает, взять нельзя — остаток заявки простоит и исказит наш же замер
+    ожидания. Доля счёта: один рынок не должен решать судьбу счёта. Доля
+    стакана: быть большей частью книги значит двигать цену собой.
+    """
+    flow = min(float(row.get('flow_in') or 0), float(row.get('flow_out') or 0))
+    by_flow = flow * params.MM_FLOW_HOURS
+    by_money = budget * params.MM_MAX_MARKET_SHARE
+    by_book = min(float(row.get('bid_usd') or 0),
+                  float(row.get('ask_usd') or 0)) * params.MM_MAX_BOOK_SHARE
+    size = min(by_flow, by_money, by_book)
+    floor = max(float(row.get('order_min') or 0), params.MM_MIN_ORDER_SIZE)
+    return floor if size < floor else float(int(size))
+
+
+def depth_at(book, side, price):
+    """Контрактов на этой самой цене — очередь, если встать рядом."""
+    levels = book['bids'] if side == 'bid' else book['asks']
+    return sum(size for lvl, size in levels if abs(lvl - price) < 1e-9)
+
+
+def measure_wait(rows, books, limit=None):
+    """
+    Сколько ЖДАТЬ исполнения — вот что решает, а не ширина спреда.
+
+    СОБСТВЕННАЯ ОШИБКА, ИСПРАВЛЕННАЯ ЗАМЕРОМ. Рынки со спредом в один тик
+    отбрасывались на том основании, что впереди стоит 152 контракта по медиане.
+    Длина очереди мерилась на МЕДЛЕННЫХ рынках и была перенесена на все.
+
+    Очередь важна не длиной, а временем. Замер по 53 рынкам: у шести ожидание
+    меньше часа, медиана 23 минуты, и почти все они — как раз однотиковые.
+    «Will Alexandria Ocasio-Cortez win...»: очередь 9 контрактов при потоке 530
+    в час, то есть ОДНА МИНУТА. Такой рынок мы выбрасывали.
+
+    Спред узок там именно потому, что торгуют, — и там же очередь рассасывается.
+
+        время до исполнения = (очередь + наш размер) / поток
+
+    Формула одна на оба случая. Шагнув внутрь, мы создаём новый уровень, где
+    очередь равна нулю, и ждём только собственный размер. Встав на лучшую цену,
+    ждём ещё и всех, кто пришёл раньше.
+    """
+    day = 24 * 3600
+    now = time.time()
+    for row in rows[:int(limit)] if limit else rows:
+        live = books.get(str(row['token_id']))
+        trades = book_mod.tape(row['condition_id'], limit=500) or []
+        mine = [t for t in trades
+                if t.get('asset') == row['token_id'] and now - t['ts'] < day]
+        span = max((max(t['ts'] for t in mine)
+                    - min(t['ts'] for t in mine)) / 3600, 0.5) if mine else 1.0
+        top = row.get('top') or (book_mod.top(live) if live else None)
+        if not top or not live:
+            row['wait_hours'] = float('inf')
+            continue
+        sells = [t for t in mine
+                 if t['side'] == 'SELL' and t['price'] <= top['bid'] + 1e-9]
+        buys = [t for t in mine
+                if t['side'] == 'BUY' and t['price'] >= top['ask'] - 1e-9]
+        flow_in = sum(t['size'] for t in sells) / span
+        flow_out = sum(t['size'] for t in buys) / span
+        size = row.get('size') or params.MM_MIN_ORDER_SIZE
+        ticks = int(round(top['spread'] / row['tick'])) if row['tick'] > 0 else 0
+
+        # ШАГ ВНУТРЬ ИЛИ В ОЧЕРЕДЬ — выбирается тем, что быстрее окупается.
+        # Шагнув, мы отдаём два тика, зато встаём первыми; встав в очередь,
+        # берём весь спред, но ждём всех, кто пришёл раньше.
+        if ticks >= params.MM_MIN_TICKS_TO_STEP_IN:
+            queue_in = queue_out = 0.0
+            gain = top['spread'] - 2 * row['tick']
+        else:
+            queue_in = depth_at(live, 'bid', top['bid'])
+            queue_out = depth_at(live, 'ask', top['ask'])
+            gain = top['spread']
+
+        wait_in = (queue_in + size) / flow_in if flow_in > 0 else float('inf')
+        wait_out = (queue_out + size) / flow_out if flow_out > 0 else float('inf')
+        row['step_inside'] = ticks >= params.MM_MIN_TICKS_TO_STEP_IN
+        row['flow_in'] = round(flow_in, 1)
+        row['flow_out'] = round(flow_out, 1)
+        row['wait_hours'] = round(wait_in + wait_out, 3)
+        row['our_gain'] = round(max(gain, 0.0), 6)
+        # Круг требует ДВУХ исполнений, поэтому ждать приходится дважды.
+        row['usd_per_hour'] = round(
+            size * row['our_gain'] / row['wait_hours'], 5) \
+            if row['wait_hours'] not in (0, float('inf')) else 0.0
+    for row in rows:
+        row.setdefault('wait_hours', float('inf'))
+        row.setdefault('usd_per_hour', 0.0)
+        row.setdefault('our_gain', 0.0)
+        row.setdefault('step_inside', False)
+    return rows
 
 
 def measure_activity(rows, limit=None):

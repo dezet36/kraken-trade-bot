@@ -21,6 +21,7 @@
 import json
 import os
 import sys
+import time
 from datetime import datetime, timedelta, timezone
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -61,7 +62,8 @@ class TestQuoteCost:
 
 class TestScanLooksAtTheRealBook:
 
-    def _scan(self, monkeypatch, markets, budget=100, book=None):
+    def _scan(self, monkeypatch, markets, budget=100, book=None,
+              trades=None):
         pages = [markets, []]
         monkeypatch.setattr(selector.client, '_get',
                             lambda url: pages.pop(0) if pages else [])
@@ -75,13 +77,39 @@ class TestScanLooksAtTheRealBook:
         monkeypatch.setattr(selector.book_mod, 'fetch_many',
                             lambda tokens: {str(t): (book or default)
                                             for t in tokens})
+        # ЛЕНТА ПОДСТАВЛЯЕТСЯ ТОЖЕ: отбор считает время ожидания, а без ленты
+        # поток равен нулю и ждать пришлось бы вечно. Даём поток по обеим
+        # сторонам, чтобы проверялись именно фильтры стакана, а не отсутствие
+        # сделок.
+        now = int(time.time())
+        flow = ([{'price': 0.49, 'size': 500.0, 'side': 'SELL',
+                  'asset': 'TOKEN', 'ts': now - 600},
+                 {'price': 0.52, 'size': 500.0, 'side': 'BUY',
+                  'asset': 'TOKEN', 'ts': now - 300}] if trades is None
+                else trades)
+        monkeypatch.setattr(selector.book_mod, 'tape',
+                            lambda cid, limit=500: list(flow))
         return selector.scan(budget=budget, pages=2)
 
     def test_two_sided_book_is_accepted(self, monkeypatch):
         rows = self._scan(monkeypatch, [_market()])
         assert len(rows) == 1
-        assert rows[0]['size'] == 5, 'размер минимальный, допустимый биржей'
-        assert rows[0]['cost'] == pytest.approx(5.0)
+        # Размер считается от ПОТОКА, поэтому на живом рынке он больше пятёрки.
+        # Стоимость по-прежнему равна размеру: двусторонняя котировка берёт p
+        # за покупку и (1-p) за продажу, в сумме единицу при любой цене.
+        assert rows[0]['size'] >= 5
+        assert rows[0]['cost'] == pytest.approx(rows[0]['size'])
+
+    def test_quiet_market_falls_back_to_the_exchange_minimum(self, monkeypatch):
+        """Слабый поток не даёт ставить меньше, чем разрешает биржа."""
+        now = int(time.time())
+        thin = [{'price': 0.49, 'size': 1.0, 'side': 'SELL',
+                 'asset': 'TOKEN', 'ts': now - 3600},
+                {'price': 0.52, 'size': 1.0, 'side': 'BUY',
+                 'asset': 'TOKEN', 'ts': now - 1800}]
+        rows = self._scan(monkeypatch, [_market()], trades=thin)
+        if rows:
+            assert rows[0]['size'] == 5
 
     def test_empty_bid_side_is_rejected(self, monkeypatch):
         """
@@ -210,3 +238,151 @@ class TestAllocationSpreadsRisk:
         # Половина спреда на вложенное: 0.1 / 2 × $100 = $5 за полный оборот.
         assert plan['ceiling_per_round_usd'] == pytest.approx(5.0)
         assert 'expected' not in str(plan), 'слово «ожидаемый» здесь неуместно'
+
+
+class TestWaitTimeDecides:
+    """
+    Время ожидания решает, а не ширина спреда. Исправление собственной ошибки.
+
+    Однотиковые рынки отбрасывались на том основании, что впереди стоит 152
+    контракта по медиане. Длина мерилась на МЕДЛЕННЫХ рынках и переносилась на
+    все. Замер по 53 рынкам: у шести ожидание меньше часа при медиане 23
+    минуты, и почти все они однотиковые. «Will Alexandria Ocasio-Cortez win...»
+    — очередь 9 контрактов при потоке 530 в час, то есть ОДНА МИНУТА.
+
+    Спред узок там именно потому, что торгуют, и там же очередь рассасывается.
+    """
+
+    def _book(self, bid=0.49, ask=0.50, size=100.0):
+        return {'bids': [(bid, size)], 'asks': [(ask, size)]}
+
+    def _rows(self, book, flow_size, tick=0.01):
+        """
+        Цены ленты берутся ИЗ СТАКАНА, а не назначаются числом.
+
+        Первая версия ставила 0.49 и 0.50 при биде 0.40: продажа по 0.49 нашу
+        заявку на 0.40 не исполняет, и поток выходил нулевым. Ошибка была в
+        фикстуре, а не в коде — но нашлась она только потому, что код ответил
+        «ждать вечно» вместо того, чтобы промолчать.
+        """
+        now = int(time.time())
+        top = selector.book_mod.top(book)
+        return ([{'token_id': 'T', 'condition_id': 'C', 'tick': tick,
+                  'size': 5.0, 'top': top}],
+                [{'price': top['bid'], 'size': flow_size, 'side': 'SELL',
+                  'asset': 'T', 'ts': now - 3600},
+                 {'price': top['ask'], 'size': flow_size, 'side': 'BUY',
+                  'asset': 'T', 'ts': now - 1800}])
+
+    def test_fast_market_with_a_queue_is_kept(self, monkeypatch):
+        """Очередь в 100 контрактов при потоке 1000 в час — это шесть минут."""
+        book = self._book(size=100.0)
+        rows, tape = self._rows(book, flow_size=1000.0)
+        monkeypatch.setattr(selector.book_mod, 'tape',
+                            lambda cid, limit=500: tape)
+        got = selector.measure_wait(rows, {'T': book})
+        assert got[0]['wait_hours'] < 1.0
+        assert not got[0]['step_inside'], 'один тик — встаём в очередь'
+
+    def test_slow_market_with_the_same_queue_is_rejected(self, monkeypatch):
+        """
+        Та же очередь при потоке в 2 контракта в час — это сутки.
+
+        Один и тот же стакан даёт противоположный ответ в зависимости от
+        потока. Именно поэтому мерить длину очереди в отрыве от скорости
+        бессмысленно.
+        """
+        book = self._book(size=100.0)
+        rows, tape = self._rows(book, flow_size=2.0)
+        monkeypatch.setattr(selector.book_mod, 'tape',
+                            lambda cid, limit=500: tape)
+        got = selector.measure_wait(rows, {'T': book})
+        assert got[0]['wait_hours'] > params.MM_MAX_WAIT_HOURS
+
+    def test_wide_spread_steps_inside_and_waits_only_for_itself(self, monkeypatch):
+        """Шагнув внутрь, ждём только собственный размер: очередь нулевая."""
+        book = {'bids': [(0.40, 5000.0)], 'asks': [(0.45, 5000.0)]}
+        rows, tape = self._rows(book, flow_size=500.0)
+        monkeypatch.setattr(selector.book_mod, 'tape',
+                            lambda cid, limit=500: tape)
+        got = selector.measure_wait(rows, {'T': book})
+        assert got[0]['step_inside'] is True
+        assert got[0]['wait_hours'] < 0.1, 'чужая очередь нас не задерживает'
+
+    def test_market_without_flow_waits_forever(self, monkeypatch):
+        monkeypatch.setattr(selector.book_mod, 'tape', lambda cid, limit=500: [])
+        book = self._book()
+        rows, _ = self._rows(book, flow_size=0.0)
+        got = selector.measure_wait(rows, {'T': book})
+        assert got[0]['wait_hours'] == float('inf')
+
+
+class TestBalanceIsMeasuredInContracts:
+    """
+    Перекос сторон меряется в КОНТРАКТАХ. В деньгах он врёт по построению.
+
+    При равной глубине в контрактах бид на цене 0.90 стоит $900, а аск $100:
+    книга выглядит перекошенной девятикратно, будучи идеально симметричной.
+    Так отбраковывался каждый рынок дороже 0.80 и дешевле 0.20 — независимо от
+    того, что в нём происходит.
+
+    Глубина при этом по-прежнему считается в деньгах, и это не противоречие:
+    глубина спрашивает «сколько стоит эта сторона», перекос — «одинаково ли
+    готовы покупать и продавать».
+    """
+
+    def _scan(self, monkeypatch, book):
+        pages = [[_market()], []]
+        monkeypatch.setattr(selector.client, '_get',
+                            lambda url: pages.pop(0) if pages else [])
+        monkeypatch.setattr(selector.params, 'PAUSE', 0)
+        monkeypatch.setattr(selector.book_mod, 'fetch_many',
+                            lambda tokens: {str(t): book for t in tokens})
+        now = int(time.time())
+        top = selector.book_mod.top(book)
+        monkeypatch.setattr(selector.book_mod, 'tape', lambda cid, limit=500: [
+            {'price': top['bid'], 'size': 5000.0, 'side': 'SELL',
+             'asset': 'TOKEN', 'ts': now - 3600},
+            {'price': top['ask'], 'size': 5000.0, 'side': 'BUY',
+             'asset': 'TOKEN', 'ts': now - 1800}])
+        return selector.scan(budget=100, pages=2)
+
+    def test_expensive_symmetric_book_is_kept(self, monkeypatch):
+        """
+        Дорогой рынок с СИММЕТРИЧНОЙ книгой обязан проходить.
+
+        Прежде он отбраковывался всегда: $900 против $100 при равных
+        контрактах. Так терялись лучшие рынки — один из них ждал исполнения
+        семь минут и давал $0.25 в час.
+        """
+        book = {'bids': [(0.88, 2000.0)], 'asks': [(0.91, 2000.0)]}
+        assert len(self._scan(monkeypatch, book)) == 1
+
+    def test_truly_one_sided_book_is_still_rejected(self, monkeypatch):
+        """Настоящий перекос — в контрактах — по-прежнему отсекается."""
+        book = {'bids': [(0.88, 20.0)], 'asks': [(0.91, 20000.0)]}
+        assert self._scan(monkeypatch, book) == []
+
+
+class TestCheapSpreadIsNotRejectedForBeingRelativelyNarrow:
+
+    def test_high_priced_market_with_small_relative_spread_is_kept(
+            self, monkeypatch):
+        """
+        Спред в восемь тиков при цене 0.80 — это 1% от неё, и прежде рынок
+        отсеивался как «узкий». Решать должно время ожидания, а не проценты.
+        """
+        book = {'bids': [(0.80, 3000.0)], 'asks': [(0.88, 3000.0)]}
+        pages = [[_market()], []]
+        monkeypatch.setattr(selector.client, '_get',
+                            lambda url: pages.pop(0) if pages else [])
+        monkeypatch.setattr(selector.params, 'PAUSE', 0)
+        monkeypatch.setattr(selector.book_mod, 'fetch_many',
+                            lambda tokens: {str(t): book for t in tokens})
+        now = int(time.time())
+        monkeypatch.setattr(selector.book_mod, 'tape', lambda cid, limit=500: [
+            {'price': 0.80, 'size': 9000.0, 'side': 'SELL',
+             'asset': 'TOKEN', 'ts': now - 3600},
+            {'price': 0.88, 'size': 9000.0, 'side': 'BUY',
+             'asset': 'TOKEN', 'ts': now - 1800}])
+        assert len(selector.scan(budget=100, pages=2)) == 1
