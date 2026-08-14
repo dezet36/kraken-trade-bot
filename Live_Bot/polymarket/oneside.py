@@ -176,8 +176,9 @@ def measure_two_way(rows, limit=None):
     now = time.time()
     for row in rows[:int(limit)] if limit else rows:
         trades = book_mod.tape(row['condition_id'], limit=500) or []
-        mine = [t for t in trades
-                if t.get('asset') == row['token_id'] and now - t['ts'] < day]
+        mine = [t for t in selector.as_yes(trades, row['token_id'],
+                                          row.get('token_no'))
+                if now - t['ts'] < day]
         top, tick = row['top'], row['tick']
         entry = round(top['bid'] + tick, 10)
         exit_price = round(entry + tick, 10)

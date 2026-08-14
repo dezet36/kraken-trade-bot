@@ -386,3 +386,106 @@ class TestCheapSpreadIsNotRejectedForBeingRelativelyNarrow:
             {'price': 0.88, 'size': 9000.0, 'side': 'BUY',
              'asset': 'TOKEN', 'ts': now - 1800}])
         assert len(selector.scan(budget=100, pages=2)) == 1
+
+
+class TestBothTokensCount:
+    """
+    Сделки ОБОИХ токенов приводятся к нашей стороне.
+
+    ЗДЕСЬ ПРЯТАЛАСЬ САМАЯ КРУПНАЯ ОШИБКА ЗАМЕРА. У бинарного рынка два токена,
+    и покупка «нет» по цене q экономически есть продажа «да» по цене (1-q).
+    Считая сделки только своего токена, отбор видел меньшую часть потока:
+
+        «Will Nigel Farage win at least 80%» — 25 продаж «да» в нашем счёте
+        против 363 настоящих, потому что 338 покупок «нет» не считались вовсе.
+
+    Из-за этого 276 рынков из 327 объявлялись «без потока с одной стороны».
+    Отбор считал мёртвыми ровно те рынки, где торговля шла через встречный
+    токен, — и выбрасывал их.
+    """
+
+    def _t(self, asset, side, price, size=10.0):
+        return {'asset': asset, 'side': side, 'price': price, 'size': size,
+                'ts': 1}
+
+    def test_buying_no_is_selling_yes(self):
+        got = selector.as_yes([self._t('NO', 'BUY', 0.70)], 'YES', 'NO')
+        assert len(got) == 1
+        assert got[0]['side'] == 'SELL'
+        assert got[0]['price'] == pytest.approx(0.30)
+
+    def test_selling_no_is_buying_yes(self):
+        got = selector.as_yes([self._t('NO', 'SELL', 0.75)], 'YES', 'NO')
+        assert got[0]['side'] == 'BUY'
+        assert got[0]['price'] == pytest.approx(0.25)
+
+    def test_our_own_token_passes_through_untouched(self):
+        row = self._t('YES', 'BUY', 0.30)
+        got = selector.as_yes([row], 'YES', 'NO')
+        assert got[0]['side'] == 'BUY' and got[0]['price'] == 0.30
+
+    def test_size_is_not_mirrored(self):
+        """Контракт «нет» и контракт «да» — одна и та же единица."""
+        got = selector.as_yes([self._t('NO', 'BUY', 0.70, size=42.0)],
+                              'YES', 'NO')
+        assert got[0]['size'] == 42.0
+
+    def test_foreign_asset_is_ignored(self):
+        assert selector.as_yes([self._t('ЧУЖОЙ', 'BUY', 0.5)], 'YES', 'NO') == []
+
+    def test_market_without_a_second_token_still_works(self):
+        got = selector.as_yes([self._t('YES', 'BUY', 0.3),
+                               self._t('NO', 'BUY', 0.7)], 'YES', None)
+        assert len(got) == 1, 'без второго токена считаем только свой'
+
+    def test_one_way_flow_becomes_two_way_after_the_fix(self):
+        """
+        Ровно тот случай, из-за которого рынки признавались мёртвыми: по
+        нашему токену идут только продажи, а покупки — через встречный.
+        """
+        trades = [self._t('YES', 'SELL', 0.30), self._t('YES', 'SELL', 0.30),
+                  self._t('NO', 'SELL', 0.68), self._t('NO', 'SELL', 0.68)]
+        got = selector.as_yes(trades, 'YES', 'NO')
+        assert {t['side'] for t in got} == {'BUY', 'SELL'}
+
+
+class TestWaitFollowsTheSize:
+    """
+    Ожидание пересчитывается под ОКОНЧАТЕЛЬНЫЙ размер заявки.
+
+    Ошибка, пойманная на себе: размер поднимался с 5 до 34 контрактов по
+    потоку, а ожидание оставалось посчитанным от пятёрки. Доход выходил
+    завышенным ровно во столько же раз — получалось, что 34 контракта
+    исполняются за две минуты при потоке 68 контрактов в час.
+
+    Потолок дохода после этой правки упал с $3 202 в месяц до правдоподобного.
+    Число было красивым и неверным.
+    """
+
+    def _row(self, size, flow=100.0, queue=0.0, gain=0.02):
+        return {'size': size, 'flow_in': flow, 'flow_out': flow,
+                'queue_in': queue, 'queue_out': queue, 'our_gain': gain}
+
+    def test_bigger_order_waits_longer(self):
+        small = selector._recompute_wait(self._row(5))['wait_hours']
+        big = selector._recompute_wait(self._row(50))['wait_hours']
+        assert big > small
+
+    def test_ten_times_the_size_is_not_ten_times_the_income(self):
+        """
+        Удесятерив заявку, мы не удесятеряем доход: ждать придётся дольше.
+        Именно это и терялось, когда время не пересчитывалось.
+        """
+        small = selector._recompute_wait(self._row(5))['usd_per_hour']
+        big = selector._recompute_wait(self._row(50))['usd_per_hour']
+        assert big < small * 10
+
+    def test_wait_matches_the_flow_it_needs(self):
+        """Пятьдесят контрактов при потоке сто в час — полчаса на сторону."""
+        got = selector._recompute_wait(self._row(50, flow=100.0))
+        assert got['wait_hours'] == pytest.approx(1.0)
+
+    def test_no_flow_means_no_income(self):
+        got = selector._recompute_wait(self._row(5, flow=0.0))
+        assert got['wait_hours'] == float('inf')
+        assert got['usd_per_hour'] == 0.0

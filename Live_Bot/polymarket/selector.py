@@ -107,6 +107,7 @@ def _candidates(pages, min_volume, price_lo, price_hi):
             rows.append({
                 'id': m.get('id'), 'question': m.get('question'),
                 'condition_id': m.get('conditionId'), 'token_id': tokens[0],
+                'token_no': tokens[1] if len(tokens) > 1 else None,
                 'tick': float(m.get('orderPriceMinTickSize') or 0.001),
                 'order_min': float(m.get('orderMinSize') or 5),
                 'rewards_daily': rewards_daily(m),
@@ -218,7 +219,7 @@ def scan(budget=None, limit=None, pages=30, min_volume=None,
     # Верхний порог остаётся: слишком широкий спред означает, что рынок не
     # знает цены, и исполнят нас там ровно тогда, когда узнает.
     good = [r for r in good if r['spread_share'] <= params.MM_MAX_SPREAD_SHARE]
-    good = measure_wait(good, books, limit=limit * 3)
+    good = measure_wait(good, books)
     # ОТСЕВ ПО ВРЕМЕНИ, А НЕ ПО ШИРИНЕ СПРЕДА. Рынок, где круг занимает сутки,
     # бесполезен при любом спреде: деньги стоят, а разрешение приближается.
     good = [r for r in good
@@ -249,9 +250,28 @@ def scan(budget=None, limit=None, pages=30, min_volume=None,
     for row in good:
         row['size'] = size_for(row, budget)
         row['cost'] = round(quote_cost(row['size'], row['price']), 2)
-        row['usd_per_hour'] = round(
-            row['size'] * row['our_gain'] / row['wait_hours'], 5)             if row['wait_hours'] not in (0, float('inf')) else 0.0
+        # ВРЕМЯ ПЕРЕСЧИТЫВАЕТСЯ ПОД НОВЫЙ РАЗМЕР. Пойманная на себе ошибка:
+        # размер поднимался с 5 до 34 контрактов, а ожидание оставалось от
+        # пятёрки — и доход выходил завышенным ровно во столько же раз.
+        # Большую заявку рынку надо дольше выбирать; иначе выходило, что
+        # тридцать четыре контракта исполняются за две минуты при потоке в
+        # шестьдесят восемь контрактов в час.
+        _recompute_wait(row)
     return good
+
+
+def _recompute_wait(row):
+    """Ожидание и доход под окончательный размер заявки."""
+    size = float(row['size'])
+    flow_in = float(row.get('flow_in') or 0)
+    flow_out = float(row.get('flow_out') or 0)
+    wait_in = ((row.get('queue_in', 0) + size) / flow_in
+               if flow_in > 0 else float('inf'))
+    wait_out = ((row.get('queue_out', 0) + size) / flow_out
+                if flow_out > 0 else float('inf'))
+    row['wait_hours'] = round(wait_in + wait_out, 3)
+    row['usd_per_hour'] = round(size * row['our_gain'] / row['wait_hours'], 5)         if row['wait_hours'] not in (0, float('inf')) else 0.0
+    return row
 
 
 def size_for(row, budget):
@@ -275,6 +295,36 @@ def size_for(row, budget):
     size = min(by_flow, by_money, by_book)
     floor = max(float(row.get('order_min') or 0), params.MM_MIN_ORDER_SIZE)
     return floor if size < floor else float(int(size))
+
+
+def as_yes(trades, token_yes, token_no):
+    """
+    Сделки ОБОИХ токенов, приведённые к нашей стороне.
+
+    ЗДЕСЬ ПРЯТАЛАСЬ САМАЯ КРУПНАЯ ОШИБКА ЗАМЕРА. У бинарного рынка два токена,
+    и покупка «нет» по цене q экономически есть продажа «да» по цене (1-q).
+    Считая сделки только своего токена, мы видели меньшую часть потока:
+
+        «Will Nigel Farage win at least 80%» — 25 продаж «да» в нашем счёте
+        против 363 настоящих, потому что 338 покупок «нет» мы не считали вовсе.
+
+    Из-за этого 276 рынков из 327 объявлялись «без потока с одной стороны» и
+    выбрасывались. Отбор считал мёртвыми ровно те рынки, где торговля шла
+    через встречный токен.
+
+    Цена зеркалится, сторона переворачивается. Размер остаётся: контракт «нет»
+    и контракт «да» — одна и та же единица.
+    """
+    out = []
+    for trade in trades or []:
+        asset = trade.get('asset')
+        if asset == token_yes:
+            out.append(trade)
+        elif token_no and asset == token_no:
+            out.append({**trade,
+                        'price': round(1.0 - float(trade['price']), 10),
+                        'side': 'SELL' if trade['side'] == 'BUY' else 'BUY'})
+    return out
 
 
 def depth_at(book, side, price):
@@ -306,11 +356,18 @@ def measure_wait(rows, books, limit=None):
     """
     day = 24 * 3600
     now = time.time()
-    for row in rows[:int(limit)] if limit else rows:
+    # ЛЕНТЫ БЕРУТСЯ РАЗОМ, И ЭТО ВОПРОС ОХВАТА, А НЕ СКОРОСТИ. Поодиночке
+    # девятьсот рынков занимали семь минут, поэтому мерились первые сто
+    # восемьдесят — а какие в них попадут, решал порядок выдачи биржи.
+    # Ликвидные, но непопулярные рынки лежат в хвосте любой выдачи: мы их не
+    # отвергали, мы до них не доходили. Теперь доходим до всех.
+    subset = rows[:int(limit)] if limit else rows
+    tapes = book_mod.tape_many([r['condition_id'] for r in subset])
+    for row in subset:
         live = books.get(str(row['token_id']))
-        trades = book_mod.tape(row['condition_id'], limit=500) or []
-        mine = [t for t in trades
-                if t.get('asset') == row['token_id'] and now - t['ts'] < day]
+        trades = tapes.get(row['condition_id']) or []
+        mine = [t for t in as_yes(trades, row['token_id'], row.get('token_no'))
+                if now - t['ts'] < day]
         span = max((max(t['ts'] for t in mine)
                     - min(t['ts'] for t in mine)) / 3600, 0.5) if mine else 1.0
         top = row.get('top') or (book_mod.top(live) if live else None)
@@ -342,6 +399,10 @@ def measure_wait(rows, books, limit=None):
         row['step_inside'] = ticks >= params.MM_MIN_TICKS_TO_STEP_IN
         row['flow_in'] = round(flow_in, 1)
         row['flow_out'] = round(flow_out, 1)
+        # Очереди сохраняются, потому что время придётся пересчитать: размер
+        # заявки выбирается ПОЗЖЕ, а ждать большую заявку дольше.
+        row['queue_in'] = round(queue_in, 1)
+        row['queue_out'] = round(queue_out, 1)
         row['wait_hours'] = round(wait_in + wait_out, 3)
         row['our_gain'] = round(max(gain, 0.0), 6)
         # Круг требует ДВУХ исполнений, поэтому ждать приходится дважды.

@@ -31,6 +31,7 @@
 import json
 import time
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 
 from . import params
 
@@ -234,6 +235,39 @@ def would_fill(side, price, queue_ahead, trades, token_id=None):
             return {'filled': True, 'ts': t['ts'], 'consumed': seen,
                     'queue_ahead': need}
     return {'filled': False, 'ts': None, 'consumed': seen, 'queue_ahead': need}
+
+
+def tape_many(condition_ids, limit=500, workers=None):
+    """
+    Ленты многих рынков разом. Здесь решается ОХВАТ, а не скорость.
+
+    ЧТО БЫЛО НЕ ТАК. Один запрос ленты идёт 0.46 секунды, и последовательно
+    девятьсот рынков заняли бы семь минут. Поэтому отбор мерил время ожидания
+    только у первых ста восьмидесяти — а КАКИЕ именно попадут в эти сто
+    восемьдесят, решал порядок выдачи биржи, то есть ничто.
+
+    Так терялась ровно та часть поля, ради которой всё затевалось: ликвидные,
+    но непопулярные рынки лежат в хвосте любой выдачи по обороту или
+    известности. Мы их не отвергали — мы до них не доходили.
+
+    Полтора десятка потоков превращают семь минут в полминуты, и мерить можно
+    всех. Больше потоков не берём: площадка отвечает отказом, и вместо охвата
+    получилась бы его видимость с пустыми лентами.
+    """
+    ids = [c for c in dict.fromkeys(condition_ids) if c]
+    if not ids:
+        return {}
+    workers = int(workers or params.TAPE_WORKERS)
+    out = {}
+
+    def one(condition_id):
+        return condition_id, tape(condition_id, limit=limit)
+
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        for condition_id, rows in pool.map(one, ids):
+            if rows is not None:
+                out[condition_id] = rows
+    return out
 
 
 def fetch_many(token_ids, chunk=50):
