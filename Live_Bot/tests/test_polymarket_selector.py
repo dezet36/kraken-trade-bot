@@ -1,21 +1,24 @@
 """
-Отбор рынков под размер капитала. Здесь живёт защита от главной ловушки.
+Отбор рынков для котирования. Здесь живёт защита от главной ловушки разбора.
 
-ЛОВУШКА, РАДИ КОТОРОЙ ЭТОТ МОДУЛЬ И ПОЯВИЛСЯ. Награды платятся на 788 рынках,
-$5 976 в день. Естественный ход — идти туда, где награда велика относительно
-стоящей ликвидности: доля в пуле будет наибольшей. Проверка показала, что так
-выбираются ПУСТЫЕ рынки: бидов на $2, асков на $15, спред 0.889.
+ЛОВУШКА ВСПЛЫВАЛА ТРИЖДЫ, И ВСЯКИЙ РАЗ ПО-НОВОМУ. Как только рынок отбирался
+по одному числу, наверх поднимались ПУСТЫЕ книги:
 
-Награда там не разобрана не потому, что её не заметили. Чтобы её получить, надо
-стоять в пределах 3.5-5.5 цента от середины, а в рынке со спредом 0.889 это
-значит выставить узкую котировку туда, где никто не торгует. Первый же, кому
-что-то понадобится, снимет нас по своей цене — и на сотне долларов это конец
-счёта, а не неприятность.
+    по награде к ликвидности   бидов на $2,  асков на $15,     спред 0.889
+    по относительному спреду   бидов на $0,  асков на $11 849, спред 200%
+    по ширине спреда           бид 0.14 против аска 0.70 — никто не котирует
+                               теснее не по щедрости, а потому что исход неясен
 
-Поэтому главный тест здесь — что рынок с широким спредом ОТСЕИВАЕТСЯ, каким бы
-привлекательным ни выглядел по награде.
+Второй случай особенно поучителен. Дешёвый лонгшот НИКТО не хочет покупать по
+два цента, зато многие хотят продать. Наш бид оказался бы единственным: нас
+исполнят немедленно, и мы получим ровно тот хвост дешёвых позиций, на котором
+разобранный кошелёк держит переоценку -$8 564 при 22% позиций в плюсе.
+
+Отсюда все проверки ниже: отбор смотрит НАСТОЯЩИЙ стакан, требует денег с обеих
+сторон и меряет глубину в долларах, а не в контрактах.
 """
 
+import json
 import os
 import sys
 
@@ -27,124 +30,142 @@ import pytest  # noqa: E402
 from polymarket import params, selector  # noqa: E402
 
 
-def _market(daily=10.0, liquidity=5000.0, min_size=20, price=0.5,
-            spread=0.01, max_spread=4.5):
-    import json as _json
+def _market(daily=10.0, liquidity=5000.0, price=0.5, spread=0.02,
+            volume=100_000, order_min=5):
     return {
         'id': 'M', 'question': 'вопрос', 'conditionId': 'C',
-        'clobTokenIds': _json.dumps(['TOKEN']),
-        'outcomePrices': _json.dumps([str(price), str(round(1 - price, 4))]),
+        'clobTokenIds': json.dumps(['TOKEN']),
+        'outcomePrices': json.dumps([str(price), str(round(1 - price, 4))]),
         'clobRewards': [{'rewardsDailyRate': daily}],
-        'rewardsMinSize': min_size, 'rewardsMaxSpread': max_spread,
-        'liquidity': liquidity, 'spread': spread,
-        'orderPriceMinTickSize': 0.01, 'endDate': '2027-01-01T00:00:00Z',
+        'rewardsMinSize': 20, 'rewardsMaxSpread': 4.5,
+        'liquidity': liquidity, 'spread': spread, 'volume': volume,
+        'orderMinSize': order_min, 'orderPriceMinTickSize': 0.01,
+        'endDate': '2027-01-01T00:00:00Z',
     }
 
 
 class TestQuoteCost:
 
-    def test_both_sides_are_counted(self):
+    def test_both_sides_together_equal_the_size(self):
         """
-        Двусторонняя котировка требует капитала на ОБЕ стороны.
+        Двусторонняя котировка стоит РОВНО размер, при любой цене.
 
-        Покупка стоит p за контракт, продажа — (1-p): продавать надо то, чего у
-        нас нет, и биржа держит залог. Считать одну сторону значило бы вдвое
-        занизить потребность и обнаружить это на первом отказе.
+        Покупка берёт p за контракт, продажа — (1-p): продавать надо то, чего у
+        нас нет. В сумме единица. Отсюда и вся арифметика малого счёта: пять
+        контрактов стоят $5, и сотня долларов — это двадцать рынков, а не пять.
         """
-        assert selector.quote_cost(100, 0.5) == pytest.approx(100.0)
-        assert selector.quote_cost(100, 0.05) == pytest.approx(100.0)
-        assert selector.quote_cost(20, 0.9) == pytest.approx(20.0)
+        for price in (0.02, 0.1, 0.5, 0.9):
+            assert selector.quote_cost(5, price) == pytest.approx(5.0)
 
 
-class TestScanRejectsTheTrap:
+class TestScanLooksAtTheRealBook:
 
-    def _scan(self, monkeypatch, markets, budget=100):
+    def _scan(self, monkeypatch, markets, budget=100, book=None):
         pages = [markets, []]
         monkeypatch.setattr(selector.client, '_get',
                             lambda url: pages.pop(0) if pages else [])
         monkeypatch.setattr(selector.params, 'PAUSE', 0)
-        monkeypatch.setattr(selector.params, 'MM_MIN_LIQUIDITY', 1000)
+        # Стакан подставляется: отбор смотрит настоящую книгу, и без неё ни
+        # один рынок не проходит — именно этого мы и добивались.
+        default = {'bids': [(0.49, 2000.0)], 'asks': [(0.51, 2000.0)]}
+        monkeypatch.setattr(selector.book_mod, 'fetch_many',
+                            lambda tokens: {str(t): (book or default)
+                                            for t in tokens})
         return selector.scan(budget=budget, pages=2)
 
-    def test_wide_spread_market_is_rejected(self, monkeypatch):
-        """
-        Спред шире порога награды — рынок не берём, как бы ни манила награда.
-
-        Это ровно та ловушка: чтобы попасть в зачёт, пришлось бы встать узко
-        там, где никто не торгует, и первый же встречный снял бы нас по своей
-        цене.
-        """
-        rich_but_dead = _market(daily=500.0, liquidity=2000.0, spread=0.889)
-        assert self._scan(monkeypatch, [rich_but_dead]) == []
-
-    def test_tight_spread_market_is_accepted(self, monkeypatch):
-        """Спред уже порога — встать у лучшей цены безопасно и зачётно."""
-        rows = self._scan(monkeypatch, [_market(spread=0.01, max_spread=4.5)])
+    def test_two_sided_book_is_accepted(self, monkeypatch):
+        rows = self._scan(monkeypatch, [_market()])
         assert len(rows) == 1
+        assert rows[0]['size'] == 5, 'размер минимальный, допустимый биржей'
+        assert rows[0]['cost'] == pytest.approx(5.0)
 
-    def test_empty_book_is_rejected(self, monkeypatch):
-        """Пустой стакан — не возможность, а предупреждение."""
-        assert self._scan(monkeypatch, [_market(liquidity=50.0)]) == []
-
-    def test_market_without_rewards_is_rejected(self, monkeypatch):
-        assert self._scan(monkeypatch, [_market(daily=0.0)]) == []
-
-    def test_quote_too_expensive_for_the_budget_is_rejected(self, monkeypatch):
+    def test_empty_bid_side_is_rejected(self, monkeypatch):
         """
-        Минимальный размер не по карману — рынок бесполезен.
+        Односторонний стакан отсеивается, каким бы заманчивым ни выглядел.
 
-        Меньше порога заявка не считается вовсе: мы стояли бы в стакане, неся
-        риск, и не получали за это ничего.
+        Дешёвый лонгшот с бидами на ноль и асками на одиннадцать тысяч — не
+        возможность: наш бид окажется единственным, его снимут немедленно, и
+        останется хвост, идущий к нулю.
         """
-        assert self._scan(monkeypatch, [_market(min_size=500)], budget=100) == []
+        one_sided = {'bids': [(0.02, 100.0)], 'asks': [(0.30, 400_000.0)]}
+        assert self._scan(monkeypatch, [_market()], book=one_sided) == []
 
-    def test_expected_daily_falls_as_the_pool_gets_crowded(self, monkeypatch):
-        """Чем больше уже стоит в стакане, тем меньше наша доля."""
-        thin = self._scan(monkeypatch, [_market(liquidity=2000.0)])[0]
-        monkeypatch.undo()
-        crowded = self._scan(monkeypatch, [_market(liquidity=200000.0)])[0]
-        assert thin['expected_daily'] > crowded['expected_daily']
+    def test_depth_is_measured_in_money_not_contracts(self, monkeypatch):
+        """Тысяча контрактов по 0.002 — это два доллара, а не глубина."""
+        thin = {'bids': [(0.002, 1000.0)], 'asks': [(0.004, 1000.0)]}
+        assert self._scan(monkeypatch, [_market()], book=thin) == []
+
+    def test_market_without_rewards_is_still_taken(self, monkeypatch):
+        """
+        Награда НЕ обязательна: доход даёт спред, награда идёт сверх.
+
+        Прежняя версия брала только рынки с наградой и оставляла пять штук на
+        сотню долларов. Разобранный кошелёк живёт не этим: 1 495 сделок в сутки
+        на разнице цен.
+        """
+        assert len(self._scan(monkeypatch, [_market(daily=0.0)])) == 1
+
+    def test_market_without_turnover_is_rejected(self, monkeypatch):
+        """Стакан можно нарисовать; оборот — нет."""
+        assert self._scan(monkeypatch, [_market(volume=10)]) == []
+
+    def test_too_narrow_spread_is_rejected(self, monkeypatch):
+        """Спред в один тик не покроет даже проскальзывания."""
+        narrow = {'bids': [(0.4999, 5000.0)], 'asks': [(0.5001, 5000.0)]}
+        assert self._scan(monkeypatch, [_market()], book=narrow) == []
+
+    def test_too_wide_spread_is_rejected(self, monkeypatch):
+        """
+        Слишком широкий спред — тоже отказ, и это не осторожность.
+
+        Бид 0.14 против аска 0.70 означает, что никто не котирует теснее не по
+        щедрости, а потому что исход неясен. Обе наши заявки исполнятся там
+        только тогда, когда кому-то станет ясно, куда идёт цена.
+        """
+        wide = {'bids': [(0.14, 3000.0)], 'asks': [(0.70, 3000.0)]}
+        assert self._scan(monkeypatch, [_market()], book=wide) == []
 
 
 class TestAllocationSpreadsRisk:
 
-    def _rows(self, count, cost_each=20.0, daily=0.1):
-        return [{'id': str(i), 'cost': cost_each, 'expected_daily': daily,
+    def _rows(self, count, cost_each=5.0, spread_share=0.1):
+        return [{'id': str(i), 'cost': cost_each, 'spread_share': spread_share,
+                 'rewards_daily': 0.0, 'liquidity': 1000.0,
                  'question': f'рынок {i}'} for i in range(count)]
 
-    def test_one_market_never_takes_the_whole_budget(self, monkeypatch):
+    def test_budget_spreads_over_many_markets(self, monkeypatch):
         """
-        Предел на рынок — следствие арифметики малого счёта, а не осторожности.
+        Сотня долларов при пяти контрактах — это двадцать рынков.
 
-        Без него сотня долларов уходила целиком в один рынок: самый доходный по
-        оценке и единственный. Одно исполнение — и половина счёта в позиции,
-        которую нечем нести и нечем усреднить.
+        Ровно то, чего требовала исходная задача: работать на многих мелких
+        событиях, а не на нескольких крупных.
         """
+        monkeypatch.setattr(params, 'MM_MAX_MARKET_SHARE', 0.34)
+        plan = selector.allocate(self._rows(50, cost_each=5.0), budget=100)
+        assert len(plan['markets']) == 20
+        assert plan['used'] == pytest.approx(100.0)
+
+    def test_one_market_never_takes_the_whole_budget(self, monkeypatch):
         monkeypatch.setattr(params, 'MM_MAX_MARKET_SHARE', 0.34)
         plan = selector.allocate(self._rows(1, cost_each=100.0), budget=100)
         assert plan['markets'] == []
-        assert plan['used'] == 0.0
-
-    def test_budget_is_spread_over_several_markets(self, monkeypatch):
-        monkeypatch.setattr(params, 'MM_MAX_MARKET_SHARE', 0.34)
-        plan = selector.allocate(self._rows(10, cost_each=20.0), budget=100)
-        assert len(plan['markets']) == 5
-        assert plan['used'] == pytest.approx(100.0)
 
     def test_budget_is_never_exceeded(self, monkeypatch):
         monkeypatch.setattr(params, 'MM_MAX_MARKET_SHARE', 1.0)
-        plan = selector.allocate(self._rows(10, cost_each=30.0), budget=100)
+        plan = selector.allocate(self._rows(40, cost_each=30.0), budget=100)
         assert plan['used'] <= 100.0
 
-    def test_expected_income_is_reported_not_hidden(self, monkeypatch):
+    def test_ceiling_is_reported_as_a_ceiling(self, monkeypatch):
         """
-        Ожидаемый доход показывается числом.
+        Потолок показывается числом и называется потолком.
 
-        При сотне долларов он измеряется единицами долларов в месяц, и знать
-        это надо заранее, а не обнаружить через месяц.
+        Он предполагает, что обе стороны исполнились по нашим ценам и ни разу
+        не против нас. Назвать его ожиданием значило бы выдать арифметику за
+        обещание — ни того, ни другого мы пока не наблюдали.
         """
-        monkeypatch.setattr(params, 'MM_MAX_MARKET_SHARE', 0.34)
-        plan = selector.allocate(self._rows(5, cost_each=20.0, daily=0.05),
+        monkeypatch.setattr(params, 'MM_MAX_MARKET_SHARE', 1.0)
+        plan = selector.allocate(self._rows(20, cost_each=5.0, spread_share=0.1),
                                  budget=100)
-        assert plan['expected_daily'] == pytest.approx(0.25)
-        assert plan['expected_monthly'] == pytest.approx(7.5)
+        # Половина спреда на вложенное: 0.1 / 2 × $100 = $5 за полный оборот.
+        assert plan['ceiling_per_round_usd'] == pytest.approx(5.0)
+        assert 'expected' not in str(plan), 'слово «ожидаемый» здесь неуместно'

@@ -1,75 +1,65 @@
 """
-Отбор рынков под РАЗМЕР КАПИТАЛА. Для сотни долларов и для тысяч он разный.
+Отбор рынков: где стоять двусторонней котировкой и зарабатывать на спреде.
 
-ПОЧЕМУ ЭТО ОТДЕЛЬНЫЙ МОДУЛЬ. При большом счёте доход даёт захват спреда: чем
-больше исполнений, тем лучше. При сотне долларов всё наоборот — исполнения
-приносят запас, который нечем нести: одна позиция в $20 это пятая часть счёта,
-и один неудачный вход съедает месячную награду. Значит и рынки нужны другие, и
-критерий другой.
+ЗАДАЧА ИМЕННО ТАКАЯ, а не «собрать награды». Разобранный кошелёк @planktonxd
+делает 1 495 сделок в сутки по $1.79, входит мейкером (комиссии 0.13% против
+4.7% у тейкера) и берёт 1.5 цента на контракте — это 16% от цены покупки. Он
+работает в мелких событиях, где есть стакан, и живёт разницей цен, а не наградой.
+Награда, если рынок под неё подходит, идёт сверх и в отборе не главная.
 
-ЧТО ИЗМЕРЕНО И ЧТО ИЗ ЭТОГО СЛЕДУЕТ
+ТРИ РАЗА ЗА РАЗБОР ОДНА И ТА ЖЕ ЛОВУШКА, поэтому она здесь описана подробно.
+Всякий раз, когда рынок отбирался по одному числу — награде, отношению награды
+к ликвидности, относительному спреду, — наверх всплывали ПУСТЫЕ книги:
 
-Награды платятся на 788 рынках, всего $5 976 в день. Соблазн — идти туда, где
-награда велика относительно уже стоящей ликвидности: доля в пуле будет
-наибольшей. Проверка показала, что так выбираются ПУСТЫЕ рынки:
+    награда к ликвидности      бидов на $2,  асков на $15,  спред 0.889
+    относительный спред        бидов на $0,  асков на $11 849, спред 200%
 
-    Conrad Kramer leave OpenAI    бидов на $2,  асков на $15,  спред 0.889
-    Trump pardon Daniel Penny     бидов на $48, асков на $89,  спред 0.100
+Второй случай особенно поучителен. Дешёвый лонгшот НИКТО не хочет покупать по
+два цента, зато многие хотят продать. Наш бид оказался бы единственным: нас
+исполнят немедленно, и мы получим ровно тот хвост дешёвых позиций, на котором
+разобранный кошелёк держит переоценку -$8 564 при 22% позиций в плюсе.
 
-Награда там не разобрана не потому, что её не заметили. Чтобы её получить, надо
-стоять в пределах 3.5-5.5 цента от середины, а в рынке со спредом 0.889 это
-значит выставить узкую котировку туда, где никто не торгует. Первый же, кому
-что-то понадобится, снимет нас по своей цене — и на сотне долларов это конец.
+Отсюда правило: рынок отбирается по СТАКАНУ, а не по полю ликвидности, и обе
+стороны должны быть живыми. Поле `liquidity` считает всё вместе и односторонний
+стакан от двустороннего не отличает.
 
-Отсюда главное условие отбора: СПРЕД РЫНКА УЖЕ ПОРОГА НАГРАДЫ. Тогда встать у
-лучшей цены безопасно, и эта же цена сама попадает в зачёт. Таких рынков 667 из
-796 — то есть отсев отбрасывает именно ловушку, а не возможности.
+ЧТО ОСТАЁТСЯ ПОСЛЕ ОТСЕВА. Из 1 282 кандидатов книга есть у 600, глубина не
+меньше $100 по обеим сторонам — у 410, без сильного перекоса — у 82. Медианный
+спред у этих 82 составляет 6% от ставки за круг. Высокие проценты, которые
+манили раньше, жили ровно в односторонних книгах.
 
-ЧЕСТНАЯ ОЦЕНКА ДОХОДА. При $100 в рынках с непустым стаканом выходит около
-$0.39 в день. Это $12 в месяц. Годовых получается красиво, абсолютные числа
-маленькие, и путать одно с другим не надо: доля в пуле оценивается по
-ликвидности стакана, а зачитывается по очкам, которых мы не видим. Оценка
-может ошибаться в обе стороны, и проверить её можно только живыми деньгами.
+РАЗМЕР ЗАЯВКИ — МИНИМАЛЬНЫЙ ДОПУСТИМЫЙ, ПЯТЬ КОНТРАКТОВ. Порог 20-200 относится
+только к награде, а для заработка на спреде он не нужен. Двусторонняя котировка
+в пять контрактов стоит РОВНО $5 при любой цене: покупка берёт 5p, продажа
+5(1-p), в сумме пятёрка. Значит сотня долларов — это двадцать рынков, а не пять.
 """
 
 import json
 import time
 
+from . import book as book_mod
 from . import client, params
 
 
-def _rewards_daily(market):
+def rewards_daily(market):
     return sum(float(r.get('rewardsDailyRate') or 0)
                for r in (market.get('clobRewards') or []))
 
 
-def quote_cost(min_size, price):
+def quote_cost(size, price):
     """
-    Во что обходится минимальная ДВУСТОРОННЯЯ котировка.
+    Во что обходится двусторонняя котировка.
 
-    Обе стороны требуют капитала: покупка стоит p за контракт, продажа — (1-p),
-    потому что продавать надо то, чего у нас нет, и биржа держит залог. Считать
-    только одну сторону значило бы вдвое занизить потребность и обнаружить это
-    на первом же отказе.
+    Обе стороны требуют денег: покупка стоит p за контракт, продажа — (1-p),
+    потому что продавать надо то, чего у нас нет. В сумме получается ровно
+    размер, независимо от цены. Считать одну сторону значило бы вдвое занизить
+    потребность и обнаружить это на первом отказе биржи.
     """
-    return float(min_size) * float(price) + float(min_size) * (1 - float(price))
+    return float(size) * float(price) + float(size) * (1 - float(price))
 
 
-def scan(budget=None, limit=None, pages=25):
-    """
-    Рынки, пригодные для нашего капитала, от лучших к худшим.
-
-    Условия, и каждое из измеренного:
-
-        награда платится                иначе стоять незачем
-        спред УЖЕ порога награды        иначе qualifying-котировка означает
-                                        узкую цену в мёртвом рынке
-        минимальная котировка по карману  иначе не попадём в зачёт вовсе
-        стакан не пустой                 пустой стакан — не возможность, а
-                                        предупреждение
-    """
-    budget = float(budget if budget is not None else params.bankroll_for('MM'))
-    limit = limit or params.MM_MARKETS
+def _candidates(pages, min_volume, price_lo, price_hi):
+    """Первичный отсев по метаданным. Стакан здесь ещё не смотрим."""
     rows = []
     for page in range(pages):
         chunk = client._get(f'{params.GAMMA}/markets?limit=100'
@@ -77,74 +67,140 @@ def scan(budget=None, limit=None, pages=25):
         if not isinstance(chunk, list) or not chunk:
             break
         for m in chunk:
-            daily = _rewards_daily(m)
-            if daily <= 0:
-                continue
-            max_spread = float(m.get('rewardsMaxSpread') or 0)
-            spread = float(m.get('spread') or 0)
-            if max_spread <= 0 or not 0 < spread <= max_spread / 100:
-                continue
-            liquidity = float(m.get('liquidity') or 0)
-            if liquidity < params.MM_MIN_LIQUIDITY:
-                continue
             try:
                 tokens = json.loads(m.get('clobTokenIds') or '[]')
                 price = float(json.loads(m.get('outcomePrices') or '[]')[0])
             except Exception:                              # noqa: BLE001
                 continue
-            if not tokens or not 0 < price < 1:
+            spread = float(m.get('spread') or 0)
+            if not tokens or spread <= 0:
                 continue
-            min_size = float(m.get('rewardsMinSize') or 0)
-            cost = quote_cost(min_size, price)
-            if cost <= 0 or cost > budget:
+            if not price_lo < price < price_hi:
+                continue
+            if float(m.get('volume') or 0) < min_volume:
                 continue
             rows.append({
                 'id': m.get('id'), 'question': m.get('question'),
                 'condition_id': m.get('conditionId'), 'token_id': tokens[0],
                 'tick': float(m.get('orderPriceMinTickSize') or 0.001),
-                'rewards_daily': daily, 'rewardsMinSize': min_size,
-                'rewardsMaxSpread': max_spread, 'liquidity': liquidity,
-                'spread': spread, 'price': price, 'cost': cost,
+                'order_min': float(m.get('orderMinSize') or 5),
+                'rewards_daily': rewards_daily(m),
+                'rewardsMinSize': m.get('rewardsMinSize'),
+                'rewardsMaxSpread': m.get('rewardsMaxSpread'),
+                'liquidity': float(m.get('liquidity') or 0),
+                'volume': float(m.get('volume') or 0),
+                'meta_price': price, 'meta_spread': spread,
                 'end': m.get('endDate'), 'fee_type': m.get('feeType'),
-                # Ожидаемая доля пула, если встанем минимальным размером.
-                # Оценка ГРУБАЯ: доля считается по деньгам в стакане, а зачёт
-                # идёт по очкам, которых мы не видим. Годится для порядка
-                # величин и для сравнения рынков между собой, не более.
-                'expected_daily': daily * cost / max(liquidity + cost, 1),
             })
         time.sleep(params.PAUSE)
-    rows.sort(key=lambda r: -r['expected_daily'])
-    return rows[:limit]
+    return rows
+
+
+def scan(budget=None, limit=None, pages=30, min_volume=None,
+         min_depth=None, min_balance=None):
+    """
+    Рынки, где двусторонняя котировка имеет смысл. Лучшие первыми.
+
+    Отсев идёт в два шага, и второй обязателен: сначала метаданные, потом
+    НАСТОЯЩИЙ стакан. Пропустив второй, мы отобрали бы односторонние книги, где
+    наша заявка окажется единственной со своей стороны и её снимут немедленно.
+    """
+    budget = float(budget if budget is not None else params.bankroll_for('MM'))
+    limit = limit or params.MM_MARKETS
+    min_volume = float(min_volume if min_volume is not None
+                       else params.MM_MIN_VOLUME)
+    min_depth = float(min_depth if min_depth is not None
+                      else params.MM_MIN_SIDE_DEPTH)
+    min_balance = float(min_balance if min_balance is not None
+                        else params.MM_MIN_BALANCE)
+
+    rows = _candidates(pages, min_volume, params.MM_MIN_PRICE,
+                       params.MM_MAX_PRICE)
+    if not rows:
+        return []
+
+    books = book_mod.fetch_many([r['token_id'] for r in rows])
+    good = []
+    for row in rows:
+        live = books.get(str(row['token_id']))
+        if not live or not live['bids'] or not live['asks']:
+            continue
+        top = book_mod.top(live)
+        if not top or top['mid'] is None or top['spread'] is None:
+            continue
+        # ГЛУБИНА СЧИТАЕТСЯ В ДЕНЬГАХ, А НЕ В КОНТРАКТАХ. Тысяча контрактов по
+        # цене 0.002 — это два доллара, и называть такую сторону живой нельзя.
+        bid_usd = sum(size * price for price, size in live['bids'])
+        ask_usd = sum(size * (1 - price) for price, size in live['asks'])
+        if bid_usd < min_depth or ask_usd < min_depth:
+            continue
+        balance = min(bid_usd, ask_usd) / max(bid_usd, ask_usd, 1e-9)
+        if balance < min_balance:
+            continue
+
+        size = max(row['order_min'], params.MM_MIN_ORDER_SIZE)
+        cost = quote_cost(size, top['mid'])
+        if cost <= 0 or cost > budget:
+            continue
+
+        row.update({
+            'price': top['mid'], 'spread': top['spread'],
+            'bid_usd': round(bid_usd, 2), 'ask_usd': round(ask_usd, 2),
+            'balance': round(balance, 3), 'size': size, 'cost': round(cost, 2),
+            # Спред в долях цены. Это НЕ ожидаемый доход, и называть его так
+            # было бы обманом: полный спред достаётся лишь тому, у кого
+            # исполнились ОБЕ стороны, а широкий спред как раз и означает, что
+            # никто не хочет котировать теснее. Обе наши заявки в таком рынке
+            # исполнятся только тогда, когда кому-то станет ясно, куда идёт
+            # цена, — то есть против нас.
+            'spread_share': round(top['spread'] / max(top['mid'], 1e-9), 4),
+        })
+        good.append(row)
+
+    # ПОРЯДОК ПО АКТИВНОСТИ, А НЕ ПО ШИРИНЕ СПРЕДА. Доход мейкера даёт частота
+    # оборотов, а не ширина: у разобранного кошелька 1 495 сделок в сутки по
+    # $1.79, и живёт он этим. Сортировка по спреду поднимала наверх рынки, где
+    # спред 0.56 при цене 0.42 — то есть бид 0.14 против аска 0.70. Там никто
+    # не котирует теснее не по щедрости, а потому что исход неясен.
+    #
+    # Слишком узкий спред тоже не годится: если он равен тику, круг не покроет
+    # даже проскальзывания. Поэтому порог снизу, а дальше — оборот.
+    good = [r for r in good
+            if r['spread_share'] >= params.MM_MIN_SPREAD_SHARE
+            and r['spread_share'] <= params.MM_MAX_SPREAD_SHARE]
+    good.sort(key=lambda r: -r['volume'])
+    return good[:limit]
 
 
 def allocate(markets, budget=None):
     """
-    Раскладывает бюджет по рынкам, пока он не кончится.
+    Раскладывает бюджет по рынкам. Чем их больше, тем ровнее идёт результат.
 
-    Берутся самые доходные на вложенный доллар. Отдельного «резерва» не
-    оставляется намеренно: запас возникает от исполнений, а не от котировок, и
-    держать деньги простаивающими на случай запаса значит платить за него
-    дважды.
+    ПРЕДЕЛ НА ОДИН РЫНОК обязателен при малом счёте: без него сотня долларов
+    уходила целиком в один рынок, и одно исполнение сажало половину счёта в
+    позицию, которую нечем нести. При размере в пять контрактов ($5 на рынок)
+    сотня расходится на двадцать рынков сама собой, и предел почти не мешает —
+    но он остаётся на случай рынков с крупным минимальным размером.
     """
     budget = float(budget if budget is not None else params.bankroll_for('MM'))
-    # ПРЕДЕЛ НА ОДИН РЫНОК — не осторожность вообще, а следствие арифметики
-    # малого счёта. Без него сотня долларов уходила целиком в один рынок:
-    # самый доходный по оценке, но и единственный. Одно исполнение — и весь
-    # счёт в одной позиции, которую нечем нести и нечем усреднить. Доход при
-    # этом падает не сильно, а риск — во столько раз, во сколько выросло число
-    # рынков.
     cap = budget * params.MM_MAX_MARKET_SHARE
-    chosen, used, expected = [], 0.0, 0.0
+    chosen, used, edge = [], 0.0, 0.0
     for market in markets:
-        if market['cost'] > cap:
-            continue
-        if used + market['cost'] > budget:
+        if market['cost'] > cap or used + market['cost'] > budget:
             continue
         chosen.append(market)
         used += market['cost']
-        expected += market['expected_daily']
-    return {'markets': chosen, 'used': round(used, 2),
-            'free': round(budget - used, 2),
-            'expected_daily': round(expected, 4),
-            'expected_monthly': round(expected * 30, 2),
-            'cap_per_market': round(cap, 2)}
+        edge += market['spread_share'] * market['cost'] / 2
+    rewards = sum(m['rewards_daily'] * m['cost'] / max(m['liquidity'] + m['cost'], 1)
+                  for m in chosen)
+    return {
+        'markets': chosen, 'used': round(used, 2),
+        'free': round(budget - used, 2), 'cap_per_market': round(cap, 2),
+        # ПОТОЛОК дохода за один оборот всех рынков, а не ожидание. Считается
+        # как половина спреда на вложенное — то есть при условии, что обе
+        # стороны исполнились по нашим ценам и ни разу не против нас. Ни того,
+        # ни другого мы пока не наблюдали: бумажный прогон не дал исполнений.
+        'ceiling_per_round_usd': round(edge, 3),
+        'rewards_daily': round(rewards, 3),
+        'rewards_monthly': round(rewards * 30, 2),
+    }

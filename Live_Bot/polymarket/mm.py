@@ -210,10 +210,11 @@ def main(loop=False):
     if LAST_PLAN:
         print(f'вложено ${LAST_PLAN["used"]:,.2f}, свободно ${LAST_PLAN["free"]:,.2f}, '
               f'предел на рынок ${LAST_PLAN["cap_per_market"]:,.2f}')
-        print(f'ожидаемая награда: ${LAST_PLAN["expected_daily"]:.3f} в день, '
-              f'${LAST_PLAN["expected_monthly"]:.2f} в месяц '
-              f'(оценка грубая: доля считается по деньгам в стакане, '
-              f'а зачёт идёт по очкам, которых мы не видим)')
+        print(f'потолок за оборот всех рынков: '
+              f'${LAST_PLAN["ceiling_per_round_usd"]:.2f} — это ПОТОЛОК, а не '
+              f'ожидание: он предполагает, что обе стороны исполнились по '
+              f'нашим ценам и ни разу не против нас')
+        print(f'награда сверх: ${LAST_PLAN["rewards_monthly"]:.2f} в месяц')
     print(f'кошелёк: {"подключён " + str(state["address"]) if state["configured"] else "НЕ подключён"}')
     print(f'режим: {"ЖИВЫЕ ДЕНЬГИ" if live else "бумага"}')
     if state['configured'] and not state['live_enabled']:
