@@ -2702,6 +2702,28 @@ function renderPolymarket() {
       + '</tbody></table></div>';
   }
 
+  /* ОБЕЩАНИЕ МОДЕЛИ ПРОТИВ ДЕЛА. Расчёт ожидания считает стороны
+     независимыми: бид ждёт своего потока, аск своего. На деле они связаны и
+     связаны ПРОТИВ нас — цена ушла вниз, покупку исполнили, продажу нет.
+     Насколько расчёт оптимистичен, показывает только эта сверка. */
+  const tm = PM.timing || {};
+  if (tm.count) {
+    html += '<h3 style="margin:18px 0 8px">Обещание модели против дела</h3>'
+      + '<div class="panel card-pad"><div class="kpis">'
+      + `<div class="kpi"><div class="k">Исполнений сверено</div><div class="v">${tm.count}</div></div>`
+      + `<div class="kpi"><div class="k">Обещано</div><div class="v">${tm.promised_min} мин</div></div>`
+      + `<div class="kpi"><div class="k">Вышло</div><div class="v">${tm.waited_min} мин</div></div>`
+      + `<div class="kpi"><div class="k">Модель оптимистичнее в</div><div class="v" style="color:var(--${tm.measured > 1.5 ? 'bad' : 'good'})">${tm.measured}×</div></div>`
+      + '</div></div>'
+      + '<div class="hint" style="padding:6px 4px">'
+      + (tm.enough
+          ? 'Поправка применяется к расчёту дохода: рынки отбираются по '
+            + 'исправленному числу, а не по обещанному.'
+          : 'Поправка пока НЕ применяется — нужно ещё ' + tm.need
+            + ' исполнений. Несколько наблюдений это шум, а не поправка.')
+      + '</div>';
+  }
+
   /* НЕБЛАГОПРИЯТНЫЙ ОТБОР — число, решающее судьбу затеи. И оговорка к нему,
      без которой оно вводит в заблуждение. */
   const dr = PM.drift || {};

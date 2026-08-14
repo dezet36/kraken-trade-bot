@@ -225,6 +225,65 @@ def _drift_summary(rows):
     }
 
 
+def timing_summary(rows):
+    """
+    Обещание модели против дела: во сколько раз она оптимистична.
+
+    ЗАЧЕМ ЭТО ЧИСЛО ВООБЩЕ ЕСТЬ. Ожидание считается в предположении, что
+    стороны независимы — бид ждёт своего потока, аск своего. На деле они
+    связаны и связаны ПРОТИВ нас: цена ушла вниз, покупку исполнили, продажу
+    нет. Поправка на это не выводится из книги; её можно только измерить.
+
+    Пока исполнений мало, поправка не применяется: пять наблюдений — это шум,
+    а не поправка. Порог намеренно назван в коде, а не подобран на глаз.
+    """
+    good = [r for r in rows or [] if r.get('ratio')]
+    if not good:
+        return {'count': 0, 'factor': 1.0, 'enough': False}
+    ratios = sorted(float(r['ratio']) for r in good)
+    middle = ratios[len(ratios) // 2]
+    promised = sorted(float(r['promised_seconds']) for r in good)
+    waited = sorted(float(r['waited_seconds']) for r in good)
+    enough = len(good) >= MIN_TIMING_SAMPLES
+    return {
+        'count': len(good),
+        'promised_min': round(promised[len(promised) // 2] / 60, 1),
+        'waited_min': round(waited[len(waited) // 2] / 60, 1),
+        'factor': round(middle, 2) if enough else 1.0,
+        'measured': round(middle, 2),
+        'enough': enough,
+        'need': max(0, MIN_TIMING_SAMPLES - len(good)),
+    }
+
+
+# Сколько исполнений нужно, чтобы поправка перестала быть шумом.
+MIN_TIMING_SAMPLES = 20
+
+
+def wait_factor():
+    """
+    Во сколько раз делить расчётный доход. 1.0 — замеров ещё мало.
+
+    Читается из журнала, а не из настройки: поправка должна приходить из дела,
+    а не из чьего-то мнения о деле.
+    """
+    import json
+    import os
+
+    from . import engine
+
+    rows = []
+    try:
+        with open(engine.TIMING, encoding='utf-8') as fh:
+            for line in fh:
+                line = line.strip()
+                if line:
+                    rows.append(json.loads(line))
+    except (OSError, ValueError):
+        return 1.0
+    return float(timing_summary(rows[-200:]).get('factor') or 1.0)
+
+
 def _shadow_summary(rows):
     """
     Модель против биржи: сходится ли бумажный расчёт с настоящими сделками.
@@ -321,6 +380,7 @@ def snapshot(limit_markets=20, limit_fills=30):
     rounds = _round_trips(_tail(engine.FILLS, 400))
 
     drift = _drift_summary(_tail(engine.DRIFT, 200))
+    timing = timing_summary(_tail(engine.TIMING, 200))
     shadow = _shadow_summary(_tail(mm.SHADOW, 200))
 
     # СОСТОЯНИЕ БЕРЁТСЯ У ПОТОКА, А НЕ ПО НАЛИЧИЮ ФАЙЛОВ. Файлы остаются от
@@ -359,6 +419,9 @@ def snapshot(limit_markets=20, limit_fills=30):
         'rounds_gain_usd': round(sum(r['gain_usd'] for r in rounds), 4),
         'drift': drift,
         'shadow': shadow,
+        # Обещание модели против дела. Пока замеров мало, поправка не
+        # применяется — но видно, сколько их и куда они клонят.
+        'timing': timing,
         # Раскладка бюджета: во что вложено и на что рассчитываем. Без неё
         # человек видит «работает» и не знает, чего ждать, а ждать при сотне
         # долларов приходится единиц долларов в месяц — и лучше знать это

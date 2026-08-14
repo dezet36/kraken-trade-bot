@@ -37,6 +37,12 @@ EQUITY = os.path.join(store.DIR, 'mm_equity.jsonl')
 # Снос цены после наших исполнений — то единственное число, которое решает,
 # работает ли затея. Спред известен заранее; неблагоприятный отбор — нет.
 DRIFT = os.path.join(store.DIR, 'mm_drift.jsonl')
+# ОБЕЩАНИЕ МОДЕЛИ ПРОТИВ ДЕЛА. Расчёт ожидания предполагает, что стороны
+# независимы: бид и аск ждут каждый своего потока. На деле они связаны и
+# связаны ПРОТИВ нас — цена ушла вниз, покупку исполнили, продажу нет. Насколько
+# именно расчёт врёт, узнать можно только сверкой обещанного с вышедшим, и
+# другого способа нет: на исторических ценах очереди не существует.
+TIMING = os.path.join(store.DIR, 'mm_timing.jsonl')
 
 
 def _now():
@@ -187,6 +193,7 @@ class PaperMaker:
             cash = -order['price'] * order['size'] if side == 'bid' \
                 else order['price'] * order['size']
             self.state['cash'] += cash
+            self._note_timing(token, side, order, at=verdict['ts'])
             done.append({'at': _stamp(),
                          # ПОМЕТКА ПРОГОНА. Журнал исполнений не чистится при
                          # перезапуске, и записи прежних прогонов дважды едва
@@ -318,6 +325,10 @@ class PaperMaker:
             orders[side] = {
                 'price': price, 'size': quote['size'], 'ts': _now(),
                 'queue': book_mod.depth_ahead(book, side, price),
+                # Обещание модели едет вместе с заявкой: сравнить его с делом
+                # можно только в момент исполнения, а к тому времени план
+                # отбора успевает смениться.
+                'expected_seconds': quote.get('expected_seconds'),
             }
         return orders, replaced
 
@@ -388,9 +399,13 @@ class PaperMaker:
                 else trade['price'] * trade['size']
             self.state['cash'] += cash
             # Заявка, по которой прошло исполнение, у биржи уже закрыта.
+            # ЗАОДНО СВЕРЯЕМ ОБЕЩАНИЕ С ДЕЛОМ. Другого способа узнать, врёт ли
+            # расчёт ожидания, не существует: на исторических ценах очереди нет
+            # вовсе, а бумажная модель отвечает на свой же вопрос.
             for side in ('bid', 'ask'):
                 order = (slot.get('orders') or {}).get(side)
                 if order and order.get('live_id') == trade.get('order_id'):
+                    self._note_timing(trade['token'], side, order)
                     slot['orders'][side] = None
             done.append({'at': _stamp(), 'source': 'exchange',
                          'token': trade['token'], 'side': trade['side'],
@@ -402,6 +417,31 @@ class PaperMaker:
         # дважды, а храниться вечно ему незачем.
         self.state['seen_trades'] = list(seen)[-5000:]
         return done
+
+    def _note_timing(self, token, side, order, at=None):
+        """
+        Кладёт в журнал обещанное время и вышедшее.
+
+        ЧИСЛО, БЕЗ КОТОРОГО ВЕСЬ РАСЧЁТ ОСТАЁТСЯ АРИФМЕТИКОЙ. Ожидание
+        считается в предположении, что стороны НЕЗАВИСИМЫ: бид ждёт своего
+        потока, аск своего. На деле они связаны, и связаны против нас — цена
+        ушла вниз, покупку исполнили, продажу нет. Насколько именно расчёт
+        оптимистичен, показывает только сверка обещанного с вышедшим, и делать
+        её надо на каждом исполнении: их пока единицы, и терять нельзя ни одно.
+        """
+        promised = order.get('expected_seconds')
+        if not promised:
+            return
+        waited = max(0, int(at or _now()) - int(order.get('ts') or _now()))
+        try:
+            store._append(TIMING, {
+                'at': _stamp(), 'token': str(token), 'side': side,
+                'promised_seconds': round(float(promised)),
+                'waited_seconds': waited,
+                'ratio': round(waited / float(promised), 3),
+            })
+        except Exception:                                   # noqa: BLE001
+            pass
 
     def live_order_ids(self):
         """Биржевые номера всех наших заявок — для сверки с биржей."""

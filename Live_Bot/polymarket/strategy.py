@@ -176,7 +176,12 @@ def desired_quote(top, market, position=0.0, max_position=None, book=None):
     # бумаге это не жгло, потому что не исполнялось ни разу; на бирже часть
     # заявок прошла бы, а остальные были бы отвергнуты — и мы узнали бы размер
     # своего плеча по факту, а не заранее.
-    size = max(float(market.get('order_min') or 0),
+    # РАЗМЕР БЕРЁТСЯ ИЗ РАСКЛАДКИ, А НЕ НАЗНАЧАЕТСЯ ЗАНОВО. Здесь стоял
+    # минимум биржи, и он молча перекрывал то, что решила раскладка: она
+    # отводила рынку тринадцать контрактов, а в стакан уходило пять. Числа на
+    # панели и заявки на бирже жили каждое своей жизнью.
+    size = max(float(market.get('size') or 0),
+               float(market.get('order_min') or 0),
                float(params.MM_MIN_ORDER_SIZE))
 
     # Запас упёрся в потолок — котируем ТОЛЬКО сокращающую сторону. Это
@@ -188,6 +193,13 @@ def desired_quote(top, market, position=0.0, max_position=None, book=None):
     elif position <= -cap:
         only = 'bid'
 
+    # Обещанное время круга едет вместе с котировкой — чтобы в момент
+    # исполнения было с чем сравнить вышедшее.
+    promised = market.get('wait_hours')
+    expected = (float(promised) * 3600
+                if promised not in (None, float('inf')) else None)
+
     return {'bid': want_bid, 'ask': want_ask, 'size': size,
             'fair': fair, 'skew': skew, 'spread': round(want_ask - want_bid, 10),
-            'mid': top['mid'], 'only': only, 'reason': ''}
+            'mid': top['mid'], 'only': only, 'expected_seconds': expected,
+            'reason': ''}

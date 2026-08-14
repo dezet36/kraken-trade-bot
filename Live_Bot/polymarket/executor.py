@@ -108,16 +108,85 @@ def _log(row):
     store._append(ORDERS_LOG, row)
 
 
-def place(token_id, side, price, size, day_loss_usd=0.0, tick=0.001):
+def route(side, price, size, holding=0.0, twin_token=None, token_id=None,
+          tick=0.001):
+    """
+    Каким токеном исполнять сторону котировки. Возвращает (токен, сторона, цена).
+
+    ЗДЕСЬ ЖИВЁТ ГЛАВНАЯ ПОЛОМКА ВСЕЙ ЗАТЕИ, И ОНА БЫЛА НЕ В КОДЕ, А В ЕГО
+    ОТСУТСТВИИ. Биржа не даёт продать токен, которого у нас нет. Проверено
+    отправкой настоящей заявки на живом счёте:
+
+        покупка «ДА»  5 по 0.066    принята
+        ПРОДАЖА «ДА»  5 по 0.98     ОТКАЗ: balance 0, order amount 5000000
+        покупка «НЕТ» 5 по 0.334    принята
+
+    То есть КАЖДАЯ наша продажа отвергалась биржей, и на Polymarket стояли
+    только покупки. Бот не был маркет-мейкером вовсе — он был односторонним
+    покупателем, ровно тем, чей разобранный кошелёк держит переоценку -$8 564
+    и ради ухода от которого всё и затевалось.
+
+    ЧИНИТСЯ ЭТО БЕЗ ХИТРОСТЕЙ. У бинарного рынка два токена, и продажа «ДА» по
+    цене A есть покупка «НЕТ» по цене (1-A): один погасится единицей, другой
+    нулём. Обе стороны становятся покупками, обе биржа принимает, а стоимость
+    двусторонней котировки остаётся ровно размером — как и считал quote_cost
+    всё это время. Расчёт предполагал этот путь; в отправке заявок его не было.
+
+    Когда токен У НАС ЕСТЬ, продаём по-настоящему: это дешевле (не требует
+    новых денег) и сразу закрывает круг.
+    """
+    price = float(price)
+    if side == 'bid':
+        # Держим «НЕТ» — продать его выгоднее, чем покупать «ДА»: закрывает
+        # пару и высвобождает деньги вместо того, чтобы занимать новые.
+        if twin_token and holding <= -float(size):
+            return {'token': str(twin_token), 'side': 'SELL',
+                    'price': _mirror(price, tick), 'mirrored': True,
+                    'why': 'продаём встречный токен — он у нас есть'}
+        return {'token': str(token_id), 'side': 'BUY', 'price': price,
+                'mirrored': False, 'why': 'обычная покупка'}
+
+    if holding >= float(size):
+        return {'token': str(token_id), 'side': 'SELL', 'price': price,
+                'mirrored': False, 'why': 'продаём то, что держим'}
+    if twin_token:
+        return {'token': str(twin_token), 'side': 'BUY',
+                'price': _mirror(price, tick), 'mirrored': True,
+                'why': 'продажа через покупку встречного токена'}
+    return {'token': None, 'side': None, 'price': None, 'mirrored': False,
+            'why': 'нечего продавать и нет встречного токена'}
+
+
+def _mirror(price, tick):
+    """Цена встречного токена: (1 - p), прижатая к сетке биржи."""
+    step = float(tick or 0.001)
+    mirrored = 1.0 - float(price)
+    return round(round(mirrored / step) * step, 10)
+
+
+def place(token_id, side, price, size, day_loss_usd=0.0, tick=0.001,
+          twin_token=None, holding=0.0):
     """
     Выставляет лимитную заявку. Возвращает результат словарём.
 
     ТОЛЬКО ЛИМИТНЫЕ И ТОЛЬКО GTC. Рыночная заявка сделала бы нас тейкером — то
     есть заплатила бы комиссию, ради отсутствия которой всё и затевалось: на
     цене 0.05 тейкер отдаёт 4.75% ставки, мейкер ноль.
+
+    twin_token — встречный токен того же рынка. Без него продать можно только
+    то, что уже держим; см. route.
     """
     stamp = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
-    notional = float(price) * float(size)
+
+    plan = route(side, price, size, holding=holding, twin_token=twin_token,
+                 token_id=token_id, tick=tick)
+    if not plan['token']:
+        _log({'at': stamp, 'action': 'REFUSE', 'why': plan['why'],
+              'token': token_id, 'side': side, 'price': price, 'size': size})
+        return {'ok': False, 'why': plan['why']}
+
+    send_token, send_side, send_price = plan['token'], plan['side'], plan['price']
+    notional = float(send_price) * float(size)
 
     allowed, why = can_trade(day_loss_usd)
     if not allowed:
@@ -132,16 +201,18 @@ def place(token_id, side, price, size, day_loss_usd=0.0, tick=0.001):
               'side': side, 'price': price, 'size': size})
         return {'ok': False, 'why': why}
 
-    if not (tick <= price <= 1 - tick):
-        why = f'цена {price} вне диапазона'
+    if not (tick <= send_price <= 1 - tick):
+        why = f'цена {send_price} вне диапазона'
         _log({'at': stamp, 'action': 'REFUSE', 'why': why, 'token': token_id,
               'side': side, 'price': price, 'size': size})
         return {'ok': False, 'why': why}
 
     # ЗАПИСЬ ДО ОТПРАВКИ. Заявка, ушедшая на биржу и не попавшая в журнал из-за
     # обрыва, — это позиция, о которой мы не знаем.
-    _log({'at': stamp, 'action': 'SEND', 'token': token_id, 'side': side,
-          'price': price, 'size': size, 'notional': round(notional, 2)})
+    _log({'at': stamp, 'action': 'SEND', 'token': send_token, 'side': side,
+          'price': send_price, 'size': size, 'notional': round(notional, 2),
+          'mirrored': plan['mirrored'], 'asked_price': price,
+          'route': plan['why']})
     _recent.append(time.time())
 
     try:
@@ -151,19 +222,20 @@ def place(token_id, side, price, size, day_loss_usd=0.0, tick=0.001):
         from py_clob_client_v2.clob_types import OrderArgsV2, OrderType
         api = wallet.client()
         signed = api.create_order(OrderArgsV2(
-            token_id=str(token_id), price=float(price), size=float(size),
-            side='BUY' if side == 'bid' else 'SELL'))
+            token_id=str(send_token), price=float(send_price),
+            size=float(size), side=send_side))
         answer = api.post_order(signed, OrderType.GTC)
     except Exception as exc:                                # noqa: BLE001
-        _log({'at': stamp, 'action': 'ERROR', 'token': token_id,
+        _log({'at': stamp, 'action': 'ERROR', 'token': send_token,
               'why': str(exc)[:200]})
         return {'ok': False, 'why': f'биржа отвергла: {str(exc)[:120]}'}
 
     order_id = (answer or {}).get('orderID') or (answer or {}).get('orderId')
-    _log({'at': stamp, 'action': 'PLACED', 'token': token_id, 'side': side,
-          'price': price, 'size': size, 'order_id': order_id,
-          'answer': str(answer)[:200]})
-    return {'ok': True, 'order_id': order_id, 'answer': answer}
+    _log({'at': stamp, 'action': 'PLACED', 'token': send_token, 'side': side,
+          'price': send_price, 'size': size, 'order_id': order_id,
+          'mirrored': plan['mirrored'], 'answer': str(answer)[:200]})
+    return {'ok': True, 'order_id': order_id, 'answer': answer,
+            'route': plan}
 
 
 def cancel(order_id):

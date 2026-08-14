@@ -162,6 +162,36 @@ def rotate(maker, current, budget=None):
     return keep, dropped
 
 
+def as_our_side(trades, markets):
+    """
+    Сделки встречного токена, приведённые к нашей стороне учёта.
+
+    ЗАЧЕМ ЭТО НУЖНО. Продажа «ДА» уходит на биржу покупкой «НЕТ» — иначе биржа
+    её не примет вовсе. Обратно она приходит сделкой ПО ДРУГОМУ ТОКЕНУ, и без
+    перевода учёт завёл бы вторую позицию вместо того, чтобы сократить первую:
+    два разных токена вместо одного рынка.
+
+    Перевод тот же, что и для ленты: цена зеркалится, сторона переворачивается,
+    размер остаётся. Контракт «нет» и контракт «да» — одна и та же единица.
+    """
+    twins = {}
+    for market in markets or []:
+        twin = market.get('token_no')
+        if twin:
+            twins[str(twin)] = str(market['token_id'])
+    out = []
+    for trade in trades or []:
+        ours = twins.get(str(trade.get('token')))
+        if not ours:
+            out.append(trade)
+            continue
+        out.append({**trade, 'token': ours,
+                    'side': 'ask' if trade['side'] == 'bid' else 'bid',
+                    'price': round(1.0 - float(trade['price']), 10),
+                    'mirrored': True})
+    return out
+
+
 def step(maker, markets, live=False, day_loss=0.0):
     """
     Один проход: стаканы пачкой, исполнения, новые котировки.
@@ -199,6 +229,10 @@ def step(maker, markets, live=False, day_loss=0.0):
     if live:
         got = executor.own_trades()
         if got:
+            # СДЕЛКИ ВСТРЕЧНОГО ТОКЕНА ПЕРЕВОДЯТСЯ В НАШУ СТОРОНУ. Без этого
+            # исполненная продажа приходила бы обратно ПОКУПКОЙ ДРУГОГО токена
+            # и заводила бы вторую позицию вместо сокращения первой.
+            got = as_our_side(got, markets)
             for done in maker.apply_exchange_trades(got):
                 store._append(engine.FILLS, done)
                 fills.append(done)
@@ -307,8 +341,14 @@ def step(maker, markets, live=False, day_loss=0.0):
                 order = (slot.get('orders') or {}).get(side)
                 if not order or order.get('live_id'):
                     continue
+                # ВСТРЕЧНЫЙ ТОКЕН И ЗАПАС ПЕРЕДАЮТСЯ ОБЯЗАТЕЛЬНО. Без них
+                # продажа уходит на биржу как есть — и отвергается, потому
+                # что продавать нечего. Так и было: на Polymarket стояли одни
+                # покупки, а маркет-мейкинга не было вовсе.
                 out = executor.place(token, side, order['price'], order['size'],
-                                     day_loss_usd=day_loss, tick=market['tick'])
+                                     day_loss_usd=day_loss, tick=market['tick'],
+                                     twin_token=market.get('token_no'),
+                                     holding=slot['position'])
                 if out.get('ok'):
                     order['live_id'] = out.get('order_id')
                     sent += 1

@@ -1545,13 +1545,25 @@ class _Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def _send_json(self, payload):
+        """
+        Отдаёт ответ. Ушедший клиент — не ошибка сервера.
+
+        ОБРЫВ СОЕДИНЕНИЯ СЛУЧАЕТСЯ ПОСТОЯННО и не значит ничего: человек ушёл
+        со страницы, закрыл окно, обновил её на середине долгого ответа. Раньше
+        каждый такой случай печатал полную простыню исключения — по двадцать
+        строк на каждое закрытое окно. В журнале это выглядит как поломка
+        сервера, а поломки там нет; настоящие ошибки в этом шуме теряются.
+        """
         body = json.dumps(payload, ensure_ascii=False).encode('utf-8')
-        self.send_response(200)
-        self.send_header('Content-Type', 'application/json; charset=utf-8')
-        self.send_header('Cache-Control', 'no-store')
-        self.send_header('Content-Length', str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
+        try:
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json; charset=utf-8')
+            self.send_header('Cache-Control', 'no-store')
+            self.send_header('Content-Length', str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        except (ConnectionError, BrokenPipeError, OSError):
+            self.close_connection = True
 
     def _save_export(self):
         """
