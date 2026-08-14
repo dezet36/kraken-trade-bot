@@ -34,6 +34,15 @@ import settings_store
 from logger import log
 
 
+def _app_version():
+    """Версия приложения, если её удаётся узнать. Пусто — тоже ответ."""
+    try:
+        import updater_app
+        return updater_app.current_version() or ''
+    except Exception:                              # noqa: BLE001
+        return ''
+
+
 def _controls_allowed():
     """
     Можно ли менять настройки через дашборд.
@@ -1144,6 +1153,20 @@ class _Handler(BaseHTTPRequestHandler):
             self._send_file(export_paths()[1], 'application/x-ndjson; charset=utf-8')
         elif path == '/api/export/save':
             self._save_export()
+        elif path == '/api/whoami':
+            # КТО ДЕРЖИТ ПОРТ. Отвечает только наше приложение, и по ответу его
+            # можно узнать наверняка — в отличие от имени процесса и командной
+            # строки, по которым опознание врёт: запуск из исходников, дочерний
+            # процесс сборщика, служба — всё это выглядит по-разному, а порт
+            # один. Из-за этого обновлённая копия отказывалась закрывать свою же
+            # предыдущую («это не наш бот») и вставала намертво.
+            #
+            # Отдаётся только то, что и так видно снаружи: ничего чувствительного
+            # здесь нет и быть не должно — обработчик доступен без пароля.
+            import os as _os
+            self._send_json({'app': 'kraken-trade-bot',
+                             'pid': _os.getpid(),
+                             'version': _app_version()})
         elif path == '/api/polymarket':
             # Читается из файлов маркет-мейкера, а не из его процесса: он живёт
             # отдельно, и панель не должна ни ждать его, ни падать вместе с ним.

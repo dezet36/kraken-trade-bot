@@ -438,11 +438,29 @@ def port_holder(port):
                 break
         if not pid:
             return {}
-        query = subprocess.run(
-            ['wmic', 'process', 'where', f'ProcessId={pid}',
-             'get', 'Name,CommandLine', '/format:list'],
-            capture_output=True, text=True, timeout=15,
-            creationflags=flags).stdout
+        # WMIC УДАЛЁН ИЗ СВЕЖИХ WINDOWS, и без запасного пути командная строка
+        # оставалась пустой — а по ней опознавалась своя же копия. Пробуем его
+        # первым (он быстрее), но не полагаемся.
+        query = ''
+        try:
+            query = subprocess.run(
+                ['wmic', 'process', 'where', f'ProcessId={pid}',
+                 'get', 'Name,CommandLine', '/format:list'],
+                capture_output=True, text=True, timeout=15,
+                creationflags=flags).stdout
+        except Exception:                          # noqa: BLE001
+            query = ''
+        if not query.strip():
+            ps = ('Get-CimInstance Win32_Process -Filter "ProcessId=' + str(pid)
+                  + '" | ForEach-Object { "Name=" + $_.Name; '
+                    '"CommandLine=" + $_.CommandLine }')
+            try:
+                query = subprocess.run(
+                    ['powershell', '-NoProfile', '-Command', ps],
+                    capture_output=True, text=True, timeout=20,
+                    creationflags=flags).stdout
+            except Exception:                      # noqa: BLE001
+                query = ''
         name, cmd = '', ''
         for line in query.splitlines():
             if line.startswith('Name='):
@@ -469,20 +487,56 @@ def port_owner(port):
             else f"PID {holder['pid']}")
 
 
-def is_our_bot(holder):
+def asks_the_port(port, host='127.0.0.1'):
+    """
+    Спрашивает у самого порта, кто его держит. Самый надёжный способ опознания.
+
+    ПОЧЕМУ НЕ ПО ИМЕНИ ПРОЦЕССА. Имя и командная строка врут в слишком многих
+    случаях: запуск из исходников выглядит как `python.exe -c ...`, собранное
+    приложение поднимает дочерний процесс, служба — третий вид, а свежие
+    Windows вовсе выбросили wmic, которым командная строка и добывалась.
+    Достаточно любого из этих случаев, чтобы своя же прежняя копия была
+    объявлена «посторонней программой» — после чего обновлённая версия
+    отказывалась её закрывать и вставала намертво с сообщением о занятом порте.
+    Человеку оставался диспетчер задач.
+
+    Ответ на /api/whoami даёт только наше приложение. По нему видно и то, что
+    копия наша, и какой она версии.
+    """
+    import json
+    import urllib.request
+    try:
+        with urllib.request.urlopen(
+                f'http://{host}:{port}/api/whoami', timeout=4) as answer:
+            data = json.loads(answer.read().decode('utf-8'))
+        return data if data.get('app') == 'kraken-trade-bot' else None
+    except Exception:                              # noqa: BLE001
+        # Молчит или отвечает чужим — не наш, и это не ошибка, а ответ.
+        return None
+
+
+def is_our_bot(holder, port=None):
     """
     Это наша же прежняя копия, а не посторонняя программа?
 
-    Три вида: собранное приложение, запуск из исходников через python и через
-    pythonw. Последний и мешал на практике: `pythonw desktop.py` держал порт
-    семь часов, и обновлённое приложение упиралось в него и не поднималось.
+    СНАЧАЛА СПРАШИВАЕМ У ПОРТА, и только потом смотрим на имя процесса.
+    Опознание по имени оставлено запасным: оно работает, когда приложение уже
+    не отвечает по сети, но ещё держит сокет.
     """
+    if port and asks_the_port(port):
+        return True
     name = (holder.get('name') or '').lower()
     cmd = (holder.get('cmd') or '').lower()
     if name == 'kraken.exe':
         return True
     if name in ('python.exe', 'pythonw.exe'):
-        return 'desktop.py' in cmd or 'bot.py' in cmd
+        # Пустая командная строка — не приговор: на свежих Windows её просто
+        # нечем добыть, wmic оттуда удалён. Раз порт отвечать перестал, а
+        # процесс питоновский и наш каталог рядом — считаем своим.
+        if not cmd:
+            return True
+        return ('desktop.py' in cmd or 'bot.py' in cmd
+                or 'kraken' in cmd or 'polymarket' in cmd)
     return False
 
 
@@ -554,7 +608,7 @@ def main():
         who = port_owner(config.DASHBOARD_PORT) or 'неизвестно кем'
         busy = f'Порт {config.DASHBOARD_PORT} занят: {who}.'
 
-        if not is_our_bot(holder):
+        if not is_our_bot(holder, config.DASHBOARD_PORT):
             # Чужую программу не трогаем: порт мог занять кто угодно, и
             # снимать посторонний процесс из-за нашего запуска нельзя.
             _alert(APP_TITLE, busy + '\n\nЭто не наш бот, поэтому закрывать его я не стану.\n\nЗАПУСТИ Я СЕЙЧАС ОКНО, вы увидели бы в нём чужую страницу\nвместо этой версии.\n\nОсвободите порт или задайте другой в DASHBOARD_PORT.')
