@@ -252,3 +252,98 @@ class TestDashboardShowsWhatMatters:
         body = html[start:end + 1]
         assert body.count('`') % 2 == 0
         assert body.count("'") % 2 == 0
+
+
+class TestRefusalsExplainWhatToDo:
+    """
+    Отказ называет, ЧТО именно не то, а не только «не подходит».
+
+    «Ключ должен быть 64 знака» верно и бесполезно: человек не знает, что у
+    него в руках другое. Настоящий случай из работы — вставили секретную
+    фразу и три раза подряд получили один и тот же невнятный отказ.
+    """
+
+    def test_seed_phrase_is_named_and_refused(self):
+        """
+        Фразу не принимаем НИКОГДА: она порождает множество ключей и потому
+        опаснее любого из них. Отказ объясняет, где взять ключ.
+        """
+        words = ' '.join(['abandon'] * 12)
+        ok, _, why = connect.check(words)
+        assert ok is False
+        assert 'фраза' in why and 'Phantom' in why
+
+    def test_address_pasted_as_key_is_named(self):
+        ok, _, why = connect.check('0x' + 'a' * 40)
+        assert ok is False and 'АДРЕС' in why
+
+    def test_short_key_says_how_short(self):
+        ok, _, why = connect.check('0x1234')
+        assert ok is False and '6 знаков' in why
+
+
+class TestPairingIsGuessedNotAsked:
+    """
+    Связка «счёт + тип подписи» подбирается, а не спрашивается.
+
+    Человеку неоткуда знать, лежат ли деньги на кошельке или на счёте, который
+    площадка завела при первом входе. Спрашивать об этом значит спрашивать о
+    внутреннем устройстве чужого сервиса.
+    """
+
+    def test_the_pairing_with_money_wins(self, monkeypatch):
+        """
+        Выбирается связка, где ЕСТЬ ДЕНЬГИ: учётные данные площадка выдаёт
+        почти на любую, и по ним верную не отличить, а по остатку отличить
+        можно.
+        """
+        seen = []
+        monkeypatch.setattr(wallet, 'address', lambda: '0x' + 'c' * 40)
+        monkeypatch.setattr(wallet, 'client', lambda force=False: object())
+
+        def balance():
+            seen.append((os.environ['PM_FUNDER'],
+                         os.environ['PM_SIGNATURE_TYPE']))
+            return 42.0 if os.environ['PM_SIGNATURE_TYPE'] == '2' else 0.0
+        monkeypatch.setattr(wallet, 'balance', balance)
+        monkeypatch.delenv('PM_SIGNATURE_TYPE', raising=False)
+        ok, _, why = connect.check(GOOD, funder='0x' + 'd' * 40)
+        assert ok is True
+        assert '42' in why, why
+        assert connect._FOUND['type'] == 2
+
+    def test_empty_account_still_connects_but_says_so(self, monkeypatch):
+        """
+        Нет денег — не отказ: класть их могут после подключения. Но и молчать
+        нельзя, иначе человек узнает о пустом счёте на первой заявке.
+        """
+        monkeypatch.setattr(wallet, 'address', lambda: '0x' + 'c' * 40)
+        monkeypatch.setattr(wallet, 'client', lambda force=False: object())
+        monkeypatch.setattr(wallet, 'balance', lambda: 0.0)
+        monkeypatch.delenv('PM_SIGNATURE_TYPE', raising=False)
+        ok, _, why = connect.check(GOOD)
+        assert ok is True
+        assert 'не видно' in why
+
+    def test_nothing_accepted_points_at_the_settings_page(self, monkeypatch):
+        monkeypatch.setattr(wallet, 'address', lambda: '0x' + 'c' * 40)
+        monkeypatch.setattr(wallet, 'client', lambda force=False: None)
+        monkeypatch.delenv('PM_SIGNATURE_TYPE', raising=False)
+        ok, _, why = connect.check(GOOD)
+        assert ok is False and 'settings' in why
+
+    def test_the_working_pairing_is_saved_not_the_typed_one(self, monkeypatch):
+        """
+        Записывается подобранное, а не введённое: человек мог указать адрес
+        кошелька там, где деньги лежат на счёте площадки.
+        """
+        written = {}
+        import first_run
+        monkeypatch.setattr(first_run, '_write_env', written.update)
+        monkeypatch.setattr(wallet, 'client', lambda force=False: None)
+        monkeypatch.setattr(connect, 'check',
+                            lambda k, f=None: (True, '0xADDR', ''))
+        connect._FOUND.update({'funder': '0xПОДОБРАННЫЙ', 'type': 2})
+        connect.save(GOOD, funder='0x' + 'd' * 40)
+        assert written['PM_FUNDER'] == '0xПОДОБРАННЫЙ'
+        assert written['PM_SIGNATURE_TYPE'] == '2'

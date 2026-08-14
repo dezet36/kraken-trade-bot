@@ -85,7 +85,22 @@ def check(private_key, funder=None):
     """
     key = str(private_key or '').strip()
     if not KEY_RE.match(key):
-        return False, None, 'ключ должен быть 64 знака в шестнадцатеричном виде'
+        # ОТКАЗ ОБЪЯСНЯЕТ, ЧТО ИМЕННО НЕ ТО. «Ключ должен быть 64 знака»
+        # верно, но бесполезно: человек не знает, что у него в руках другое.
+        # Чаще всего вставляют секретную ФРАЗУ — она порождает множество
+        # ключей и потому опаснее любого из них; принимать её мы не станем.
+        if len(key.split()) >= 6:
+            return False, None, (
+                'это секретная фраза, а нужен приватный КЛЮЧ одного адреса. '
+                'Фраза распоряжается всеми кошельками сразу, и хранить её боту '
+                'нельзя. В Phantom: Настройки → Управление аккаунтами → нужный '
+                'аккаунт → Показать приватный ключ. Берите ключ EVM-аккаунта, '
+                'не Solana')
+        if ADDRESS_RE.match(key):
+            return False, None, ('это АДРЕС, а не ключ: адрес короче вдвое и '
+                                 'подписывать им нельзя')
+        return False, None, ('ключ должен быть 64 знака из цифр и букв a-f. '
+                             f'Введено {len(key)} знаков')
     if funder and not ADDRESS_RE.match(str(funder).strip()):
         return False, None, 'адрес счёта должен быть вида 0x и 40 знаков'
 
@@ -97,22 +112,53 @@ def check(private_key, funder=None):
         if not address:
             return False, None, 'ключ не удалось прочитать как приватный'
 
-        # Без указанного счёта пробуем адрес самого ключа: так выглядит случай,
-        # когда человек торгует прямо с кошелька, а не через счёт площадки.
-        money_at = str(funder).strip() if funder else address
-        os.environ['PM_FUNDER'] = money_at
+        # ПОДБИРАЕМ СВЯЗКУ ЦЕЛИКОМ, А НЕ ТОЛЬКО ТИП ПОДПИСИ.
+        #
+        # Человеку неоткуда знать, какой у него случай: деньги могут лежать на
+        # самом кошельке, а могут — на счёте, который площадка завела при
+        # первом входе. Спрашивать об этом значит спрашивать о внутреннем
+        # устройстве чужого сервиса.
+        #
+        # Поэтому перебираем сочетания и выбираем то, где ЕСТЬ ДЕНЬГИ: это
+        # единственный признак, который нельзя истолковать двояко. Учётные
+        # данные площадка выдаёт почти на любую связку — по ним верную не
+        # отличить, а по остатку отличить можно.
+        candidates = []
+        for money_at in ([str(funder).strip()] if funder else []) + [address]:
+            for sig in SIGNATURE_TYPES:
+                candidates.append((money_at, sig))
 
         chosen = os.environ.get('PM_SIGNATURE_TYPE')
-        order = [int(chosen)] if chosen else list(SIGNATURE_TYPES)
-        for sig in order:
+        if chosen:
+            candidates = [c for c in candidates if c[1] == int(chosen)]
+
+        works = None
+        for money_at, sig in candidates:
+            os.environ['PM_FUNDER'] = money_at
             os.environ['PM_SIGNATURE_TYPE'] = str(sig)
-            if wallet.client(force=True) is not None:
-                _remember_signature(sig)
-                return True, address, (f'подпись: {SIGNATURE_NAMES[sig]}')
+            if wallet.client(force=True) is None:
+                continue
+            balance = wallet.balance()
+            if balance and balance > 0:
+                _remember(money_at, sig)
+                return True, address, (
+                    f'счёт {money_at[:8]}…{money_at[-4:]}, '
+                    f'на нём ${balance:,.2f} · {SIGNATURE_NAMES[sig]}')
+            if works is None:
+                works = (money_at, sig)
+
+        if works:
+            # Связка принята, но денег на ней не видно. Это НЕ отказ: класть
+            # средства могут после подключения. Но и молчать нельзя — иначе
+            # человек узнает о пустом счёте на первой заявке.
+            _remember(*works)
+            return True, address, (
+                f'подключено ({SIGNATURE_NAMES[works[1]]}), но остатка на счёте '
+                f'не видно. Положите USDC на Polygon и обновите страницу')
         return False, address, (
-            'ключ прочитан, но площадка не приняла ни один тип подписи. '
-            'Обычно это значит, что адрес счёта указан не тот: возьмите его '
-            'на polymarket.com/settings, а не из кошелька')
+            'ключ прочитан, но площадка не приняла ни одну связку. Проверьте '
+            'адрес счёта на polymarket.com/settings — он может отличаться от '
+            'адреса кошелька')
     except Exception as exc:                                # noqa: BLE001
         # СООБЩЕНИЕ БИБЛИОТЕКИ НАРУЖУ НЕ ИДЁТ. Оно способно содержать сам ключ:
         # у некоторых версий он попадает в текст ошибки целиком.
@@ -128,12 +174,13 @@ def check(private_key, funder=None):
         wallet.client(force=True)
 
 
-_FOUND_SIGNATURE = {}
+_FOUND = {}
 
 
-def _remember_signature(sig):
-    """Запоминает подобранный тип, чтобы записать его вместе с ключом."""
-    _FOUND_SIGNATURE['type'] = int(sig)
+def _remember(funder_address, sig):
+    """Запоминает подобранную связку, чтобы записать её вместе с ключом."""
+    _FOUND['funder'] = str(funder_address)
+    _FOUND['type'] = int(sig)
 
 
 def save(private_key, funder=None):
@@ -153,12 +200,13 @@ def save(private_key, funder=None):
     # самого ключа. Оставить поле пустым значило бы, что configured() вернёт
     # ложь и кошелёк будет считаться неподключённым сразу после успешной
     # проверки.
-    values['PM_FUNDER'] = (str(funder).strip() if funder
-                           else (address or ''))
-    # Подобранный тип подписи сохраняется рядом с ключом: подбирать его заново
-    # при каждом запуске значило бы три лишних обращения к бирже на старте.
-    if _FOUND_SIGNATURE.get('type') is not None:
-        values['PM_SIGNATURE_TYPE'] = str(_FOUND_SIGNATURE['type'])
+    # ПИШЕТСЯ ПОДОБРАННОЕ, А НЕ ВВЕДЁННОЕ. Человек мог указать адрес кошелька
+    # там, где деньги лежат на счёте площадки, — подбор это выяснил, и
+    # записывать надо то, что работает, а не то, что было напечатано.
+    values['PM_FUNDER'] = _FOUND.get('funder') or (
+        str(funder).strip() if funder else (address or ''))
+    if _FOUND.get('type') is not None:
+        values['PM_SIGNATURE_TYPE'] = str(_FOUND['type'])
     first_run._write_env(values)
 
     # Окружение текущего процесса тоже обновляется: иначе настройка
