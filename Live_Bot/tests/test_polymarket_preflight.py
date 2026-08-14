@@ -249,3 +249,59 @@ class TestReachIsCheckedSeparately:
         assert "'/api/polymarket/check'" in py
         html = open(os.path.join(ROOT, 'dashboard.html'), encoding='utf-8').read()
         assert 'pm-wallet-check' in html
+
+
+class TestJournalsDoNotAlarmWithoutReason:
+    """
+    Отсутствие журнала до первого запуска — не повод для тревоги.
+
+    ЖАЛОБА: «осталась такая ошибка» — и снимок с шестью строками «внимание,
+    журнал ещё не создан». Ошибки там не было ни одной: маркет-мейкер просто
+    не запускали, и журналам неоткуда взяться. Но выглядело это списком
+    поломок, и человек справедливо принял его за ошибку.
+
+    Тревога уместна там, где что-то ДОЛЖНО было случиться и не случилось.
+    """
+
+    def _in(self, tmp, monkeypatch):
+        from polymarket import store
+        monkeypatch.setattr(store, 'DIR', str(tmp))
+        monkeypatch.setattr(executor, 'ORDERS_LOG',
+                            os.path.join(str(tmp), 'live_orders.jsonl'))
+
+    def test_fresh_install_says_one_calm_line(self, tmp_path, monkeypatch):
+        self._in(tmp_path, monkeypatch)
+        rows = preflight.check_data()
+        assert len(rows) == 1, 'шесть тревог на пустом месте — не отчёт'
+        assert rows[0]['mark'] == preflight.OK
+        assert 'не запускался' in rows[0]['name']
+
+    def test_nothing_here_ever_blocks(self, tmp_path, monkeypatch):
+        """Журналы не мешают торговать: их отсутствие ничего не решает."""
+        self._in(tmp_path, monkeypatch)
+        assert all(r['mark'] != preflight.BAD for r in preflight.check_data())
+        (tmp_path / 'mm_state.json').write_text('{}', encoding='utf-8')
+        assert all(r['mark'] != preflight.BAD for r in preflight.check_data())
+
+    def test_events_that_have_not_happened_are_calm(self, tmp_path, monkeypatch):
+        """
+        Исполнений может не быть часами — на медленных рынках это норма, а не
+        поломка. Тревожиться об этом каждую проверку незачем.
+        """
+        self._in(tmp_path, monkeypatch)
+        (tmp_path / 'mm_state.json').write_text('{}', encoding='utf-8')
+        rows = {r['name']: r for r in preflight.check_data()}
+        for name in ('журнал «исполнения»', 'журнал «снос цены»',
+                     'журнал «мнение модели»', 'журнал «живые заявки»'):
+            assert rows[name]['mark'] == preflight.OK, name
+            assert 'событий' in rows[name]['detail']
+
+    def test_unwritable_folder_is_a_real_blocker(self, tmp_path, monkeypatch):
+        """
+        А вот это уже беда: бот отработает вхолостую и не оставит следов, по
+        которым потом разбираться.
+        """
+        self._in(tmp_path, monkeypatch)
+        (tmp_path / 'mm_state.json').write_text('{}', encoding='utf-8')
+        monkeypatch.setattr(os, 'access', lambda p, m: False)
+        assert any(r['mark'] == preflight.BAD for r in preflight.check_data())

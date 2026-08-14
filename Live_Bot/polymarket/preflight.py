@@ -177,19 +177,52 @@ def check_markets(budget=None):
 
 
 def check_data():
-    """Пишутся ли журналы, по которым потом судить о результате."""
+    """
+    Пишутся ли журналы, по которым потом судить о результате.
+
+    ОТСУТСТВИЕ ЖУРНАЛА ДО ПЕРВОГО ЗАПУСКА — НЕ ПОВОД ДЛЯ ТРЕВОГИ, и раньше
+    было наоборот: шесть строк «внимание, ещё не создан» на свежей установке.
+    Человек читал их как список поломок, хотя единственной причиной было то,
+    что маркет-мейкер пока не запускали.
+
+    Поэтому сначала смотрим, работал ли он вообще. Не работал — говорим одной
+    спокойной строкой. Работал, а журнала нет — вот это уже стоит отметить:
+    значит он не пишет там, где должен.
+    """
     import os
     out = []
-    for name, path in (('состояние', os.path.join(store.DIR, 'mm_state.json')),
-                       ('исполнения', os.path.join(store.DIR, 'mm_fills.jsonl')),
-                       ('капитал', os.path.join(store.DIR, 'mm_equity.jsonl')),
-                       ('снос цены', os.path.join(store.DIR, 'mm_drift.jsonl')),
-                       ('мнение модели', os.path.join(store.DIR, 'mm_shadow.jsonl')),
-                       ('живые заявки', executor.ORDERS_LOG)):
-        exists = os.path.exists(path)
-        size = os.path.getsize(path) if exists else 0
-        out.append(_line(OK if exists else WARN, f'журнал «{name}»',
-                         f'{size:,} б' if exists else 'ещё не создан'))
+    journals = (('состояние', os.path.join(store.DIR, 'mm_state.json')),
+                ('исполнения', os.path.join(store.DIR, 'mm_fills.jsonl')),
+                ('капитал', os.path.join(store.DIR, 'mm_equity.jsonl')),
+                ('снос цены', os.path.join(store.DIR, 'mm_drift.jsonl')),
+                ('мнение модели', os.path.join(store.DIR, 'mm_shadow.jsonl')),
+                ('живые заявки', executor.ORDERS_LOG))
+
+    started = os.path.exists(os.path.join(store.DIR, 'mm_state.json'))
+    if not started:
+        return [_line(OK, 'маркет-мейкер ещё не запускался',
+                      'журналы появятся сами при первом запуске — это не ошибка')]
+
+    # Место для записи важнее самих файлов: без права писать бот отработает
+    # вхолостую и не оставит следов, по которым потом разбираться.
+    if not os.access(store.DIR, os.W_OK):
+        out.append(_line(BAD, 'папка данных недоступна для записи', store.DIR))
+
+    for name, path in journals:
+        if os.path.exists(path):
+            out.append(_line(OK, f'журнал «{name}»',
+                             f'{os.path.getsize(path):,} б'))
+        elif name in ('исполнения', 'снос цены', 'мнение модели',
+                      'живые заявки'):
+            # Эти четыре появляются не сразу: исполнения — после первой
+            # сделки, снос — после неё же, мнение модели — только в живом
+            # режиме, живые заявки — после первой отправки. Их отсутствие
+            # говорит, что события пока не случилось, а не о поломке. На
+            # медленных рынках первого исполнения ждут часами, и всё это время
+            # человек видел бы тревогу на ровном месте.
+            out.append(_line(OK, f'журнал «{name}»', 'событий пока не было'))
+        else:
+            out.append(_line(WARN, f'журнал «{name}»', 'не создан'))
     return out
 
 
