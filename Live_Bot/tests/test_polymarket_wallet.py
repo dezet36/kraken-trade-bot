@@ -378,14 +378,17 @@ class TestAutostart:
         assert 'except Exception' in block
         assert 'продолжается' in block
 
-    def test_second_start_does_not_double_quote(self, monkeypatch):
+    def test_second_start_does_not_double_quote(self, tmp_path, monkeypatch):
         """
         Повторный запуск не поднимает второй поток.
 
         Два потока котировали бы одни рынки, перебивая заявки друг друга и
         удваивая размер — то есть и риск.
         """
-        from polymarket import service
+        from polymarket import mm, service
+        # Замок уводится во временную папку: иначе тест зависел бы от того,
+        # работает ли маркет-мейкер на этой машине прямо сейчас.
+        monkeypatch.setattr(mm.store, 'DIR', str(tmp_path))
         monkeypatch.setenv('PM_AUTOSTART', '1')
         monkeypatch.setattr(service, '_thread', None)
 
@@ -420,3 +423,39 @@ class TestDashboardNeverExposesTheKey:
         assert TEST_KEY not in str(snap)
         assert snap['wallet']['address'] is not None
         assert 'private' not in str(snap).lower()
+
+
+class TestServiceTakesTheLockToo:
+    """
+    Служба берёт тот же замок, что и запуск из консоли.
+
+    Проверка на живой поток ловила только повтор внутри приложения. Но
+    маркет-мейкер запускается ещё и командой из консоли — а это ДРУГОЙ процесс
+    с тем же файлом состояния. Два таких пишут вперемешку: заявки разного
+    размера, число рынков скачет от цикла к циклу, позиции одного затираются
+    другим. Это уже случалось, замок был поставлен в командный запуск — и дыра
+    осталась открытой ровно наполовину.
+    """
+
+    def test_start_is_refused_when_another_process_holds_the_lock(
+            self, tmp_path, monkeypatch):
+        from polymarket import mm, service
+        monkeypatch.setattr(mm.store, 'DIR', str(tmp_path))
+        monkeypatch.setattr(mm, '_alive', lambda pid: True)
+        (tmp_path / 'mm.lock').write_text('999999999', encoding='utf-8')
+        monkeypatch.setattr(service, '_thread', None)
+        assert service.start(force=True) is False
+        assert 'другом процессе' in (service.status().get('last_error') or '')
+
+    def test_start_proceeds_when_the_lock_is_free(self, tmp_path, monkeypatch):
+        from polymarket import mm, service
+        monkeypatch.setattr(mm.store, 'DIR', str(tmp_path))
+        monkeypatch.setattr(service, '_thread', None)
+        # Поток не поднимаем: проверяем только, что замок не мешает.
+        started = {}
+        monkeypatch.setattr(service.threading, 'Thread',
+                            lambda **kw: type('T', (), {
+                                'start': lambda self: started.setdefault('да', True),
+                                'is_alive': lambda self: True})())
+        assert service.start(force=True) is True
+        assert started.get('да')

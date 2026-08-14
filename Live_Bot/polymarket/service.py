@@ -115,7 +115,24 @@ def start(poll_seconds=None, force=False):
         return False
     if _thread is not None and _thread.is_alive():
         return True
-    from . import params
+
+    # ЗАМОК БЕРЁТСЯ И ЗДЕСЬ. Проверка на живой поток ловит только повтор внутри
+    # приложения, а маркет-мейкер запускается ещё и командой из консоли — и это
+    # ДРУГОЙ процесс с тем же файлом состояния. Два таких пишут вперемешку:
+    # заявки разного размера, число рынков скачет от цикла к циклу, позиции
+    # одного затираются другим. Ровно это уже случалось, и замок был поставлен
+    # в командный запуск — но служба его не спрашивала, и дыра осталась
+    # открытой ровно наполовину.
+    from . import mm, params
+    if not mm._single_instance():
+        _state['last_error'] = ('маркет-мейкер уже работает в другом процессе '
+                                '— второй запуск отменён')
+        try:
+            from logger import log as _say
+            _say(f"⚠️ Polymarket: {_state['last_error']}")
+        except Exception:                                   # noqa: BLE001
+            pass
+        return False
     seconds = int(poll_seconds or params.MM_POLL_SECONDS)
     _state['stopping'] = False
     _thread = threading.Thread(target=_loop, args=(seconds,), daemon=True,
