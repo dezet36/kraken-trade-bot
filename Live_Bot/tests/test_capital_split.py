@@ -33,19 +33,55 @@ class TestCapitalSplit:
         assert set(config.PAPER_START_BALANCES) == {'FIBO', 'SMC', 'LEVELS',
                                                     'RSIBB'}
 
-    def test_total_pool_is_unchanged_by_the_split(self):
-        """Перераспределение долей не увеличивает суммарную экспозицию."""
-        total = sum(config.PAPER_START_BALANCES.values())
-        expected = config.PAPER_START_BALANCE * len(config.PAPER_START_BALANCES)
-        assert abs(total - expected) < 1e-6
-
-    def test_shares_follow_the_measured_rule(self):
+    def test_one_strategy_budget_does_not_move_the_others(self, monkeypatch):
         """
-        Доли соответствуют измеренному правилу «по сумме R».
+        БЮДЖЕТЫ НЕЗАВИСИМЫ. Прежде этого свойства не было.
+
+        Депозиты считались долями одного котла, и правка доли у одной МОЛЧА
+        меняла деньги у остальных: их собственные настройки не двигались.
+        Менять что-то одно было нельзя в принципе.
+
+        Проверяется через настройку окружения — тем самым способом, которым
+        бюджет и меняют на деле.
+        """
+        import importlib
+        before = dict(config.PAPER_START_BALANCES)
+        monkeypatch.setenv('PAPER_START_BALANCE_FIBO', '777')
+        importlib.reload(config)
+        after = dict(config.PAPER_START_BALANCES)
+        assert after['FIBO'] == 777
+        for name in ('LEVELS', 'SMC', 'RSIBB'):
+            assert after[name] == before[name], f'{name} сдвинулся вслед за FIBO'
+        monkeypatch.delenv('PAPER_START_BALANCE_FIBO')
+        importlib.reload(config)
+
+    def test_common_deposit_no_longer_scales_everyone(self, monkeypatch):
+        """
+        Общее число депозита больше не растягивает всех разом.
+
+        Именно так выглядела связь: PAPER_START_BALANCE умножался на число
+        стратегий, и каждая получала свою долю от произведения. Поднять общий
+        депозит значило поднять всем — даже той, которую трогать не хотели.
+        """
+        import importlib
+        before = dict(config.PAPER_START_BALANCES)
+        monkeypatch.setenv('PAPER_START_BALANCE', '99999')
+        importlib.reload(config)
+        assert dict(config.PAPER_START_BALANCES) == before
+        monkeypatch.delenv('PAPER_START_BALANCE')
+        importlib.reload(config)
+
+    def test_starting_numbers_still_carry_the_measured_proportion(self):
+        """
+        Начальные суммы сохраняют измеренную пропорцию — как отправную точку.
 
         Числа: FIBO 50%, LEVELS 23%, SMC 17%, RSIBB 10%. Первые три получены
         из сумм R на четырёх периодах, RSIBB как недоказанный получает десятую
         часть.
+
+        ЭТО БОЛЬШЕ НЕ ФОРМУЛА, А ИСТОРИЯ. Пропорция вшита в стартовые суммы,
+        чтобы разделение бюджетов не переписало на ходу результаты идущего
+        замера. Дальше каждая сумма живёт своей жизнью и меняется отдельно.
         """
         total = sum(config.PAPER_START_BALANCES.values())
         share = {k: v / total for k, v in config.PAPER_START_BALANCES.items()}
@@ -76,3 +112,43 @@ class TestCapitalSplit:
         finally:
             monkeypatch.delenv('PAPER_START_BALANCE_FIBO', raising=False)
             importlib.reload(config)
+
+
+class TestDirectionsDoNotShareMoney:
+    """
+    Биржевой бот и Polymarket — РАЗНЫЕ системы с разными деньгами.
+
+    Требование поставлено прямо: бюджет на торговлю и бюджет на предсказания
+    считаются отдельно, и ни одно направление не должно уметь занять у другого.
+    Общий счёт означал бы, что удачный месяц на бирже молча увеличивает ставки
+    на площадке, где ещё ничего не подтверждено.
+    """
+
+    def test_polymarket_budget_does_not_read_the_exchange_deposit(self,
+                                                                  monkeypatch):
+        import importlib
+        from polymarket import params
+        before = params.bankroll_for('MM')
+        monkeypatch.setenv('PAPER_START_BALANCE', '1000000')
+        importlib.reload(config)
+        assert params.bankroll_for('MM') == before
+
+    def test_exchange_deposit_does_not_read_the_polymarket_budget(self,
+                                                                  monkeypatch):
+        import importlib
+        before = dict(config.PAPER_START_BALANCES)
+        monkeypatch.setenv('PM_BUDGET_MM', '1000000')
+        importlib.reload(config)
+        assert dict(config.PAPER_START_BALANCES) == before
+
+    def test_neither_direction_names_the_other(self):
+        """
+        Ни один модуль направления не читает капитал чужого.
+
+        Проверка идёт по тексту, а не по значению: значения могут совпасть
+        случайно, а импорт — это уже связь, которая рано или поздно сработает.
+        """
+        import glob
+        for path in glob.glob(os.path.join(ROOT, 'polymarket', '*.py')):
+            text = open(path, encoding='utf-8').read()
+            assert 'PAPER_START_BALANCE' not in text, os.path.basename(path)

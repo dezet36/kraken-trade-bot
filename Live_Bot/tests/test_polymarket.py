@@ -275,30 +275,69 @@ class TestThreeStrategies:
         for factory in (CryptoSignal, LongshotSignal, WeatherSignal):
             assert factory().allows_real_money() is False
 
-    def test_bankrolls_are_separate_and_unknown_gets_nothing(self):
+    def test_budget_of_one_strategy_does_not_touch_the_others(self, monkeypatch):
         """
-        Раздельные счета: смешав их, нельзя сказать, кто заработал.
+        БЮДЖЕТЫ НЕЗАВИСИМЫ. Это главное свойство, и раньше его не было.
 
-        Незнакомое имя получает ноль, а не весь капитал — опечатка в названии
-        не должна отдавать стратегии всё.
+        Долями было так: WEATHER 0.30, CRYPTO 0.20, LONGSHOT 0.05, MM 0.45 — в
+        сумме единица. Поднять маркет-мейкингу до 0.60 означало отобрать 0.15 у
+        остальных, причём МОЛЧА: цифры в их настройках не менялись, а денег
+        становилось меньше. Стратегии были связаны через знаменатель, которого
+        никто не трогал.
+
+        Теперь бюджет — просто число долларов, и правка одного не двигает
+        соседей ни на цент.
         """
-        total = 10_000
-        # Сумма считается по ВСЕМ стратегиям из таблицы, а не по трём знакомым:
-        # с появлением маркет-мейкера список вырос, и проверка, перечисляющая
-        # имена руками, объявила бы капитал потерянным.
-        parts = {name: params.bankroll_for(name, total)
-                 for name in params.BANKROLL_SPLIT}
-        assert abs(sum(parts.values()) - total) < 1e-6
-        assert all(v > 0 for v in parts.values())
-        assert {'WEATHER', 'CRYPTO', 'LONGSHOT', 'MM'} <= set(parts)
-        assert params.bankroll_for('НЕТ ТАКОЙ', total) == 0.0
+        before = {name: params.bankroll_for(name) for name in params.BUDGET}
+        monkeypatch.setitem(params.BUDGET, 'MM', before['MM'] * 7 + 1000)
+        after = {name: params.bankroll_for(name) for name in params.BUDGET}
+        for name in before:
+            if name == 'MM':
+                continue
+            assert after[name] == before[name], f'{name} сдвинулся вслед за MM'
 
-        # Маркет-мейкер получает больше остальных, и это не предпочтение:
-        # у трёх других источник дохода — угаданный исход, и ни одна проверку
-        # не прошла. Здесь источник — разница комиссий мейкера и тейкера,
-        # то есть механика биржи.
-        assert parts['MM'] > max(parts['WEATHER'], parts['CRYPTO'],
-                                 parts['LONGSHOT'])
+    def test_budgets_are_dollars_not_shares(self):
+        """Сумма бюджетов ничего не ограничивает и никуда не нормируется."""
+        assert params.bankroll_for('MM') > 1.0, 'доллары, а не доля единицы'
+        assert params.budget_total() == sum(params.BUDGET.values())
+
+    def test_unknown_strategy_gets_nothing(self):
+        """
+        Опечатка в имени не должна открывать доступ ко всем деньгам.
+        Молчаливая щедрость опаснее отказа.
+        """
+        assert params.bankroll_for('НЕТ ТАКОЙ') == 0.0
+        assert params.bankroll_for('') == 0.0
+
+    def test_both_market_making_schemes_have_separate_wallets(self):
+        """
+        У двусторонней и односторонней схем РАЗНЫЕ кошельки.
+
+        Прежде обе спрашивали bankroll_for('MM'). Запущенные вместе, они обе
+        считали, что располагают всей суммой, и планировали потратить её каждая
+        целиком — то есть вдвое больше, чем есть на счету.
+        """
+        assert 'MM' in params.BUDGET and 'ONESIDE' in params.BUDGET
+        text = open(os.path.join(ROOT, 'polymarket', 'oneside_run.py'),
+                    encoding='utf-8').read()
+        assert "bankroll_for('ONESIDE')" in text
+        assert "bankroll_for('MM')" not in text.replace('#', '\n#').split('\n#')[0]
+
+    def test_zero_budget_means_no_trading_not_leftovers(self, monkeypatch):
+        """Ноль означает «не торгует», а не «получает остаток от других»."""
+        monkeypatch.setitem(params.BUDGET, 'ONESIDE', 0.0)
+        assert params.bankroll_for('ONESIDE') == 0.0
+        assert params.bankroll_for('MM') > 0.0, 'сосед не пострадал'
+
+    def test_second_argument_is_ignored_on_purpose(self):
+        """
+        Общий счёт больше ни на что не влияет, и вызовы с ним это подтверждают.
+
+        Принимать параметр и не использовать честнее, чем принимать и делать
+        вид, будто он на что-то влияет: старые вызовы не падают, но и не
+        получают власти над бюджетом.
+        """
+        assert params.bankroll_for('MM', 999_999) == params.bankroll_for('MM')
 
     def test_risk_input_shape_is_identical_across_modules(self):
         """

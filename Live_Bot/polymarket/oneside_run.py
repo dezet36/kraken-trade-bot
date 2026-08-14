@@ -40,7 +40,7 @@ def select(budget=None, refresh=False):
     global MARKETS
     if MARKETS is not None and not refresh:
         return MARKETS
-    money = float(budget if budget is not None else params.bankroll_for('MM'))
+    money = float(budget if budget is not None else params.bankroll_for('ONESIDE'))
     rows = oneside.scan(budget=money, limit=params.OS_MARKETS)
     got = oneside.plan(rows, budget=money)
     MARKETS = got['markets']
@@ -131,7 +131,11 @@ def step(maker, markets):
 
 def main(loop=False):
     markets = select()
-    maker = engine.PaperMaker(state_path=STATE)
+    # СВОЙ КОШЕЛЁК, А НЕ ОБЩИЙ С ДВУСТОРОННЕЙ СХЕМОЙ. Прежде обе спрашивали
+    # bankroll_for('MM') и обе считали, что располагают всей суммой: запущенные
+    # вместе, они планировали потратить её дважды.
+    maker = engine.PaperMaker(bankroll=params.bankroll_for('ONESIDE'),
+                              state_path=STATE)
     print(f'капитал: ${maker.bankroll:,.0f}')
     print(f'рынков: {len(markets)}')
     if LAST_PLAN:

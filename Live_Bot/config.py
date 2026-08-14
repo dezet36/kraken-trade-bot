@@ -100,21 +100,31 @@ PAPER_START_BALANCE = float(os.getenv('PAPER_START_BALANCE', 10_000))
 # оставлена десятая доля, остальные делят девять десятых по измеренному правилу.
 _MEASURED_SHARE = {'FIBO': 0.50, 'LEVELS': 0.23, 'SMC': 0.17, 'RSIBB': 0.10}
 
-# Индивидуальный депозит, если нужно разное (пусто = по измеренной доле)
-_pb_fibo = os.getenv('PAPER_START_BALANCE_FIBO', '').strip()
-_pb_smc  = os.getenv('PAPER_START_BALANCE_SMC', '').strip()
-_pb_lvl  = os.getenv('PAPER_START_BALANCE_LEVELS', '').strip()
-_pb_rsi  = os.getenv('PAPER_START_BALANCE_RSIBB', '').strip()
-_pool = PAPER_START_BALANCE * len(_MEASURED_SHARE)
-PAPER_START_BALANCES = {
-    'FIBO':   float(_pb_fibo) if _pb_fibo else _pool * _MEASURED_SHARE['FIBO'],
-    'SMC':    float(_pb_smc)  if _pb_smc  else _pool * _MEASURED_SHARE['SMC'],
-    'LEVELS': float(_pb_lvl)  if _pb_lvl  else _pool * _MEASURED_SHARE['LEVELS'],
-    # RSIBB прежде в этом словаре отсутствовал вовсе и получал запасное
-    # значение внутри брокера. Работало, но означало, что доля живой стратегии
-    # нигде не записана и не может быть изменена настройкой.
-    'RSIBB':  float(_pb_rsi)  if _pb_rsi  else _pool * _MEASURED_SHARE['RSIBB'],
-}
+# ДЕПОЗИТ КАЖДОЙ СТРАТЕГИИ — СВОЙ И В ДЕНЬГАХ, А НЕ ДОЛЯ ОБЩЕГО КОТЛА.
+#
+# Доли задавали связь, которой не должно быть. Депозиты считались от одного
+# котла (`PAPER_START_BALANCE` умножить на число стратегий), поэтому правка
+# доли у одной МОЛЧА меняла деньги у остальных: их собственные настройки при
+# этом не двигались. Отвечать на вопрос «сколько у SMC» приходилось умножением
+# в уме, а менять что-то одно было нельзя в принципе.
+#
+# Числа ниже — те же самые, что давал прежний расчёт при депозите $10 000, и
+# это намеренно: разделение бюджетов не должно на ходу переписать результаты
+# идущего замера. Пропорция взята из измеренного вклада стратегий и осталась
+# записанной выше — но теперь она История, а не действующая формула.
+_DEFAULT_BALANCES = {'FIBO': 20_000, 'LEVELS': 9_200, 'SMC': 6_800,
+                     'RSIBB': 4_000}
+
+
+def _own_balance(name):
+    """Депозит стратегии. Своя настройка важнее общей, общая — важнее числа."""
+    private = os.getenv(f'PAPER_START_BALANCE_{name}', '').strip()
+    if private:
+        return float(private)
+    return float(_DEFAULT_BALANCES[name])
+
+
+PAPER_START_BALANCES = {name: _own_balance(name) for name in _DEFAULT_BALANCES}
 
 # Издержки. Ставки Bybit для линейных перпетуалов: мейкер 0.02%, тейкер 0.055%.
 # Вход — лимитный (мейкер), выход — по триггеру, то есть рыночный (тейкер).

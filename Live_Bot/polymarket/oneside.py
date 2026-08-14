@@ -64,7 +64,7 @@ def scan(budget=None, limit=None, pages=30):
     единственной, и исполнят нас ровно тогда, когда это выгодно встречной
     стороне.
     """
-    budget = float(budget if budget is not None else params.bankroll_for('MM'))
+    budget = float(budget if budget is not None else params.bankroll_for('ONESIDE'))
     limit = int(limit or params.OS_MARKETS)
     rows = selector._candidates(pages, params.OS_MIN_VOLUME,
                                 params.OS_MIN_PRICE, params.OS_MAX_PRICE)
@@ -257,7 +257,7 @@ def plan(markets, budget=None):
     занять существенную долю счёта. Нужен потолок на СУММУ — накопление
     ограничивается числом рынков, и число это выбирается здесь.
     """
-    budget = float(budget if budget is not None else params.bankroll_for('MM'))
+    budget = float(budget if budget is not None else params.bankroll_for('ONESIDE'))
     chosen, used = [], 0.0
     for market in markets:
         if used + market['cost'] > budget:
