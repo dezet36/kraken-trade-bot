@@ -82,6 +82,7 @@ jobs:
             --hidden-import polymarket.strategy `
             --hidden-import polymarket.selector `
             --hidden-import polymarket.preflight `
+            --hidden-import polymarket.connect `
             --hidden-import polymarket.oneside `
             --hidden-import polymarket.oneside_run `
             --hidden-import polymarket.engine `

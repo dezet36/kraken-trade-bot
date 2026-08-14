@@ -18,6 +18,16 @@ Polymarket: доступ к площадке, сбор данных и сигн�
 __all__ = ['params', 'client', 'store', 'weather', 'longshot', 'risk']
 
 
+
+def _connect_state():
+    """Состояние кошелька для панели. Сбой здесь не должен ронять весь снимок."""
+    try:
+        from . import connect
+        return connect.state()
+    except Exception:                                       # noqa: BLE001
+        return None
+
+
 def snapshot(limit_markets=20, limit_fills=30):
     """
     Состояние маркет-мейкера для панели. Ключа здесь нет и быть не может.
@@ -84,6 +94,10 @@ def snapshot(limit_markets=20, limit_fills=30):
         'service': thread,
         'started': state.get('started'),
         'wallet': wallet.status(),
+        # Состояние подключения для панели: адрес, остаток, бюджет. Ключа
+        # здесь нет и быть не может — по адресу всё видно и ничего нельзя
+        # подписать.
+        'connect': _connect_state(),
         'kill_switch': executor.kill_switch_on(),
         'equity': equity[-1] if equity else None,
         'equity_series': [{'at': e.get('at'), 'equity': e.get('equity'),

@@ -301,7 +301,7 @@ def selftest():
                # строку журнала. На сервере это выглядело как «маркет-мейкер
                # не запускался» без объяснения причины.
                'polymarket', 'polymarket.mm', 'polymarket.service',
-               'polymarket.preflight', 'polymarket.oneside',
+               'polymarket.preflight', 'polymarket.connect', 'polymarket.oneside',
                'polymarket.oneside_run', 'polymarket.selector',
                'polymarket.strategy',
                'polymarket.wallet', 'polymarket.executor',

@@ -1091,6 +1091,73 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send_json({'ok': True, 'stopped': False})
             except Exception as exc:               # noqa: BLE001
                 self._fail(500, f'не удалось: {exc}')
+        elif path == '/api/polymarket/wallet':
+            # КОШЕЛЁК ПОДКЛЮЧАЕТСЯ ОТСЮДА, и это выправление непоследовательности.
+            # Ключи биржи в этом приложении давно задаются панелью, а для
+            # Polymarket держался особый случай — без основания, зато оставляя
+            # человека с сервером без способа подключить кошелёк вообще.
+            #
+            # Ключ проверяется ДО записи и НИКОГДА не отдаётся обратно: наружу
+            # уходит только адрес. Живая торговля при этом не включается —
+            # подключить кошелёк и разрешить тратить деньги решаются отдельно.
+            try:
+                from polymarket import connect
+                ok, address, message = connect.save(
+                    changes.get('private_key'), changes.get('funder'))
+                if not ok:
+                    self._fail(400, message)
+                    return
+                log('🔑 Polymarket: кошелёк подключён оператором '
+                    f'({address})')
+                self._send_json({'ok': True, 'address': address,
+                                 'message': message,
+                                 'state': connect.state()})
+            except Exception as exc:               # noqa: BLE001
+                # Наружу идёт только тип ошибки: её текст способен содержать
+                # сам ключ — у некоторых версий библиотеки он попадает туда
+                # целиком.
+                self._fail(500, f'не удалось сохранить ({type(exc).__name__})')
+        elif path == '/api/polymarket/wallet/forget':
+            try:
+                from polymarket import connect
+                _, message = connect.forget()
+                log('🔑 Polymarket: кошелёк отключён оператором')
+                self._send_json({'ok': True, 'message': message,
+                                 'state': connect.state()})
+            except Exception as exc:               # noqa: BLE001
+                self._fail(500, f'не удалось ({type(exc).__name__})')
+        elif path == '/api/polymarket/live':
+            try:
+                from polymarket import connect
+                want = bool(changes.get('enabled'))
+                ok, message = connect.set_live(want)
+                if not ok:
+                    self._fail(409, message)
+                    return
+                log(f'⚡ Polymarket: живая торговля '
+                    f'{"ВКЛЮЧЕНА" if want else "выключена"} оператором')
+                self._send_json({'ok': True, 'message': message,
+                                 'state': connect.state()})
+            except Exception as exc:               # noqa: BLE001
+                self._fail(500, f'не удалось ({type(exc).__name__})')
+        elif path == '/api/polymarket/budget':
+            # Сумма задаётся числом, «max» или долей — тем же разбором, что и
+            # в настройке PM_BUDGET_MM. Панель лишь пишет её в то же место.
+            try:
+                import first_run
+                from polymarket import connect, params as pm_params
+                raw = str(changes.get('budget') or '').strip()
+                if not raw:
+                    self._fail(400, 'укажите сумму, «max» или долю вида 80%')
+                    return
+                first_run._write_env({'PM_BUDGET_MM': raw})
+                os.environ['PM_BUDGET_MM'] = raw
+                amount, why = pm_params.budget_plan('MM')
+                log(f'💰 Polymarket: бюджет задан «{raw}» → ${amount:,.2f}')
+                self._send_json({'ok': True, 'budget_usd': round(amount, 2),
+                                 'note': why, 'state': connect.state()})
+            except Exception as exc:               # noqa: BLE001
+                self._fail(500, f'не удалось ({type(exc).__name__})')
         elif path.startswith('/api/report.txt'):
             # Отчёт собирается на лету, а не лежит файлом: он должен отражать
             # состояние на момент нажатия, иначе присланное описывает не ту

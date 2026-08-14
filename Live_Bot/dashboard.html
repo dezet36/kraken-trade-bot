@@ -971,6 +971,65 @@
             <button type="button" class="btn ghost sm" id="pm-stop">Аварийная остановка</button>
           </div>
         </div>
+        <!-- КОШЕЛЁК ОТДЕЛЬНЫМ БЛОКОМ И ВЫШЕ ОСТАЛЬНОГО. Без него на вкладке
+             нечего смотреть: маркет-мейкер работает на бумаге и ничего не
+             отправляет. Прятать подключение под таблицы значило бы прятать
+             единственное, что отделяет замер от торговли. -->
+        <div class="card" id="pm-wallet">
+          <div class="row" style="justify-content:space-between;align-items:baseline">
+            <h3 style="margin:0">Кошелёк</h3>
+            <span class="hint" id="pm-wallet-state">—</span>
+          </div>
+          <!-- ПРЕДУПРЕЖДЕНИЕ СТОИТ ПЕРЕД ПОЛЕМ, А НЕ ПОСЛЕ. Ключ биржи можно
+               урезать в правах; приватный ключ Polygon урезать нельзя — он
+               распоряжается всем, что лежит на адресе. Прочитать об этом
+               нужно до того, как ключ вставлен, а не после. -->
+          <p class="hint" id="pm-wallet-warn">
+            Приватный ключ распоряжается <b>всеми</b> средствами адреса и
+            подписывает любую операцию, включая перевод остатка. Урезать его в
+            правах, как ключ биржи, нельзя. Заведите для бота
+            <b>отдельный кошелёк</b> и держите на нём только ту сумму, которой
+            не жаль в эксперименте.
+          </p>
+          <div id="pm-wallet-form">
+            <label class="field">
+              <span>Приватный ключ</span>
+              <input type="password" id="pm-key" autocomplete="off"
+                     placeholder="0x… 64 знака" spellcheck="false">
+            </label>
+            <label class="field">
+              <span>Адрес счёта Polymarket</span>
+              <input type="text" id="pm-funder" autocomplete="off"
+                     placeholder="0x… 40 знаков" spellcheck="false">
+            </label>
+            <div class="row-end" style="gap:8px">
+              <button type="button" class="btn sm" id="pm-wallet-save">Подключить</button>
+              <button type="button" class="btn ghost sm" id="pm-wallet-forget" hidden>Отключить</button>
+            </div>
+            <p class="hint">
+              Ключ проверяется до записи и обратно не показывается — видно
+              только адрес. Подключение <b>не включает</b> живую торговлю.
+            </p>
+          </div>
+          <div class="row" style="gap:12px;margin-top:12px;flex-wrap:wrap">
+            <label class="field" style="max-width:220px">
+              <span>Бюджет маркет-мейкера</span>
+              <input type="text" id="pm-budget" autocomplete="off"
+                     placeholder="20, max или 80%" spellcheck="false">
+            </label>
+            <button type="button" class="btn ghost sm" id="pm-budget-save">Сохранить сумму</button>
+          </div>
+          <p class="hint" id="pm-budget-note"></p>
+          <!-- ЖИВАЯ ТОРГОВЛЯ — ОТДЕЛЬНЫЙ РУБИЛЬНИК. Подключить кошелёк и
+               разрешить тратить с него деньги суть разные решения, и одно
+               действие не должно делать оба. -->
+          <div class="row" style="gap:10px;margin-top:14px;align-items:center">
+            <button type="button" class="btn sm" id="pm-live-toggle" disabled>
+              Включить живую торговлю
+            </button>
+            <span class="hint" id="pm-live-state">кошелёк не подключён</span>
+          </div>
+        </div>
         <div id="pm-body">загружаю…</div>
       </section>
       <section class="page" data-page="control" hidden>
@@ -2315,9 +2374,123 @@ function renderPolymarket() {
   if (hint) hint.textContent = eq.at ? 'обновлено ' + eq.at.slice(11, 19) : '';
   const run = el('pm-run');
   if (run) run.textContent = PM.running ? 'Остановить' : 'Запустить';
+  renderPmWallet(PM.connect || null);
+}
+
+/* Состояние кошелька. КЛЮЧА ЗДЕСЬ НЕТ И БЫТЬ НЕ МОЖЕТ — приходит только адрес,
+   признак настройки и остаток. По адресу всё видно и ничего нельзя подписать. */
+function renderPmWallet(w) {
+  const state = el('pm-wallet-state');
+  const form = el('pm-wallet-form');
+  const forget = el('pm-wallet-forget');
+  const live = el('pm-live-toggle');
+  const liveState = el('pm-live-state');
+  const note = el('pm-budget-note');
+  if (!state) return;
+  if (!w) { state.textContent = 'состояние не пришло'; return; }
+
+  if (w.configured) {
+    /* НЕИЗВЕСТНЫЙ ОСТАТОК И НОЛЬ — РАЗНЫЕ ВЕЩИ. На нуле торговать нельзя
+       осознанно, при неизвестном нельзя вообще: неясно, чем рискуем. */
+    const money = w.balance_known ? ('$' + pmMoney(w.balance_usd))
+                                  : 'остаток не спросился';
+    state.textContent = w.address.slice(0, 8) + '…' + w.address.slice(-6)
+                      + ' · ' + money;
+    if (forget) forget.hidden = false;
+  } else {
+    state.textContent = 'не подключён';
+    if (forget) forget.hidden = true;
+  }
+  if (form) form.classList.toggle('muted-block', !!w.configured);
+  if (note) note.textContent = w.budget_note || '';
+  const budget = el('pm-budget');
+  if (budget && !budget.value) budget.placeholder = w.budget_usd
+    ? ('сейчас $' + pmMoney(w.budget_usd)) : '20, max или 80%';
+
+  if (live) {
+    live.disabled = !w.configured;
+    live.textContent = w.live_enabled ? 'Выключить живую торговлю'
+                                      : 'Включить живую торговлю';
+    live.classList.toggle('ghost', !!w.live_enabled);
+  }
+  if (liveState) {
+    liveState.textContent = !w.configured ? 'кошелёк не подключён'
+      : (w.live_enabled ? 'ВКЛЮЧЕНА — заявки уходят на биржу'
+                        : 'выключена, бот считает на бумаге');
+  }
+}
+
+async function pmPost(url, body) {
+  const resp = await fetch(url, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body || {}),
+  });
+  const data = await resp.json().catch(() => ({}));
+  if (!resp.ok) throw new Error(data.error || data.message || 'не удалось');
+  return data;
 }
 
 document.addEventListener('click', async ev => {
+  const save = ev.target.closest('#pm-wallet-save');
+  if (save) {
+    const key = (el('pm-key') || {}).value || '';
+    const funder = (el('pm-funder') || {}).value || '';
+    if (!key.trim()) { toast('Введите приватный ключ'); return; }
+    save.disabled = true;
+    try {
+      const out = await pmPost('/api/polymarket/wallet',
+                               { private_key: key.trim(), funder: funder.trim() });
+      /* ПОЛЕ ОЧИЩАЕТСЯ СРАЗУ. Ключ, оставшийся в разметке, доступен всякому,
+         кто откроет ту же страницу или посмотрит историю ввода. */
+      if (el('pm-key')) el('pm-key').value = '';
+      toast(out.message || 'кошелёк подключён');
+      renderPmWallet(out.state);
+    } catch (e) { toast('Не принято: ' + e.message); }
+    finally { save.disabled = false; }
+    return;
+  }
+  const drop = ev.target.closest('#pm-wallet-forget');
+  if (drop) {
+    if (!confirm('Отключить кошелёк? Живая торговля тоже выключится.')) return;
+    drop.disabled = true;
+    try {
+      const out = await pmPost('/api/polymarket/wallet/forget');
+      toast(out.message || 'отключён');
+      renderPmWallet(out.state);
+    } catch (e) { toast('Не удалось: ' + e.message); }
+    finally { drop.disabled = false; }
+    return;
+  }
+  const money = ev.target.closest('#pm-budget-save');
+  if (money) {
+    const value = ((el('pm-budget') || {}).value || '').trim();
+    if (!value) { toast('Укажите сумму, «max» или долю'); return; }
+    money.disabled = true;
+    try {
+      const out = await pmPost('/api/polymarket/budget', { budget: value });
+      toast('Бюджет: ' + out.note);
+      renderPmWallet(out.state);
+    } catch (e) { toast('Не принято: ' + e.message); }
+    finally { money.disabled = false; }
+    return;
+  }
+  const liveBtn = ev.target.closest('#pm-live-toggle');
+  if (liveBtn) {
+    const turningOn = liveBtn.textContent.indexOf('Включить') === 0;
+    /* ПОДТВЕРЖДЕНИЕ ТОЛЬКО НА ВКЛЮЧЕНИЕ. Выключение — всегда безопасное
+       действие, и спрашивать о нём значит мешать в тот момент, когда спешат. */
+    if (turningOn && !confirm(
+        'Включить живую торговлю? Бот начнёт отправлять заявки на биржу '
+        + 'и тратить средства кошелька.')) return;
+    liveBtn.disabled = true;
+    try {
+      const out = await pmPost('/api/polymarket/live', { enabled: turningOn });
+      toast(out.message);
+      renderPmWallet(out.state);
+    } catch (e) { toast('Не удалось: ' + e.message); }
+    finally { liveBtn.disabled = false; }
+    return;
+  }
   const run = ev.target.closest('#pm-run');
   if (run) {
     /* Кнопка одна на два действия: пока не работает — «Запустить», как
