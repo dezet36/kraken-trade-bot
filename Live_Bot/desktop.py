@@ -625,6 +625,17 @@ def stop_holder(holder, port, wait=25):
     """
     import time
 
+    # СВОБОДНЫЙ ПОРТ ЗАКРЫВАТЬ НЕ У КОГО, и эта проверка не формальность.
+    #
+    # Ниже стоит запасной путь: держателя не назвали — берём PID, который
+    # работающая копия записала о себе. Без проверки порта этот путь снимал
+    # приложение ВСЕГДА, даже когда снимать было нечего. Поймано на себе самым
+    # неприятным способом: прогон тестов раз за разом убивал работающее
+    # приложение — четыре падения подряд с кодом 1 и без единой строки в
+    # журнале, потому что taskkill /F не оставляет следов.
+    if not port_busy(port):
+        return True
+
     pid = (holder or {}).get('pid') or our_recorded_pid()
     if pid:
         flags = getattr(subprocess, 'CREATE_NO_WINDOW', 0)
@@ -662,7 +673,52 @@ def free_port(preferred, tries=40):
     return 0
 
 
+CRASH_LOG = os.path.join(config.DATA_DIR, 'crash.log')
+
+
+def _remember_crashes():
+    """
+    Записывает причину падения на диск. Без этого её просто нет.
+
+    ПОЧЕМУ ЭТО ПОНАДОБИЛОСЬ. Приложение трижды завершалось само по себе с кодом
+    1, и в выводе не оставалось ни строчки: консоли у оконного режима нет,
+    стандартный обработчик печатает разбор в поток, которого никто не читает.
+    Разбирать такое можно только гаданием — а гадание на живых деньгах плохой
+    способ работы.
+
+    Ставится ДВА обработчика, и второй не менее важен первого: исключение в
+    фоновом потоке главный обработчик не видит вовсе, а вся торговля у нас
+    идёт именно в потоках.
+    """
+    import threading
+    import traceback
+
+    def write(kind, exc_type, exc, tb):
+        try:
+            with open(CRASH_LOG, 'a', encoding='utf-8') as fh:
+                fh.write(f"\n=== {kind} {time.strftime('%Y-%m-%d %H:%M:%S')} ===\n")
+                fh.write(''.join(traceback.format_exception(exc_type, exc, tb)))
+        except Exception:                          # noqa: BLE001
+            pass
+        try:
+            log(f'❌ {kind}: {exc_type.__name__}: {str(exc)[:160]}')
+        except Exception:                          # noqa: BLE001
+            pass
+
+    def on_main(exc_type, exc, tb):
+        write('падение главного потока', exc_type, exc, tb)
+        sys.__excepthook__(exc_type, exc, tb)
+
+    def on_thread(args):
+        write(f'падение потока {args.thread.name if args.thread else "?"}',
+              args.exc_type, args.exc_value, args.exc_traceback)
+
+    sys.excepthook = on_main
+    threading.excepthook = on_thread
+
+
 def main():
+    _remember_crashes()
     if '--selftest' in sys.argv:
         sys.exit(selftest())
     if '--diag' in sys.argv:

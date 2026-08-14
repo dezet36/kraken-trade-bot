@@ -150,6 +150,22 @@ class TestNoDeadEnd:
         free = _free_port()
         assert desktop.stop_holder({}, free, wait=1) is True   # порт и так свободен
 
+    def test_free_port_is_never_a_reason_to_kill_anything(self, monkeypatch):
+        """
+        САМАЯ ДОРОГАЯ ОШИБКА ЭТОГО МОДУЛЯ, и поймана она на себе.
+
+        Запасной путь «держателя не назвали — снимаем записанный PID» работал
+        даже тогда, когда порт СВОБОДЕН. Прогон тестов раз за разом убивал
+        работающее приложение: четыре падения подряд с кодом 1 и без единой
+        строки в журнале, потому что taskkill /F следов не оставляет.
+        """
+        killed = []
+        monkeypatch.setattr(desktop, 'our_recorded_pid', lambda: 12345)
+        monkeypatch.setattr(desktop.subprocess, 'run',
+                            lambda cmd, **k: killed.append(cmd))
+        assert desktop.stop_holder({}, _free_port(), wait=1) is True
+        assert killed == [], 'на свободном порту никого снимать нельзя'
+
     def test_unknown_holder_falls_back_to_the_recorded_pid(self, monkeypatch):
         """netstat промолчал — закрываем по записанному PID."""
         killed = {}
@@ -158,9 +174,13 @@ class TestNoDeadEnd:
             killed['cmd'] = cmd
             return subprocess.CompletedProcess(cmd, 0)
 
+        # Порт СНАЧАЛА занят — иначе закрывать некого и запасной путь не нужен.
+        # Порядок ответов: занят при входе, свободен после снятия.
+        answers = [True, False]
         monkeypatch.setattr(desktop, 'our_recorded_pid', lambda: 3131)
         monkeypatch.setattr(desktop.subprocess, 'run', fake_run)
-        monkeypatch.setattr(desktop, 'port_busy', lambda *a, **k: False)
+        monkeypatch.setattr(desktop, 'port_busy',
+                            lambda *a, **k: answers.pop(0) if answers else False)
         assert desktop.stop_holder({}, 8931, wait=1) is True
         assert '3131' in killed['cmd']
 

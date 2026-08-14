@@ -122,6 +122,40 @@ def _log(row):
     store._append(ORDERS_LOG, row)
 
 
+def explain_refusal(exc):
+    """
+    Отказ биржи по-человечески. Непонятный текст — тоже ответ, но плохой.
+
+    ПОЧЕМУ ЭТО ОТДЕЛЬНАЯ ФУНКЦИЯ. Одна строка от биржи стоила целого разбора:
+    «the order signer address has to be the address of the API KEY» означает
+    ровно одно — в поле «счёт Polymarket» указан адрес КОШЕЛЬКА, а нужен адрес
+    СЧЁТА на Polymarket. Это разные адреса, и человек, который завёл кошелёк
+    через расширение, уверен, что адрес у него один.
+
+    Проверено обеими заявками на живом счёте:
+        счёт = адрес кошелька Phantom   ОТКАЗ этой самой строкой
+        счёт = адрес Polymarket         ПРИНЯТА
+    """
+    text = str(exc)
+    low = text.lower()
+    if 'signer address' in low and 'api key' in low:
+        return ('в поле «счёт Polymarket» указан адрес вашего КОШЕЛЬКА, а '
+                'нужен адрес СЧЁТА на Polymarket — это разные адреса. '
+                'Посмотрите его на polymarket.com в профиле (Deposit / '
+                'адрес счёта) и впишите сюда')
+    if 'not enough balance' in low or 'balance is not enough' in low:
+        return ('на счёте Polymarket не хватает денег под эту заявку — '
+                'проверьте остаток и бюджет стратегии')
+    if 'invalid order version' in low or 'clob-client' in low:
+        return ('биржа не приняла формат заявки — приложению нужна свежая '
+                'версия торговой библиотеки, обновитесь')
+    if 'minimum' in low and ('size' in low or 'amount' in low):
+        return 'размер заявки ниже минимума этого рынка'
+    if 'tick' in low or 'price' in low and 'increment' in low:
+        return 'цена не попадает в шаг цен этого рынка'
+    return f'биржа отвергла: {text[:120]}'
+
+
 def route(side, price, size, holding=0.0, twin_token=None, token_id=None,
           tick=0.001):
     """
@@ -242,7 +276,7 @@ def place(token_id, side, price, size, day_loss_usd=0.0, tick=0.001,
     except Exception as exc:                                # noqa: BLE001
         _log({'at': stamp, 'action': 'ERROR', 'token': send_token,
               'why': str(exc)[:200]})
-        return {'ok': False, 'why': f'биржа отвергла: {str(exc)[:120]}'}
+        return {'ok': False, 'why': explain_refusal(exc)}
 
     order_id = (answer or {}).get('orderID') or (answer or {}).get('orderId')
     _log({'at': stamp, 'action': 'PLACED', 'token': send_token, 'side': side,

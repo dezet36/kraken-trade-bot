@@ -261,6 +261,23 @@ def step(maker, markets, live=False, day_loss=0.0):
     committed = 0.0
     budget = float(maker.state['cash'])
 
+    # В ЖИВОМ РЕЖИМЕ ПОТОЛОК СТАВИТ БИРЖА, А НЕ НАШ СЧЁТ НА БУМАГЕ.
+    #
+    # Бумажные деньги считают, сколько мы СОБИРАЛИСЬ вложить; биржа знает,
+    # сколько свободно на самом деле. Разойтись они обязаны: часть денег уже
+    # заперта под стоящими заявками, часть ушла в исполненную покупку. Пока
+    # ориентиром была бумага, бот раз за разом слал заявки, на которые денег
+    # нет, и получал «not enough balance» пачками — по строке на каждый рынок
+    # каждый такт. Наблюдалось на живом счёте: восемь рынков, поток отказов,
+    # и ни одного слова о том, что деньги просто кончились.
+    if live:
+        try:
+            free = wallet.balance()
+            if free is not None:
+                budget = min(budget, float(free))
+        except Exception:                                   # noqa: BLE001
+            pass                                            # не спросили — идём по бумаге
+
     for token, market in by_token.items():
         live_book = books.get(str(token))
         if not live_book or str(token) not in marks:
@@ -364,6 +381,10 @@ def step(maker, markets, live=False, day_loss=0.0):
                                      holding=slot['position'])
                 if out.get('ok'):
                     order['live_id'] = out.get('order_id')
+                    # ПРЕЖНЯЯ ОШИБКА СТИРАЕТСЯ. Без этого строка в панели вечно
+                    # показывала отказ, которого уже нет: заявка стоит на
+                    # бирже, а рядом с ней висит текст прошлой неудачи.
+                    order.pop('live_error', None)
                     sent += 1
                 else:
                     order['live_error'] = out.get('why')

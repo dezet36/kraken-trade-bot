@@ -398,3 +398,105 @@ class TestOurOwnCapDoesNotKillTheAskSide:
 
         monkeypatch.setenv('PM_MAX_ORDER_USD', '2')
         assert executor.max_order_usd() == 2.0
+
+
+class TestRefusalIsExplained:
+    """
+    Одна строка от биржи стоила целого разбора.
+
+    «the order signer address has to be the address of the API KEY» означает
+    ровно одно: в поле «счёт Polymarket» указан адрес КОШЕЛЬКА, а нужен адрес
+    СЧЁТА на Polymarket. Проверено обеими заявками на живом счёте — с адресом
+    кошелька отказ, с адресом счёта принята.
+    """
+
+    def test_wrong_account_is_named_in_plain_words(self):
+        from polymarket import executor
+
+        why = executor.explain_refusal(
+            "PolyApiException[status_code=400, error_message="
+            "{'error': 'the order signer address has to be the address of the API KEY'}]")
+        assert 'адрес вашего КОШЕЛЬКА' in why
+        assert 'polymarket.com' in why
+
+    def test_no_money_is_named(self):
+        from polymarket import executor
+
+        why = executor.explain_refusal("{'error': 'not enough balance / allowance'}")
+        assert 'не хватает денег' in why
+
+    def test_unknown_refusal_is_passed_through(self):
+        """Непонятный текст лучше молчания — его хотя бы можно показать."""
+        from polymarket import executor
+
+        why = executor.explain_refusal('какая-то новая беда')
+        assert 'какая-то новая беда' in why
+
+    def test_success_clears_the_previous_error(self):
+        """Заявка стоит на бирже, а рядом висит текст прошлой неудачи."""
+        text = open(os.path.join(ROOT, 'polymarket', 'mm.py'),
+                    encoding='utf-8').read()
+        assert "order.pop('live_error', None)" in text
+
+    def test_panel_puts_the_exchange_number_first(self):
+        html = open(os.path.join(ROOT, 'dashboard.html'), encoding='utf-8').read()
+        spot = html.index('let where;')
+        block = html[spot:spot + 700]
+        assert block.index('q.live_ids') < block.index('q.live_error')
+
+    def test_panel_warns_when_the_addresses_match(self):
+        """
+        Прежний текст утверждал обратное — «так и должно быть у кошелька из
+        расширения». Это неверно: биржа такие заявки отвергает.
+        """
+        html = open(os.path.join(ROOT, 'dashboard.html'), encoding='utf-8').read()
+        assert 'биржа такие заявки отвергает' in html
+
+
+class TestLiveBudgetComesFromTheExchange:
+    """
+    В живом режиме потолок ставит биржа, а не наш счёт на бумаге.
+
+    Бумажные деньги считают, сколько мы СОБИРАЛИСЬ вложить; биржа знает,
+    сколько свободно на самом деле. Часть уже заперта под стоящими заявками,
+    часть ушла в исполненную покупку. Пока ориентиром была бумага, бот слал
+    заявки, на которые денег нет, и получал «not enough balance» пачками.
+    """
+
+    def test_step_asks_the_exchange_for_free_money(self):
+        text = open(os.path.join(ROOT, 'polymarket', 'mm.py'),
+                    encoding='utf-8').read()
+        spot = text.index('committed = 0.0')
+        block = text[spot:spot + 1200]
+        assert 'wallet.balance()' in block
+        assert 'min(budget, float(free))' in block
+
+    def test_paper_mode_keeps_its_own_money(self):
+        """В бумаге биржу спрашивать не о чем — там нет наших денег."""
+        text = open(os.path.join(ROOT, 'polymarket', 'mm.py'),
+                    encoding='utf-8').read()
+        spot = text.index('committed = 0.0')
+        block = text[spot:spot + 1200]
+        assert 'if live:' in block, 'опрос биржи только в живом режиме'
+
+
+class TestCrashesAreWrittenDown:
+    """
+    Приложение трижды завершалось само с кодом 1, не оставив ни строчки.
+
+    Консоли у оконного режима нет, стандартный обработчик печатает разбор в
+    поток, которого никто не читает. Разбирать такое можно только гаданием — а
+    гадание на живых деньгах плохой способ работы.
+    """
+
+    def test_both_hooks_are_installed(self):
+        text = open(os.path.join(ROOT, 'desktop.py'), encoding='utf-8').read()
+        assert 'sys.excepthook = on_main' in text
+        assert 'threading.excepthook = on_thread' in text, \
+            'исключение в фоновом потоке главный обработчик не видит'
+
+    def test_main_installs_them_first(self):
+        text = open(os.path.join(ROOT, 'desktop.py'), encoding='utf-8').read()
+        body = text[text.index('def main():'):]
+        assert body.index('_remember_crashes()') < body.index('--selftest'), \
+            'ловушка ставится до первой строки работы'
