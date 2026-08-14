@@ -51,6 +51,27 @@ def mask(value):
     return f'{text[:6]}…{text[-4:]} ({len(text)} знаков)'
 
 
+# ТИПЫ ПОДПИСИ У ПЛОЩАДКИ, И ПОЧЕМУ ИХ ПРИХОДИТСЯ ПОДБИРАТЬ.
+#
+#     0  EOA           ключ сам владеет деньгами; счёт равен адресу ключа
+#     1  POLY_PROXY    вход по почте: деньги на прокси, ключ только подписывает
+#     2  GNOSIS_SAFE   вход кошельком-расширением: деньги на сейфе Gnosis
+#
+# Угадать со стороны нельзя. Тип зависит от того, КАК человек когда-то завёл
+# счёт на площадке, а не от того, какой у него кошелёк сейчас: один и тот же
+# Phantom даёт тип 0, если торговать прямо с адреса, и тип 2, если площадка
+# завела для него сейф. Документация площадки на этот счёт противоречит сама
+# себе — в одном месте для расширений назван тип 0, в другом тип 2.
+#
+# Поэтому мы не спрашиваем и не гадаем, а ПРОБУЕМ: верный тот, с которым биржа
+# выдаёт учётные данные. Ошибиться здесь молча дороже всего — заявки уходили бы
+# от имени счёта, на котором нет денег, и отвергались бы без внятной причины.
+SIGNATURE_TYPES = (0, 1, 2)
+SIGNATURE_NAMES = {0: 'ключ владеет деньгами напрямую',
+                   1: 'счёт-прокси (вход по почте)',
+                   2: 'сейф Gnosis (вход кошельком-расширением)'}
+
+
 def check(private_key, funder=None):
     """
     Проверяет ключ, НЕ записывая его. Возвращает (годен, адрес, причина).
@@ -58,6 +79,9 @@ def check(private_key, funder=None):
     Проверка идёт тем же способом, каким потом пойдёт бот: ключ подставляется
     в окружение временно, поднимается настоящий торговый клиент, спрашивается
     адрес. Иначе «проверено» означало бы «похоже на ключ», а это не проверка.
+
+    Тип подписи ПОДБИРАЕТСЯ перебором, если не задан явно: см. выше, почему
+    угадать его со стороны нельзя.
     """
     key = str(private_key or '').strip()
     if not KEY_RE.match(key):
@@ -65,20 +89,30 @@ def check(private_key, funder=None):
     if funder and not ADDRESS_RE.match(str(funder).strip()):
         return False, None, 'адрес счёта должен быть вида 0x и 40 знаков'
 
-    saved_key = os.environ.get('PM_PRIVATE_KEY')
-    saved_funder = os.environ.get('PM_FUNDER')
+    saved = {name: os.environ.get(name) for name in
+             ('PM_PRIVATE_KEY', 'PM_FUNDER', 'PM_SIGNATURE_TYPE')}
     try:
         os.environ['PM_PRIVATE_KEY'] = key
-        if funder:
-            os.environ['PM_FUNDER'] = str(funder).strip()
         address = wallet.address()
         if not address:
             return False, None, 'ключ не удалось прочитать как приватный'
-        client = wallet.client(force=True)
-        if client is None:
-            return False, address, ('адрес получен, но торговый клиент не '
-                                    'поднялся — проверьте адрес счёта')
-        return True, address, ''
+
+        # Без указанного счёта пробуем адрес самого ключа: так выглядит случай,
+        # когда человек торгует прямо с кошелька, а не через счёт площадки.
+        money_at = str(funder).strip() if funder else address
+        os.environ['PM_FUNDER'] = money_at
+
+        chosen = os.environ.get('PM_SIGNATURE_TYPE')
+        order = [int(chosen)] if chosen else list(SIGNATURE_TYPES)
+        for sig in order:
+            os.environ['PM_SIGNATURE_TYPE'] = str(sig)
+            if wallet.client(force=True) is not None:
+                _remember_signature(sig)
+                return True, address, (f'подпись: {SIGNATURE_NAMES[sig]}')
+        return False, address, (
+            'ключ прочитан, но площадка не приняла ни один тип подписи. '
+            'Обычно это значит, что адрес счёта указан не тот: возьмите его '
+            'на polymarket.com/settings, а не из кошелька')
     except Exception as exc:                                # noqa: BLE001
         # СООБЩЕНИЕ БИБЛИОТЕКИ НАРУЖУ НЕ ИДЁТ. Оно способно содержать сам ключ:
         # у некоторых версий он попадает в текст ошибки целиком.
@@ -86,13 +120,20 @@ def check(private_key, funder=None):
     finally:
         # Окружение возвращается в прежний вид независимо от исхода: проверка
         # не должна незаметно включить кошелёк, который человек ещё не сохранил.
-        for name, value in (('PM_PRIVATE_KEY', saved_key),
-                            ('PM_FUNDER', saved_funder)):
+        for name, value in saved.items():
             if value is None:
                 os.environ.pop(name, None)
             else:
                 os.environ[name] = value
         wallet.client(force=True)
+
+
+_FOUND_SIGNATURE = {}
+
+
+def _remember_signature(sig):
+    """Запоминает подобранный тип, чтобы записать его вместе с ключом."""
+    _FOUND_SIGNATURE['type'] = int(sig)
 
 
 def save(private_key, funder=None):
@@ -108,8 +149,16 @@ def save(private_key, funder=None):
 
     import first_run
     values = {'PM_PRIVATE_KEY': str(private_key).strip()}
-    if funder:
-        values['PM_FUNDER'] = str(funder).strip()
+    # СЧЁТ ЗАПИСЫВАЕТСЯ ВСЕГДА, даже когда человек его не ввёл: тогда это адрес
+    # самого ключа. Оставить поле пустым значило бы, что configured() вернёт
+    # ложь и кошелёк будет считаться неподключённым сразу после успешной
+    # проверки.
+    values['PM_FUNDER'] = (str(funder).strip() if funder
+                           else (address or ''))
+    # Подобранный тип подписи сохраняется рядом с ключом: подбирать его заново
+    # при каждом запуске значило бы три лишних обращения к бирже на старте.
+    if _FOUND_SIGNATURE.get('type') is not None:
+        values['PM_SIGNATURE_TYPE'] = str(_FOUND_SIGNATURE['type'])
     first_run._write_env(values)
 
     # Окружение текущего процесса тоже обновляется: иначе настройка
@@ -129,8 +178,9 @@ def forget():
     одним действием, не разбираясь, где что записано.
     """
     import first_run
-    first_run._write_env({'PM_PRIVATE_KEY': '', 'PM_FUNDER': '', 'PM_LIVE': '0'})
-    for name in ('PM_PRIVATE_KEY', 'PM_FUNDER'):
+    first_run._write_env({'PM_PRIVATE_KEY': '', 'PM_FUNDER': '',
+                          'PM_SIGNATURE_TYPE': '', 'PM_LIVE': '0'})
+    for name in ('PM_PRIVATE_KEY', 'PM_FUNDER', 'PM_SIGNATURE_TYPE'):
         os.environ.pop(name, None)
     os.environ['PM_LIVE'] = '0'
     wallet.client(force=True)
@@ -170,6 +220,8 @@ def state():
         'can_trade_live': status['can_trade_live'],
         'budget_usd': round(money, 2),
         'budget_note': why,
+        'signature_type': status.get('signature_type'),
+        'signature_note': SIGNATURE_NAMES.get(status.get('signature_type'), ''),
         'balance_usd': None,
         'balance_known': False,
     }
