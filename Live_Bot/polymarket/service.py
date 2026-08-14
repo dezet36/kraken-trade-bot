@@ -23,7 +23,7 @@ import time
 
 _thread = None
 _state = {'running': False, 'cycles': 0, 'last_error': None,
-          'last_at': None, 'stopping': False}
+          'last_at': None, 'stopping': False, 'live': None}
 
 # Сон между тактами прерываемый. Обычный time.sleep держал бы поток до конца
 # такта — до полуминуты, — а всё это время на Polymarket стоят наши заявки.
@@ -40,6 +40,11 @@ def status():
     out = dict(_state)
     out['alive'] = bool(_thread is not None and _thread.is_alive())
     out['autostart'] = autostart_enabled()
+    # РЕЖИМ ОТДАЁТСЯ ИЗ ПОТОКА, а не спрашивается заново. Иначе панель
+    # показывала бы «живые деньги» по настройке, тогда как поток продолжал
+    # считать в бумаге — ровно то расхождение, из-за которого заявки не
+    # уходили, а на экране всё выглядело правильно.
+    out['live_now'] = _state.get('live')
     return out
 
 
@@ -75,6 +80,7 @@ def _loop(poll_seconds):
         f"режим {'ЖИВЫЕ ДЕНЬГИ' if live else 'бумага'}, "
         f"капитал ${maker.bankroll:,.0f}")
     _state['running'] = True
+    _state['live'] = live
 
     try:
         while True:
@@ -82,6 +88,30 @@ def _loop(poll_seconds):
                 log('◈ Polymarket: остановка по запросу')
                 return
             try:
+                # РЕЖИМ ПЕРЕЧИТЫВАЕТСЯ КАЖДЫЙ ТАКТ, А НЕ БЕРЁТСЯ ПРИ ЗАПУСКЕ.
+                #
+                # Здесь он читался ровно один раз, и порядок действий человека
+                # ломал всё молча: запустил маркет-мейкер, потом подключил
+                # кошелёк, потом включил живую торговлю — а поток так и остался
+                # с тем ответом, который получил при старте. Заявки считались,
+                # рисовались на панели и НИКУДА НЕ УХОДИЛИ. Ни ошибки, ни
+                # предупреждения: панель показывала «котируем 4 рынка», биржа —
+                # ноль заявок. Повторное нажатие «Запустить» не помогало: поток
+                # уже живой, и запуск возвращал «работает».
+                #
+                # Поймано на живом счёте: 16 тактов, четыре рынка, ноль заявок
+                # на бирже при подключённом кошельке и включённом живом режиме.
+                now_live = wallet.status()['can_trade_live']
+                if now_live != live:
+                    log(f"◈ Polymarket: режим изменился — "
+                        f"{'ЖИВЫЕ ДЕНЬГИ' if now_live else 'бумага'}")
+                    if live and not now_live:
+                        # Живую торговлю выключили — заявки на бирже надо
+                        # снять: вести их больше некому, а исполнить нас могут.
+                        log(f"◈ Polymarket: снимаю заявки — "
+                            f"{executor.cancel_all()}")
+                    live = now_live
+                    _state['live'] = live
                 before = maker.mark_to_market({})
                 out = mm.step(maker, markets, live=live,
                               day_loss=max(0.0, -before['pnl']))

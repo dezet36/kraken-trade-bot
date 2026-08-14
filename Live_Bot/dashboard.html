@@ -2657,7 +2657,13 @@ function renderPolymarket() {
              записывалась и раньше — но не читалась никем. */
           let where;
           if (q.live_error) {
-            where = `<span style="color:var(--bad)" title="${esc(q.live_error)}">не ушла</span>`;
+            /* ПРИЧИНА ПИШЕТСЯ В СТРОКЕ, А НЕ ПРЯЧЕТСЯ ПОД НАВЕДЕНИЕ. Ответ на
+               «почему на бирже пусто» должен читаться с экрана сразу: под
+               наведением его не ищут, потому что не знают, что там что-то
+               есть. Проверено на себе — искал причину полчаса, а она была
+               записана и не показана. */
+            where = `<span style="color:var(--bad)" title="${esc(q.live_error)}">не ушла: ${
+              esc(String(q.live_error).slice(0, 38))}</span>`;
           } else if (q.live_ids) {
             where = `<span style="color:var(--good)">да (${q.live_ids})</span>`;
           } else {

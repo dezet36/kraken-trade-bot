@@ -302,3 +302,99 @@ class TestSmallBudgetStillStandsSomewhere:
 
         rows = [dict(r, order_min=50) for r in self._rows(3)]
         assert selector.allocate(rows, budget=10)['markets'] == []
+
+
+class TestLiveModeIsNotFrozenAtStart:
+    """
+    Режим читается КАЖДЫЙ такт. Раньше — один раз, при запуске потока.
+
+    Порядок действий человека ломал всё молча: запустил маркет-мейкер, потом
+    подключил кошелёк, потом включил живую торговлю — а поток остался с тем
+    ответом, который получил при старте. Заявки считались, рисовались на
+    панели и никуда не уходили. Ни ошибки, ни предупреждения. Повторное
+    нажатие «Запустить» не помогало: поток уже живой, запуск возвращал
+    «работает».
+
+    Замерено на живом счёте: 39 тактов, четыре рынка, ноль заявок на бирже при
+    подключённом кошельке и включённом живом режиме.
+    """
+
+    def test_loop_rereads_the_mode_every_cycle(self):
+        text = open(os.path.join(ROOT, 'polymarket', 'service.py'),
+                    encoding='utf-8').read()
+        body = text[text.index('def _loop('):text.index('def start(')]
+        assert "now_live = wallet.status()['can_trade_live']" in body
+        assert 'if now_live != live:' in body
+
+    def test_turning_live_off_cancels_what_stands(self):
+        """
+        Выключили живую торговлю — заявки на бирже надо снять: вести их больше
+        некому, а исполнить нас могут.
+        """
+        text = open(os.path.join(ROOT, 'polymarket', 'service.py'),
+                    encoding='utf-8').read()
+        body = text[text.index('def _loop('):text.index('def start(')]
+        spot = body.index('if now_live != live:')
+        assert 'cancel_all()' in body[spot:spot + 600]
+
+    def test_status_tells_the_mode_of_the_thread(self):
+        """
+        Панель обязана показывать, чем поток занят СЕЙЧАС. Спрашивать настройку
+        заново значило бы показывать «живые деньги» там, где поток считает в
+        бумаге, — то самое расхождение, из-за которого заявки не уходили.
+        """
+        from polymarket import service
+
+        assert 'live_now' in service.status()
+
+
+class TestOrdersWithoutAnExchangeNumberAreSent:
+    """
+    Отправляется всё, у чего нет биржевого номера, а не только изменившееся.
+
+    Условие «котировка изменилась с прошлого такта» ломало ровно тот порядок,
+    который человек и выбирает: котировки уже выставлены и с места не двигаются,
+    пока не двинется рынок, — а значит не отправляются никогда.
+    """
+
+    def test_step_does_not_require_the_quote_to_change(self):
+        text = open(os.path.join(ROOT, 'polymarket', 'mm.py'),
+                    encoding='utf-8').read()
+        spot = text.index('def step(')
+        body = text[spot:text.index('def _single_instance(')]
+        assert 'if live:\n            for side in' in body, \
+            'отправка не должна зависеть от изменения котировки'
+        assert "if not order or order.get('live_id'):" in body, \
+            'от повтора защищает номер, а не сравнение котировок'
+
+
+class TestOurOwnCapDoesNotKillTheAskSide:
+    """
+    Потолок заявки и раскладка обязаны согласовываться.
+
+    Раскладка отводит рынку минимум биржи — пять контрактов, ровно $5 за
+    двустороннюю котировку. Потолок считал долю бюджета: при $10 это $3.40, и
+    продажа на дешёвом рынке (цена 0.20 → встречный токен 0.80, то есть $4)
+    отвергалась НАШЕЙ ЖЕ проверкой. Снаружи — опять односторонняя котировка.
+    """
+
+    def test_cap_is_never_below_what_a_quote_costs(self, monkeypatch):
+        from polymarket import executor, params
+
+        monkeypatch.delenv('PM_MAX_ORDER_USD', raising=False)
+        monkeypatch.setattr(params, 'bankroll_for', lambda _: 10.0)
+        assert executor.max_order_usd() >= params.MM_MIN_ORDER_SIZE
+
+    def test_the_mirrored_side_of_a_cheap_market_passes(self, monkeypatch):
+        """Цена 0.20 — встречный токен стоит 0.80, и это дороже доли бюджета."""
+        from polymarket import executor, params
+
+        monkeypatch.delenv('PM_MAX_ORDER_USD', raising=False)
+        monkeypatch.setattr(params, 'bankroll_for', lambda _: 10.0)
+        assert 0.80 * 5 <= executor.max_order_usd()
+
+    def test_an_explicit_setting_still_wins(self, monkeypatch):
+        from polymarket import executor
+
+        monkeypatch.setenv('PM_MAX_ORDER_USD', '2')
+        assert executor.max_order_usd() == 2.0
