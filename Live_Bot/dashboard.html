@@ -842,6 +842,15 @@
     .topbar, .content { padding-left: 16px; padding-right: 16px; }
     .hero .big { font-size: 32px; }
   }
+  /* Заголовок группы в меню: направление и его итог. Меню было плоским, и
+     принадлежность раздела приходилось помнить. */
+  .nav-group { display:flex; justify-content:space-between; align-items:baseline;
+    gap:8px; padding:14px 14px 5px; font-size:11px; letter-spacing:.09em;
+    text-transform:uppercase; color:var(--muted); font-weight:600; }
+  .nav-group:first-child { padding-top:6px; }
+  .grp-pnl { font-size:11.5px; font-weight:600; letter-spacing:0;
+    text-transform:none; font-variant-numeric:tabular-nums; }
+  td.num, th.num { text-align:right; font-variant-numeric:tabular-nums; }
 </style>
 </head>
 <body>
@@ -879,6 +888,89 @@
     <div class="content" id="body">
       <div id="attention"></div>
       <div id="regime"></div>
+
+      <!-- ── Сводка ───────────────────────────────────────────────────────
+           ЕДИНСТВЕННОЕ МЕСТО, ГДЕ НАПРАВЛЕНИЯ ВСТРЕЧАЮТСЯ, и встречаются
+           намеренно: ответить «сколько всего и где» иначе было нельзя.
+           Дальше они расходятся по своим разделам и больше не смешиваются. -->
+      <section class="page" data-page="summary" hidden>
+        <div id="summary-body">загружаю…</div>
+      </section>
+
+      <!-- ── Стратегии Polymarket ─────────────────────────────────────────
+           У направления их пять, и статус у каждой свой: одна торгует, одна
+           выключена, три считают на бумаге и живого пути не имеют вовсе.
+           Показывать их одним списком с биржевыми было бы смешением рынков. -->
+      <section class="page" data-page="pmstrat" hidden>
+        <div id="pmstrat-body">загружаю…</div>
+      </section>
+
+      <!-- ── Подключения ──────────────────────────────────────────────────
+           БИРЖА И КОШЕЛЁК В ОДНОМ МЕСТЕ. Прежде ключи биржи лежали в
+           «Управление → Приложение», а кошелёк Polymarket — на вкладке
+           маркет-мейкера: два разных места для одного по сути действия
+           «подключить, откуда берутся деньги». -->
+      <section class="page" data-page="connect" hidden>
+        <div id="connect-intro"></div>
+        <div id="exchange"></div>
+        <div id="keys"></div>
+        <div class="card" id="pm-wallet">
+          <div class="row" style="justify-content:space-between;align-items:baseline">
+            <h3 style="margin:0">Кошелёк</h3>
+            <span class="hint" id="pm-wallet-state">—</span>
+          </div>
+          <!-- ПРЕДУПРЕЖДЕНИЕ СТОИТ ПЕРЕД ПОЛЕМ, А НЕ ПОСЛЕ. Ключ биржи можно
+               урезать в правах; приватный ключ Polygon урезать нельзя — он
+               распоряжается всем, что лежит на адресе. Прочитать об этом
+               нужно до того, как ключ вставлен, а не после. -->
+          <p class="hint" id="pm-wallet-warn">
+            Приватный ключ распоряжается <b>всеми</b> средствами адреса и
+            подписывает любую операцию, включая перевод остатка. Урезать его в
+            правах, как ключ биржи, нельзя. Заведите для бота
+            <b>отдельный кошелёк</b> и держите на нём только ту сумму, которой
+            не жаль в эксперименте.
+          </p>
+          <div id="pm-wallet-form">
+            <label class="field">
+              <span>Приватный ключ</span>
+              <input type="password" id="pm-key" autocomplete="off"
+                     placeholder="0x… 64 знака" spellcheck="false">
+            </label>
+            <label class="field">
+              <span>Адрес счёта Polymarket</span>
+              <input type="text" id="pm-funder" autocomplete="off"
+                     placeholder="0x… 40 знаков" spellcheck="false">
+            </label>
+            <div class="row-end" style="gap:8px">
+              <button type="button" class="btn sm" id="pm-wallet-save">Подключить</button>
+              <button type="button" class="btn ghost sm" id="pm-wallet-forget" hidden>Отключить</button>
+            </div>
+            <p class="hint">
+              Ключ проверяется до записи и обратно не показывается — видно
+              только адрес. Подключение <b>не включает</b> живую торговлю.
+            </p>
+          </div>
+          <div class="row" style="gap:12px;margin-top:12px;flex-wrap:wrap">
+            <label class="field" style="max-width:220px">
+              <span>Бюджет маркет-мейкера</span>
+              <input type="text" id="pm-budget" autocomplete="off"
+                     placeholder="20, max или 80%" spellcheck="false">
+            </label>
+            <button type="button" class="btn ghost sm" id="pm-budget-save">Сохранить сумму</button>
+          </div>
+          <p class="hint" id="pm-budget-note"></p>
+          <!-- ЖИВАЯ ТОРГОВЛЯ — ОТДЕЛЬНЫЙ РУБИЛЬНИК. Подключить кошелёк и
+               разрешить тратить с него деньги суть разные решения, и одно
+               действие не должно делать оба. -->
+          <div class="row" style="gap:10px;margin-top:14px;align-items:center">
+            <button type="button" class="btn sm" id="pm-live-toggle" disabled>
+              Включить живую торговлю
+            </button>
+            <span class="hint" id="pm-live-state">кошелёк не подключён</span>
+          </div>
+        </div>
+        <div id="connect-pm"></div>
+      </section>
 
       <!-- ── Обзор ────────────────────────────────────────────────────── -->
       <section class="page" data-page="overview">
@@ -975,61 +1067,6 @@
              нечего смотреть: маркет-мейкер работает на бумаге и ничего не
              отправляет. Прятать подключение под таблицы значило бы прятать
              единственное, что отделяет замер от торговли. -->
-        <div class="card" id="pm-wallet">
-          <div class="row" style="justify-content:space-between;align-items:baseline">
-            <h3 style="margin:0">Кошелёк</h3>
-            <span class="hint" id="pm-wallet-state">—</span>
-          </div>
-          <!-- ПРЕДУПРЕЖДЕНИЕ СТОИТ ПЕРЕД ПОЛЕМ, А НЕ ПОСЛЕ. Ключ биржи можно
-               урезать в правах; приватный ключ Polygon урезать нельзя — он
-               распоряжается всем, что лежит на адресе. Прочитать об этом
-               нужно до того, как ключ вставлен, а не после. -->
-          <p class="hint" id="pm-wallet-warn">
-            Приватный ключ распоряжается <b>всеми</b> средствами адреса и
-            подписывает любую операцию, включая перевод остатка. Урезать его в
-            правах, как ключ биржи, нельзя. Заведите для бота
-            <b>отдельный кошелёк</b> и держите на нём только ту сумму, которой
-            не жаль в эксперименте.
-          </p>
-          <div id="pm-wallet-form">
-            <label class="field">
-              <span>Приватный ключ</span>
-              <input type="password" id="pm-key" autocomplete="off"
-                     placeholder="0x… 64 знака" spellcheck="false">
-            </label>
-            <label class="field">
-              <span>Адрес счёта Polymarket</span>
-              <input type="text" id="pm-funder" autocomplete="off"
-                     placeholder="0x… 40 знаков" spellcheck="false">
-            </label>
-            <div class="row-end" style="gap:8px">
-              <button type="button" class="btn sm" id="pm-wallet-save">Подключить</button>
-              <button type="button" class="btn ghost sm" id="pm-wallet-forget" hidden>Отключить</button>
-            </div>
-            <p class="hint">
-              Ключ проверяется до записи и обратно не показывается — видно
-              только адрес. Подключение <b>не включает</b> живую торговлю.
-            </p>
-          </div>
-          <div class="row" style="gap:12px;margin-top:12px;flex-wrap:wrap">
-            <label class="field" style="max-width:220px">
-              <span>Бюджет маркет-мейкера</span>
-              <input type="text" id="pm-budget" autocomplete="off"
-                     placeholder="20, max или 80%" spellcheck="false">
-            </label>
-            <button type="button" class="btn ghost sm" id="pm-budget-save">Сохранить сумму</button>
-          </div>
-          <p class="hint" id="pm-budget-note"></p>
-          <!-- ЖИВАЯ ТОРГОВЛЯ — ОТДЕЛЬНЫЙ РУБИЛЬНИК. Подключить кошелёк и
-               разрешить тратить с него деньги суть разные решения, и одно
-               действие не должно делать оба. -->
-          <div class="row" style="gap:10px;margin-top:14px;align-items:center">
-            <button type="button" class="btn sm" id="pm-live-toggle" disabled>
-              Включить живую торговлю
-            </button>
-            <span class="hint" id="pm-live-state">кошелёк не подключён</span>
-          </div>
-        </div>
         <div id="pm-body">загружаю…</div>
       </section>
       <section class="page" data-page="control" hidden>
@@ -1045,9 +1082,11 @@
           <div id="controls"></div>
         </div>
         <div class="subpage" data-sub="app" hidden>
-          <div id="exchange"></div>
+          <!-- Подключение биржи и ключи переехали в раздел «Подключения»:
+               там же кошелёк Polymarket, и действие у них одно — сказать
+               боту, откуда берутся деньги. Здесь остаётся то, что настраивают
+               раз в месяц и что к деньгам отношения не имеет. -->
           <div id="notify"></div>
-          <div id="keys"></div>
           <div id="update"></div>
           <div id="settings-history"></div>
         </div>
@@ -1945,17 +1984,43 @@ function closedTable(rows) {
 }
 
 
-/* ── Разделы ────────────────────────────────────────────────────────────── */
+/* ── Разделы ────────────────────────────────────────────────────────────────
+   РАЗДЕЛЫ СГРУППИРОВАНЫ ПО НАПРАВЛЕНИЯМ, и это не украшение меню.
+
+   В приложении два рынка с РАЗНЫМИ деньгами, разными стратегиями и разной
+   механикой. Меню было плоским, и четыре раздела из семи говорили только про
+   биржу, нигде этого не называя: человек, открывший «Обзор», не мог знать, что
+   Polymarket туда не входит, а весь Polymarket с пятью стратегиями ютился в
+   одной вкладке сбоку.
+
+   Теперь принадлежность раздела видна до нажатия, а «Сводка» — единственное
+   место, где направления встречаются, и встречаются намеренно: ответить
+   «сколько всего» иначе было нельзя. */
 const PAGES = [
-  { id: 'overview',  ic: '◎', title: 'Обзор' },
-  { id: 'positions', ic: '▤', title: 'Позиции' },
-  { id: 'history',   ic: '≡', title: 'История' },
-  { id: 'analytics', ic: '◨', title: 'Аналитика' },
-  { id: 'polymarket', ic: '◈', title: 'Polymarket' },
-  { id: 'control',   ic: '⚙', title: 'Управление' },
+  { id: 'summary',   ic: '◉', title: 'Сводка' },
+
+  { group: 'Биржа', dir: 'exchange' },
+  { id: 'overview',  ic: '◎', title: 'Обзор',     dir: 'exchange' },
+  { id: 'positions', ic: '▤', title: 'Позиции',   dir: 'exchange' },
+  { id: 'history',   ic: '≡', title: 'История',   dir: 'exchange' },
+  { id: 'analytics', ic: '◨', title: 'Аналитика', dir: 'exchange' },
+
+  { group: 'Polymarket', dir: 'polymarket' },
+  { id: 'polymarket', ic: '◈', title: 'Маркет-мейкер', dir: 'polymarket' },
+  { id: 'pmstrat',    ic: '◇', title: 'Стратегии',     dir: 'polymarket' },
+
+  { group: 'Приложение' },
+  { id: 'connect',   ic: '⚭', title: 'Подключения' },
+  { id: 'control',   ic: '⚙', title: 'Настройки' },
   { id: 'diag',      ic: '⚠', title: 'Диагностика' },
 ];
-let page = PAGES.some(p => p.id === q.get('page')) ? q.get('page') : 'overview';
+const PAGE_IDS = PAGES.filter(p => p.id);
+/* Какому направлению принадлежит раздел. Нужно затем, чтобы прятать фильтры
+   периода и стратегии на страницах Polymarket: они относятся к сделкам биржи
+   и там не действуют вовсе. Фильтр, который ничего не фильтрует, хуже
+   отсутствующего — он обещает управление, которого нет. */
+const PAGE_DIR = Object.fromEntries(PAGE_IDS.map(p => [p.id, p.dir || '']));
+let page = PAGE_IDS.some(p => p.id === q.get('page')) ? q.get('page') : 'summary';
 
 function buildNav() {
   const counts = {
@@ -1963,7 +2028,21 @@ function buildNav() {
     history: (DATA && DATA.closed_total) || 0,
     diag: (DATA && DATA.errors && DATA.errors.groups) || 0,
   };
+  /* Итог направления стоит в заголовке группы. Без него человек видит имена
+     разделов, но не видит, где деньги и как они себя чувствуют, — а это
+     первое, зачем открывают панель. */
+  const money = {};
+  ((DATA && DATA.directions) || []).forEach(d => { money[d.id] = d; });
+
   document.getElementById('nav').innerHTML = PAGES.map(p => {
+    if (p.group) {
+      const d = money[p.dir];
+      const pnl = d ? d.pnl : null;
+      const tail = pnl === null || pnl === undefined ? ''
+        : `<span class="grp-pnl" style="color:var(--${pnl >= 0 ? 'good' : 'bad'})">`
+          + (pnl >= 0 ? '+' : '') + pmMoney(pnl) + '</span>';
+      return `<div class="nav-group">${p.group}${tail}</div>`;
+    }
     const n = counts[p.id];
     return `<button type="button" data-page="${p.id}" aria-current="${p.id === page}">
       <span class="ic">${p.ic}</span>${p.title}
@@ -2042,9 +2121,138 @@ function showPage() {
   // повторять на каждом такте нельзя, это затирало бы поле под курсором.
   if (page === 'control' && SETTINGS && CONTROLS_BLIND && DATA) renderControls();
   if (page === 'diag' && currentSub('diag') === 'log' && !LOG_LOADED) refreshLog();
-  const def = PAGES.find(p => p.id === page);
+  if (page === 'summary') renderSummary();
+  if (page === 'pmstrat') { renderPmStrategies(); loadPolymarket(); }
+  if (page === 'connect') {
+    renderKeys(DATA && DATA.writable !== false);
+    if (!SETTINGS) loadSettings();
+    loadPolymarket();
+  }
+
+  const def = PAGE_IDS.find(p => p.id === page);
   document.getElementById('page-title').textContent = def ? def.title : '';
+
+  /* ФИЛЬТРЫ ПРЯЧУТСЯ ТАМ, ГДЕ НЕ ДЕЙСТВУЮТ. Период и стратегия относятся к
+     сделкам биржи; на страницах Polymarket они не фильтруют ничего, но своим
+     видом обещают управление, которого нет. Пустое место честнее. */
+  const filters = document.querySelector('.filters');
+  if (filters) filters.hidden = PAGE_DIR[page] !== 'exchange';
+
   buildNav();
+}
+
+/* ── Сводка по направлениям ─────────────────────────────────────────────────
+   ЕДИНСТВЕННОЕ МЕСТО, ГДЕ БИРЖА И POLYMARKET СТОЯТ РЯДОМ. Дальше они
+   расходятся по своим разделам и не смешиваются: у них разные деньги, разные
+   стратегии и разная механика, и сложение их результатов в одну строку было бы
+   сложением несуммируемого.
+
+   Здесь они сравнимы по одной мерке — вложено, стало, разница, — и по ней же
+   сравнимы стратегии внутри каждого. */
+function renderSummary() {
+  const box = el('summary-body');
+  if (!box) return;
+  const dirs = (DATA && DATA.directions) || [];
+  if (!dirs.length) { box.innerHTML = '<div class="hint">данных пока нет</div>'; return; }
+
+  const money = v => pmMoney(v);
+  const sign = v => `<span style="color:var(--${v >= 0 ? 'good' : 'bad'})">`
+    + (v >= 0 ? '+' : '') + money(v) + '</span>';
+
+  let html = dirs.map(d => {
+    const link = d.id === 'exchange' ? 'overview' : 'polymarket';
+    const rows = (d.strategies || []).map(s => {
+      const off = !s.enabled;
+      return `<tr${off ? ' style="opacity:.5"' : ''}>
+        <td>${esc(s.name)}${off ? ' <span class="hint">выключена</span>' : ''}</td>
+        <td class="num">${money(s.invested)}</td>
+        <td class="num">${money(s.equity)}</td>
+        <td class="num">${sign(s.pnl)}</td>
+        <td class="num">${s.open || 0}</td></tr>`;
+    }).join('');
+
+    /* Подключение показывается тут же: направление без подключения не
+       торгует, и объяснять это в другом разделе — значит заставлять искать. */
+    const conn = d.connected
+      ? '<span class="hint">подключено</span>'
+      : '<span class="hint" style="color:var(--bad)">не подключено — '
+        + '<a href="?page=connect">настроить</a></span>';
+
+    return `<div class="panel card-pad" style="margin-bottom:16px">
+      <div class="row" style="justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:8px">
+        <div>
+          <h3 style="margin:0"><a href="?page=${link}">${esc(d.title)}</a></h3>
+          <div class="hint">${esc(d.subtitle || '')}</div>
+        </div>
+        <div style="text-align:right">
+          <div style="font-size:20px;font-weight:600">${sign(d.pnl)}</div>
+          <div class="hint">${money(d.invested)} → ${money(d.equity)}</div>
+        </div>
+      </div>
+      <div style="margin:10px 0">${conn}</div>
+      <div class="scroll"><table>
+        <thead><tr><th>стратегия</th><th class="num">вложено</th>
+        <th class="num">стало</th><th class="num">итог</th>
+        <th class="num">открыто</th></tr></thead>
+        <tbody>${rows}</tbody></table></div>
+      ${d.error ? '<div class="warn-box">не читается: ' + esc(d.error) + '</div>' : ''}
+    </div>`;
+  }).join('');
+
+  /* ОБЩИЙ ИТОГ НЕ ПОКАЗЫВАЕТСЯ ОДНИМ ЧИСЛОМ, и это осознанный отказ. Сорок
+     тысяч бумажных на бирже и сто настоящих долларов на Polymarket — величины
+     разной природы: сложив их, мы получили бы число, которое ничего не
+     значит, зато выглядит убедительно. */
+  html += '<div class="hint" style="padding:8px 4px">Направления показаны '
+    + 'порознь и не складываются: у них разные деньги и разная механика. '
+    + 'Общая сумма выглядела бы убедительно и не значила бы ничего.</div>';
+  box.innerHTML = html;
+}
+
+/* ── Стратегии Polymarket ───────────────────────────────────────────────────
+   У направления их пять, и статус у каждой свой: одна торгует, одна выключена
+   бюджетом, три считают на бумаге и живого пути не имеют вовсе. Смешивать их
+   с биржевыми в одном списке значило бы смешивать рынки. */
+function renderPmStrategies() {
+  const box = el('pmstrat-body');
+  if (!box) return;
+  const dir = ((DATA && DATA.directions) || []).find(d => d.id === 'polymarket');
+  if (!dir) { box.innerHTML = '<div class="hint">данных пока нет</div>'; return; }
+
+  /* Статус берётся из того, что известно, а не назначается: бюджет ноль —
+     выключена; идёт прогон — работает; иначе стоит. Про три стратегии-
+     предсказателя сказано прямо, что живого пути у них нет: без этого их
+     сумма выглядела бы обещанием торговли, которой не будет. */
+  const NOTES = {
+    MM: 'Двусторонняя котировка. Единственная с живым путём на биржу.',
+    ONESIDE: 'Односторонняя на дешёвых рынках. Только бумага.',
+    WEATHER: 'Предсказание температуры. Проверена против климата, но не против цены.',
+    CRYPTO: 'Волатильность против корзин. Проверка не проводилась.',
+    LONGSHOT: 'Продажа дешёвых исходов. Проверка провалена — живого пути нет.',
+  };
+  const rows = (dir.strategies || []).map(s => {
+    const state = !s.enabled ? '<span class="hint">выключена бюджетом</span>'
+      : (s.live ? '<span style="color:var(--good)">работает</span>'
+                : '<span class="hint">стоит</span>');
+    return `<tr>
+      <td><b>${esc(s.name)}</b><div class="hint">${esc(NOTES[s.key] || '')}</div></td>
+      <td>${state}</td>
+      <td class="num">${pmMoney(s.invested)}</td>
+      <td class="num">${pmMoney(s.equity)}</td>
+      <td class="num" style="color:var(--${s.pnl >= 0 ? 'good' : 'bad'})">${
+        (s.pnl >= 0 ? '+' : '') + pmMoney(s.pnl)}</td></tr>`;
+  }).join('');
+
+  box.innerHTML = `<div class="panel card-pad">
+      <div class="scroll"><table>
+        <thead><tr><th>стратегия</th><th>состояние</th><th class="num">бюджет</th>
+        <th class="num">стало</th><th class="num">итог</th></tr></thead>
+        <tbody>${rows}</tbody></table></div>
+    </div>
+    <div class="hint" style="padding:8px 4px">Бюджеты независимы: правка одного
+      не двигает остальные, ноль означает «не торгует». Задаются в
+      <a href="?page=connect">Подключениях</a> или настройкой
+      <code>PM_BUDGET_&lt;ИМЯ&gt;</code>.</div>`;
 }
 
 /* ── Полоса внимания ────────────────────────────────────────────────────── */
@@ -4538,6 +4746,11 @@ async function refreshLog() {
 function render() {
   if (!DATA) return;
   buildFilters();
+  // Сводка и стратегии Polymarket живут на данных общего опроса, поэтому
+  // обновляются здесь же: рисовать их только при открытии вкладки значило бы
+  // показывать вчерашние числа тому, кто держит панель открытой.
+  if (page === 'summary') renderSummary();
+  if (page === 'pmstrat') renderPmStrategies();
 
   const closed = pick(DATA.closed);
   // Открытые позиции и ожидающие ордера существуют СЕЙЧАС: фильтр периода

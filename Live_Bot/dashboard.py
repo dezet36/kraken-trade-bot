@@ -590,10 +590,107 @@ def _live_payload():
     }
 
 
+def _directions():
+    """
+    Сводка по НАПРАВЛЕНИЯМ: биржа и Polymarket рядом, одной меркой.
+
+    ЗАЧЕМ ЭТО ОТДЕЛЬНО. В приложении два разных рынка с разными деньгами,
+    разными стратегиями и разной механикой, но панель показывала их так, будто
+    биржа — это «всё», а Polymarket — ещё одна вкладка сбоку. Четыре раздела из
+    семи говорили только про биржу, нигде этого не называя: человек, открывший
+    «Обзор», не мог знать, что Polymarket туда не входит.
+
+    Здесь оба направления отвечают на один вопрос — сколько вложено, сколько
+    стало, сколько стратегий работает, — и потому сравнимы. Считается на
+    сервере, чтобы панель не складывала деньги сама: сложение чужих сумм в
+    браузере — верный способ однажды сложить несуммируемое.
+    """
+    out = []
+
+    # ── Биржа ───────────────────────────────────────────────────────────────
+    strategies = []
+    invested = current = 0.0
+    for name, start in (config.PAPER_START_BALANCES or {}).items():
+        info = (_STRATEGY_CACHE or {}).get(name) or {}
+        equity = float(info.get('equity') or start)
+        invested += float(start)
+        current += equity
+        strategies.append({
+            'name': name, 'invested': round(float(start), 2),
+            'equity': round(equity, 2),
+            'pnl': round(equity - float(start), 2),
+            'open': int(info.get('open') or 0),
+            'enabled': bool(info.get('enabled', True)),
+        })
+    out.append({
+        'id': 'exchange', 'title': 'Биржа',
+        'subtitle': f'{config.EXCHANGE_NAME.upper()} · бессрочные фьючерсы',
+        'invested': round(invested, 2), 'equity': round(current, 2),
+        'pnl': round(current - invested, 2),
+        'strategies': strategies,
+        'connected': bool(config.EXCHANGE_NAME),
+    })
+
+    # ── Polymarket ──────────────────────────────────────────────────────────
+    try:
+        from polymarket import params as pm_params
+        import polymarket as pm
+        shot = pm.snapshot(limit_markets=1, limit_fills=1)
+        equity_row = shot.get('equity') or {}
+        rows = []
+        pm_invested = pm_current = 0.0
+        for key, title in (('MM', 'Маркет-мейкер'),
+                           ('ONESIDE', 'Односторонний'),
+                           ('WEATHER', 'Погода'),
+                           ('CRYPTO', 'Крипта'),
+                           ('LONGSHOT', 'Лонгшоты')):
+            budget = pm_params.bankroll_for(key)
+            # Живой результат есть только у маркет-мейкера: остальные считают
+            # на бумаге в своих файлах, и подменять их нулём было бы враньём —
+            # показываем сумму и молчим о результате, пока его нет.
+            equity = float(equity_row.get('equity') or budget) if key == 'MM' \
+                else budget
+            pm_invested += budget
+            pm_current += equity
+            rows.append({
+                'name': title, 'key': key,
+                'invested': round(budget, 2), 'equity': round(equity, 2),
+                'pnl': round(equity - budget, 2),
+                'open': shot.get('positions_total', 0) if key == 'MM' else 0,
+                'enabled': budget > 0,
+                'live': bool(shot.get('running')) if key == 'MM' else False,
+            })
+        connect = shot.get('connect') or {}
+        out.append({
+            'id': 'polymarket', 'title': 'Polymarket',
+            'subtitle': 'рынки предсказаний · маркет-мейкинг',
+            'invested': round(pm_invested, 2), 'equity': round(pm_current, 2),
+            'pnl': round(pm_current - pm_invested, 2),
+            'strategies': rows,
+            'connected': bool(connect.get('configured')),
+            'rounds': shot.get('rounds_total', 0),
+            'standing': len(shot.get('standing') or []),
+        })
+    except Exception as exc:                                # noqa: BLE001
+        out.append({'id': 'polymarket', 'title': 'Polymarket',
+                    'subtitle': 'не читается', 'error': str(exc)[:160],
+                    'invested': 0, 'equity': 0, 'pnl': 0, 'strategies': [],
+                    'connected': False})
+    return out
+
+
+_STRATEGY_CACHE = {}
+
+
 def build_payload():
     """Полный набор данных для дашборда."""
     payload = _paper_payload() if (config.PAPER_MODE or _broker is not None) else _live_payload()
     payload['status'] = dict(_status)
+    # Сводка по направлениям считается ПОСЛЕ основного набора: ей нужны
+    # результаты стратегий биржи, которые тот и собирает.
+    global _STRATEGY_CACHE
+    _STRATEGY_CACHE = payload.get('strategies') or {}
+    payload['directions'] = _directions()
     # Воронка отсева: бот считает причины отказа на каждом цикле, но раньше
     # они уходили только в лог. Это ответ на самый частый вопрос при
     # наблюдении — «почему он ничего не делает».
