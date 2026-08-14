@@ -172,8 +172,24 @@ class TestOrderGates:
         monkeypatch.setenv('PM_PRIVATE_KEY', TEST_KEY)
         monkeypatch.setenv('PM_FUNDER', '0x' + '1' * 40)
         monkeypatch.setenv('PM_LIVE', '1')
-        monkeypatch.setattr(executor, 'MAX_ORDER_USD', 25.0)
+        # Потолок больше не отдельное число: он считается от бюджета, поэтому
+        # задаётся явной настройкой, как это и делается на деле.
+        monkeypatch.setenv('PM_MAX_ORDER_USD', '25')
         out = executor.place('T', 'bid', 0.90, 1000)      # $900
+        assert out['ok'] is False and 'потолка' in out['why']
+
+    def test_the_cap_shrinks_with_a_small_budget(self, monkeypatch):
+        """
+        Жёсткие $25 были БОЛЬШЕ всего счёта при бюджете в двадцать долларов:
+        заявка, съедающая счёт целиком, проходила проверку, написанную ровно
+        против этого. Теперь потолок — доля бюджета.
+        """
+        monkeypatch.setenv('PM_PRIVATE_KEY', TEST_KEY)
+        monkeypatch.setenv('PM_FUNDER', '0x' + '1' * 40)
+        monkeypatch.setenv('PM_LIVE', '1')
+        monkeypatch.delenv('PM_MAX_ORDER_USD', raising=False)
+        monkeypatch.setenv('PM_BUDGET_MM', '20')
+        out = executor.place('T', 'bid', 0.90, 20)        # $18 при бюджете $20
         assert out['ok'] is False and 'потолка' in out['why']
 
     def test_price_outside_the_range_is_refused(self, monkeypatch):
@@ -290,13 +306,46 @@ class TestLiveFillsComeFromTheExchange:
         assert maker.apply_exchange_trades(trades) == []
         assert maker._slot('T')['position'] == 100.0
 
-    def test_tape_model_is_skipped_in_live_mode(self):
-        """Оценка по ленте в живом режиме не вызывается вовсе."""
+    def test_live_accounting_comes_only_from_the_exchange(self):
+        """Позиции и деньги в живом режиме ведёт биржа, а не модель."""
         source = os.path.join(ROOT, 'polymarket', 'mm.py')
         with open(source, encoding='utf-8') as fh:
             text = fh.read()
-        assert 'if not live and ((slot.get(' in text
         assert 'maker.apply_exchange_trades(got)' in text
+        assert 'maker.predict_fills(' in text, 'модель идёт рядом'
+
+    def test_model_runs_beside_reality_without_touching_it(self):
+        """
+        В живом режиме модель отвечает на свой вопрос, ничего не меняя.
+
+        ЗАГОЛОВОК МОДУЛЯ ОБЕЩАЛ ЭТО С САМОГО НАЧАЛА, а код обещание не
+        выполнял: ветка с лентой просто пропускалась, и сравнивать оказывалось
+        нечего. Первый живой прогон не сказал бы о точности модели ровно
+        ничего — при том что ради этого сравнения бумажный расчёт и
+        задумывался.
+
+        Расхождение модели с биржей — самое ценное, что даст живой режим: оно
+        скажет, насколько можно верить бумаге, когда придёт время увеличивать
+        размер.
+        """
+        from polymarket import engine
+        maker = engine.PaperMaker(bankroll=100, state_path=os.devnull + '.json')
+        slot = maker._slot('T')
+        slot['orders'] = {'bid': {'price': 0.20, 'size': 5, 'ts': 0,
+                                  'queue': 0.0}}
+        before = dict(slot)
+        tape = [{'ts': 10, 'price': 0.19, 'size': 50, 'side': 'SELL',
+                 'asset': 'T'}]
+        guess = maker.predict_fills('T', tape)
+        assert guess['bid']['model_filled'] is True, 'модель видит исполнение'
+        assert maker._slot('T')['position'] == 0.0, 'но позицию не трогает'
+        assert maker._slot('T')['orders'] == before['orders'], 'и заявку тоже'
+
+    def test_prediction_is_empty_without_orders(self):
+        from polymarket import engine
+        maker = engine.PaperMaker(bankroll=100, state_path=os.devnull + '.json')
+        assert maker.predict_fills('T', [{'ts': 1, 'price': 0.2, 'size': 1,
+                                          'side': 'SELL', 'asset': 'T'}]) == {}
 
 
 class TestReconciliation:

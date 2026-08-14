@@ -36,7 +36,22 @@ KILL_FILE = os.path.join(store.DIR, 'STOP')
 # Потолки живого режима. Они НАМЕРЕННО жёстче бумажных: бумага нужна, чтобы
 # увидеть поведение, живой режим — чтобы не потерять деньги, пока поведение
 # ещё изучается.
-MAX_ORDER_USD = float(os.getenv('PM_MAX_ORDER_USD', '25'))
+#
+# ПОТОЛОК ЗАЯВКИ СЧИТАЕТСЯ ОТ БЮДЖЕТА, А НЕ ЖИВЁТ ОТДЕЛЬНЫМ ЧИСЛОМ. Жёсткие $25
+# были больше всего счёта при бюджете в двадцать долларов: заявка, съедающая
+# счёт целиком, проходила бы проверку, которая для того и написана. Треть —
+# чтобы одно исполнение не могло стать всем экспериментом.
+_ORDER_CAP_SHARE = float(os.getenv('PM_MAX_ORDER_SHARE', '0.34'))
+
+
+def max_order_usd():
+    """Потолок одной заявки: доля бюджета, но не выше явной настройки."""
+    hard = os.getenv('PM_MAX_ORDER_USD')
+    if hard:
+        return float(hard)
+    return max(1.0, params.bankroll_for('MM') * _ORDER_CAP_SHARE)
+
+
 MAX_ORDERS_PER_MINUTE = int(os.getenv('PM_MAX_ORDERS_PER_MINUTE', '60'))
 
 _recent = []
@@ -110,8 +125,9 @@ def place(token_id, side, price, size, day_loss_usd=0.0, tick=0.001):
               'side': side, 'price': price, 'size': size})
         return {'ok': False, 'why': why}
 
-    if notional > MAX_ORDER_USD:
-        why = f'размер ${notional:.2f} выше потолка ${MAX_ORDER_USD:.2f}'
+    cap = max_order_usd()
+    if notional > cap:
+        why = f'размер ${notional:.2f} выше потолка ${cap:.2f}'
         _log({'at': stamp, 'action': 'REFUSE', 'why': why, 'token': token_id,
               'side': side, 'price': price, 'size': size})
         return {'ok': False, 'why': why}

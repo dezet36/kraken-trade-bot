@@ -46,6 +46,9 @@ import time
 from . import book as book_mod
 from . import client, engine, executor, params, store, strategy, wallet
 
+# Мнение модели в живом режиме — рядом с реальностью, а не вместо неё.
+SHADOW = os.path.join(store.DIR, 'mm_shadow.jsonl')
+
 CANDIDATES = None          # кэш отбора внутри процесса
 LAST_PLAN = {}             # последняя раскладка бюджета, для панели
 
@@ -210,12 +213,29 @@ def step(maker, markets, live=False, day_loss=0.0):
         # заявки уходят на биржу, оценка становится вредной: она отвечает
         # «исполнилось бы», а биржа знает «исполнилось», и расходятся они
         # обязательно. Живые сделки берутся ниже, одним запросом на все рынки.
-        if not live and ((slot.get('orders') or {}).get('bid')
-                         or (slot.get('orders') or {}).get('ask')):
+        has_orders = ((slot.get('orders') or {}).get('bid')
+                      or (slot.get('orders') or {}).get('ask'))
+        if has_orders:
             tape = book_mod.tape(market['condition_id'], limit=200)
-            for done in maker.process_fills(token, market['condition_id'], tape):
-                store._append(engine.FILLS, done)
-                fills.append(done)
+            if live:
+                # МОДЕЛЬ ИДЁТ РЯДОМ, А НЕ ВМЕСТО. В живом режиме позиции и
+                # деньги ведёт биржа; модель отвечает на свой вопрос и
+                # оставляет мнение в стороне. Их расхождение и есть самое
+                # ценное, что даст живой прогон: оно скажет, насколько можно
+                # верить бумаге, когда придёт время увеличивать размер.
+                #
+                # Прежде эта ветка просто пропускалась, и сравнивать было
+                # нечего — при том что заголовок модуля обещал обратное.
+                guess = maker.predict_fills(token, tape)
+                if guess:
+                    store._append(SHADOW, {
+                        'at': engine._stamp(), 'token': str(token),
+                        'question': market.get('question'), 'sides': guess})
+            else:
+                for done in maker.process_fills(token, market['condition_id'],
+                                                tape):
+                    store._append(engine.FILLS, done)
+                    fills.append(done)
 
         quote = strategy.desired_quote(top, market, position=slot['position'],
                                        max_position=params.MM_MAX_POSITION)

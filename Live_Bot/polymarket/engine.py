@@ -203,6 +203,35 @@ class PaperMaker:
             slot['orders'][side] = None
         return done
 
+    def predict_fills(self, token, trades):
+        """
+        Что сказала бы модель очереди — БЕЗ изменения состояния.
+
+        ЗАЧЕМ ОТДЕЛЬНАЯ ФУНКЦИЯ. Заголовок модуля обещает, что бумажный расчёт
+        не выключается в живом режиме и служит меркой для реальности. Обещание
+        было ложным: в живом режиме код просто пропускал ленту, и сравнивать
+        оказывалось нечего. Первый живой прогон не сказал бы о точности модели
+        ровно ничего.
+
+        Здесь модель отвечает на свой вопрос, ничего не трогая: позиции и
+        деньги ведёт биржа, а модель идёт рядом и оставляет своё мнение. Их
+        расхождение и есть самое ценное, что даст живой режим — оно скажет,
+        насколько можно верить бумаге, когда придёт время увеличивать размер.
+        """
+        slot = self._slot(token)
+        out = {}
+        for side in ('bid', 'ask'):
+            order = (slot.get('orders') or {}).get(side)
+            if not order:
+                continue
+            fresh = [t for t in (trades or []) if t['ts'] >= order['ts']]
+            verdict = book_mod.would_fill(side, order['price'], order['queue'],
+                                          fresh, token_id=token)
+            out[side] = {'price': order['price'], 'size': order['size'],
+                         'queue': order['queue'],
+                         'model_filled': bool(verdict and verdict['filled'])}
+        return out
+
     def watch_drift(self, fills, marks):
         """
         Ставит исполнение на учёт: куда ушла цена ПОСЛЕ того, как нас исполнили.
