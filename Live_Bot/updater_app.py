@@ -37,6 +37,7 @@ import json
 import os
 import subprocess
 import sys
+import urllib.error
 import urllib.request
 
 import config
@@ -90,6 +91,75 @@ def _fetch_latest():
         return json.loads(response.read().decode('utf-8'))
 
 
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """Перенаправление не выполняем: нам нужен адрес, а не страница."""
+
+    def redirect_request(self, *args, **kwargs):
+        return None
+
+
+def _fetch_latest_without_api():
+    """
+    Версия выпуска БЕЗ обращения к API. Запасной путь, и он важнее основного.
+
+    ЗАЧЕМ ОН НУЖЕН. У API GitHub предел в шестьдесят запросов в час на адрес,
+    и считается он без разбора: на сервере с общим или облачным адресом его
+    исчерпывает кто угодно, а бот получает 403 и говорит «не удалось связаться
+    с GitHub». Выглядит как поломка сети, хотя сеть в порядке и файл выпуска
+    лежит на месте.
+
+    Обычная страница `/releases/latest` отвечает перенаправлением на страницу
+    последней метки. Это не API, предел на неё не распространяется, и версия
+    читается прямо из адреса. Имя файла у нас всегда одно, поэтому и ссылку на
+    скачивание можно собрать самим.
+
+    Чего этот путь НЕ даёт — описания выпуска. Поэтому он именно запасной:
+    предлагать обновление без объяснения, что в нём, значит просить доверять
+    вслепую. Но обновиться без описания лучше, чем не обновиться вовсе.
+    """
+    opener = urllib.request.build_opener(_NoRedirect)
+    request = urllib.request.Request(
+        f'https://github.com/{REPO}/releases/latest',
+        headers={'User-Agent': 'kraken-bot-updater'})
+    location = None
+    try:
+        with opener.open(request, timeout=NET_TIMEOUT) as response:
+            location = response.headers.get('Location')
+    except urllib.error.HTTPError as exc:
+        # Перенаправление приходит именно так: обработчик выше отказался его
+        # выполнять, и urllib поднимает исключение с нужными заголовками.
+        location = exc.headers.get('Location') if exc.headers else None
+        if exc.code not in (301, 302, 303, 307, 308):
+            raise
+    if not location:
+        raise RuntimeError('GitHub не назвал последнюю версию')
+    tag = location.rstrip('/').rsplit('/', 1)[-1].strip()
+    if not tag:
+        raise RuntimeError('в ответе GitHub нет имени версии')
+    return {
+        'tag_name': tag,
+        'name': tag,
+        'published_at': '',
+        'body': '',
+        'assets': [{'name': ASSET_NAME, 'size': 0,
+                    'browser_download_url':
+                        f'https://github.com/{REPO}/releases/download/'
+                        f'{tag}/{ASSET_NAME}'}],
+        'from_fallback': True,
+    }
+
+
+def _explain(exc):
+    """Человеческое объяснение отказа вместо номера ошибки."""
+    code = getattr(exc, 'code', None)
+    if code == 403:
+        return ('GitHub временно отказывает: у него предел в 60 обращений '
+                'в час на один адрес, и он исчерпан. Через час пройдёт само')
+    if code == 404:
+        return 'выпуск не найден на GitHub'
+    return str(exc)
+
+
 def _asset_url(release):
     for asset in release.get('assets') or []:
         if asset.get('name') == ASSET_NAME:
@@ -135,13 +205,29 @@ def status(fetch=True):
                 'dirty': [], 'can_update': False, 'reason': '',
                 'previous': state.get('previous')}
 
+    # СНАЧАЛА API, ПОТОМ ОБЫЧНАЯ СТРАНИЦА. У API есть описание выпуска, но и
+    # предел в шестьдесят обращений в час на адрес — на сервере с общим или
+    # облачным адресом его исчерпывает кто угодно, и бот отвечал «не удалось
+    # связаться с GitHub» при исправной сети и лежащем на месте файле.
+    #
+    # Страница выпусков предела не имеет и версию называет перенаправлением.
+    # Описания она не даёт, поэтому идёт второй: обновляться без объяснения,
+    # что внутри, хуже, чем с ним, — но лучше, чем не обновляться вовсе.
+    release, first_error = None, None
     try:
         release = _fetch_latest()
     except Exception as exc:                       # noqa: BLE001
+        first_error = exc
+        try:
+            release = _fetch_latest_without_api()
+        except Exception:                          # noqa: BLE001
+            release = None
+
+    if release is None:
         return {'available': True, 'mode': 'exe', 'branch': 'выпуски',
                 'current': current, 'behind': 0, 'ahead': 0, 'pending': [],
                 'dirty': [], 'can_update': False,
-                'reason': f'не удалось связаться с GitHub: {exc}'}
+                'reason': f'не удалось связаться с GitHub: {_explain(first_error)}'}
 
     tag = (release.get('tag_name') or '').strip()
     url, size = _asset_url(release)
