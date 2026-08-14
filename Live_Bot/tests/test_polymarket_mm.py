@@ -508,3 +508,74 @@ class TestAdverseSelection:
     def test_fill_without_a_mark_is_not_registered(self, maker):
         maker.watch_drift([self._fill()], {})
         assert maker.state.get('drift_pending', []) == []
+
+
+class TestRotation:
+    """
+    Пересмотр списка рынков. Прежде он замерзал при запуске и не менялся
+    никогда: выбрав рынки в понедельник, бот стоял в них и в пятницу, даже
+    если торговля там кончилась, и новых событий не видел вовсе. При сотне
+    долларов каждые $5 в мёртвом рынке — двадцатая часть счёта, не работающая.
+    """
+
+    @pytest.fixture
+    def maker(self, tmp_path):
+        return engine.PaperMaker(bankroll=100,
+                                 state_path=str(tmp_path / 'state.json'))
+
+    def _m(self, token, joined_ago_h=0):
+        import time as _t
+        return {'token_id': token, 'condition_id': 'C' + token,
+                'question': 'рынок ' + token, 'cost': 5.0,
+                'joined_ts': _t.time() - joined_ago_h * 3600}
+
+    def test_idle_market_is_replaced(self, maker, monkeypatch):
+        old = [self._m('A', joined_ago_h=99)]
+        monkeypatch.setattr(mm, 'select_markets',
+                            lambda **kw: [self._m('A'), self._m('B')])
+        keep, left = mm.rotate(maker, old)
+        assert [m['token_id'] for m in left] == ['A']
+        assert [m['token_id'] for m in keep] == ['B'], 'место занял новый рынок'
+
+    def test_market_with_inventory_is_never_abandoned(self, maker, monkeypatch):
+        """
+        Рынок с запасом не бросается, как бы он ни затих.
+
+        Уйти, оставив позицию, значит перестать ею управлять: наклон котировки
+        — единственный способ разгрузиться, и он работает, только пока мы
+        котируем. Брошенная позиция ждёт разрешения, а разрешение делает
+        контракт нулём или единицей целиком.
+        """
+        maker._slot('A')['position'] = 5.0
+        monkeypatch.setattr(mm, 'select_markets',
+                            lambda **kw: [self._m('B'), self._m('C')])
+        keep, left = mm.rotate(maker, [self._m('A', joined_ago_h=99)])
+        assert left == []
+        assert [m['token_id'] for m in keep] == ['A']
+
+    def test_market_that_traded_is_kept(self, maker, monkeypatch):
+        """Исполнялся — значит живой, даже если давно взят."""
+        maker._slot('A')['trades'] = 3
+        monkeypatch.setattr(mm, 'select_markets', lambda **kw: [self._m('B')])
+        keep, left = mm.rotate(maker, [self._m('A', joined_ago_h=99)])
+        assert left == []
+
+    def test_young_market_is_given_time(self, maker, monkeypatch):
+        """Только что взятый рынок не выбрасывается за то, что ещё не успел."""
+        monkeypatch.setattr(mm, 'select_markets', lambda **kw: [self._m('B')])
+        keep, left = mm.rotate(maker, [self._m('A', joined_ago_h=0)])
+        assert left == []
+
+    def test_count_of_markets_does_not_grow(self, maker, monkeypatch):
+        """
+        Число рынков не растёт: бюджет от пересмотра не появляется.
+
+        Без этого предела каждый пересмотр добавлял бы рынков, и обязательства
+        поползли бы вверх незаметно — ровно та ошибка, что уже стоила нам
+        $9 000 обещаний при $450 денег.
+        """
+        old = [self._m('A', 99), self._m('B', 99)]
+        monkeypatch.setattr(mm, 'select_markets',
+                            lambda **kw: [self._m(x) for x in 'CDEFG'])
+        keep, left = mm.rotate(maker, old)
+        assert len(keep) == len(old)

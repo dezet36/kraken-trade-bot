@@ -57,9 +57,7 @@ def select_markets(limit=None, min_liquidity=None, refresh=False, budget=None):
     ОТБОР ЗАВИСИТ ОТ РАЗМЕРА СЧЁТА, и это не тонкость. При большом капитале
     доход даёт захват спреда, и чем больше исполнений, тем лучше. При сотне
     долларов наоборот: исполнение приносит запас, который нечем нести — одна
-    позиция в $20 это пятая часть счёта. Поэтому рынки берутся те, где мы
-    попадём в зачёт награды минимальным размером и где спред уже порога, то
-    есть встать у лучшей цены безопасно.
+    позиция в $20 это пятая часть счёта.
     """
     global CANDIDATES
     if CANDIDATES is not None and not refresh:
@@ -73,6 +71,63 @@ def select_markets(limit=None, min_liquidity=None, refresh=False, budget=None):
     LAST_PLAN.clear()
     LAST_PLAN.update(plan)
     return CANDIDATES
+
+
+def rotate(maker, current, budget=None):
+    """
+    Пересматривает список рынков: уходит из затихших, входит в новые.
+
+    ПРЕЖДЕ СПИСОК ЗАМОРАЖИВАЛСЯ ПРИ ЗАПУСКЕ И НЕ МЕНЯЛСЯ НИКОГДА. Бот не видел
+    ни новых событий, ни того, что рынок затих: выбрав двадцать рынков в
+    понедельник, он стоял в них и в пятницу, даже если торговля там кончилась.
+    При сотне долларов это не мелочь — каждые $5 в мёртвом рынке есть
+    двадцатая часть счёта, не работающая вовсе.
+
+    ДВА ПРАВИЛА, И ОБА НЕСИММЕТРИЧНЫ.
+
+    Рынок с ОТКРЫТЫМ ЗАПАСОМ не бросается никогда, как бы он ни затих. Уйти,
+    оставив позицию, значит перестать ею управлять: наклон котировки — наш
+    единственный способ разгрузиться, и он работает только пока мы котируем.
+
+    Рынок БЕЗ запаса и БЕЗ единого исполнения за отведённые часы уступает
+    место следующему кандидату. Ошибиться здесь дёшево: мы ничего не теряем,
+    кроме места в очереди, которое всё равно ничего не принесло.
+    """
+    fresh = select_markets(refresh=True, budget=budget)
+    by_token = {m['token_id']: m for m in fresh}
+    now = time.time()
+    keep, dropped = [], []
+    for market in current:
+        slot = maker.state['books'].get(str(market['token_id'])) or {}
+        if slot.get('position'):
+            keep.append(by_token.get(market['token_id'], market))
+            continue
+        idle = now - float(market.get('joined_ts') or now)
+        if not slot.get('trades') and idle > params.MM_IDLE_HOURS * 3600:
+            dropped.append(market)
+            continue
+        keep.append(by_token.get(market['token_id'], market))
+
+    # Место освободилось — добираем лучших из новых, кого ещё нет в работе.
+    # Список отсортирован по ожидаемому доходу в час, поэтому «лучшие» это
+    # просто первые.
+    #
+    # ТОЛЬКО ЧТО ПОКИНУТЫЕ РЫНКИ ИСКЛЮЧАЮТСЯ, иначе пересмотр вырождается: они
+    # остаются добротными кандидатами по всем меркам отбора и возвращаются
+    # первыми же, а мы обнуляем им отсчёт простоя и стоим там вечно. Поймано
+    # тестом, а не рассуждением.
+    have = {m['token_id'] for m in keep} | {m['token_id'] for m in dropped}
+    for market in fresh:
+        if len(keep) >= len(current):
+            break
+        if market['token_id'] in have:
+            continue
+        market['joined_ts'] = now
+        keep.append(market)
+        have.add(market['token_id'])
+    for market in keep:
+        market.setdefault('joined_ts', now)
+    return keep, dropped
 
 
 def step(maker, markets, live=False, day_loss=0.0):
@@ -299,6 +354,7 @@ def main(loop=False):
     if executor.kill_switch_on():
         print('   ВНИМАНИЕ: включена аварийная остановка (файл STOP)')
 
+    last_scan = time.time()
     try:
         while True:
             report_before = maker.mark_to_market({})
@@ -320,6 +376,28 @@ def main(loop=False):
                       f'(у нас {m["our_count"]}, на бирже {m["live_count"]})')
             if not loop:
                 return out
+
+            # ПЕРЕСМОТР СПИСКА РЫНКОВ. Прежде список замерзал при запуске:
+            # выбрав рынки в понедельник, бот стоял в них и в пятницу, даже
+            # если торговля там кончилась. Новые события он не видел вовсе.
+            if time.time() - last_scan > params.MM_RESCAN_MINUTES * 60:
+                markets, left = rotate(maker, markets)
+                last_scan = time.time()
+                if left:
+                    # ЗАЯВКИ НА ПОКИДАЕМЫХ РЫНКАХ СНИМАЮТСЯ ДО УХОДА. Уйти,
+                    # оставив их в стакане, значит перестать за ними следить,
+                    # продолжая быть исполняемым, — и исполнят нас тогда, когда
+                    # это выгодно встречной стороне.
+                    for market in left:
+                        slot = maker.state['books'].get(str(market['token_id']))
+                        for side in ('bid', 'ask'):
+                            order = ((slot or {}).get('orders') or {}).get(side)
+                            if live and order and order.get('live_id'):
+                                executor.cancel(order['live_id'])
+                            if slot:
+                                slot.setdefault('orders', {})[side] = None
+                    print(f'   пересмотр: ушли с {len(left)}, '
+                          f'работаем на {len(markets)}')
             time.sleep(params.MM_POLL_SECONDS)
     finally:
         # ЗАЯВКИ СНИМАЮТСЯ ПРИ ЛЮБОМ ВЫХОДЕ, включая аварийный. Оставленные без
