@@ -2796,7 +2796,10 @@ document.addEventListener('click', async ev => {
     try {
       const url = (PM && PM.running) ? '/api/polymarket/halt'
                                      : '/api/polymarket/start';
-      await fetch(url, { cache: 'no-store' });
+      /* POST, А НЕ GET. Действие меняет состояние, и обработчик его принимает
+         только методом POST — там же живёт проверка «только с этой машины».
+         Прежде запрос уходил методом чтения и отвечал 404 молча. */
+      await pmPost(url);
       await new Promise(r => setTimeout(r, 1200));
       await loadPolymarket();
     } finally { run.disabled = false; }
@@ -2810,7 +2813,7 @@ document.addEventListener('click', async ev => {
   const url = stopping ? '/api/polymarket/stop' : '/api/polymarket/resume';
   btn.disabled = true;
   try {
-    await fetch(url, { cache: 'no-store' });
+    await pmPost(url);
     await loadPolymarket();
   } finally {
     btn.disabled = false;

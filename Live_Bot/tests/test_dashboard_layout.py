@@ -157,3 +157,65 @@ class TestServerSideSummary:
         block = source[spot:source.index('\ndef ', spot + 10)]
         assert 'except Exception' in block
         assert "'не читается'" in block
+
+
+class TestActionsArePostAndGuarded:
+    """
+    Действия принимаются методом POST и только с этой машины.
+
+    ДВЕ ОШИБКИ РАЗОМ, И ОБЕ МОЛЧАЛИ. Адреса действий Polymarket были объявлены
+    в обработчике ЧТЕНИЯ, а панель шлёт их методом POST: запрос уходил в
+    никуда с ответом 404, и снаружи это выглядело как «кошелёк не подключён»
+    без всякого объяснения.
+
+    Вторая хуже первой. В обработчике чтения нет проверки «только с этой
+    машины» — той самой, что защищает панель без пароля. Дотянувшийся до порта
+    мог запустить маркет-мейкера, включить аварийную остановку или подменить
+    кошелёк. Спасал только 404, то есть первая ошибка прикрывала вторую.
+    """
+
+    PY = open(os.path.join(ROOT, 'dashboard.py'), encoding='utf-8').read()
+    ACTIONS = ('/api/polymarket/start', '/api/polymarket/halt',
+               '/api/polymarket/stop', '/api/polymarket/resume',
+               '/api/polymarket/wallet', '/api/polymarket/wallet/forget',
+               '/api/polymarket/live', '/api/polymarket/budget')
+
+    def _handler_of(self, endpoint):
+        get = self.PY.index('def do_GET')
+        post = self.PY.index('def do_POST')
+        spot = self.PY.index(f"path == '{endpoint}'")
+        return 'do_GET' if get < spot < post else 'do_POST'
+
+    def test_every_action_lives_in_the_post_handler(self):
+        for endpoint in self.ACTIONS:
+            assert self._handler_of(endpoint) == 'do_POST', endpoint
+
+    def test_every_action_is_allowed_through(self):
+        """
+        Адрес в обработчике, но не в списке разрешённых, отвечает 404 — то
+        есть молча не работает.
+        """
+        start = self.PY.index('if path not in (', self.PY.index('def do_POST'))
+        allow = self.PY[start:self.PY.index('):', start)]
+        for endpoint in self.ACTIONS:
+            assert f"'{endpoint}'" in allow, endpoint
+
+    def test_reading_the_snapshot_stays_a_get(self):
+        """Чтение состояния ничего не меняет и остаётся доступным на чтение."""
+        assert self._handler_of('/api/polymarket') == 'do_GET'
+
+    def test_the_panel_sends_them_as_post(self):
+        """
+        Обработчик и панель должны сойтись в методе. Их расхождение и было
+        причиной молчаливого отказа.
+        """
+        for endpoint in self.ACTIONS:
+            if endpoint in HTML:
+                spot = HTML.index(endpoint)
+                near = HTML[max(0, spot - 400):spot + 400]
+                assert 'pmPost' in near, endpoint
+
+    def test_local_only_guard_protects_the_post_handler(self):
+        post = self.PY.index('def do_POST')
+        head = self.PY[post:post + 1600]
+        assert '_controls_allowed()' in head

@@ -1152,7 +1152,138 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send_json(polymarket.snapshot())
             except Exception as exc:               # noqa: BLE001
                 self._send_json({'running': False, 'error': str(exc)[:200]})
-        elif path == '/api/polymarket/start':
+        elif path.startswith('/api/report.txt'):
+            # Отчёт собирается на лету, а не лежит файлом: он должен отражать
+            # состояние на момент нажатия, иначе присланное описывает не ту
+            # неполадку, из-за которой его и делали.
+            try:
+                import report
+                body = report.build().encode('utf-8')
+                name = report.filename()
+            except Exception as exc:               # noqa: BLE001
+                self._fail(500, f'отчёт не собрался: {exc}')
+                return
+            self.send_response(200)
+            self.send_header('Content-Type', 'text/plain; charset=utf-8')
+            # Имя с кириллицей — только в filename*, по RFC 5987. Простой
+            # filename с не-ASCII часть браузеров обрезает до мусора.
+            from urllib.parse import quote
+            self.send_header('Content-Disposition',
+                             f"attachment; filename=\"report.txt\"; "
+                             f"filename*=UTF-8''{quote(name)}")
+            self.send_header('Content-Length', str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        elif path.startswith('/api/candles'):
+            from urllib.parse import parse_qs, urlparse
+            q = parse_qs(urlparse(self.path).query)
+            pair = (q.get('pair') or [''])[0]
+            opened = (q.get('from') or [''])[0]
+            closed = (q.get('to') or [''])[0]
+            # Начало сетапа: по нему окно разворачивается назад, до импульса,
+            # по которому вошли. Необязательный — у старых записей его нет.
+            setup_from = (q.get('setup') or [''])[0]
+            if not pair or not opened:
+                self._fail(400, 'нужны pair и from')
+                return
+            try:
+                data = _trade_candles(pair, opened, closed, setup_from or None)
+            except Exception as exc:               # noqa: BLE001
+                self._fail(502, f'свечи недоступны: {exc}')
+                return
+            if data is None:
+                self._fail(404, 'свечей за этот период нет')
+                return
+            self._send_json(data)
+        elif path == '/api/settings/history':
+            # Отдельная выдача, а не часть общей: история нужна редко, а
+            # общая выдача опрашивается каждые несколько секунд.
+            try:
+                self._send_json({'history': settings_store.history()})
+            except Exception as exc:               # noqa: BLE001
+                self._fail(500, f'история настроек недоступна: {exc}')
+        elif path == '/api/errors':
+            try:
+                import error_log
+                # Ошибки чистятся от ключей ДО показа, а не только в отчёте.
+                # Сообщения об отказе биржи часто содержат полный адрес
+                # запроса вместе с ключом, а трассировки — куски конфига. На
+                # экране это лежит открытым текстом, и достаточно одного
+                # скриншота, отправленного за помощью, чтобы ключ уехал.
+                import report
+                self._send_json({
+                    'errors': report.scrub_obj(error_log.snapshot()),
+                    'summary': report.scrub_obj(error_log.summary()),
+                    'writable': _controls_allowed(),
+                })
+            except Exception as exc:               # noqa: BLE001
+                self._fail(500, f'журнал ошибок недоступен: {exc}')
+        elif path == '/api/update':
+            # fetch по требованию: без него страница ждала бы сеть на каждом
+            # обновлении, а состояние репозитория меняется несравнимо реже.
+            import updater
+            fetch = 'check' in (self.path.split('?', 1) + [''])[1]
+            self._send_json({'update': updater.status(fetch=fetch),
+                             'writable': _controls_allowed()})
+        elif path == '/api/settings':
+            # Раздел портфеля отдаём ОТДЕЛЬНО от стратегий. Он лежит в том же
+            # файле настроек, и панель управления, перебирая ключи, рисовала
+            # его как ещё одну стратегию — с названием PORTFOLIO и пустыми
+            # полями риска.
+            stored = settings_store.load()
+            self._send_json({
+                'settings': _strategy_settings(stored),
+                'portfolio': stored.get(settings_store.PORTFOLIO, {}),
+                'notify': stored.get(settings_store.NOTIFY, {}),
+                'limits': settings_store.LIMITS,
+                'exchange': _exchange_state(stored),
+                'writable': _controls_allowed()})
+        elif path in ('/', '/index.html'):
+            self._send_html()
+        else:
+            self.send_error(404)
+
+    def do_POST(self):
+        path = self.path.split('?')[0]
+        if path not in ('/api/settings', '/api/deposit', '/api/action',
+                        '/api/update', '/api/update/rollback',
+                        '/api/errors/clear', '/api/keys',
+                        # Действия Polymarket: запуск, остановка, кошелёк,
+                        # разрешение торговать, бюджет. Все меняют состояние,
+                        # поэтому идут только POST и только с этой машины.
+                        '/api/polymarket/start', '/api/polymarket/halt',
+                        '/api/polymarket/stop', '/api/polymarket/resume',
+                        '/api/polymarket/wallet',
+                        '/api/polymarket/wallet/forget',
+                        '/api/polymarket/live', '/api/polymarket/budget'):
+            self.send_error(404)
+            return
+        if not _controls_allowed():
+            # Дашборд не имеет ни пароля, ни HTTPS. Пока он слушает только
+            # localhost, менять параметры торговли безопасно; открытый в сеть
+            # он позволил бы любому желающему поднять риск на сделку.
+            self._fail(403, 'Управление доступно только с этой машины')
+            return
+        try:
+            length = int(self.headers.get('Content-Length') or 0)
+            body = self.rfile.read(min(length, 64 * 1024)) if length else b'{}'
+            changes = json.loads(body.decode('utf-8') or '{}')
+            if not isinstance(changes, dict):
+                raise ValueError('ожидается объект')
+        except Exception as exc:
+            self._fail(400, f'Неверные данные: {exc}')
+            return
+
+        # ДЕЙСТВИЯ POLYMARKET ЖИВУТ ЗДЕСЬ, А НЕ В do_GET, И ЭТО ИСПРАВЛЕНИЕ
+        # ДЫРЫ. Они меняют состояние — поднимают маркет-мейкера, включают
+        # аварийную остановку, подключают кошелёк, — а лежали в обработчике
+        # чтения, где нет проверки «только с этой машины». Дотянувшийся до
+        # порта мог остановить торговлю или подменить кошелёк.
+        #
+        # Заодно чинится молчаливый отказ: панель шлёт их методом POST, а
+        # объявлены они были в GET, и запрос уходил в никуда с ответом 404.
+        # Снаружи это выглядело как «кошелёк не подключён» без объяснения.
+        if path == '/api/polymarket/start':
             # ЗАПУСК ПО КНОПКЕ, минуя PM_AUTOSTART. Переменная отвечает на
             # вопрос «поднимать ли самому при старте бота»; нажатие — это уже
             # ответ. На сервере с собранным приложением другого способа нет:
@@ -1255,120 +1386,6 @@ class _Handler(BaseHTTPRequestHandler):
                                  'note': why, 'state': connect.state()})
             except Exception as exc:               # noqa: BLE001
                 self._fail(500, f'не удалось ({type(exc).__name__})')
-        elif path.startswith('/api/report.txt'):
-            # Отчёт собирается на лету, а не лежит файлом: он должен отражать
-            # состояние на момент нажатия, иначе присланное описывает не ту
-            # неполадку, из-за которой его и делали.
-            try:
-                import report
-                body = report.build().encode('utf-8')
-                name = report.filename()
-            except Exception as exc:               # noqa: BLE001
-                self._fail(500, f'отчёт не собрался: {exc}')
-                return
-            self.send_response(200)
-            self.send_header('Content-Type', 'text/plain; charset=utf-8')
-            # Имя с кириллицей — только в filename*, по RFC 5987. Простой
-            # filename с не-ASCII часть браузеров обрезает до мусора.
-            from urllib.parse import quote
-            self.send_header('Content-Disposition',
-                             f"attachment; filename=\"report.txt\"; "
-                             f"filename*=UTF-8''{quote(name)}")
-            self.send_header('Content-Length', str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
-        elif path.startswith('/api/candles'):
-            from urllib.parse import parse_qs, urlparse
-            q = parse_qs(urlparse(self.path).query)
-            pair = (q.get('pair') or [''])[0]
-            opened = (q.get('from') or [''])[0]
-            closed = (q.get('to') or [''])[0]
-            # Начало сетапа: по нему окно разворачивается назад, до импульса,
-            # по которому вошли. Необязательный — у старых записей его нет.
-            setup_from = (q.get('setup') or [''])[0]
-            if not pair or not opened:
-                self._fail(400, 'нужны pair и from')
-                return
-            try:
-                data = _trade_candles(pair, opened, closed, setup_from or None)
-            except Exception as exc:               # noqa: BLE001
-                self._fail(502, f'свечи недоступны: {exc}')
-                return
-            if data is None:
-                self._fail(404, 'свечей за этот период нет')
-                return
-            self._send_json(data)
-        elif path == '/api/settings/history':
-            # Отдельная выдача, а не часть общей: история нужна редко, а
-            # общая выдача опрашивается каждые несколько секунд.
-            try:
-                self._send_json({'history': settings_store.history()})
-            except Exception as exc:               # noqa: BLE001
-                self._fail(500, f'история настроек недоступна: {exc}')
-        elif path == '/api/errors':
-            try:
-                import error_log
-                # Ошибки чистятся от ключей ДО показа, а не только в отчёте.
-                # Сообщения об отказе биржи часто содержат полный адрес
-                # запроса вместе с ключом, а трассировки — куски конфига. На
-                # экране это лежит открытым текстом, и достаточно одного
-                # скриншота, отправленного за помощью, чтобы ключ уехал.
-                import report
-                self._send_json({
-                    'errors': report.scrub_obj(error_log.snapshot()),
-                    'summary': report.scrub_obj(error_log.summary()),
-                    'writable': _controls_allowed(),
-                })
-            except Exception as exc:               # noqa: BLE001
-                self._fail(500, f'журнал ошибок недоступен: {exc}')
-        elif path == '/api/update':
-            # fetch по требованию: без него страница ждала бы сеть на каждом
-            # обновлении, а состояние репозитория меняется несравнимо реже.
-            import updater
-            fetch = 'check' in (self.path.split('?', 1) + [''])[1]
-            self._send_json({'update': updater.status(fetch=fetch),
-                             'writable': _controls_allowed()})
-        elif path == '/api/settings':
-            # Раздел портфеля отдаём ОТДЕЛЬНО от стратегий. Он лежит в том же
-            # файле настроек, и панель управления, перебирая ключи, рисовала
-            # его как ещё одну стратегию — с названием PORTFOLIO и пустыми
-            # полями риска.
-            stored = settings_store.load()
-            self._send_json({
-                'settings': _strategy_settings(stored),
-                'portfolio': stored.get(settings_store.PORTFOLIO, {}),
-                'notify': stored.get(settings_store.NOTIFY, {}),
-                'limits': settings_store.LIMITS,
-                'exchange': _exchange_state(stored),
-                'writable': _controls_allowed()})
-        elif path in ('/', '/index.html'):
-            self._send_html()
-        else:
-            self.send_error(404)
-
-    def do_POST(self):
-        path = self.path.split('?')[0]
-        if path not in ('/api/settings', '/api/deposit', '/api/action',
-                        '/api/update', '/api/update/rollback',
-                        '/api/errors/clear', '/api/keys'):
-            self.send_error(404)
-            return
-        if not _controls_allowed():
-            # Дашборд не имеет ни пароля, ни HTTPS. Пока он слушает только
-            # localhost, менять параметры торговли безопасно; открытый в сеть
-            # он позволил бы любому желающему поднять риск на сделку.
-            self._fail(403, 'Управление доступно только с этой машины')
-            return
-        try:
-            length = int(self.headers.get('Content-Length') or 0)
-            body = self.rfile.read(min(length, 64 * 1024)) if length else b'{}'
-            changes = json.loads(body.decode('utf-8') or '{}')
-            if not isinstance(changes, dict):
-                raise ValueError('ожидается объект')
-        except Exception as exc:
-            self._fail(400, f'Неверные данные: {exc}')
-            return
-
         if path == '/api/keys':
             # Ключи биржи меняются отсюда, а не правкой .env в блокноте.
             # Окно первого запуска эту работу уже делает, но оно показывается
