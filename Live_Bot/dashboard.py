@@ -1277,6 +1277,7 @@ class _Handler(BaseHTTPRequestHandler):
                         '/api/polymarket/start', '/api/polymarket/halt',
                         '/api/polymarket/stop', '/api/polymarket/resume',
                         '/api/polymarket/wallet',
+                        '/api/polymarket/check',
                         '/api/polymarket/wallet/forget',
                         '/api/polymarket/live', '/api/polymarket/budget'):
             self.send_error(404)
@@ -1342,6 +1343,19 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send_json({'ok': True, 'stopped': False})
             except Exception as exc:               # noqa: BLE001
                 self._fail(500, f'не удалось: {exc}')
+        elif path == '/api/polymarket/check':
+            # ПРОВЕРКА ИЗ ПАНЕЛИ. На сервере консоли нет, а именно там и нужен
+            # разбор: «кошелёк не подключён» без причины не отличает нехватку
+            # библиотеки от закрытой сети, ограничения по стране и негодного
+            # ключа. Проверка ничего не меняет и ничего не отправляет.
+            try:
+                from polymarket import preflight
+                groups, bad = preflight.run()
+                self._send_json({'ok': True, 'blockers': bad,
+                                 'groups': [{'title': t, 'rows': r}
+                                            for t, r in groups]})
+            except Exception as exc:               # noqa: BLE001
+                self._fail(500, f'проверка не прошла ({type(exc).__name__})')
         elif path == '/api/polymarket/wallet':
             # КОШЕЛЁК ПОДКЛЮЧАЕТСЯ ОТСЮДА, и это выправление непоследовательности.
             # Ключи биржи в этом приложении давно задаются панелью, а для

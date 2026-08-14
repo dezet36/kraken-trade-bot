@@ -178,3 +178,74 @@ class TestBuildAndSelftestAgree:
         for name in ('polymarket.preflight', 'polymarket.selector',
                      'polymarket.oneside', 'polymarket.oneside_run'):
             assert name in packed, f'{name} не попадёт в .exe'
+
+
+class TestFailureReasonSurvives:
+    """
+    Причина отказа доходит до человека, а не глохнет.
+
+    ЖАЛОБА: «установил, ввёл ключ, ничего не произошло — пишет, что кошелёк не
+    подключён. Почему? Как это проверить?» Ответить было нечем: клиент
+    возвращал «не поднялся» и молчал, а под этим молчанием пряталось четыре
+    разных случая с четырьмя разными решениями — нет библиотеки, закрыта сеть,
+    страна под ограничением, негоден ключ.
+    """
+
+    def test_reason_is_remembered(self):
+        wallet._remember_failure(RuntimeError('что-то пошло не так'))
+        assert wallet.last_failure().get('kind') == 'RuntimeError'
+
+    def test_the_key_is_cut_out_of_the_reason(self, monkeypatch):
+        """
+        Сообщение библиотеки способно содержать ключ целиком — у некоторых
+        версий он попадает туда как есть.
+        """
+        secret = '0x' + 'e' * 64
+        monkeypatch.setenv('PM_PRIVATE_KEY', secret)
+        wallet._remember_failure(RuntimeError(f'bad key {secret} rejected'))
+        text = str(wallet.last_failure())
+        assert secret not in text
+        assert 'e' * 64 not in text
+
+    def test_missing_library_is_named(self):
+        wallet._remember_failure(ModuleNotFoundError('No module named x'))
+        assert 'библиотек' in wallet.explain_failure()
+
+    def test_closed_network_is_named(self):
+        wallet._remember_failure(OSError('getaddrinfo failed'))
+        assert 'сет' in wallet.explain_failure()
+
+    def test_country_block_is_named(self):
+        wallet._remember_failure(RuntimeError('403 Forbidden'))
+        assert 'стран' in wallet.explain_failure()
+
+    def test_no_failure_means_empty(self):
+        wallet._last_failure.clear()
+        assert wallet.explain_failure() == ''
+
+
+class TestReachIsCheckedSeparately:
+    """
+    Связь проверяется ОТДЕЛЬНО от ключа и раньше него.
+
+    Закрытая сеть и ограничение по стране выглядели ровно как негодный ключ.
+    Человек проверял ключ там, где дело было в сети, — и проверял правильно.
+    """
+
+    def test_reach_comes_first(self):
+        text = open(os.path.join(ROOT, 'polymarket', 'preflight.py'),
+                    encoding='utf-8').read()
+        spot = text.index("groups = [")
+        assert text.index("'Связь'", spot) < text.index("'Кошелёк'", spot)
+
+    def test_library_and_network_are_different_lines(self):
+        rows = preflight.check_reach()
+        assert rows, 'проверка связи ничего не сказала'
+        assert any('библиотек' in r['name'] for r in rows)
+
+    def test_panel_can_run_the_check(self):
+        """На сервере консоли нет — проверка обязана быть в панели."""
+        py = open(os.path.join(ROOT, 'dashboard.py'), encoding='utf-8').read()
+        assert "'/api/polymarket/check'" in py
+        html = open(os.path.join(ROOT, 'dashboard.html'), encoding='utf-8').read()
+        assert 'pm-wallet-check' in html

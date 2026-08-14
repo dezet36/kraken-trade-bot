@@ -113,6 +113,60 @@ def status():
     }
 
 
+_last_failure = {}
+
+
+def _remember_failure(exc):
+    """
+    Запоминает, ПОЧЕМУ не поднялся клиент, не выдавая при этом ключа.
+
+    Сообщение библиотеки обезвреживается: если в нём попался ключ или сам
+    адрес, они вырезаются. Разряд ошибки при этом сохраняется целиком — по
+    нему и различаются случаи, которые снаружи выглядели одинаково.
+    """
+    text = str(exc)
+    key = private_key() or ''
+    if key:
+        text = text.replace(key, '‹ключ вырезан›')
+        if key.startswith('0x'):
+            text = text.replace(key[2:], '‹ключ вырезан›')
+    _last_failure.clear()
+    _last_failure.update({'kind': type(exc).__name__, 'text': text[:220]})
+
+
+def last_failure():
+    """Почему клиент не поднялся в прошлый раз. Пусто — значит поднялся."""
+    return dict(_last_failure)
+
+
+def explain_failure():
+    """
+    Человеческое объяснение отказа вместо разряда исключения.
+
+    Разбор идёт по узнаваемым признакам: нехватка библиотеки, закрытая сеть,
+    отказ площадки. Всё прочее отдаётся как есть — лучше непонятный текст, чем
+    молчание.
+    """
+    fail = last_failure()
+    if not fail:
+        return ''
+    kind, text = fail.get('kind', ''), (fail.get('text') or '')
+    low = text.lower()
+    if kind in ('ModuleNotFoundError', 'ImportError'):
+        return ('в сборку не попала библиотека торгового API — '
+                f'обновите приложение ({text})')
+    if kind in ('URLError', 'ConnectionError', 'TimeoutError', 'OSError',
+                'ConnectionRefusedError', 'socket.timeout'):
+        return ('не удалось достучаться до биржи: сеть закрыта, прокси или '
+                f'страна под ограничением ({text})')
+    if '403' in low or 'forbidden' in low or 'geo' in low or 'blocked' in low:
+        return ('биржа отказала в доступе — обычно это ограничение по стране. '
+                f'Polymarket закрыт для ряда стран ({text})')
+    if '401' in low or 'unauthorized' in low or 'invalid' in low:
+        return f'биржа не приняла ключ или подпись ({text})'
+    return f'{kind}: {text}'
+
+
 def client(force=False):
     """
     Клиент торгового API с готовыми учётными данными.
@@ -144,8 +198,15 @@ def client(force=False):
         made.set_api_creds(made.derive_api_key())
         _client = made
         return _client
-    except Exception:                                       # noqa: BLE001
-        # Текст ошибки наружу не отдаём: он может содержать ключ целиком.
+    except Exception as exc:                                # noqa: BLE001
+        # ПРИЧИНА ЗАПОМИНАЕТСЯ, ХОТЯ НАРУЖУ И НЕ ОТДАЁТСЯ ЦЕЛИКОМ. Прежде она
+        # пропадала совсем: клиент отвечал «не поднялся», и отличить нехватку
+        # библиотеки от закрытой сети или негодного ключа было нечем — человек
+        # видел «кошелёк не подключён» и не имел ни единой зацепки.
+        #
+        # Сам текст библиотеки не показываем: у некоторых версий в него попадает
+        # ключ целиком. Сохраняем разряд ошибки и обезвреженное сообщение.
+        _remember_failure(exc)
         return None
 
 

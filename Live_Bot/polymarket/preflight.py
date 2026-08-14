@@ -26,6 +26,43 @@ def _line(mark, name, detail=''):
     return {'mark': mark, 'name': name, 'detail': detail}
 
 
+def check_reach():
+    """
+    Доходит ли вообще до биржи. Проверяется ДО ключа и отдельно от него.
+
+    ЗАЧЕМ ОТДЕЛЬНО. Закрытая сеть, прокси и ограничение по стране выглядели
+    ровно как негодный ключ: «кошелёк не подключён» и ни слова о причине.
+    Человек проверял ключ там, где дело было в сети, и проверял правильно —
+    ключ был в порядке.
+
+    Библиотека тоже проверяется здесь: в собранном приложении её может не
+    оказаться, и это отдельная беда, которую нельзя путать с остальными.
+    """
+    import urllib.request
+    out = []
+    try:
+        import py_clob_client_v2  # noqa: F401
+        out.append(_line(OK, 'библиотека торгового API на месте'))
+    except Exception as exc:                                # noqa: BLE001
+        out.append(_line(BAD, 'библиотеки торгового API нет',
+                         f'{type(exc).__name__}: обновите приложение'))
+        return out
+    try:
+        request = urllib.request.Request(
+            'https://clob.polymarket.com/', headers={'User-Agent': 'kraken-bot'})
+        with urllib.request.urlopen(request, timeout=12) as answer:
+            out.append(_line(OK, 'биржа отвечает', f'код {answer.status}'))
+    except Exception as exc:                                # noqa: BLE001
+        code = getattr(exc, 'code', None)
+        if code in (403, 451):
+            out.append(_line(BAD, f'биржа отказала в доступе (код {code})',
+                             'обычно это ограничение по стране'))
+        else:
+            out.append(_line(BAD, 'биржа не отвечает',
+                             f'{type(exc).__name__}: сеть, прокси или брандмауэр'))
+    return out
+
+
 def check_wallet():
     """Ключ, адрес, клиент и остаток. Ключ не показывается никогда."""
     out = []
@@ -38,7 +75,8 @@ def check_wallet():
 
     if wallet.client() is None:
         out.append(_line(BAD, 'торговый клиент не поднялся',
-                         'ключ есть, но библиотека не приняла его'))
+                         wallet.explain_failure()
+                         or 'причина неизвестна'))
         return out
     out.append(_line(OK, 'торговый клиент поднялся'))
 
@@ -131,6 +169,7 @@ def check_data():
 def run(budget=None):
     """Все проверки разом. Возвращает список строк и признак готовности."""
     groups = [
+        ('Связь', check_reach()),
         ('Кошелёк', check_wallet()),
         ('Разрешения', check_permission()),
         ('Деньги', check_budget()),
