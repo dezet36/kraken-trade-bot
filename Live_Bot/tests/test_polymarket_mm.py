@@ -611,3 +611,73 @@ class TestFillsAreAttributableToTheirRun:
                                              'consumed': 5, 'queue_ahead': 0})
         done = maker.process_fills('T', 'C', [{'ts': 5}])
         assert done and done[0]['run'] == maker.state['started']
+
+
+class TestBudgetChangeReachesTheState:
+    """
+    Изменённый бюджет доходит до денег, а не только до печати.
+
+    БЕЗ ЭТОГО НАСТРОЙКА ЛИШЬ КАЗАЛАСЬ БЫ РАБОТАЮЩЕЙ. Состояние хранит деньги на
+    диске, и при запуске с новым бюджетом бот печатал «капитал $250», а тратил
+    прежние $450: цифра бралась из файла, а не из настройки. Поймано на первом
+    же запуске с изменённой суммой.
+    """
+
+    def test_new_budget_applies_to_a_clean_state(self, tmp_path):
+        path = str(tmp_path / 'state.json')
+        engine.PaperMaker(bankroll=450, state_path=path).save()
+        second = engine.PaperMaker(bankroll=250, state_path=path)
+        assert second.state['cash'] == 250
+        assert second.state['bankroll'] == 250
+
+    def test_budget_is_not_swapped_under_open_positions(self, tmp_path):
+        """
+        Под открытыми позициями размер счёта не меняется.
+
+        Доходность считается от начального капитала, и подмена знаменателя на
+        ходу превратила бы замер в бессмыслицу. Поэтому предупреждение, а не
+        тихая правка.
+        """
+        path = str(tmp_path / 'state.json')
+        first = engine.PaperMaker(bankroll=450, state_path=path)
+        first._slot('T')['position'] = 5.0
+        first.state['cash'] = 445.0
+        first.save()
+        second = engine.PaperMaker(bankroll=250, state_path=path)
+        assert second.state['cash'] == 445.0, 'деньги не тронуты'
+        assert 'вступит в силу' in second.budget_note
+
+    def test_legacy_state_with_positions_is_not_overwritten(self, tmp_path):
+        """
+        Состояние БЕЗ записанного бюджета, но с позицией — не трогаем.
+
+        Первая версия этой проверки смотрела на сохранённый бюджет и, не найдя
+        его (а в состояниях от прежнего кода его и нет), переписывала деньги
+        поверх открытой позиции. Ровно то, чего функция обязана не делать.
+        Поймано запуском на живом состоянии, а не рассуждением.
+        """
+        import json as _json
+        path = tmp_path / 'state.json'
+        path.write_text(_json.dumps({
+            'started': 'X', 'cash': 447.42, 'version': 1,
+            'books': {'T': {'position': 5.0, 'avg_cost': 0.2, 'realized': 0.0,
+                            'orders': {}, 'trades': 1, 'opened_ts': None}},
+        }), encoding='utf-8')
+        maker = engine.PaperMaker(bankroll=60, state_path=str(path))
+        assert maker.state['cash'] == 447.42, 'деньги под позицией не тронуты'
+        assert 'вступит в силу' in maker.budget_note
+
+    def test_legacy_state_that_never_traded_accepts_the_budget(self, tmp_path):
+        """Не торговали ни разу — состояние чистое, сумму можно применить."""
+        import json as _json
+        path = tmp_path / 'state.json'
+        path.write_text(_json.dumps({
+            'started': 'X', 'cash': 450.0, 'version': 1, 'books': {},
+        }), encoding='utf-8')
+        maker = engine.PaperMaker(bankroll=60, state_path=str(path))
+        assert maker.state['cash'] == 60
+
+    def test_unchanged_budget_says_nothing(self, tmp_path):
+        path = str(tmp_path / 'state.json')
+        engine.PaperMaker(bankroll=450, state_path=path).save()
+        assert engine.PaperMaker(bankroll=450, state_path=path).budget_note == ''

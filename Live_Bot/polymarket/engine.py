@@ -54,12 +54,53 @@ class PaperMaker:
         self.state_path = state_path or STATE
         self.bankroll = float(bankroll or params.bankroll_for('MM'))
         self.state = self._load()
+        self.budget_note = self._sync_budget()
+
+    def _sync_budget(self):
+        """
+        Подтягивает изменённый бюджет к сохранённому состоянию.
+
+        БЕЗ ЭТОГО НАСТРОЙКА ЛИШЬ КАЗАЛАСЬ БЫ РАБОТАЮЩЕЙ. Состояние хранит
+        деньги на диске, и при запуске с новым бюджетом бот печатал бы «капитал
+        $250», а тратил бы прежние $450 — потому что цифра берётся из файла, а
+        не из настройки. Поймано на первом же запуске с изменённой суммой.
+
+        ДЕНЬГИ ПЕРЕСТАВЛЯЮТСЯ ТОЛЬКО НА ЧИСТОМ СОСТОЯНИИ. Если есть открытые
+        позиции, менять размер счёта под ними нельзя: доходность считается от
+        начального капитала, и подмена знаменателя на ходу превратила бы замер
+        в бессмыслицу. Тогда — предупреждение, а не тихая правка.
+        """
+        saved = self.state.get('bankroll')
+        if saved is not None and abs(float(saved) - self.bankroll) < 1e-9:
+            return ''
+
+        # ЧИСТОЕ СОСТОЯНИЕ ОПРЕДЕЛЯЕТСЯ ПО ДЕЛУ, А НЕ ПО ЗАПИСИ О БЮДЖЕТЕ.
+        # Первая версия смотрела на сохранённый бюджет и, не найдя его (а в
+        # состояниях, созданных прежним кодом, его и нет), переписывала деньги
+        # ПОВЕРХ открытой позиции. Ровно то, чего эта функция обязана не делать.
+        # Поймано запуском на живом состоянии, а не рассуждением.
+        books = self.state.get('books', {}) or {}
+        busy = [t for t, s in books.items() if s.get('position')]
+        traded = [t for t, s in books.items() if s.get('trades')]
+        if busy or traded:
+            was = f'${float(saved):,.2f}' if saved is not None else 'прежняя сумма'
+            return (f'бюджет изменён ({was} → ${self.bankroll:,.2f}), но '
+                    f'состояние уже в работе: позиций {len(busy)}, '
+                    f'торговавших рынков {len(traded)}. Новая сумма вступит в '
+                    f'силу после сброса состояния.')
+
+        self.state['bankroll'] = self.bankroll
+        self.state['cash'] = self.bankroll
+        return f'бюджет применён к чистому состоянию: ${self.bankroll:,.2f}'
 
     # ── Состояние ────────────────────────────────────────────────────────────
 
     def _blank(self):
         return {'started': _stamp(), 'cash': self.bankroll,
-                'books': {}, 'version': 1}
+                # Бюджет запоминается вместе с деньгами: иначе при следующем
+                # запуске нельзя отличить «настройку изменили» от «столько и
+                # было», а значит нельзя решить, применять её или нет.
+                'bankroll': self.bankroll, 'books': {}, 'version': 1}
 
     def _load(self):
         if not os.path.exists(self.state_path):

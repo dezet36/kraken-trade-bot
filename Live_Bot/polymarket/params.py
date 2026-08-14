@@ -134,6 +134,16 @@ BIAS_DAYS = _i('BIAS_DAYS', 365)
 #
 # Направление Polymarket и биржевой бот и без того раздельны: тот считает свой
 # капитал в config.py и про эти суммы не знает.
+# КАК ЗАДАЁТСЯ СУММА. Три способа, и все три читаются из одной настройки:
+#
+#     PM_BUDGET_MM=100      сто долларов, ровно и всегда
+#     PM_BUDGET_MM=max      всё, что лежит на кошельке
+#     PM_BUDGET_MM=80%      восемь десятых остатка, две оставить в запасе
+#
+# «Максимум» разрешён РОВНО ОДНОЙ стратегии. Две, попросившие максимум, обе
+# получили бы весь остаток и обе распланировали бы его целиком — та самая
+# ошибка, из-за которой две схемы маркет-мейкинга делили один кошелёк. Здесь
+# она вернулась бы через настройку, и потому запрещена явно.
 BUDGET = {
     # Двусторонняя котировка. Единственная схема с живым путём на биржу.
     'MM': _f('BUDGET_MM', 100),
@@ -152,6 +162,83 @@ BUDGET = {
 }
 
 
+def _raw_budget(strategy):
+    """Что написано в настройке: число, «max» или доля вида «80%»."""
+    text = os.getenv(f'PM_BUDGET_{strategy}')
+    if text is None or not str(text).strip():
+        return BUDGET.get(strategy, 0.0)
+    return str(text).strip()
+
+
+def _wants_wallet(value):
+    """Просит ли настройка денег С КОШЕЛЬКА, а не фиксированную сумму."""
+    if isinstance(value, str):
+        low = value.strip().lower()
+        return low in ('max', 'all', 'весь', 'всё') or low.endswith('%')
+    return False
+
+
+def budget_plan(strategy, balance=None):
+    """
+    Как разрешилась настройка бюджета. Возвращает (сумма, объяснение).
+
+    ОБЪЯСНЕНИЕ ВОЗВРАЩАЕТСЯ ВСЕГДА, включая случай отказа. Бюджет — это
+    единственное, что отделяет «бот работает» от «бот стоит», и молчаливый ноль
+    здесь неотличим от поломки: заявок нет, ошибок нет, причины нет.
+    """
+    value = _raw_budget(strategy)
+
+    if not _wants_wallet(value):
+        try:
+            return max(0.0, float(value)), f'задано числом: ${float(value):,.2f}'
+        except (TypeError, ValueError):
+            return 0.0, f'настройка «{value}» не число и не «max»'
+
+    # ДВА «МАКСИМУМА» — ЭТО ДВОЙНАЯ ТРАТА ОДНИХ ДЕНЕГ. Отказываем обоим, а не
+    # выбираем одного тайком: тихий выбор означал бы, что вторая стратегия
+    # торгует на деньги, которые уже обещаны первой.
+    greedy = [name for name in BUDGET if _wants_wallet(_raw_budget(name))]
+    if len(greedy) > 1:
+        return 0.0, ('максимум просят несколько стратегий '
+                     f'({", ".join(sorted(greedy))}) — так нельзя, '
+                     'они поделили бы одни и те же деньги дважды')
+
+    if balance is None:
+        from . import wallet
+        balance = wallet.balance()
+
+    # НЕИЗВЕСТНЫЙ ОСТАТОК — НЕ НОЛЬ И НЕ «СКОЛЬКО-НИБУДЬ». Кошелёк намеренно
+    # различает эти случаи, и здесь различие сохраняется: не зная остатка,
+    # берём запасную сумму, а не гадаем. Без неё бумажный прогон, где кошелька
+    # нет вовсе, просто не запустился бы.
+    if balance is None:
+        fallback = _f('BUDGET_FALLBACK', 100)
+        return fallback, (f'остаток кошелька неизвестен — взята запасная '
+                          f'сумма ${fallback:,.2f}')
+
+    share = 1.0
+    if isinstance(value, str) and value.strip().endswith('%'):
+        try:
+            share = float(value.strip().rstrip('%')) / 100.0
+        except ValueError:
+            return 0.0, f'долю «{value}» прочитать не удалось'
+        if not 0 < share <= 1:
+            return 0.0, f'доля «{value}» вне разумного'
+
+    # Чужие фиксированные бюджеты вычитаются: они уже обещаны и тратить их
+    # второй раз нельзя. Иначе «максимум» означал бы «всё, включая соседское».
+    reserved = sum(float(_raw_budget(name)) for name in BUDGET
+                   if name != strategy and not _wants_wallet(_raw_budget(name)))
+    free = max(0.0, float(balance) - reserved)
+    amount = free * share
+    note = f'с кошелька ${balance:,.2f}'
+    if reserved:
+        note += f', занято другими ${reserved:,.2f}'
+    if share < 1:
+        note += f', доля {share:.0%}'
+    return amount, f'{note} → ${amount:,.2f}'
+
+
 def bankroll_for(strategy, total=None):
     """
     Бюджет стратегии в долларах. Незнакомое имя получает ноль, а не весь счёт.
@@ -164,12 +251,14 @@ def bankroll_for(strategy, total=None):
     зависят. Принимать его и не использовать честнее, чем принимать и делать
     вид, будто он на что-то влияет.
     """
-    return float(BUDGET.get(strategy, 0.0))
+    if strategy not in BUDGET:
+        return 0.0
+    return budget_plan(strategy)[0]
 
 
 def budget_total():
     """Сумма всех бюджетов. Число справочное: оно ничего не ограничивает."""
-    return sum(BUDGET.values())
+    return sum(bankroll_for(name) for name in BUDGET)
 
 
 # ── Маркет-мейкинг (Фаза 0: наблюдение) ──────────────────────────────────────

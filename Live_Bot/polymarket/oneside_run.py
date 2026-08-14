@@ -136,7 +136,10 @@ def main(loop=False):
     # вместе, они планировали потратить её дважды.
     maker = engine.PaperMaker(bankroll=params.bankroll_for('ONESIDE'),
                               state_path=STATE)
-    print(f'капитал: ${maker.bankroll:,.0f}')
+    money, why = params.budget_plan('ONESIDE')
+    print(f'капитал: ${maker.bankroll:,.2f}  ({why})')
+    if money <= 0:
+        print('   БЮДЖЕТ НУЛЕВОЙ — заявки выставляться не будут')
     print(f'рынков: {len(markets)}')
     if LAST_PLAN:
         print(f'вложено ${LAST_PLAN["used"]:.2f}, свободно ${LAST_PLAN["free"]:.2f}')

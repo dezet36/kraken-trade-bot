@@ -15,6 +15,8 @@ import sys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
+import pytest  # noqa: E402
+
 from polymarket import client, longshot, params, risk, weather  # noqa: E402
 
 
@@ -499,3 +501,99 @@ class TestSigmaUnits:
         assert "spread_buckets = sigma_in_buckets(fit['sigma'], bucket['unit'])" in text
         assert "if not fit or fit['sigma'] > params.MAX_SIGMA:" not in text, \
             'старый отбор по градусам обязан быть убран'
+
+
+class TestBudgetCanFollowTheWallet:
+    """
+    Сумму можно задать числом, а можно взять с кошелька.
+
+        PM_BUDGET_MM=100      сто долларов, ровно и всегда
+        PM_BUDGET_MM=max      всё, что лежит на кошельке
+        PM_BUDGET_MM=80%      восемь десятых остатка, две в запасе
+
+    Объяснение возвращается ВСЕГДА, включая отказ: бюджет отделяет «бот
+    работает» от «бот стоит», и молчаливый ноль неотличим от поломки — заявок
+    нет, ошибок нет, причины нет.
+    """
+
+    def test_plain_number_is_taken_as_dollars(self, monkeypatch):
+        monkeypatch.setenv('PM_BUDGET_MM', '250')
+        amount, why = params.budget_plan('MM', balance=9999)
+        assert amount == 250.0
+        assert 'числом' in why, 'кошелёк тут ни при чём'
+
+    def test_max_takes_what_is_left_after_the_others(self, monkeypatch):
+        """
+        Чужие фиксированные бюджеты вычитаются: они уже обещаны.
+
+        Иначе «максимум» означал бы «всё, включая соседское», и две стратегии
+        планировали бы одни деньги.
+        """
+        monkeypatch.setenv('PM_BUDGET_MM', 'max')
+        monkeypatch.setitem(params.BUDGET, 'WEATHER', 100.0)
+        monkeypatch.setitem(params.BUDGET, 'CRYPTO', 100.0)
+        monkeypatch.setitem(params.BUDGET, 'LONGSHOT', 100.0)
+        monkeypatch.setitem(params.BUDGET, 'ONESIDE', 0.0)
+        amount, why = params.budget_plan('MM', balance=1000.0)
+        assert amount == 700.0
+        assert 'занято другими' in why
+
+    def test_share_of_the_wallet(self, monkeypatch):
+        monkeypatch.setenv('PM_BUDGET_MM', '80%')
+        for name in ('WEATHER', 'CRYPTO', 'LONGSHOT', 'ONESIDE'):
+            monkeypatch.setitem(params.BUDGET, name, 0.0)
+        amount, _ = params.budget_plan('MM', balance=1000.0)
+        assert amount == pytest.approx(800.0)
+
+    def test_two_strategies_asking_for_max_are_both_refused(self, monkeypatch):
+        """
+        Два «максимума» — это двойная трата одних денег.
+
+        Отказываем обоим, а не выбираем одного тайком: тихий выбор означал бы,
+        что вторая стратегия торгует на деньги, уже обещанные первой. Ровно эта
+        ошибка была, когда обе схемы делили кошелёк.
+        """
+        monkeypatch.setenv('PM_BUDGET_MM', 'max')
+        monkeypatch.setenv('PM_BUDGET_ONESIDE', 'max')
+        for name in ('MM', 'ONESIDE'):
+            amount, why = params.budget_plan(name, balance=1000.0)
+            assert amount == 0.0
+            assert 'несколько стратегий' in why
+
+    def test_unknown_balance_is_not_treated_as_zero_or_infinity(self,
+                                                                monkeypatch):
+        """
+        Неизвестный остаток — не ноль и не «сколько-нибудь».
+
+        Кошелёк намеренно различает «ноль» и «не удалось спросить». Различие
+        сохраняется: не зная остатка, берём запасную сумму и говорим об этом.
+        Без неё бумажный прогон, где кошелька нет вовсе, не запустился бы.
+        """
+        monkeypatch.setenv('PM_BUDGET_MM', 'max')
+        amount, why = params.budget_plan('MM', balance=None)
+        assert amount > 0
+        assert 'неизвест' in why
+
+    def test_garbage_setting_stops_trading_and_says_why(self, monkeypatch):
+        monkeypatch.setenv('PM_BUDGET_MM', 'сто рублей')
+        amount, why = params.budget_plan('MM', balance=1000.0)
+        assert amount == 0.0
+        assert 'не число' in why
+
+    def test_share_outside_reason_is_refused(self, monkeypatch):
+        monkeypatch.setenv('PM_BUDGET_MM', '250%')
+        assert params.budget_plan('MM', balance=1000.0)[0] == 0.0
+
+    def test_wallet_mode_never_exceeds_the_wallet(self, monkeypatch):
+        monkeypatch.setenv('PM_BUDGET_MM', 'max')
+        for name in ('WEATHER', 'CRYPTO', 'LONGSHOT', 'ONESIDE'):
+            monkeypatch.setitem(params.BUDGET, name, 0.0)
+        amount, _ = params.budget_plan('MM', balance=42.0)
+        assert amount <= 42.0
+
+    def test_reserved_more_than_the_wallet_leaves_nothing(self, monkeypatch):
+        """Если соседям обещано больше, чем есть, максимум равен нулю."""
+        monkeypatch.setenv('PM_BUDGET_MM', 'max')
+        monkeypatch.setitem(params.BUDGET, 'WEATHER', 5000.0)
+        amount, _ = params.budget_plan('MM', balance=100.0)
+        assert amount == 0.0

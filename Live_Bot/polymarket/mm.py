@@ -337,7 +337,16 @@ def main(loop=False):
     state = wallet.status()
     live = state['can_trade_live']
 
-    print(f'капитал маркет-мейкера: ${maker.bankroll:,.0f}')
+    # ОТКУДА ВЗЯЛАСЬ СУММА — ПЕЧАТАЕТСЯ ВСЕГДА. Бюджет отделяет «бот работает»
+    # от «бот стоит», и молчаливый ноль здесь неотличим от поломки: заявок нет,
+    # ошибок нет, причины нет. Настройка может значить «сто долларов», «всё с
+    # кошелька» или «доля остатка» — какое из трёх сработало, видно только тут.
+    money, why = params.budget_plan('MM')
+    print(f'капитал маркет-мейкера: ${maker.bankroll:,.2f}  ({why})')
+    if maker.budget_note:
+        print(f'   {maker.budget_note}')
+    if money <= 0:
+        print('   БЮДЖЕТ НУЛЕВОЙ — заявки выставляться не будут')
     print(f'рынков отобрано: {len(markets)}')
     if LAST_PLAN:
         print(f'вложено ${LAST_PLAN["used"]:,.2f}, свободно ${LAST_PLAN["free"]:,.2f}, '
