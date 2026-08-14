@@ -470,36 +470,6 @@ def measure_wait(rows, books, limit=None):
     return rows
 
 
-def measure_activity(rows, limit=None):
-    """
-    Частота сделок по ЛЕНТЕ за последние сутки, а не по накопленному обороту.
-
-    Оборот считается за всю жизнь рынка и потому льстит старым: $152 000 за
-    год — это 0.3 сделки в час. Лента отвечает на нужный вопрос прямо: сколько
-    раз в час здесь вообще торгуют, то есть сколько кругов мы можем надеяться
-    совершить.
-
-    Запрос идёт на каждый рынок отдельно, поэтому список сначала обрезается.
-    Делать это каждый цикл было бы расточительством; частота меняется медленно,
-    и пересчёта при перевыборе рынков достаточно.
-    """
-    day = 24 * 3600
-    now = time.time()
-    for row in rows[:int(limit)] if limit else rows:
-        trades = book_mod.tape(row['condition_id'], limit=500) or []
-        fresh = [t for t in trades if now - t['ts'] < day]
-        row['trades_per_hour'] = round(len(fresh) / 24.0, 2)
-        # Ожидаемый доход в час: что остаётся от спреда после шага внутрь,
-        # умноженное на размер и на частоту. Это ПОТОЛОК — он считает, что
-        # каждая чужая сделка могла бы стать нашим кругом.
-        keep = max(row['spread'] - 2 * row['tick'], 0.0)
-        row['usd_per_hour'] = round(keep * row['size'] * row['trades_per_hour'], 5)
-    for row in rows:
-        row.setdefault('trades_per_hour', 0.0)
-        row.setdefault('usd_per_hour', 0.0)
-    return rows
-
-
 def _cap_per_event(rows):
     """
     Не больше нескольких рынков одного события.
