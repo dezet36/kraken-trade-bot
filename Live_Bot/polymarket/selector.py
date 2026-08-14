@@ -260,8 +260,30 @@ def scan(budget=None, limit=None, pages=30, min_volume=None,
     return good
 
 
+def _step_options(ticks):
+    """
+    Возможные шаги внутрь спреда, в тиках. Ноль означает встать на лучшую цену.
+
+    Шаг должен оставлять хотя бы тик: при спреде в шесть тиков глубже двух не
+    уйти, иначе цены сойдутся и заявка станет тейкерской.
+    """
+    room = (ticks - 1) // 2
+    return [0] + [d for d in (1, 2, 3, 5, 8, 12) if d <= room]
+
+
 def _recompute_wait(row):
-    """Ожидание и доход под окончательный размер заявки."""
+    """
+    Ожидание и доход под окончательный размер заявки.
+
+    ОБЕ ЗАЯВКИ СТОЯТ ОДНОВРЕМЕННО, и это меняет арифметику. Прежде ожидания
+    складывались, как будто мы сперва покупаем, потом выставляем продажу, —
+    но бид и аск живут в стакане вместе, и часы у них идут параллельно.
+
+    Для независимых ожиданий со средними a и b среднее время, когда случатся
+    ОБА, равно a + b - ab/(a+b). Это всегда меньше суммы и всегда больше
+    большего из двух: сложение завышало ожидание в полтора раза при равных
+    сторонах, то есть занижало доход настолько же.
+    """
     size = float(row['size'])
     flow_in = float(row.get('flow_in') or 0)
     flow_out = float(row.get('flow_out') or 0)
@@ -269,7 +291,12 @@ def _recompute_wait(row):
                if flow_in > 0 else float('inf'))
     wait_out = ((row.get('queue_out', 0) + size) / flow_out
                 if flow_out > 0 else float('inf'))
-    row['wait_hours'] = round(wait_in + wait_out, 3)
+    if wait_in == float('inf') or wait_out == float('inf'):
+        both = float('inf')
+    else:
+        total = wait_in + wait_out
+        both = total - (wait_in * wait_out / total) if total > 0 else 0.0
+    row['wait_hours'] = round(both, 3)
     row['usd_per_hour'] = round(size * row['our_gain'] / row['wait_hours'], 5)         if row['wait_hours'] not in (0, float('inf')) else 0.0
     return row
 
@@ -383,32 +410,58 @@ def measure_wait(rows, books, limit=None):
         size = row.get('size') or params.MM_MIN_ORDER_SIZE
         ticks = int(round(top['spread'] / row['tick'])) if row['tick'] > 0 else 0
 
-        # ШАГ ВНУТРЬ ИЛИ В ОЧЕРЕДЬ — выбирается тем, что быстрее окупается.
-        # Шагнув, мы отдаём два тика, зато встаём первыми; встав в очередь,
-        # берём весь спред, но ждём всех, кто пришёл раньше.
-        if ticks >= params.MM_MIN_TICKS_TO_STEP_IN:
-            queue_in = queue_out = 0.0
-            gain = top['spread'] - 2 * row['tick']
-        else:
-            queue_in = depth_at(live, 'bid', top['bid'])
-            queue_out = depth_at(live, 'ask', top['ask'])
-            gain = top['spread']
+        # ГЛУБИНА ШАГА ПОДБИРАЕТСЯ, А НЕ БЕРЁТСЯ В ОДИН ТИК.
+        #
+        # Шаг в один тик был произволом, и замер показал, насколько дорогим.
+        # На широком спреде заявка в тик от лучшей цены стоит ДАЛЕКО от
+        # середины, и до неё почти никто не доходит:
+        #
+        #     «Khvicha Kvaratskhelia», спред 21 тик
+        #         шаг 1 тик:  остаётся 0.0190, поток   13.1 контр/ч
+        #         шаг 5 тик:  остаётся 0.0110, поток  225.6 контр/ч
+        #
+        # Поток вырос в семнадцать раз, спред упал вдвое — произведение
+        # выросло вдесятеро. По четырём рынкам подбор дал вдевятеро больше
+        # жёсткого тика.
+        #
+        # Берём шаг с наибольшим произведением «что остаётся» на «что
+        # доходит»: это и есть доход в единицу времени с точностью до размера.
+        best = None
+        for depth in _step_options(ticks):
+            if depth == 0:
+                price_bid, price_ask = top['bid'], top['ask']
+                q_in = depth_at(live, 'bid', top['bid'])
+                q_out = depth_at(live, 'ask', top['ask'])
+            else:
+                price_bid = top['bid'] + depth * row['tick']
+                price_ask = top['ask'] - depth * row['tick']
+                q_in = q_out = 0.0
+            take = price_ask - price_bid
+            if take <= 0:
+                continue
+            f_in = sum(t['size'] for t in mine if t['side'] == 'SELL'
+                       and t['price'] <= price_bid + 1e-9) / span
+            f_out = sum(t['size'] for t in mine if t['side'] == 'BUY'
+                        and t['price'] >= price_ask - 1e-9) / span
+            score = take * min(f_in, f_out)
+            if best is None or score > best['score']:
+                best = {'score': score, 'depth': depth, 'gain': take,
+                        'flow_in': f_in, 'flow_out': f_out,
+                        'queue_in': q_in, 'queue_out': q_out}
+        if best is None:
+            row['wait_hours'] = float('inf')
+            continue
 
-        wait_in = (queue_in + size) / flow_in if flow_in > 0 else float('inf')
-        wait_out = (queue_out + size) / flow_out if flow_out > 0 else float('inf')
-        row['step_inside'] = ticks >= params.MM_MIN_TICKS_TO_STEP_IN
-        row['flow_in'] = round(flow_in, 1)
-        row['flow_out'] = round(flow_out, 1)
+        row['step_ticks'] = best['depth']
+        row['step_inside'] = best['depth'] > 0
+        row['flow_in'] = round(best['flow_in'], 1)
+        row['flow_out'] = round(best['flow_out'], 1)
         # Очереди сохраняются, потому что время придётся пересчитать: размер
         # заявки выбирается ПОЗЖЕ, а ждать большую заявку дольше.
-        row['queue_in'] = round(queue_in, 1)
-        row['queue_out'] = round(queue_out, 1)
-        row['wait_hours'] = round(wait_in + wait_out, 3)
-        row['our_gain'] = round(max(gain, 0.0), 6)
-        # Круг требует ДВУХ исполнений, поэтому ждать приходится дважды.
-        row['usd_per_hour'] = round(
-            size * row['our_gain'] / row['wait_hours'], 5) \
-            if row['wait_hours'] not in (0, float('inf')) else 0.0
+        row['queue_in'] = round(best['queue_in'], 1)
+        row['queue_out'] = round(best['queue_out'], 1)
+        row['our_gain'] = round(max(best['gain'], 0.0), 6)
+        _recompute_wait(row)
     for row in rows:
         row.setdefault('wait_hours', float('inf'))
         row.setdefault('usd_per_hour', 0.0)

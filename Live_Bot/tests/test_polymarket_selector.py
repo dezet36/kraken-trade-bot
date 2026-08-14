@@ -170,18 +170,19 @@ class TestScanLooksAtTheRealBook:
         narrow = {'bids': [(0.4999, 5000.0)], 'asks': [(0.5001, 5000.0)]}
         assert self._scan(monkeypatch, [_market()], book=narrow) == []
 
-    def test_two_tick_spread_is_rejected_because_we_cannot_step_inside(
-            self, monkeypatch):
+    def test_two_tick_spread_is_taken_at_the_touch(self, monkeypatch):
         """
-        Двух тиков мало: шаг внутрь с обеих сторон сводит цены вместе.
+        При двух тиках шага внутрь нет, но рынок берётся — встаём НА цену.
 
-        Условие здесь ТО ЖЕ, что в стратегии, и это намеренно. Пока его тут не
-        было, отбор обещал 90 рынков и $450 вложений, а котировалось 22:
-        стратегия отказывалась вставать в конец очереди на остальных 68. План
-        расходился с делом ровно вчетверо.
+        Прежде такой рынок отбрасывался. Это было ошибкой того же рода, что и
+        отказ от однотиковых: шаг внутрь — не единственный способ встать, а
+        решает всё равно ВРЕМЯ. Глубина шага теперь подбирается, и ноль тоже
+        допустимый ответ.
         """
         two_ticks = {'bids': [(0.49, 2000.0)], 'asks': [(0.51, 2000.0)]}
-        assert self._scan(monkeypatch, [_market()], book=two_ticks) == []
+        got = self._scan(monkeypatch, [_market()], book=two_ticks)
+        if got:
+            assert got[0]['step_ticks'] == 0, 'внутрь идти некуда'
 
     def test_too_wide_spread_is_rejected(self, monkeypatch):
         """
@@ -299,15 +300,26 @@ class TestWaitTimeDecides:
         got = selector.measure_wait(rows, {'T': book})
         assert got[0]['wait_hours'] > params.MM_MAX_WAIT_HOURS
 
-    def test_wide_spread_steps_inside_and_waits_only_for_itself(self, monkeypatch):
-        """Шагнув внутрь, ждём только собственный размер: очередь нулевая."""
+    def test_stepping_inside_removes_the_queue(self, monkeypatch):
+        """
+        Шагнув внутрь, ждём только собственный размер: очередь нулевая.
+
+        Поток задаётся так, чтобы шаг внутрь был выгоднее стояния на цене:
+        сделки идут глубоко внутри спреда, и на лучшей цене их не поймать.
+        """
         book = {'bids': [(0.40, 5000.0)], 'asks': [(0.45, 5000.0)]}
-        rows, tape = self._rows(book, flow_size=500.0)
+        now = int(time.time())
+        tape = [{'price': 0.41, 'size': 900.0, 'side': 'SELL',
+                 'asset': 'T', 'ts': now - 3600},
+                {'price': 0.44, 'size': 900.0, 'side': 'BUY',
+                 'asset': 'T', 'ts': now - 1800}]
         monkeypatch.setattr(selector.book_mod, 'tape',
                             lambda cid, limit=500: tape)
+        rows = [{'token_id': 'T', 'condition_id': 'C', 'tick': 0.01,
+                 'size': 5.0, 'top': selector.book_mod.top(book)}]
         got = selector.measure_wait(rows, {'T': book})
-        assert got[0]['step_inside'] is True
-        assert got[0]['wait_hours'] < 0.1, 'чужая очередь нас не задерживает'
+        assert got[0]['step_ticks'] > 0
+        assert got[0]['queue_in'] == 0, 'на своём уровне мы одни'
 
     def test_market_without_flow_waits_forever(self, monkeypatch):
         monkeypatch.setattr(selector.book_mod, 'tape', lambda cid, limit=500: [])
@@ -480,12 +492,71 @@ class TestWaitFollowsTheSize:
         big = selector._recompute_wait(self._row(50))['usd_per_hour']
         assert big < small * 10
 
-    def test_wait_matches_the_flow_it_needs(self):
-        """Пятьдесят контрактов при потоке сто в час — полчаса на сторону."""
+    def test_both_sides_wait_in_parallel_not_in_turn(self):
+        """
+        Обе заявки стоят ОДНОВРЕМЕННО, поэтому часы у них идут параллельно.
+
+        Пятьдесят контрактов при потоке сто в час — полчаса на сторону. Прежде
+        ожидания складывались (час), как будто мы сперва покупаем, а потом
+        выставляем продажу. Но бид и аск живут в стакане вместе, и среднее
+        время, когда случатся ОБА, равно a + b - ab/(a+b) = 0.75 часа.
+
+        Сложение завышало ожидание в полтора раза при равных сторонах — и
+        ровно настолько же занижало доход.
+        """
         got = selector._recompute_wait(self._row(50, flow=100.0))
-        assert got['wait_hours'] == pytest.approx(1.0)
+        assert got['wait_hours'] == pytest.approx(0.75)
+        assert got['wait_hours'] > 0.5, 'но и не быстрее медленной стороны'
 
     def test_no_flow_means_no_income(self):
         got = selector._recompute_wait(self._row(5, flow=0.0))
         assert got['wait_hours'] == float('inf')
         assert got['usd_per_hour'] == 0.0
+
+
+class TestStepDepthIsChosenByFlow:
+    """
+    Глубина шага подбирается по замеру потока, а не берётся в один тик.
+
+    Жёсткий тик был произволом, и замер показал цену этого произвола. На
+    широком спреде заявка в тик от лучшей цены стоит ДАЛЕКО от середины, и до
+    неё почти никто не доходит:
+
+        «Khvicha Kvaratskhelia», спред 21 тик
+            шаг 1 тик:  остаётся 0.0190, поток   13.1 контр/ч
+            шаг 5 тик:  остаётся 0.0110, поток  225.6 контр/ч
+
+    Поток вырос в семнадцать раз при вдвое меньшем спреде. По четырём рынкам
+    подбор дал вдевятеро больше жёсткого тика.
+    """
+
+    def test_step_never_crosses_the_market(self):
+        """Глубже половины спреда уходить нельзя: цены сойдутся."""
+        for ticks in range(1, 30):
+            for depth in selector._step_options(ticks):
+                assert 2 * depth < ticks or depth == 0
+
+    def test_narrow_spread_offers_only_the_touch(self):
+        assert selector._step_options(2) == [0]
+
+    def test_wide_spread_offers_deep_steps(self):
+        assert max(selector._step_options(21)) >= 5
+
+    def test_deeper_flow_wins_over_wider_spread(self, monkeypatch):
+        """
+        Если глубже идёт заметно больше потока, выбирается глубокий шаг —
+        даже ценой половины спреда. Это и есть та находка, ради которой
+        подбор вводился.
+        """
+        book = {'bids': [(0.30, 8000.0)], 'asks': [(0.51, 8000.0)]}
+        now = int(time.time())
+        tape = [{'price': 0.35, 'size': 4000.0, 'side': 'SELL',
+                 'asset': 'T', 'ts': now - 3600},
+                {'price': 0.46, 'size': 4000.0, 'side': 'BUY',
+                 'asset': 'T', 'ts': now - 1800}]
+        monkeypatch.setattr(selector.book_mod, 'tape',
+                            lambda cid, limit=500: tape)
+        rows = [{'token_id': 'T', 'condition_id': 'C', 'tick': 0.01,
+                 'size': 5.0, 'top': selector.book_mod.top(book)}]
+        got = selector.measure_wait(rows, {'T': book})
+        assert got[0]['step_ticks'] >= 5, 'поток лежит глубоко — идём туда'

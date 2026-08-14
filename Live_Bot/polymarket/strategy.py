@@ -143,7 +143,19 @@ def desired_quote(top, market, position=0.0, max_position=None, book=None):
     # укладывается в предел. Здесь остаётся выбрать, КАК встать: есть место —
     # шагаем внутрь и берём спред минус два тика; места нет — встаём на лучшую
     # цену и берём спред целиком, расплачиваясь ожиданием.
-    step = tick if ticks >= params.MM_MIN_TICKS_TO_STEP_IN else 0.0
+    # ГЛУБИНА ШАГА ПРИХОДИТ ИЗ ОТБОРА, где она подобрана по замеру потока.
+    # Жёсткий тик был произволом: на широком спреде заявка в тик от лучшей
+    # цены стоит далеко от середины, и до неё почти никто не доходит. По
+    # рынку «Khvicha Kvaratskhelia» шаг в пять тиков вместо одного поднимал
+    # доходящий поток с 13 до 226 контрактов в час при вдвое меньшем спреде.
+    #
+    # Запасной вариант на случай, когда отбор ничего не сказал: прежний тик.
+    depth = market.get('step_ticks')
+    if depth is None:
+        depth = 1 if ticks >= params.MM_MIN_TICKS_TO_STEP_IN else 0
+    # Глубже половины спреда уходить нельзя — цены сойдутся.
+    depth = max(0, min(int(depth), (ticks - 1) // 2))
+    step = depth * tick
 
     want_bid = _round_to_tick(top['bid'] + step + skew, tick, 'down')
     want_ask = _round_to_tick(top['ask'] - step + skew, tick, 'up')
