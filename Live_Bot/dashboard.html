@@ -2296,12 +2296,25 @@ function renderPolymarket() {
     ? '<b style="color:var(--bad)">ЖИВЫЕ ДЕНЬГИ</b>'
     : (w.configured ? 'кошелёк подключён, живой режим выключен' : 'бумага');
 
+  /* ИТОГ СТАВИТСЯ ПЕРВЫМ И СЧИТАЕТСЯ ОТ БЮДЖЕТА, а не показывается капиталом.
+     «Капитал $100» не отвечает на вопрос «сколько получили»: чтобы ответить,
+     человеку приходилось вычитать в уме начальную сумму, которой на экране
+     не было вовсе. */
+  const start = (PM.connect || {}).budget_usd;
+  const pnl = (eq.equity !== undefined && start) ? (eq.equity - start) : null;
+  const pnlText = pnl === null ? '—'
+    : `<span style="color:var(--${pnl >= 0 ? 'good' : 'bad'})">`
+      + (pnl >= 0 ? '+' : '') + pmMoney(pnl) + '</span>';
+
   const cards = [
     ['Режим', mode],
-    ['Капитал', pmMoney(eq.equity)],
+    ['Итог', pnlText],
+    ['Было / стало', pmMoney(start) + ' → ' + pmMoney(eq.equity)],
     ['Зафиксировано', pmMoney(eq.realized)],
     ['В запасе', pmMoney(eq.inventory)],
-    ['Котируется рынков', PM.quoting_markets || 0],
+    ['Кругов завершено', PM.rounds_total || 0],
+    ['Заработано кругами', pmMoney(PM.rounds_gain_usd)],
+    ['Стоим на рынках', (PM.standing || []).length],
     ['Позиций открыто', PM.positions_total || 0],
     ['Тактов', svc.cycles || 0],
   ];
@@ -2334,6 +2347,81 @@ function renderPolymarket() {
   if (w.configured && w.address) {
     html += '<div class="hint" style="padding:8px 4px">Кошелёк: <code>' + esc(w.address) + '</code>'
       + (w.funder ? ' · счёт <code>' + esc(w.funder) + '</code>' : '') + '</div>';
+  }
+
+  /* ЧТО БОТ ДЕЛАЕТ ПРЯМО СЕЙЧАС. Раньше на этот вопрос ответить было нечем:
+     показывались только рынки с позицией, то есть где нас УЖЕ исполнили. Но
+     мейкер большую часть времени именно СТОИТ, и это его работа. */
+  if ((PM.standing || []).length) {
+    html += '<h3 style="margin:18px 0 8px">Где стоим сейчас</h3><div class="scroll">'
+      + '<table><thead><tr><th>рынок</th><th>бид</th><th>аск</th>'
+      + '<th>держим</th><th>размер</th><th>очередь</th>'
+      + '<th>стоит</th><th>ждали</th><th>позиция</th></tr></thead><tbody>'
+      + PM.standing.slice(0, 20).map(q => {
+          /* Расхождение «стоит» и «ждали» — первый признак, что модель врёт.
+             Поэтому оба числа рядом, а не в разных таблицах. */
+          const late = q.expected_min && q.standing_min > q.expected_min * 2;
+          return `<tr>
+            <td>${esc((q.question || '—').slice(0, 40))}</td>
+            <td>${q.bid === null ? '—' : Number(q.bid).toFixed(3)}</td>
+            <td>${q.ask === null ? '—' : Number(q.ask).toFixed(3)}</td>
+            <td>${q.spread_kept === null ? '—' : Number(q.spread_kept).toFixed(3)}</td>
+            <td>${Number(q.size || 0).toFixed(0)}</td>
+            <td>${Number(q.queue_bid || 0).toFixed(0)} / ${Number(q.queue_ask || 0).toFixed(0)}</td>
+            <td${late ? ' style="color:var(--bad)"' : ''}>${q.standing_min} мин</td>
+            <td>${q.expected_min ? q.expected_min + ' мин' : '—'}</td>
+            <td>${Number(q.position || 0).toFixed(0)}</td></tr>`;
+        }).join('')
+      + '</tbody></table></div>'
+      + '<div class="hint" style="padding:6px 4px">«Держим» — что останется '
+      + 'нам, если исполнятся обе стороны. «Очередь» — сколько контрактов '
+      + 'впереди нас: ноль значит, что мы первые. Красное время означает, что '
+      + 'заявка стоит вдвое дольше расчётного — модель ожидания ошиблась.</div>';
+  }
+
+  /* ЗАВЕРШЁННЫЕ КРУГИ — главная мерка. Отдельные исполнения не говорят
+     ничего: купить может каждый, заработок появляется только при закрытии. */
+  if ((PM.rounds || []).length) {
+    html += '<h3 style="margin:18px 0 8px">Завершённые круги</h3><div class="scroll">'
+      + '<table><thead><tr><th>время</th><th>купили</th><th>продали</th>'
+      + '<th>размер</th><th>заработок</th><th>заняло</th></tr></thead><tbody>'
+      + PM.rounds.slice(0, 20).map(r => `<tr>
+          <td>${esc((r.at || '').slice(11, 19))}</td>
+          <td>${Number(r.bought).toFixed(3)}</td>
+          <td>${Number(r.sold).toFixed(3)}</td>
+          <td>${Number(r.size).toFixed(0)}</td>
+          <td style="color:var(--${r.gain_usd >= 0 ? 'good' : 'bad'})">${
+            (r.gain_usd >= 0 ? '+' : '') + pmMoney(r.gain_usd)}</td>
+          <td>${r.minutes} мин</td></tr>`).join('')
+      + '</tbody></table></div>';
+  }
+
+  /* НЕБЛАГОПРИЯТНЫЙ ОТБОР — число, решающее судьбу затеи. И оговорка к нему,
+     без которой оно вводит в заблуждение. */
+  const dr = PM.drift || {};
+  if (dr.count) {
+    const sign = dr.avg_per_contract < 0 ? 'bad' : 'good';
+    html += '<h3 style="margin:18px 0 8px">Куда шла цена после наших сделок</h3>'
+      + '<div class="panel card-pad"><div class="kpis">'
+      + `<div class="kpi"><div class="k">Замеров</div><div class="v">${dr.count}</div></div>`
+      + `<div class="kpi"><div class="k">В сумме</div><div class="v" style="color:var(--${sign})">${pmMoney(dr.total_usd)}</div></div>`
+      + `<div class="kpi"><div class="k">На контракт</div><div class="v" style="color:var(--${sign})">${Number(dr.avg_per_contract).toFixed(5)}</div></div>`
+      + `<div class="kpi"><div class="k">Против нас</div><div class="v">${dr.against_us} из ${dr.count}</div></div>`
+      + '</div></div>'
+      + '<div class="hint" style="padding:6px 4px">Отрицательное число значит, '
+      + 'что нас исполняют перед движением против нас. ВАЖНО: по завершённому '
+      + 'кругу снос сокращается сам собой — на покупке он одного знака, на '
+      + 'продаже другого. Судить надо по позициям, которые НЕ закрылись.</div>';
+  }
+
+  /* МОДЕЛЬ ПРОТИВ БИРЖИ — только в живом режиме, и только когда есть что
+     сравнивать. */
+  const sh = PM.shadow || {};
+  if (sh.count) {
+    html += '<div class="hint" style="padding:6px 4px">Модель сверялась с '
+      + `биржей ${sh.count} раз; «исполнилось бы» сказала ${sh.model_said_filled} раз. `
+      + 'Расхождение с настоящими исполнениями показывает, насколько можно '
+      + 'верить бумажному расчёту при увеличении размера.</div>';
   }
 
   /* Исполнения — главное, чего ждём: пока их нет, неизвестно, переживает ли

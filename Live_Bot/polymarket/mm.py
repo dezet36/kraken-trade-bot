@@ -48,6 +48,10 @@ from . import client, engine, executor, params, store, strategy, wallet
 
 # Мнение модели в живом режиме — рядом с реальностью, а не вместо неё.
 SHADOW = os.path.join(store.DIR, 'mm_shadow.jsonl')
+# План отбора на диске. Панель живёт в ДРУГОМ процессе и в память
+# маркет-мейкера заглянуть не может: без файла она показывала бы прочерки
+# вместо названий рынков и «неизвестно» вместо ожидаемого времени круга.
+PLAN_FILE = os.path.join(store.DIR, 'mm_plan.json')
 
 CANDIDATES = None          # кэш отбора внутри процесса
 LAST_PLAN = {}             # последняя раскладка бюджета, для панели
@@ -73,7 +77,27 @@ def select_markets(limit=None, min_liquidity=None, refresh=False, budget=None):
     CANDIDATES = plan['markets']
     LAST_PLAN.clear()
     LAST_PLAN.update(plan)
+    _save_plan(plan)
     return CANDIDATES
+
+
+def _save_plan(plan):
+    """Кладёт план на диск для панели. Сбой записи не должен ронять отбор."""
+    try:
+        os.makedirs(os.path.dirname(PLAN_FILE), exist_ok=True)
+        slim = [{'token_id': str(m.get('token_id')),
+                 'question': m.get('question'),
+                 'wait_hours': m.get('wait_hours'),
+                 'size': m.get('size'), 'cost': m.get('cost'),
+                 'step_ticks': m.get('step_ticks'),
+                 'usd_per_hour': m.get('usd_per_hour')}
+                for m in plan.get('markets') or []]
+        with open(PLAN_FILE, 'w', encoding='utf-8') as fh:
+            json.dump({'at': engine._stamp(), 'used': plan.get('used'),
+                       'free': plan.get('free'), 'markets': slim},
+                      fh, ensure_ascii=False)
+    except Exception:                                      # noqa: BLE001
+        pass
 
 
 def rotate(maker, current, budget=None):

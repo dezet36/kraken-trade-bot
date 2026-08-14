@@ -178,3 +178,77 @@ class TestPanelMarkup:
         block = html[spot:spot + 1200]
         assert 'confirm(' in block
         assert 'turningOn &&' in block, 'подтверждение только на включение'
+
+
+class TestDashboardShowsWhatMatters:
+    """
+    Панель отвечает на два вопроса: чем бот занят и сколько получилось.
+
+    ПРЕЖДЕ НИ НА ОДИН ОТВЕТИТЬ БЫЛО НЕЛЬЗЯ. Показывались только рынки с
+    позицией — то есть где нас УЖЕ исполнили, — а мейкер большую часть времени
+    именно СТОИТ, и это его работа. И «капитал $100» не отвечает на вопрос
+    «сколько получили»: начальной суммы на экране не было вовсе, вычитать
+    приходилось в уме.
+    """
+
+    def _html(self):
+        return open(os.path.join(ROOT, 'dashboard.html'), encoding='utf-8').read()
+
+    def test_the_bottom_line_comes_first(self):
+        html = self._html()
+        spot = html.index('function renderPolymarket()')
+        block = html[spot:spot + 3000]
+        assert "['Итог'" in block
+        assert 'Было / стало' in block, 'начальная сумма показана рядом'
+
+    def test_standing_quotes_are_shown(self):
+        html = self._html()
+        assert 'Где стоим сейчас' in html
+        assert 'PM.standing' in html
+
+    def test_expected_and_actual_waiting_stand_together(self):
+        """
+        Расхождение «стоит» и «ждали» — первый признак, что модель ожидания
+        врёт. Поэтому оба числа в одной строке, а не в разных таблицах.
+        """
+        html = self._html()
+        spot = html.index('Где стоим сейчас')
+        block = html[spot:spot + 2200]
+        assert 'standing_min' in block and 'expected_min' in block
+
+    def test_round_trips_are_shown_separately_from_fills(self):
+        """
+        Круг — главная мерка: отдельное исполнение не говорит ничего, купить
+        может каждый. Заработок появляется только при закрытии.
+        """
+        html = self._html()
+        assert 'Завершённые круги' in html
+        assert 'PM.rounds' in html
+
+    def test_adverse_selection_carries_its_caveat(self):
+        """
+        Число сноса без оговорки вводит в заблуждение: по завершённому кругу
+        снос сокращается сам собой, и судить надо по незакрытым позициям.
+        """
+        html = self._html()
+        spot = html.index('Куда шла цена после наших сделок')
+        block = html[spot:spot + 1800]
+        assert 'сокращается сам собой' in block
+
+    def test_render_function_is_balanced(self):
+        """Грубая, но полезная проверка: функция закрывается, кавычки парны."""
+        html = self._html()
+        start = html.index('function renderPolymarket()')
+        depth, end = 0, None
+        for k in range(start, len(html)):
+            if html[k] == '{':
+                depth += 1
+            elif html[k] == '}':
+                depth -= 1
+                if depth == 0:
+                    end = k
+                    break
+        assert end is not None, 'функция не закрывается'
+        body = html[start:end + 1]
+        assert body.count('`') % 2 == 0
+        assert body.count("'") % 2 == 0
