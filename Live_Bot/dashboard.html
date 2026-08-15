@@ -2556,9 +2556,24 @@ function renderPolymarket() {
 
   if (w.configured) {
     const num = (x) => (x === null || x === undefined) ? '—' : x;
+    /* ИТОГ СЧИТАЕТСЯ ПО БИРЖЕ, А НЕ ПО МОДЕЛИ, и запас оценивается по БИДУ.
+       Середина — цена, по которой никто не обязан у нас покупать. Разница
+       выглядит мелочью при одной позиции и становится всем результатом при
+       двенадцати: панель показывала -$0.04, а на счёте было -$2.89. */
+    const held = ex.positions_value;
+    const real = (ex.balance !== null && ex.balance !== undefined
+                  && held !== null && held !== undefined)
+      ? ex.balance + held : null;
+    const startPm = (PM.connect || {}).budget_usd;
     const factCards = [
       ['Деньги на счёте', ex.balance === null || ex.balance === undefined
         ? '—' : pmMoney(ex.balance)],
+      ['Токены на руках', held === null || held === undefined
+        ? '—' : pmMoney(held) + (ex.positions_count ? ` (${ex.positions_count})` : '')],
+      ['Всего на бирже', real === null ? '—' : pmMoney(real)],
+      ['Итог к вложенному', (real === null || !startPm) ? '—'
+        : `<span style="color:var(--${real - startPm >= 0 ? 'good' : 'bad'})">`
+          + (real - startPm >= 0 ? '+' : '') + pmMoney(real - startPm) + '</span>'],
       ['Заявок стоит', num(ex.orders)],
       ['Сделок было', num(ex.trades)],
     ];

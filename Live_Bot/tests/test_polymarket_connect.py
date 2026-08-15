@@ -205,7 +205,7 @@ class TestDashboardShowsWhatMatters:
         """
         html = self._html()
         spot = html.index('function renderPolymarket()')
-        block = html[spot:spot + 6000]
+        block = html[spot:spot + 9000]
         assert 'Что видно на бирже' in block
         assert 'Расчёт бота' in block
         assert (block.index('Что видно на бирже')
@@ -214,7 +214,7 @@ class TestDashboardShowsWhatMatters:
     def test_the_bottom_line_comes_first(self):
         html = self._html()
         spot = html.index('function renderPolymarket()')
-        block = html[spot:spot + 6000]
+        block = html[spot:spot + 9000]
         assert "['Итог'" in block
         assert 'Было / стало' in block, 'начальная сумма показана рядом'
 

@@ -84,6 +84,7 @@ def exchange_view(force=False):
     done = executor.own_trades()
     if done is not None:
         view['trades'] = len(done)
+        view.update(_holdings_value(done))
     view['asked'] = True
     _EXCHANGE_CACHE.update({'at': _time.time(), 'view': view})
     return view
@@ -96,6 +97,54 @@ def _stats_safely():
         return stats.report()
     except Exception as exc:                                # noqa: BLE001
         return {'error': f'{type(exc).__name__}: {str(exc)[:120]}'}
+
+
+def _holdings_value(trades):
+    """
+    Токены на руках и что за них дадут ПРЯМО СЕЙЧАС.
+
+    ПОЧЕМУ ПО БИДУ, А НЕ ПО СЕРЕДИНЕ. Середина — это цена, по которой никто не
+    обязан у нас покупать; бид — та, по которой купят сегодня. Разница выглядит
+    мелочью, пока позиций одна, и становится всем результатом, когда их
+    двенадцать: панель показывала -$0.04, а на счёте было -$2.89, и вся разница
+    сидела ровно в этом выборе цены.
+
+    Оценка по середине к тому же льстит систематически: нас исполняют, когда
+    цена идёт против нас, поэтому наш запас почти всегда стоит ближе к биду.
+    """
+    from collections import defaultdict
+
+    from . import book as book_mod
+
+    held = defaultdict(float)
+    paid = 0.0
+    for trade in trades or []:
+        size = float(trade.get('size') or 0)
+        price = float(trade.get('price') or 0)
+        if trade.get('side') == 'bid':
+            held[str(trade.get('token'))] += size
+            paid += price * size
+        else:
+            held[str(trade.get('token'))] -= size
+            paid -= price * size
+    held = {k: v for k, v in held.items() if abs(v) > 1e-9}
+    if not held:
+        return {'positions_value': 0.0, 'positions_paid': round(paid, 4),
+                'positions_count': 0}
+    try:
+        books = book_mod.fetch_many(list(held))
+    except Exception:                                       # noqa: BLE001
+        return {'positions_value': None, 'positions_paid': round(paid, 4),
+                'positions_count': len(held)}
+    value = 0.0
+    for token, qty in held.items():
+        live = books.get(str(token))
+        top = book_mod.top(live) if live else None
+        price = (top or {}).get('bid') or 0.0
+        value += qty * float(price)
+    return {'positions_value': round(value, 4),
+            'positions_paid': round(paid, 4),
+            'positions_count': len(held)}
 
 
 def _exchange_safely():
