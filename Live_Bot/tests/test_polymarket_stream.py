@@ -43,23 +43,44 @@ class TestBookKeeping:
         assert top['mid'] == pytest.approx(0.22)
         assert top['source'] == 'поток'
 
-    def test_a_change_updates_one_level(self):
+    def test_a_change_brings_the_top_ready(self):
+        """
+        Верхушка приходит от биржи ГОТОВОЙ, и собирать её из уровней не нужно.
+
+        Прежняя версия вела полную книгу: находила уровень по цене, заменяла
+        размер, убирала при нуле. Но дельта приходит по ОДНОМУ уровню, часто
+        глубокому: в захваченном сообщении цена изменения 0.162 при лучшей цене
+        0.2. Собранная так книга вырождалась в 0.001/0.999, и котировки по ней
+        уходили на биржу покупками по тысячной доле при рынке 0.926.
+        """
         stream._apply_book({'asset_id': 'T',
                             'bids': [{'price': '0.20', 'size': '100'}],
                             'asks': [{'price': '0.24', 'size': '50'}]})
         stream._apply_change({'price_changes': [
-            {'asset_id': 'T', 'price': '0.21', 'size': '30', 'side': 'BUY'}]})
-        assert stream.top('T')['bid'] == pytest.approx(0.21)
+            {'asset_id': 'T', 'price': '0.162', 'size': '9431.99',
+             'side': 'BUY', 'best_bid': '0.21', 'best_ask': '0.23'}]})
+        top = stream.top('T')
+        assert top['bid'] == pytest.approx(0.21)
+        assert top['ask'] == pytest.approx(0.23)
 
-    def test_a_zero_size_removes_the_level(self):
-        """Нулевой размер означает, что уровень исчез, а не что он пустой."""
+    def test_a_deep_change_does_not_become_the_top(self):
+        """Цена изменения 0.162 при лучшей 0.2 — это глубокий уровень."""
         stream._apply_book({'asset_id': 'T',
-                            'bids': [{'price': '0.20', 'size': '100'},
-                                     {'price': '0.21', 'size': '10'}],
+                            'bids': [{'price': '0.20', 'size': '100'}],
                             'asks': [{'price': '0.24', 'size': '50'}]})
         stream._apply_change({'price_changes': [
-            {'asset_id': 'T', 'price': '0.21', 'size': '0', 'side': 'BUY'}]})
+            {'asset_id': 'T', 'price': '0.001', 'size': '5',
+             'side': 'BUY', 'best_bid': '0.20', 'best_ask': '0.24'}]})
         assert stream.top('T')['bid'] == pytest.approx(0.20)
+
+    def test_a_nonsense_top_is_ignored(self):
+        stream._apply_book({'asset_id': 'T',
+                            'bids': [{'price': '0.20', 'size': '100'}],
+                            'asks': [{'price': '0.24', 'size': '50'}]})
+        stream._apply_change({'price_changes': [
+            {'asset_id': 'T', 'price': '0.5', 'size': '5', 'side': 'BUY',
+             'best_bid': '0.9', 'best_ask': '0.1'}]})
+        assert stream.top('T')['bid'] == pytest.approx(0.20), 'перекос отвергнут'
 
     def test_a_crossed_book_is_refused(self):
         """Перекрещенной книге верить нельзя — лучше вернуться к опросу."""
@@ -143,12 +164,10 @@ class TestDeltasWithoutASnapshotAreNotABook:
         with stream._lock:
             stream._books.clear()
 
-    def test_a_delta_alone_gives_nothing(self):
+    def test_a_delta_without_a_top_gives_nothing(self):
         stream._apply_change({'price_changes': [
-            {'asset_id': 'T', 'price': '0.21', 'size': '30', 'side': 'BUY'},
-            {'asset_id': 'T', 'price': '0.90', 'size': '30', 'side': 'SELL'}]})
-        assert stream.top('T') is None, 'по двум уровням цену не выдумываем'
-        assert stream.book('T') is None
+            {'asset_id': 'T', 'price': '0.21', 'size': '30', 'side': 'BUY'}]})
+        assert stream.top('T') is None, 'без готовой верхушки цену не выдумываем'
 
     def test_a_snapshot_makes_it_usable(self):
         stream._apply_change({'price_changes': [
@@ -163,7 +182,8 @@ class TestDeltasWithoutASnapshotAreNotABook:
                             'bids': [{'price': '0.20', 'size': '100'}],
                             'asks': [{'price': '0.24', 'size': '50'}]})
         stream._apply_change({'price_changes': [
-            {'asset_id': 'T', 'price': '0.22', 'size': '10', 'side': 'BUY'}]})
+            {'asset_id': 'T', 'price': '0.22', 'size': '10', 'side': 'BUY',
+             'best_bid': '0.22', 'best_ask': '0.23'}]})
         assert stream.top('T')['bid'] == pytest.approx(0.22)
 
     def test_unsynced_books_are_not_counted_as_fresh(self):
@@ -229,10 +249,11 @@ class TestTheStreamIsOffUntilItIsProven:
     Поэтому поток остаётся под настройкой до конца разбора.
     """
 
-    def test_the_stream_is_off_by_default(self):
+    def test_the_stream_is_on_again(self):
+        """Причина вырождения книги найдена и устранена — можно включать."""
         from polymarket import params
 
-        assert params.MM_STREAM is False
+        assert params.MM_STREAM is True
 
     def test_the_cycle_asks_the_stream_only_when_allowed(self):
         text = open(os.path.join(ROOT, 'polymarket', 'mm.py'),
@@ -251,4 +272,6 @@ class TestTheStreamIsOffUntilItIsProven:
         text = open(os.path.join(ROOT, 'polymarket', 'params.py'),
                     encoding='utf-8').read()
         spot = text.index('MM_STREAM = _b(')
-        assert '0.001/0.999' in text[max(0, spot - 1200):spot]
+        block = text[max(0, spot - 1400):spot]
+        assert '0.001/0.999' in block, 'что было сломано'
+        assert 'best_bid' in block, 'и чем оказалось починено'

@@ -134,36 +134,55 @@ def _apply_book(payload):
     with _lock:
         # СНИМОК ДЕЛАЕТ КНИГУ ПРИГОДНОЙ. До него у нас в лучшем случае
         # несколько уровней из дельт, и «лучшая цена» по ним — выдумка.
-        _books[token] = {'bids': bids, 'asks': asks, 'at': time.time(),
-                         'synced': True}
+        best_bid = max((p for p, _ in bids), default=None)
+        best_ask = min((p for p, _ in asks), default=None)
+        _books[token] = {
+            'bids': bids, 'asks': asks, 'at': time.time(), 'synced': True,
+            # Размеры верхушки запоминаются отдельно: дельты приносят цены, но
+            # не глубину, а очередь считается именно по ней.
+            'bid_size': sum(s for p, s in bids
+                            if best_bid is not None and abs(p - best_bid) < 1e-12),
+            'ask_size': sum(s for p, s in asks
+                            if best_ask is not None and abs(p - best_ask) < 1e-12)}
 
 
 def _apply_change(payload):
     """
-    Изменение уровней. Нулевой размер означает, что уровень исчез.
+    Изменение стакана. Берём ГОТОВУЮ верхушку, а не пересобираем книгу.
 
-    Сообщение несёт ещё и готовые best_bid/best_ask, но полагаться только на
-    них нельзя: нам нужна глубина уровня, чтобы считать очередь.
+    ЗДЕСЬ БЫЛА ОШИБКА, СТОИВШАЯ СЕМНАДЦАТИ БЕСПОЛЕЗНЫХ ЗАЯВОК. Прежняя версия
+    вела полную книгу: находила уровень по цене, заменяла размер, убирала при
+    нуле. Дельты приходят по ОДНОМУ уровню — и часто по глубокому, далёкому от
+    верхушки: в захваченном сообщении цена изменения 0.162 при лучшей цене 0.2.
+    Собранная так книга вырождалась в 0.001/0.999, и котировки по ней уходили
+    на биржу покупками по цене в тысячную долю при рынке 0.926.
+
+    А между тем КАЖДОЕ сообщение несёт `best_bid` и `best_ask` — ровно то, из
+    чего считается край. Их и берём: верхушка приходит от биржи готовой, и
+    ошибиться в ней нельзя.
+
+    Глубина уровней остаётся за опросом. Она нужна только для очереди, меняется
+    медленно, и ради неё держать хрупкий пересчёт не стоит.
     """
     for change in (payload.get('price_changes') or []):
         token = str(change.get('asset_id') or '')
         if not token:
             continue
         try:
-            price = float(change['price'])
-            size = float(change['size'])
+            bid = float(change['best_bid'])
+            ask = float(change['best_ask'])
         except (KeyError, TypeError, ValueError):
             continue
-        side = 'bids' if str(change.get('side', '')).upper() == 'BUY' else 'asks'
+        if not 0 < bid < ask < 1:
+            continue                    # верхушка бессмысленна — пропускаем
         with _lock:
             row = _books.setdefault(token, {'bids': [], 'asks': [],
                                             'at': time.time(),
                                             'synced': False})
-            levels = [lvl for lvl in row[side] if abs(lvl[0] - price) > 1e-12]
-            if size > 0:
-                levels.append((price, size))
-            row[side] = levels
+            row['bids'] = [(bid, row.get('bid_size') or 0.0)]
+            row['asks'] = [(ask, row.get('ask_size') or 0.0)]
             row['at'] = time.time()
+            row['synced'] = True        # верхушка от биржи, собирать нечего
 
 
 async def _run():
