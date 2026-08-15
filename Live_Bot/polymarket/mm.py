@@ -766,6 +766,15 @@ def step(maker, markets, live=False, day_loss=0.0, deadline=None,
             order = (slot.get('orders') or {}).get(side)
             if not order:
                 continue
+            # СЧИТАЕМ ТОЛЬКО ТО, ЧТО ДЕЙСТВИТЕЛЬНО СТОИТ НА БИРЖЕ.
+            #
+            # В состоянии остаются заявки, которых на бирже нет: не ушедшие,
+            # снятые при запуске, оставшиеся от прежних прогонов. Их цены
+            # старые, и край по ним — выдумка. Замер показывал «медиану 0.45 и
+            # десять котировок без края» при двадцати шести учтённых и
+            # тринадцати настоящих: считались призраки.
+            if live and not order.get('live_id'):
+                continue
             price = float(order['price'])
             quoted_edges.append((top['mid'] - price) if side == 'bid'
                                 else (price - top['mid']))

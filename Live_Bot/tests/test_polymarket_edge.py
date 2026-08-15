@@ -224,3 +224,32 @@ class TestEdgeIsMeasuredWhenWePlace:
             'ts': engine._now() - 10_000}]
         ripe = maker.measure_drift({'T': 0.410})
         assert ripe[0]['gain_per_contract'] == pytest.approx(0.010)
+
+
+class TestOnlyRealOrdersAreMeasured:
+    """
+    В состоянии остаются заявки, которых на бирже нет: не ушедшие, снятые при
+    запуске, оставшиеся от прежних прогонов. Их цены старые, и край по ним —
+    выдумка.
+
+    Замер показывал «медиана 0.45, десять котировок без края» при двадцати
+    шести учтённых и ТРИНАДЦАТИ настоящих: считались призраки.
+    """
+
+    def test_the_measurement_skips_orders_without_an_exchange_number(self):
+        text = open(os.path.join(ROOT, 'polymarket', 'mm.py'),
+                    encoding='utf-8').read()
+        spot = text.index('quoted_edges = []')
+        block = text[spot:spot + 1600]
+        assert "if live and not order.get('live_id'):" in block
+
+    def test_paper_mode_still_measures_its_own_quotes(self):
+        """
+        В бумаге биржевого номера нет ни у одной заявки — и мерить всё равно
+        надо, иначе бумажный прогон остался бы без главной мерки.
+        """
+        text = open(os.path.join(ROOT, 'polymarket', 'mm.py'),
+                    encoding='utf-8').read()
+        spot = text.index('quoted_edges = []')
+        block = text[spot:spot + 1600]
+        assert 'if live and' in block, 'условие только для живого режима'
