@@ -1193,6 +1193,22 @@ class _Handler(BaseHTTPRequestHandler):
             self._send_json({'app': 'kraken-trade-bot',
                              'pid': _os.getpid(),
                              'version': _app_version()})
+        elif path == '/api/polymarket/stats.csv':
+            # ВЫГРУЗКА ДЛЯ РАЗБОРА ВНЕ ПРИЛОЖЕНИЯ. Решения об отборе принимают
+            # по таблице, а не по экрану: строка на рынок, обещанное рядом с
+            # вышедшим.
+            try:
+                from polymarket import stats
+                body = stats.to_csv().encode('utf-8-sig')
+                self.send_response(200)
+                self.send_header('Content-Type', 'text/csv; charset=utf-8')
+                self.send_header('Content-Disposition',
+                                 'attachment; filename=polymarket_stats.csv')
+                self.send_header('Content-Length', str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+            except Exception as exc:                        # noqa: BLE001
+                self._fail(500, f'не собралось ({type(exc).__name__})')
         elif path == '/api/polymarket':
             # Читается из файлов маркет-мейкера, а не из его процесса: он живёт
             # отдельно, и панель не должна ни ждать его, ни падать вместе с ним.

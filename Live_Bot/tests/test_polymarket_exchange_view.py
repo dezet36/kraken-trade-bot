@@ -86,13 +86,22 @@ class TestExchangeView:
         polymarket._EXCHANGE_CACHE.update({'at': 0.0, 'view': None})
 
     def test_reports_balance_orders_and_trades(self, monkeypatch):
+        # Сделка приходит МЭТЧЕМ ЦЕЛИКОМ: верхние поля тейкера, наша доля
+        # внутри maker_orders. Считать верхний уровень своим — та самая
+        # ошибка, что показывала +$290 при минусе на счёте.
         api = FakeClient(orders=[{'id': '1', 'side': 'BUY', 'price': '0.5',
                                   'original_size': '5', 'size_matched': '0',
                                   'asset_id': 'T'}],
-                         trades=[{'id': 't1', 'asset_id': 'T', 'side': 'BUY',
-                                  'price': '0.5', 'size': '5',
-                                  'match_time': '1700000000',
-                                  'status': 'CONFIRMED'}])
+                         trades=[{'id': 't1', 'asset_id': 'ЧУЖОЙ',
+                                  'side': 'BUY', 'price': '0.9',
+                                  'size': '999', 'match_time': '1700000000',
+                                  'status': 'CONFIRMED',
+                                  'maker_address': '0xЧУЖОЙ',
+                                  'maker_orders': [
+                                      {'order_id': 'o1', 'maker_address': '0xAAA',
+                                       'matched_amount': '5', 'price': '0.5',
+                                       'side': 'BUY', 'asset_id': 'T'}]}])
+        monkeypatch.setattr(wallet, 'funder', lambda: '0xAAA')
         monkeypatch.setattr(wallet, 'client', lambda *a, **k: api)
         monkeypatch.setattr(wallet, 'balance', lambda: 42.42)
         monkeypatch.setattr(wallet, 'status', lambda: {

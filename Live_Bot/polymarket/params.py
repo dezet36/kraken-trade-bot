@@ -196,7 +196,15 @@ def _wants_wallet(value):
     return False
 
 
-def budget_plan(strategy, balance=None):
+# «НЕ ПЕРЕДАЛИ» И «НЕИЗВЕСТНО» — РАЗНЫЕ ВЕЩИ, и путать их нельзя. Раньше оба
+# случая обозначались None: вызов без остатка шёл спрашивать кошелёк, а
+# намеренное «остаток неизвестен» не выражалось вовсе. Проверка, которая хотела
+# сказать второе, говорила первое — и получала настоящий остаток вместо
+# запасной суммы.
+_ASK_THE_WALLET = object()
+
+
+def budget_plan(strategy, balance=_ASK_THE_WALLET):
     """
     Как разрешилась настройка бюджета. Возвращает (сумма, объяснение).
 
@@ -221,7 +229,7 @@ def budget_plan(strategy, balance=None):
                      f'({", ".join(sorted(greedy))}) — так нельзя, '
                      'они поделили бы одни и те же деньги дважды')
 
-    if balance is None:
+    if balance is _ASK_THE_WALLET:
         from . import wallet
         balance = wallet.balance()
 

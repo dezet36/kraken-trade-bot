@@ -2735,6 +2735,43 @@ function renderPolymarket() {
       + '</div>';
   }
 
+  /* ЧТО ВЫШЛО НА САМОМ ДЕЛЕ, рядом с тем, что обещал отбор. Панель отвечает
+     на вопрос «что сейчас», а улучшать стратегию можно только по вопросу
+     «что вышло»: рынок с исполнениями и без кругов занимает деньги впустую, и
+     по расчётному доходу этого не видно. */
+  const stx = (PM.stats || {}).overview || {};
+  if (stx.fills || stx.orders_placed) {
+    html += '<h3 style="margin:18px 0 8px">Что вышло на самом деле</h3>'
+      + '<div class="panel card-pad"><div class="kpis">'
+      + `<div class="kpi"><div class="k">Исполнений</div><div class="v">${stx.fills}</div></div>`
+      + `<div class="kpi"><div class="k">Кругов закрыто</div><div class="v">${stx.rounds}</div></div>`
+      + `<div class="kpi"><div class="k">Не закрыто</div><div class="v">${stx.open_fills}</div></div>`
+      + `<div class="kpi"><div class="k">Заработано</div><div class="v" style="color:var(--${stx.gain_usd >= 0 ? 'good' : 'bad'})">${pmMoney(stx.gain_usd)}</div></div>`
+      + `<div class="kpi"><div class="k">Заявок выставлено</div><div class="v">${stx.orders_placed}</div></div>`
+      + `<div class="kpi"><div class="k">Доля исполнения</div><div class="v">${
+          stx.fill_rate === null || stx.fill_rate === undefined ? '—' : (stx.fill_rate * 100).toFixed(1) + '%'}</div></div>`
+      + '</div></div>';
+    const rows = (PM.stats || {}).markets || [];
+    if (rows.length) {
+      html += '<div class="scroll"><table><thead><tr><th>рынок</th>'
+        + '<th>исполнений</th><th>кругов</th><th>не закрыто</th>'
+        + '<th>заработано</th><th>потрачено</th><th>обещано в час</th></tr>'
+        + '</thead><tbody>'
+        + rows.slice(0, 20).map(r => `<tr>
+            <td>${esc((r.question || '—').slice(0, 40))}</td>
+            <td>${r.fills}</td><td>${r.rounds}</td><td>${r.open_fills}</td>
+            <td style="color:var(--${r.gain_usd >= 0 ? 'good' : 'bad'})">${pmMoney(r.gain_usd)}</td>
+            <td>${pmMoney(r.spent_usd)}</td>
+            <td>${r.promised_per_hour === null || r.promised_per_hour === undefined
+                  ? '—' : Number(r.promised_per_hour).toFixed(4)}</td></tr>`).join('')
+        + '</tbody></table></div>'
+        + '<div class="hint" style="padding:6px 4px">Рынок с исполнениями и '
+        + 'без кругов занимает деньги впустую — по расчётному доходу этого не '
+        + 'видно. <a href="/api/polymarket/stats.csv">Выгрузить таблицей</a> '
+        + 'для разбора вне приложения.</div>';
+    }
+  }
+
   /* НЕБЛАГОПРИЯТНЫЙ ОТБОР — число, решающее судьбу затеи. И оговорка к нему,
      без которой оно вводит в заблуждение. */
   const dr = PM.drift || {};

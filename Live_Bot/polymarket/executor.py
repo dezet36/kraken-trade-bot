@@ -387,19 +387,77 @@ def own_trades(after_ts=None):
         rows = api.get_trades(params_obj)
     except Exception:                                       # noqa: BLE001
         return None
+    return our_part(rows, wallet.funder())
+
+
+def our_part(rows, funder):
+    """
+    Наша доля в сделках биржи. Верхний уровень записи — НЕ наша сделка.
+
+    САМАЯ ДОРОГАЯ ОШИБКА ВСЕГО ПРОЕКТА, и обнаружилась она по расхождению:
+    панель показывала +$290 прибыли, тогда как на счёте было минус два доллара.
+
+    Запись о сделке описывает ВЕСЬ мэтч — то есть заявку тейкера целиком и всех
+    мейкеров, которых он собрал. Наши пять контрактов лежат внутри, в
+    maker_orders, вместе с НАШЕЙ ценой, НАШИМ токеном и НАШЕЙ стороной. Верхние
+    поля принадлежат тейкеру и к нам отношения не имеют:
+
+        верхний уровень   size 1070.54  price 0.401  токен «Нет»
+        наша строка       matched_amount 5  price 0.637  токен «Да»
+
+    Записывая верхний уровень, бот приписывал себе тысячу контрактов вместо
+    пяти, чужую цену и ЧУЖОЙ ТОКЕН. Отсюда позиции в тысячи контрактов при
+    бюджете в сорок долларов, деньги, ушедшие в минус тысячу восемьсот, и
+    прибыль, которой никогда не было.
+
+    Одна запись может содержать НЕСКОЛЬКО наших заявок — тейкер способен снять
+    сразу два наших уровня. Поэтому на каждую свою строку выдаётся отдельное
+    исполнение, а ключ для защиты от повторов включает номер заявки: по одному
+    лишь номеру сделки второе исполнение потерялось бы молча.
+    """
+    mine = (funder or '').lower()
     out = []
     for row in rows or []:
         try:
-            out.append({
-                'id': row.get('id'),
-                'token': str(row.get('asset_id') or ''),
-                'side': 'bid' if str(row.get('side', '')).upper() == 'BUY' else 'ask',
-                'price': float(row.get('price')),
-                'size': float(row.get('size')),
-                'ts': int(row.get('match_time') or row.get('timestamp') or 0),
-                'order_id': row.get('taker_order_id') or row.get('maker_order_id'),
-                'status': row.get('status'),
-            })
+            trade_id = str(row.get('id') or '')
+            stamp = int(row.get('match_time') or row.get('timestamp') or 0)
+            status = row.get('status')
+
+            # Мы тейкер — тогда верхний уровень наш, и он единственный.
+            taker = str(row.get('maker_address') or '').lower()
+            parts = []
+            if mine and taker == mine:
+                parts.append({
+                    'key': trade_id,
+                    'token': str(row.get('asset_id') or ''),
+                    'side': str(row.get('side', '')),
+                    'price': row.get('price'),
+                    'size': row.get('size'),
+                    'order_id': row.get('taker_order_id'),
+                })
+            for part in row.get('maker_orders') or []:
+                if mine and str(part.get('maker_address') or '').lower() != mine:
+                    continue
+                parts.append({
+                    'key': f"{trade_id}:{part.get('order_id')}",
+                    'token': str(part.get('asset_id') or ''),
+                    'side': str(part.get('side', '')),
+                    'price': part.get('price'),
+                    'size': part.get('matched_amount'),
+                    'order_id': part.get('order_id'),
+                })
+
+            for part in parts:
+                out.append({
+                    'id': part['key'],
+                    'token': part['token'],
+                    'side': 'bid' if part['side'].upper() == 'BUY' else 'ask',
+                    'price': float(part['price']),
+                    'size': float(part['size']),
+                    'ts': stamp,
+                    'order_id': part['order_id'],
+                    'status': status,
+                })
         except (TypeError, ValueError):
             continue
     return out

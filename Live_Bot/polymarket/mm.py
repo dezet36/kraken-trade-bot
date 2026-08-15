@@ -234,6 +234,18 @@ def step(maker, markets, live=False, day_loss=0.0):
             # и заводила бы вторую позицию вместо сокращения первой.
             got = as_our_side(got, markets)
             for done in maker.apply_exchange_trades(got):
+                # КОНТЕКСТ КЛАДЁТСЯ РЯДОМ С ИСПОЛНЕНИЕМ, а не добывается потом.
+                # Разбирать статистику по рынкам, имея один номер токена,
+                # нельзя: к моменту разбора план успевает смениться, и
+                # название рынка взять уже неоткуда.
+                market = by_token.get(str(done.get('token'))) or {}
+                done['question'] = market.get('question')
+                done['condition'] = market.get('condition_id')
+                done['planned_gain'] = market.get('our_gain')
+                done['planned_wait_min'] = (
+                    round(market['wait_hours'] * 60)
+                    if market.get('wait_hours') not in (None, float('inf'))
+                    else None)
                 store._append(engine.FILLS, done)
                 fills.append(done)
         check = executor.reconcile(maker.live_order_ids())
