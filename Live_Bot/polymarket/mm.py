@@ -44,7 +44,8 @@ import sys
 import time
 
 from . import book as book_mod
-from . import client, engine, executor, params, store, strategy, stream, wallet
+from . import (client, engine, executor, params, reward_audit, store, strategy,
+               stream, wallet)
 
 # Мнение модели в живом режиме — рядом с реальностью, а не вместо неё.
 SHADOW = os.path.join(store.DIR, 'mm_shadow.jsonl')
@@ -93,6 +94,10 @@ def select_markets(limit=None, min_liquidity=None, refresh=False, budget=None):
     LAST_PLAN.clear()
     LAST_PLAN.update(plan)
     _save_plan(plan)
+    # ОБЕЩАНИЕ ЗАПИСЫВАЕТСЯ СРАЗУ, чтобы завтра было с чем сравнить выплату.
+    # Модель награды ошибалась дважды и оба раза крупно; обнаруживалось это
+    # руками и не сразу, а решения по ней принимались сразу.
+    reward_audit.remember(plan)
     return CANDIDATES
 
 

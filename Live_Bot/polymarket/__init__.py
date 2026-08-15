@@ -313,6 +313,26 @@ def _stream_safely():
         return {'connected': False, 'last_error': str(exc)[:120]}
 
 
+def _reward_check_safely():
+    """
+    Обещанная награда против выплаченной.
+
+    Спрашивает биржу, поэтому обёрнута: сеть отвалится — панель обязана
+    показать остальное, а не белый экран. Клиент берётся тот же, что торгует;
+    без кошелька остаются одни обещания, и это честный ответ.
+    """
+    try:
+        from . import reward_audit, wallet
+        try:
+            client = wallet.client()
+        except Exception:                                   # noqa: BLE001
+            client = None
+        return reward_audit.report(client)
+    except Exception as exc:                                # noqa: BLE001
+        return {'days': [], 'overstates': None, 'checked_days': 0,
+                'error': str(exc)[:120]}
+
+
 def _edge_summary(rows):
     """
     Край стоящих заявок: берём ли мы вообще спред.
@@ -558,4 +578,9 @@ def snapshot(limit_markets=20, limit_fills=30):
         # долларов приходится единиц долларов в месяц — и лучше знать это
         # заранее, чем обнаружить через месяц.
         'plan': {k: v for k, v in (mm.LAST_PLAN or {}).items() if k != 'markets'},
+        # СВЕРКА ОБЕЩАННОЙ НАГРАДЫ С ВЫПЛАЧЕННОЙ. Модель ошибалась дважды и оба
+        # раза крупно — $2.85 в сутки против восьми выплаченных центов. Площадка
+        # знает точный ответ по дням, значит проверять можно вычитанием, а не
+        # рассуждением.
+        'reward_check': _reward_check_safely(),
     }
