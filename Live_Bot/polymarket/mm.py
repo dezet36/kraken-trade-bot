@@ -321,7 +321,8 @@ def as_our_side(trades, markets):
     return out
 
 
-def step(maker, markets, live=False, day_loss=0.0, deadline=None):
+def step(maker, markets, live=False, day_loss=0.0, deadline=None,
+         want_shadow=True):
     """
     Один проход: стаканы пачкой, исполнения, новые котировки.
 
@@ -413,9 +414,18 @@ def step(maker, markets, live=False, day_loss=0.0, deadline=None):
     # сорока восьми секунд, — но в торговом цикле осталась.
     #
     # Берём только те рынки, где у нас есть заявки: остальным лента не нужна.
-    need_tape = [m['condition_id'] for token, m in by_token.items()
-                 if ((maker._slot(token).get('orders') or {}).get('bid')
-                     or (maker._slot(token).get('orders') or {}).get('ask'))]
+    #
+    # А В ЖИВОМ РЕЖИМЕ ЛЕНТА НУЖНА ТОЛЬКО ДЛЯ МНЕНИЯ МОДЕЛИ, и это самая
+    # дорогая часть такта: по запросу на каждый рынок с заявками. Позиции и
+    # деньги там ведёт биржа, а бумажная оценка идёт рядом справочно —
+    # спрашивать её каждые несколько секунд незачем. Берём изредка: сверка
+    # модели с делом от этого не пострадает, а такт становится втрое короче и
+    # может идти чаще.
+    need_tape = []
+    if not live or want_shadow:
+        need_tape = [m['condition_id'] for token, m in by_token.items()
+                     if ((maker._slot(token).get('orders') or {}).get('bid')
+                         or (maker._slot(token).get('orders') or {}).get('ask'))]
     tapes = book_mod.tape_many(need_tape) if need_tape else {}
 
     exposure = maker.exposure(marks)
