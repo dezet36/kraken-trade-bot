@@ -301,6 +301,30 @@ def _drift_summary(rows):
     }
 
 
+def _edge_summary(rows):
+    """
+    Край стоящих заявок: берём ли мы вообще спред.
+
+    ГЛАВНАЯ МЕРКА МЕЙКЕРА, и мерить её по исполнениям слишком медленно — их
+    единицы в сутки. Край виден у каждой заявки прямо сейчас: положительный
+    означает, что мы покупаем ниже середины и продаём выше, нулевой — что
+    торгуем по справедливой цене, то есть с нулевым ожиданием.
+
+    Замер по 21 исполнению до правки дал медиану РОВНО НОЛЬ.
+    """
+    if not rows:
+        return {'count': 0}
+    last = rows[-1]
+    mids = sorted(float(r.get('median') or 0) for r in rows)
+    return {
+        'count': len(rows),
+        'now': last.get('median'),
+        'quotes': last.get('quotes'),
+        'without_edge': last.get('without_edge'),
+        'median': round(mids[len(mids) // 2], 5),
+    }
+
+
 def timing_summary(rows):
     """
     Обещание модели против дела: во сколько раз она оптимистична.
@@ -467,6 +491,7 @@ def snapshot(limit_markets=20, limit_fills=30):
 
     drift = _drift_summary(_tail(engine.DRIFT, 200))
     timing = timing_summary(_tail(engine.TIMING, 200))
+    edges = _edge_summary(_tail(mm.EDGES, 200))
     shadow = _shadow_summary(_tail(mm.SHADOW, 200))
 
     # СОСТОЯНИЕ БЕРЁТСЯ У ПОТОКА, А НЕ ПО НАЛИЧИЮ ФАЙЛОВ. Файлы остаются от
@@ -508,6 +533,9 @@ def snapshot(limit_markets=20, limit_fills=30):
         # Обещание модели против дела. Пока замеров мало, поправка не
         # применяется — но видно, сколько их и куда они клонят.
         'timing': timing,
+        # Край котировок — главная мерка мейкера, и видна она без единого
+        # исполнения: просто сравнением наших цен с серединой.
+        'edges': edges,
         # Статистика для улучшения стратегии: что вышло на самом деле, рядом
         # с тем, что обещал отбор. Читается с диска и переживает перезапуск.
         'stats': _stats_safely(),

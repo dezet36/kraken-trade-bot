@@ -121,3 +121,44 @@ class TestTheRuleIsWrittenDown:
         block = text[spot:spot + 2000]
         assert 'медиана края' in block
         assert 'ВЫШЕ середины' in block
+
+
+class TestEdgeIsMeasuredEveryCycle:
+    """
+    Край виден у каждой стоящей заявки прямо сейчас — просто сравнением с
+    серединой. Мерить его по ИСПОЛНЕНИЯМ слишком медленно: их единицы в сутки,
+    и чтобы понять, работает ли стратегия, пришлось бы ждать днями.
+    """
+
+    def test_step_writes_the_edge_journal(self):
+        text = open(os.path.join(ROOT, 'polymarket', 'mm.py'),
+                    encoding='utf-8').read()
+        assert 'EDGES = os.path.join' in text
+        spot = text.index('def step(')
+        block = text[spot:]
+        assert 'quoted_edges' in block
+        assert "store._append(EDGES" in block
+
+    def test_the_summary_names_quotes_without_edge(self):
+        import polymarket
+
+        got = polymarket._edge_summary([
+            {'median': 0.01, 'quotes': 10, 'without_edge': 0},
+            {'median': 0.008, 'quotes': 12, 'without_edge': 2},
+        ])
+        assert got['count'] == 2
+        assert got['now'] == 0.008
+        assert got['without_edge'] == 2
+        assert got['quotes'] == 12
+
+    def test_no_measurements_is_not_a_zero_edge(self):
+        import polymarket
+
+        assert polymarket._edge_summary([]) == {'count': 0}
+
+    def test_the_panel_shows_it_before_the_slower_checks(self):
+        html = open(os.path.join(ROOT, 'dashboard.html'), encoding='utf-8').read()
+        assert 'Берём ли мы спред' in html
+        assert (html.index('Берём ли мы спред')
+                < html.index('Обещание модели против дела')), \
+            'главная мерка стоит выше медленных'

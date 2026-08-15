@@ -52,6 +52,9 @@ SHADOW = os.path.join(store.DIR, 'mm_shadow.jsonl')
 # маркет-мейкера заглянуть не может: без файла она показывала бы прочерки
 # вместо названий рынков и «неизвестно» вместо ожидаемого времени круга.
 PLAN_FILE = os.path.join(store.DIR, 'mm_plan.json')
+# КРАЙ СТОЯЩИХ ЗАЯВОК, замеренный каждый такт. Отдельно от исполнений: их
+# единицы в сутки, а край виден у каждой заявки прямо сейчас.
+EDGES = os.path.join(store.DIR, 'mm_edges.jsonl')
 # СПРАВОЧНИК ВСЕХ РЫНКОВ, ЧТО МЫ КОГДА-ЛИБО ВЕЛИ. План отбора перезаписывается
 # при каждом пересмотре, а позиции остаются — и панель, ища название по токену,
 # не находила его и рисовала прочерк. Человек видел открытую позицию без
@@ -629,6 +632,36 @@ def step(maker, markets, live=False, day_loss=0.0, deadline=None):
     drift = maker.measure_drift(marks)
     for row in drift:
         store._append(engine.DRIFT, row)
+
+    # КРАЙ СТОЯЩИХ ЗАЯВОК — ГЛАВНАЯ МЕРКА, И МЕРИТЬ ЕЁ НАДО КАЖДЫЙ ТАКТ.
+    #
+    # Прежде край считался только по ИСПОЛНЕНИЯМ, а их единицы в сутки: чтобы
+    # понять, работает ли стратегия, приходилось ждать днями. Между тем край
+    # виден у каждой стоящей заявки прямо сейчас — просто сравнением с
+    # серединой, без единого исполнения.
+    #
+    # Замер по 21 исполнению показал медиану края РОВНО НОЛЬ: мы не делали
+    # маркет-мейкинг, а торговали по справедливой цене. Такое обязано быть
+    # видно за минуту, а не за сутки.
+    quoted_edges = []
+    for token, slot in (maker.state.get('books') or {}).items():
+        top = book_mod.top(books.get(str(token))) if books.get(str(token)) else None
+        if not top or top.get('mid') is None:
+            continue
+        for side in ('bid', 'ask'):
+            order = (slot.get('orders') or {}).get(side)
+            if not order:
+                continue
+            price = float(order['price'])
+            quoted_edges.append((top['mid'] - price) if side == 'bid'
+                                else (price - top['mid']))
+    if quoted_edges:
+        ordered = sorted(quoted_edges)
+        store._append(EDGES, {
+            'at': engine._stamp(), 'quotes': len(ordered),
+            'median': round(ordered[len(ordered) // 2], 5),
+            'without_edge': sum(1 for e in ordered if e <= 0),
+        })
 
     report = maker.mark_to_market(marks)
     store._append(engine.EQUITY, {'at': engine._stamp(), **report,
