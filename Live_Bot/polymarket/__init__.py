@@ -84,7 +84,17 @@ def exchange_view(force=False):
     done = executor.own_trades()
     if done is not None:
         view['trades'] = len(done)
-        view.update(_holdings_value(done))
+        if done:
+            view.update(_holdings_value(done))
+        elif fresh:
+            # ПУСТОЙ ОТВЕТ НЕ ЗНАЧИТ «ПОЗИЦИЙ НЕТ». Биржа иногда отдаёт пустой
+            # список сделок на ровном месте, и панель показывала «токены $0.00»
+            # при тринадцати живых позициях — то есть счёт выглядел на двадцать
+            # долларов беднее, чем есть. Держим прежнюю оценку, пока не придёт
+            # непустой ответ.
+            for key in ('positions_value', 'positions_paid', 'positions_count'):
+                if key in fresh:
+                    view[key] = fresh[key]
     view['asked'] = True
     _EXCHANGE_CACHE.update({'at': _time.time(), 'view': view})
     return view
@@ -347,7 +357,13 @@ def wait_factor():
                     rows.append(json.loads(line))
     except (OSError, ValueError):
         return 1.0
-    return float(timing_summary(rows[-200:]).get('factor') or 1.0)
+    from . import params
+
+    got = float(timing_summary(rows[-200:]).get('factor') or 1.0)
+    # ОГРАНИЧИТЕЛЬ. Несколько мгновенных исполнений дают медиану 0.01 — «модель
+    # врёт в сто раз», — и без предела это открыло бы список рынкам, где круг
+    # по расчёту занимает недели.
+    return max(params.MM_WAIT_FACTOR_MIN, min(params.MM_WAIT_FACTOR_MAX, got))
 
 
 def _shadow_summary(rows):
