@@ -125,10 +125,23 @@ def remember_markets(markets):
                 if token in known and (known[token] or {}).get('question'):
                     continue                   # уже знаем лучше — не портим
                 name = None
-            known[token] = {'question': name,
-                            'condition_id': market.get('condition_id'),
-                            'token_no': market.get('token_no'),
-                            'tick': market.get('tick')}
+            card = {'question': name,
+                    'condition_id': market.get('condition_id'),
+                    'token_no': market.get('token_no'),
+                    'tick': market.get('tick')}
+            known[token] = card
+            # СПРАВОЧНИК ИНДЕКСИРУЕТСЯ ОБОИМИ ТОКЕНАМИ РЫНКА.
+            #
+            # Ключом был только токен «ДА», а встречный лежал внутри записи —
+            # искать по нему было нечего. Наши же продажи уходят покупкой
+            # встречного токена, и в журнале исполнений, и в статистике по
+            # рынкам стояли прочерки вместо названий: рынок тот же, а токен
+            # другой. Записываем обе стороны, каждая указывает на соседнюю.
+            twin = market.get('token_no')
+            if twin and str(twin) != token:
+                twin = str(twin)
+                if not (known.get(twin) or {}).get('question') or name:
+                    known[twin] = dict(card, token_no=token)
         os.makedirs(os.path.dirname(CATALOGUE), exist_ok=True)
         with open(CATALOGUE, 'w', encoding='utf-8') as fh:
             json.dump(known, fh, ensure_ascii=False)

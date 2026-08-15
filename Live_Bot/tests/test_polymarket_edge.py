@@ -253,3 +253,65 @@ class TestOnlyRealOrdersAreMeasured:
         spot = text.index('quoted_edges = []')
         block = text[spot:spot + 1600]
         assert 'if live and' in block, 'условие только для живого режима'
+
+
+class TestFlowIsNotABurst:
+    """
+    ГЛАВНАЯ ПРИЧИНА, ПО КОТОРОЙ НИЧЕГО НЕ ИСПОЛНЯЛОСЬ.
+
+    Знаменателем скорости служил промежуток от первой сделки до последней — и
+    сгусток превращался в мнимую скорость. Замерено на живых рынках, где мы
+    стояли заявками:
+
+        «Republicans win Arkansas»  7 сделок за сутки, все за 15 минут
+                                    старый счёт: 27.5 сделок в час
+                                    на деле:      0.3 в час, тишина 2.9ч
+
+    Медиана по нашим шестнадцати рынкам: НОЛЬ сделок в час, а с последней
+    сделки прошло 6.6 часа. При этом девять заявок из семнадцати стояли ПЕРВЫМИ
+    в очереди — позиция была прекрасной, торговать было не с кем.
+    """
+
+    def _rate(self, monkeypatch, ages_hours):
+        """Считает поток по сделкам, случившимся столько-то часов назад."""
+        import time
+
+        from polymarket import book as book_mod, selector
+
+        now = time.time()
+        trades = [{'ts': now - h * 3600, 'price': 0.20, 'size': 10.0,
+                   'side': 'SELL', 'asset': 'T'} for h in ages_hours]
+        monkeypatch.setattr(book_mod, 'tape_many', lambda conds: {'C': trades})
+        book = {'bids': [(0.20, 500.0)], 'asks': [(0.24, 500.0)]}
+        row = {'token_id': 'T', 'token_no': 'N', 'condition_id': 'C',
+               'tick': 0.01, 'order_min': 5, 'size': 5,
+               'bid_usd': 500.0, 'ask_usd': 500.0}
+        selector.measure_wait([row], {'T': book})
+        return row
+
+    def test_an_old_burst_is_not_a_fast_market(self, monkeypatch):
+        """
+        Пять сделок по десять контрактов, все двадцать часов назад. Рынок с тех
+        пор молчит, и честная скорость — 50 контрактов за 20 часов, то есть 2.5
+        в час. Прежний счёт делил на промежуток МЕЖДУ сделками (двенадцать
+        минут, снизу ограниченные получасом) и давал 100 в час — сорокакратное
+        завышение.
+        """
+        row = self._rate(monkeypatch, [20.0, 20.05, 20.1, 20.15, 20.2])
+        assert row['flow_in'] == pytest.approx(2.5, rel=0.1)
+
+    def test_a_steady_market_keeps_its_rate(self, monkeypatch):
+        """Те же пять сделок за последние два с половиной часа — скорость выше."""
+        row = self._rate(monkeypatch, [0.5, 1.0, 1.5, 2.0, 2.5])
+        assert row['flow_in'] > 15
+
+    def test_silence_lowers_the_rate(self, monkeypatch):
+        """Та же горсть сделок, но давно — скорость обязана быть ниже."""
+        fresh = self._rate(monkeypatch, [0.2, 0.4, 0.6])
+        stale = self._rate(monkeypatch, [18.0, 18.2, 18.4])
+        assert stale['flow_in'] < fresh['flow_in'] / 5
+
+    def test_the_denominator_is_time_since_the_first_trade(self):
+        text = open(os.path.join(ROOT, 'polymarket', 'selector.py'),
+                    encoding='utf-8').read()
+        assert "span = max((now - min(t['ts'] for t in mine))" in text

@@ -265,3 +265,55 @@ class TestNamesAreLearnedFromTheExchange:
                     encoding='utf-8').read()
         spot = text.index('def with_open_positions(')
         assert 'learn_missing_names(held)' in text[spot:spot + 3000]
+
+
+class TestBothTokensOfAMarketAreIndexed:
+    """
+    Ключом справочника был только токен «ДА», а встречный лежал внутри записи —
+    искать по нему было нечего.
+
+    Наши продажи уходят покупкой встречного токена, поэтому в журнале
+    исполнений и в статистике по рынкам стояли прочерки вместо названий: рынок
+    тот же, а токен другой. Замерено в панели: одиннадцать прочерков при
+    полностью заполненном справочнике.
+    """
+
+    def _cat(self, monkeypatch, tmp_path, start=None):
+        import json
+
+        from polymarket import mm
+
+        path = tmp_path / 'markets.json'
+        path.write_text(json.dumps(start or {}), encoding='utf-8')
+        monkeypatch.setattr(mm, 'CATALOGUE', str(path))
+        return mm
+
+    def test_the_counter_token_gets_its_own_entry(self, monkeypatch, tmp_path):
+        mm = self._cat(monkeypatch, tmp_path)
+        mm.remember_markets([{'token_id': 'YES', 'token_no': 'NO',
+                              'question': 'вопрос', 'tick': 0.01,
+                              'condition_id': 'C'}])
+        known = mm.known_markets()
+        assert known['YES']['question'] == 'вопрос'
+        assert known['NO']['question'] == 'вопрос', 'рынок тот же'
+
+    def test_each_side_points_at_the_other(self, monkeypatch, tmp_path):
+        """Чтобы продать, нужен встречный токен — с любой стороны."""
+        mm = self._cat(monkeypatch, tmp_path)
+        mm.remember_markets([{'token_id': 'YES', 'token_no': 'NO',
+                              'question': 'вопрос', 'tick': 0.01}])
+        known = mm.known_markets()
+        assert known['YES']['token_no'] == 'NO'
+        assert known['NO']['token_no'] == 'YES'
+
+    def test_a_market_without_a_twin_is_still_recorded(self, monkeypatch, tmp_path):
+        mm = self._cat(monkeypatch, tmp_path)
+        mm.remember_markets([{'token_id': 'YES', 'question': 'вопрос'}])
+        assert mm.known_markets()['YES']['question'] == 'вопрос'
+
+    def test_a_nameless_entry_does_not_erase_the_twin(self, monkeypatch, tmp_path):
+        mm = self._cat(monkeypatch, tmp_path,
+                       {'NO': {'question': 'настоящее имя'}})
+        mm.remember_markets([{'token_id': 'YES', 'token_no': 'NO',
+                              'question': None}])
+        assert mm.known_markets()['NO']['question'] == 'настоящее имя'
