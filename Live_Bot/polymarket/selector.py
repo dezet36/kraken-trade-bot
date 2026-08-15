@@ -231,8 +231,26 @@ def scan(budget=None, limit=None, pages=30, min_volume=None,
     good = measure_wait(good, books)
     # ОТСЕВ ПО ВРЕМЕНИ, А НЕ ПО ШИРИНЕ СПРЕДА. Рынок, где круг занимает сутки,
     # бесполезен при любом спреде: деньги стоят, а разрешение приближается.
+    # НАГРАДНЫЕ РЫНКИ НЕ ВЫБРАСЫВАЮТСЯ ПО ВРЕМЕНИ КРУГА, и это исправление
+    # крупной потери.
+    #
+    # Награда платится за ТО, ЧТО МЫ СТОИМ, а не за то, что круг закрылся.
+    # Отсев по времени написан для захвата спреда: там медленный рынок и правда
+    # бесполезен. Но наградному рынку скорость безразлична — деньги идут, пока
+    # заявка висит внутри допуска от середины.
+    #
+    # Замерено: захват спреда насыщается на 14 рынках и $14.70 капитала, дальше
+    # деньги девать некуда. Награда же принимает капитал до тысячи долларов:
+    #
+    #     $40  → 13 рынков, $2.85/сут  = 215% в месяц
+    #     $200 → 27 рынков, $8.57/сут  = 129%
+    #     $1000→129 рынков, $15.50/сут =  47%
+    #
+    # И со входом дешёвой стороной наградная заявка стоит $1-3, а не $20.
+    for row in good:
+        row['pays_reward'] = float(row.get('rewards_daily') or 0) > 0 and             float(row.get('rewardsMinSize') or 0) > 0
     good = [r for r in good
-            if r['wait_hours'] <= params.MM_MAX_WAIT_HOURS
+            if (r['wait_hours'] <= params.MM_MAX_WAIT_HOURS or r['pays_reward'])
             and r['our_gain'] > 0]
 
     # ПОРЯДОК ПО ДЕНЬГАМ В ЧАС, а не по обороту и не по ширине спреда.
@@ -700,6 +718,44 @@ def allocate(markets, budget=None):
             market['usd_per_hour'] = probe['usd_per_hour']
             used += spent
             room = min(budget - used, cap - market['cost'])
+
+    # ── Проход третий: остаток денег в награду.
+    #
+    # Захват спреда насыщается: годных рынков четырнадцать, и стоят они $14.70.
+    # Остальное лежало без дела. Награда принимает капитал дальше и платится за
+    # стояние, а не за закрытый круг, — значит именно ей и место в остатке.
+    #
+    # Отбираются по доходу НА ВЛОЖЕННЫЙ ДОЛЛАР: пул делится по объёму, поэтому
+    # тонкая книга при щедром пуле даёт больше, чем толстая при таком же.
+    # Пороги качества книги при этом те же, что и везде, — иначе наверх всплыли
+    # бы пустые книги, и эта ловушка в проекте описана трижды.
+    taken = {id(m) for m in chosen}
+    pool = [m for m in markets
+            if id(m) not in taken and m.get('pays_reward')]
+    for market in pool:
+        market['reward_stake'] = reward_size(market)
+    pool = [m for m in pool if m['reward_stake']]
+    for market in pool:
+        market['reward_rate'] = (reward_per_hour(market, market['reward_stake'])
+                                 / max(quote_cost(market['reward_stake'],
+                                                  market['price']), 1e-9))
+    pool.sort(key=lambda m: -m['reward_rate'])
+    for market in pool:
+        size = market['reward_stake']
+        cost = quote_cost(size, market['price'])
+        if cost > cap or used + cost > budget:
+            continue
+        gain = reward_per_hour(market, size)
+        if gain <= 0:
+            continue
+        market['size'] = size
+        market['cost'] = round(cost, 2)
+        market['reward_per_hour'] = round(gain, 5)
+        market['reward_only'] = True
+        _recompute_wait(market)
+        market['usd_per_hour'] = round(market['usd_per_hour'] + gain, 5)
+        chosen.append(market)
+        used += cost
 
     edge = sum(m['spread_share'] * m['cost'] / 2 for m in chosen)
     rewards = sum(m['rewards_daily'] * m['cost'] / max(m['liquidity'] + m['cost'], 1)

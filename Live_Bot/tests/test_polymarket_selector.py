@@ -184,10 +184,23 @@ class TestScanLooksAtTheRealBook:
         в план, и это разные вещи.
         """
         narrow = {'bids': [(0.4999, 5000.0)], 'asks': [(0.5001, 5000.0)]}
-        got = self._scan(monkeypatch, [_market()], book=narrow)
+        got = self._scan(monkeypatch, [_market(daily=0.0)], book=narrow)
         for row in got:
             assert row['usd_per_hour'] < params.MM_MIN_USD_PER_HOUR
         assert selector.allocate(got, budget=100)['markets'] == []
+
+    def test_a_narrow_market_is_still_worth_standing_in_for_the_reward(
+            self, monkeypatch):
+        """
+        Спреда там нет, но награда платится за СТОЯНИЕ, а не за закрытый круг.
+        Такой рынок берётся — и берётся именно как наградный.
+        """
+        narrow = {'bids': [(0.4999, 5000.0)], 'asks': [(0.5001, 5000.0)]}
+        got = self._scan(monkeypatch, [_market(daily=50.0)], book=narrow)
+        plan = selector.allocate(got, budget=100)
+        assert len(plan['markets']) == 1
+        assert plan['markets'][0].get('reward_only') is True
+        assert plan['markets'][0]['size'] == 20, 'наградный порог'
 
     def test_two_tick_spread_is_taken_at_the_touch(self, monkeypatch):
         """
