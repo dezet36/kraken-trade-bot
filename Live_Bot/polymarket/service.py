@@ -98,7 +98,9 @@ def _loop(poll_seconds):
     # ПОДПИСКА ПОДНИМАЕТСЯ ОДИН РАЗ И ЖИВЁТ ВЕСЬ ПРОГОН. Список рынков она
     # получает каждый такт и меняет его на лету: переподключаться ради этого
     # нельзя, разрыв стоит секунд, а за секунды нас и подбирают.
-    if stream.start([m['token_id'] for m in markets]):
+    if not params.MM_STREAM:
+        log('◈ Polymarket: работаю опросом (подписка выключена, PM_MM_STREAM)')
+    elif stream.start([m['token_id'] for m in markets]):
         log('◈ Polymarket: подписка на стакан поднята')
     else:
         log(f"⚠️ Polymarket: подписка не поднялась "

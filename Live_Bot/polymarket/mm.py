@@ -431,8 +431,9 @@ def step(maker, markets, live=False, day_loss=0.0, deadline=None,
     # Но поток рвётся, отстаёт от списка рынков и молчит по тихим рынкам,
     # поэтому опрос остаётся: спрашиваем ТОЛЬКО то, чего в потоке нет свежего.
     # Так и заявки видят живую книгу, и ни один рынок не остаётся без цены.
-    stream.watch(list(by_token) + [m.get('token_no') for m in markets
-                                   if m.get('token_no')])
+    if params.MM_STREAM:
+        stream.watch(list(by_token) + [m.get('token_no') for m in markets
+                                       if m.get('token_no')])
     # СПРАВОЧНИК ПОПОЛНЯЕТСЯ ТЕМ, ЧТО В РАБОТЕ, а не только отобранным. Отбор
     # отдаёт горсть лучших, но позиция может остаться на рынке, который из
     # отбора уже выпал, — и панель показывала её прочерком. Здесь проходит
@@ -441,7 +442,7 @@ def step(maker, markets, live=False, day_loss=0.0, deadline=None,
     books = {}
     ask_rest = []
     for token in by_token:
-        live = stream.book(token)
+        live = stream.book(token) if params.MM_STREAM else None
         if live and live['bids'] and live['asks']:
             books[str(token)] = live
         else:

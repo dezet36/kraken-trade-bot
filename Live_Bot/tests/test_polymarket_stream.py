@@ -212,3 +212,43 @@ class TestOrdersFromThePastAreNotInherited:
                     encoding='utf-8').read()
         spot = text.index('заявки прошлого прогона')
         assert 'if live:' in text[max(0, spot - 700):spot]
+
+
+class TestTheStreamIsOffUntilItIsProven:
+    """
+    ЧЕСТНЫЙ ИТОГ ПРОВЕРКИ. Сам поток работает: снимок приходит верный, до цифры
+    совпадает с опросом — 0.026/0.036 при 14+34 уровнях, и параметр `level` тут
+    ни при чём.
+
+    А вот после применения присылаемых ИЗМЕНЕНИЙ книга вырождается в
+    0.001/0.999, то есть в одни крайние уровни. Котировки по такой книге уходили
+    на биржу покупками по 0.001 при рынке 0.926: не исполнятся никогда, но
+    занимают деньги и засоряют стакан. Семнадцать таких заявок за один запуск.
+
+    Опрос от этого защищён по построению — он всегда приносит книгу целиком.
+    Поэтому поток остаётся под настройкой до конца разбора.
+    """
+
+    def test_the_stream_is_off_by_default(self):
+        from polymarket import params
+
+        assert params.MM_STREAM is False
+
+    def test_the_cycle_asks_the_stream_only_when_allowed(self):
+        text = open(os.path.join(ROOT, 'polymarket', 'mm.py'),
+                    encoding='utf-8').read()
+        spot = text.index('def step(')
+        block = text[spot:spot + 3000]
+        assert 'stream.book(token) if params.MM_STREAM else None' in block
+        assert 'if params.MM_STREAM:' in block
+
+    def test_the_service_says_which_way_it_works(self):
+        text = open(os.path.join(ROOT, 'polymarket', 'service.py'),
+                    encoding='utf-8').read()
+        assert 'работаю опросом' in text
+
+    def test_the_reason_is_written_down_where_the_switch_is(self):
+        text = open(os.path.join(ROOT, 'polymarket', 'params.py'),
+                    encoding='utf-8').read()
+        spot = text.index('MM_STREAM = _b(')
+        assert '0.001/0.999' in text[max(0, spot - 1200):spot]
