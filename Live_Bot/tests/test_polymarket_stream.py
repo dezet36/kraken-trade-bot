@@ -275,3 +275,51 @@ class TestTheStreamIsOffUntilItIsProven:
         block = text[max(0, spot - 1400):spot]
         assert '0.001/0.999' in block, 'что было сломано'
         assert 'best_bid' in block, 'и чем оказалось починено'
+
+
+class TestTheSnapshotIsSortedBestFirst:
+    """
+    ОШИБКА, СТАВИВШАЯ ЗАЯВКИ ПО ЦЕНЕ В ОДИН ЦЕНТ НА РЫНКЕ В СОРОК ТРИ.
+
+    `book.top` берёт просто ПЕРВЫЙ уровень — так устроен опрос, который
+    сортирует сам. Площадка присылает биды по ВОЗРАСТАНИЮ, а снимок из потока
+    не сортировался, и лучшим бидом оказывался худший:
+
+        «Theo FDV»,   16 уровней: первый бид 0.01, настоящий 0.39
+        «CDU Berlin», 56 уровней: первый бид 0.01, настоящий 0.66
+
+    Обе заявки ушли на биржу по 0.01 и стояли за очередью в двадцать пять тысяч
+    контрактов. Прошлая правка потока чинила ДЕЛЬТЫ и про снимок молчала.
+    """
+
+    def _snapshot(self):
+        stream._books.clear()
+        stream._apply_book({
+            'asset_id': 'T',
+            # Порядок биржи: биды по возрастанию, аски по убыванию.
+            'bids': [{'price': '0.01', 'size': '10052.35'},
+                     {'price': '0.02', 'size': '500'},
+                     {'price': '0.39', 'size': '120'}],
+            'asks': [{'price': '0.99', 'size': '35507.08'},
+                     {'price': '0.97', 'size': '23000'},
+                     {'price': '0.47', 'size': '90'}],
+        })
+        return stream.book('T')
+
+    def test_the_best_bid_comes_first(self):
+        assert self._snapshot()['bids'][0][0] == 0.39
+
+    def test_the_best_ask_comes_first(self):
+        assert self._snapshot()['asks'][0][0] == 0.47
+
+    def test_book_top_reads_it_the_same_way(self):
+        """Опрос и поток обязаны отдавать книгу в одном виде."""
+        from polymarket import book as book_mod
+        top = book_mod.top(self._snapshot())
+        assert top['bid'] == 0.39
+        assert top['ask'] == 0.47
+        assert top['mid'] == 0.43
+
+    def test_the_stream_top_agrees(self):
+        self._snapshot()
+        assert stream.top('T')['bid'] == 0.39
