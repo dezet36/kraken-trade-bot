@@ -94,3 +94,15 @@
   File "C:\Users\Лаки\AppData\Local\Programs\Python\Python313\Lib\site-packages\_pytest\fixtures.py", line 1014, in _teardown_yield_fixture
     next(it)
 
+--- paper_state.json ---
+  File "C:\Users\Лаки\AppData\Local\Programs\Python\Python313\Lib\site-packages\pluggy\_callers.py", line 121, in _multicall
+    res = hook_impl.function(*args)
+  File "C:\Users\Лаки\AppData\Local\Programs\Python\Python313\Lib\site-packages\_pytest\runner.py", line 199, in pytest_runtest_teardown
+    item.session._setupstate.teardown_exact(nextitem)
+  File "C:\Users\Лаки\AppData\Local\Programs\Python\Python313\Lib\site-packages\_pytest\runner.py", line 568, in teardown_exact
+    fin()
+  File "C:\Users\Лаки\AppData\Local\Programs\Python\Python313\Lib\site-packages\_pytest\fixtures.py", line 1156, in finish
+    fin()
+  File "C:\Users\Лаки\AppData\Local\Programs\Python\Python313\Lib\site-packages\_pytest\fixtures.py", line 1014, in _teardown_yield_fixture
+    next(it)
+

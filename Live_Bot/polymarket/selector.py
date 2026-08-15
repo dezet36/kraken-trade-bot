@@ -281,6 +281,49 @@ def _measured_factor():
         return 1.0
 
 
+def reward_per_hour(row, size):
+    """
+    Сколько награда даст в час, если поставить столько-то контрактов.
+
+    НАГРАДА ПЛАТИТСЯ ЗА ЛИКВИДНОСТЬ, А НЕ ЗА СДЕЛКИ, и это другой источник
+    дохода, чем спред. Биржа делит дневной пул между теми, кто стоит близко к
+    середине, пропорционально выставленному объёму. Значит наша доля — это наш
+    объём против всего, что стоит в книге.
+
+    ПОРОГ РАЗМЕРА ОБЯЗАТЕЛЕН: заявка меньше rewardsMinSize не участвует вовсе.
+    Спрошено у самой биржи про наши пятнадцать стоящих заявок — под награду не
+    попадала НИ ОДНА, потому что мы ставим пять контрактов, а минимум везде
+    двадцать.
+
+    ЛОВУШКА, В КОТОРУЮ ЭТОТ РАСЧЁТ ЗАВОДИТ, ОПИСАНА В ЗАГОЛОВКЕ МОДУЛЯ И
+    СТОИЛА УЖЕ ТРЁХ РАЗБОРОВ. Отношение награды к ликвидности поднимает наверх
+    ПУСТЫЕ книги: пул $3 при книге в $2 даёт «2744% в месяц», и это не доход, а
+    приглашение стать всем рынком сразу. Поэтому функция считает долю честно —
+    от полной глубины, — а отсев по качеству книги остаётся выше и снимается
+    только через свой параметр.
+    """
+    pool = float(row.get('rewards_daily') or 0)
+    if pool <= 0:
+        return 0.0
+    floor = float(row.get('rewardsMinSize') or 0)
+    if floor and size < floor:
+        return 0.0                      # меньше порога — не участвуем вовсе
+    price = float(row.get('price') or row.get('meta_price') or 0.5)
+    depth = min(float(row.get('bid_usd') or 0), float(row.get('ask_usd') or 0))
+    ours = float(size) * price
+    if ours <= 0:
+        return 0.0
+    return pool * ours / max(depth + ours, 1e-9) / 24.0
+
+
+def reward_size(row):
+    """Размер, с которого рынок начинает платить награду. 0 — не платит."""
+    if float(row.get('rewards_daily') or 0) <= 0:
+        return 0.0
+    floor = float(row.get('rewardsMinSize') or 0)
+    return max(floor, _floor_size(row)) if floor else 0.0
+
+
 def _step_options(ticks):
     """
     Возможные шаги внутрь спреда, в тиках. Ноль означает встать на лучшую цену.
@@ -584,6 +627,33 @@ def allocate(markets, budget=None):
         room = min(budget - used, cap - market['cost'])
         if room < 1:
             continue
+
+        # РОСТ РАДИ НАГРАДЫ СЧИТАЕТСЯ ОТДЕЛЬНО ОТ РОСТА РАДИ СПРЕДА.
+        #
+        # Награда включается СТУПЕНЬКОЙ: до порога она равна нулю, после —
+        # сразу заметна. Обычный поиск «растём, пока растёт доход в час» такую
+        # ступеньку не находит, потому что первый же шаг ничего не даёт.
+        #
+        # Замерено на 256 рынках с живой книгой: лучшие дают сто-двести
+        # процентов в месяц на вложенное, тогда как захват спреда за ночь
+        # принёс полцента. Порог везде двадцать контрактов, и наши пять под
+        # награду не попадали ни разу — спрошено у биржи про пятнадцать
+        # стоящих заявок, скоринг ноль из пятнадцати.
+        wanted = reward_size(market)
+        if wanted and market['size'] < wanted:
+            cost = quote_cost(wanted, market['price'])
+            gain = reward_per_hour(market, wanted)
+            if (cost <= cap and used - market['cost'] + cost <= budget
+                    and gain > market['usd_per_hour']):
+                used += cost - market['cost']
+                market['size'] = wanted
+                market['cost'] = round(cost, 2)
+                market['reward_per_hour'] = round(gain, 5)
+                _recompute_wait(market)
+                market['usd_per_hour'] = round(
+                    market['usd_per_hour'] + gain, 5)
+                room = min(budget - used, cap - market['cost'])
+
         ceiling = size_for(market, budget)
         while room >= 1 and market['size'] < ceiling:
             probe = dict(market)
