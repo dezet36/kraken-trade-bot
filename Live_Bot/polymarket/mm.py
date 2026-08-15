@@ -261,6 +261,33 @@ def rotate(maker, current, budget=None):
     return keep, dropped
 
 
+def _quote_needs(quote, position):
+    """
+    Сколько НОВЫХ денег требует эта котировка.
+
+    Считается по сторонам, которые действительно уйдут на биржу, и с одной
+    важной оговоркой: ЗАКРЫВАЮЩАЯ СТОРОНА БЕСПЛАТНА. Продаём то, что уже
+    держим, а продажа своего денег не требует — именно на этом стоит вся
+    экономия капитала, ради которой мы входим одной стороной.
+
+    Считать двусторонний случай как «ровно размер» было бы неверно, когда одна
+    из сторон закрывающая: мы завысили бы потребность вдвое и обрезали список
+    рынков там, где денег на самом деле хватает.
+    """
+    size = float(quote['size'])
+    closing = 'ask' if position > 0 else ('bid' if position < 0 else None)
+    only = quote.get('only')
+    need = 0.0
+    for side in ('bid', 'ask'):
+        if only and only != side:
+            continue
+        if side == closing and abs(position) >= size:
+            continue                    # продаём своё — денег не нужно
+        need += (size * float(quote['bid']) if side == 'bid'
+                 else size * (1.0 - float(quote['ask'])))
+    return need
+
+
 def as_our_side(trades, markets):
     """
     Сделки встречного токена, приведённые к нашей стороне учёта.
@@ -517,17 +544,7 @@ def step(maker, markets, live=False, day_loss=0.0, deadline=None):
         # размер; вход одной стороной — только свою цену. Считать одинаково
         # значило бы в разы завысить потребность и обрезать список рынков там,
         # где денег на самом деле хватает.
-        if quote.get('only') == 'bid':
-            need = float(quote['size']) * float(quote['bid'])
-        elif quote.get('only') == 'ask':
-            need = float(quote['size']) * (1.0 - float(quote['ask']))
-        else:
-            need = float(quote['size'])
-        # Закрывающая сторона денег не требует: продаём то, что держим.
-        if slot['position'] and quote.get('only'):
-            closing = 'ask' if slot['position'] > 0 else 'bid'
-            if quote['only'] == closing:
-                need = 0.0
+        need = _quote_needs(quote, slot['position'])
         if committed + need > budget:
             if slot['position']:
                 quote['only'] = 'ask' if slot['position'] > 0 else 'bid'

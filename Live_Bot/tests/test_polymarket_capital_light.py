@@ -64,10 +64,19 @@ class TestWeEnterOnTheCheapSide:
         quote = _quote(0.50)
         assert quote['only'] in ('bid', 'ask')
 
-    def test_holding_switches_to_the_free_side(self):
-        """Держим — продажа своего не стоит ничего, ею и выходим."""
-        assert _quote(0.06, position=5, cost=0.06)['only'] == 'ask'
-        assert _quote(0.85, position=-5, cost=0.85)['only'] == 'bid'
+    def test_a_full_position_switches_to_the_free_side(self):
+        """
+        Держим полный запас — остаётся только разгрузка, и она бесплатна.
+
+        При ЧАСТИЧНОМ запасе рынок продолжает работать обеими сторонами: это
+        и есть рычаг числа сделок, см. test_polymarket_throughput.
+        """
+        full = 5 * params.MM_SKEW_FULL_AT
+        assert _quote(0.06, position=full, cost=0.06)['only'] == 'ask'
+        assert _quote(0.85, position=-full, cost=0.85)['only'] == 'bid'
+
+    def test_a_partial_position_keeps_both_sides(self):
+        assert _quote(0.06, position=5, cost=0.06)['only'] is None
 
 
 class TestCostFallsWithOneSidedEntry:
@@ -94,21 +103,24 @@ class TestCostFallsWithOneSidedEntry:
 
 
 class TestBudgetCountsTheRealCost:
+    """
+    Счёт денег живёт в mm._quote_needs — там же, где решается, какие стороны
+    уйдут на биржу. Подробные проверки самого счёта лежат в
+    test_polymarket_throughput; здесь только то, что раскладка им пользуется.
+    """
 
-    def test_step_charges_only_the_side_it_posts(self):
+    def test_step_asks_how_much_the_quote_needs(self):
         text = open(os.path.join(ROOT, 'polymarket', 'mm.py'),
                     encoding='utf-8').read()
-        assert "if quote.get('only') == 'bid':" in text
-        assert "need = float(quote['size']) * float(quote['bid'])" in text
+        spot = text.index('def step(')
+        assert "_quote_needs(quote, slot['position'])" in text[spot:]
 
     def test_closing_a_position_is_free(self):
         """Продаём то, что держим: новых денег это не требует."""
-        text = open(os.path.join(ROOT, 'polymarket', 'mm.py'),
-                    encoding='utf-8').read()
-        spot = text.index("if quote.get('only') == 'bid':")
-        block = text[spot:spot + 900]
-        assert 'need = 0.0' in block
-        assert 'продаём то, что держим' in block.lower()
+        from polymarket import mm
+
+        quote = {'bid': 0.19, 'ask': 0.22, 'size': 5, 'only': 'ask'}
+        assert mm._quote_needs(quote, 5) == 0.0
 
 
 class TestTheRiskThatComesWithIt:
