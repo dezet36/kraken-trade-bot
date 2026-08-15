@@ -185,7 +185,11 @@ def learn_missing_names(tokens):
     fresh = {}
     for token in tokens or []:
         token = str(token)
-        if (known.get(token) or {}).get('question'):
+        # ПРОЧЕРК — ЭТО НЕ ИМЯ. Он попадал в справочник из прежней версии, и
+        # проверка «имя уже есть» на нём срабатывала: запрос не делался, а
+        # позиция так и оставалась безымянной навсегда.
+        have = (known.get(token) or {}).get('question')
+        if have and have != '—':
             continue
         try:
             got = client._get(f'{params.GAMMA}/markets?clob_token_ids={token}')

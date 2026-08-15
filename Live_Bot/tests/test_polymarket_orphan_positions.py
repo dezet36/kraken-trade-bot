@@ -242,6 +242,24 @@ class TestNamesAreLearnedFromTheExchange:
         monkeypatch.setattr(mm.client, '_get', boom)
         assert mm.learn_missing_names(['T']) == {}
 
+    def test_a_dash_in_the_catalogue_is_not_a_name(self, monkeypatch, tmp_path):
+        """
+        Прочерк попадал в справочник из прежней версии, и проверка «имя уже
+        есть» на нём срабатывала: запрос не делался, позиция оставалась
+        безымянной навсегда.
+        """
+        import json
+
+        from polymarket import mm
+
+        path = tmp_path / 'markets.json'
+        path.write_text(json.dumps({'T': {'question': '—'}}), encoding='utf-8')
+        monkeypatch.setattr(mm, 'CATALOGUE', str(path))
+        monkeypatch.setattr(mm.client, '_get', lambda url: [{
+            'question': 'нашлось', 'conditionId': 'C',
+            'clobTokenIds': '["T","N"]', 'orderPriceMinTickSize': 0.01}])
+        assert mm.learn_missing_names(['T'])['T']['question'] == 'нашлось'
+
     def test_positions_outside_the_list_trigger_the_lookup(self):
         text = open(os.path.join(ROOT, 'polymarket', 'mm.py'),
                     encoding='utf-8').read()
