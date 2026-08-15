@@ -134,8 +134,22 @@ def rotate(maker, current, budget=None):
         if slot.get('position'):
             keep.append(by_token.get(market['token_id'], market))
             continue
+        # СРОК ОЖИДАНИЯ СЧИТАЕТСЯ ОТ ОБЕЩАНИЯ РЫНКА, А НЕ ОДИН НА ВСЕХ.
+        #
+        # Шесть часов на всё подряд — это ровно та жалоба, с которой пришёл
+        # человек: «бот висит часами на одном рынке». Рынок, которому отбор
+        # обещал круг за двадцать минут, к шестому часу ошибся в восемнадцать
+        # раз, и ждать его дальше незачем: место в списке стоит дороже.
+        #
+        # Берём тройное обещание, но не дольше общего потолка. Тройка — не
+        # красивое число: одинарного мало (очередь плавает, и мы бы дёргались
+        # на шуме), а к тройному сроку ошибка модели уже не случайность.
+        promised = market.get('wait_hours')
+        patience = params.MM_IDLE_HOURS * 3600
+        if promised not in (None, float('inf')) and promised > 0:
+            patience = min(patience, float(promised) * 3600 * params.MM_IDLE_TRIES)
         idle = now - float(market.get('joined_ts') or now)
-        if not slot.get('trades') and idle > params.MM_IDLE_HOURS * 3600:
+        if not slot.get('trades') and idle > patience:
             dropped.append(market)
             continue
         keep.append(by_token.get(market['token_id'], market))
@@ -264,6 +278,17 @@ def step(maker, markets, live=False, day_loss=0.0):
 
     exposure = maker.exposure(marks)
 
+    # СРОК УДЕРЖАНИЯ ПРОВЕРЯЕТСЯ КАЖДЫЙ ТАКТ, и до сих пор он не проверялся
+    # ВООБЩЕ. Ограничение записано в заголовке модуля с самого начала —
+    # «застрявшая позиция превращает мейкера в предсказателя», — а функция
+    # stale_positions существовала и не вызывалась ни разу. Позиция могла
+    # висеть сутками, держа деньги, которые должны работать на других рынках.
+    stale = set(maker.stale_positions())
+    if stale:
+        from logger import log as _say
+        _say(f'◈ Polymarket: {len(stale)} позиций держатся дольше '
+             f'{params.MM_MAX_HOLD_HOURS:.0f} ч — закрываю по лучшей цене')
+
     # ОБЯЗАТЕЛЬСТВА СЧИТАЮТСЯ ПРОТИВ ДЕНЕГ, А НЕ ПРОТИВ ОТДЕЛЬНОГО ПОТОЛКА.
     # Двусторонняя котировка стоит РОВНО размер при любой цене (покупка берёт
     # p, продажа — (1-p)), поэтому обещанное складывается просто. Без этого
@@ -329,6 +354,10 @@ def step(maker, markets, live=False, day_loss=0.0):
                     store._append(engine.FILLS, done)
                     fills.append(done)
 
+        # Признак просрочки едет в котировку: решает её стратегия, а знает о
+        # сроке — состояние. Смешивать эти два знания в одном месте значило бы
+        # тащить время жизни позиции в чистую функцию котирования.
+        market = dict(market, stale=str(token) in stale)
         quote = strategy.desired_quote(top, market, position=slot['position'],
                                        max_position=params.MM_MAX_POSITION)
         if not quote or quote.get('reason'):
