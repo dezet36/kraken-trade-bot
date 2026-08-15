@@ -184,3 +184,66 @@ class TestThePlaceholderNeverOverwritesARealName:
         mm.remember_markets([{'token_id': 'T', 'question': '—', 'tick': 0.01}])
         assert 'T' in mm.known_markets()
         assert mm.known_markets()['T']['question'] is None
+
+
+class TestNamesAreLearnedFromTheExchange:
+    """
+    Отбор видит только активные рынки, проходящие пороги по обороту, цене и
+    сроку до разрешения. А позиция переживает любые пороги: рынок затих, оборот
+    упал — и мы держим в нём деньги, не зная даже названия.
+
+    Замерено: пять позиций из тринадцати. Все пять нашлись у биржи по токену с
+    первого запроса.
+    """
+
+    def test_an_unknown_token_is_asked_about(self, monkeypatch, tmp_path):
+        import json
+
+        from polymarket import mm
+
+        path = tmp_path / 'markets.json'
+        path.write_text(json.dumps({}), encoding='utf-8')
+        monkeypatch.setattr(mm, 'CATALOGUE', str(path))
+        monkeypatch.setattr(mm.client, '_get', lambda url: [{
+            'question': 'забытый рынок', 'conditionId': 'C',
+            'clobTokenIds': '["T","N"]', 'orderPriceMinTickSize': 0.01}])
+        got = mm.learn_missing_names(['T'])
+        assert got['T']['question'] == 'забытый рынок'
+        assert got['T']['token_no'] == 'N', 'встречный токен нужен, чтобы продать'
+        assert mm.known_markets()['T']['question'] == 'забытый рынок'
+
+    def test_a_known_token_is_not_asked_about(self, monkeypatch, tmp_path):
+        import json
+
+        from polymarket import mm
+
+        path = tmp_path / 'markets.json'
+        path.write_text(json.dumps({'T': {'question': 'уже знаем'}}),
+                        encoding='utf-8')
+        monkeypatch.setattr(mm, 'CATALOGUE', str(path))
+        asked = []
+        monkeypatch.setattr(mm.client, '_get',
+                            lambda url: asked.append(url) or [])
+        mm.learn_missing_names(['T'])
+        assert asked == [], 'лишний запрос стоит времени такта'
+
+    def test_a_silent_exchange_does_not_break_anything(self, monkeypatch, tmp_path):
+        import json
+
+        from polymarket import mm
+
+        path = tmp_path / 'markets.json'
+        path.write_text(json.dumps({}), encoding='utf-8')
+        monkeypatch.setattr(mm, 'CATALOGUE', str(path))
+
+        def boom(url):
+            raise OSError('сеть закрыта')
+
+        monkeypatch.setattr(mm.client, '_get', boom)
+        assert mm.learn_missing_names(['T']) == {}
+
+    def test_positions_outside_the_list_trigger_the_lookup(self):
+        text = open(os.path.join(ROOT, 'polymarket', 'mm.py'),
+                    encoding='utf-8').read()
+        spot = text.index('def with_open_positions(')
+        assert 'learn_missing_names(held)' in text[spot:spot + 3000]

@@ -164,6 +164,58 @@ def _save_plan(plan):
         pass
 
 
+def learn_missing_names(tokens):
+    """
+    Спрашивает у биржи названия рынков, которых нет в справочнике.
+
+    ЗАЧЕМ, ЕСЛИ СПРАВОЧНИК И ТАК ПОПОЛНЯЕТСЯ ОТБОРОМ. Отбор видит только
+    активные рынки, проходящие пороги по обороту, цене и сроку до разрешения. А
+    позиция живёт до закрытия и переживает любые пороги: рынок затих, оборот
+    упал ниже порога — и мы держим в нём деньги, не зная даже названия. Панель
+    показывала такую позицию прочерком, и разобраться, где мы стоим, было
+    нельзя.
+
+    Замерено: пять позиций из тринадцати. Все пять нашлись у биржи по токену с
+    первого запроса.
+
+    Спрашиваем ПО ОДНОМУ и только про неизвестные: таких единицы, а запрос
+    стоит времени такта.
+    """
+    known = known_markets()
+    fresh = {}
+    for token in tokens or []:
+        token = str(token)
+        if (known.get(token) or {}).get('question'):
+            continue
+        try:
+            got = client._get(f'{params.GAMMA}/markets?clob_token_ids={token}')
+        except Exception:                                  # noqa: BLE001
+            continue
+        row = (got or [None])[0] if isinstance(got, list) else None
+        if not row or not row.get('question'):
+            continue
+        try:
+            pair = json.loads(row.get('clobTokenIds') or '[]')
+        except Exception:                                  # noqa: BLE001
+            pair = []
+        fresh[token] = {
+            'question': row.get('question'),
+            'condition_id': row.get('conditionId'),
+            'token_no': (pair[1] if len(pair) > 1 and str(pair[0]) == token
+                         else (pair[0] if pair else None)),
+            'tick': float(row.get('orderPriceMinTickSize') or 0.001),
+        }
+    if fresh:
+        known.update(fresh)
+        try:
+            os.makedirs(os.path.dirname(CATALOGUE), exist_ok=True)
+            with open(CATALOGUE, 'w', encoding='utf-8') as fh:
+                json.dump(known, fh, ensure_ascii=False)
+        except Exception:                                  # noqa: BLE001
+            pass
+    return fresh
+
+
 def with_open_positions(markets, maker):
     """
     Дописывает в рабочий список рынки, где у нас ОТКРЫТА позиция.
@@ -184,6 +236,12 @@ def with_open_positions(markets, maker):
     одном отборе, а закрывать позицию всё равно надо.
     """
     have = {str(m.get('token_id')) for m in markets}
+    # Имена для позиций, которых отбор больше не видит: рынок мог затихнуть, а
+    # деньги в нём остались. Спрашиваем у биржи по токену — таких единицы.
+    held = [t for t, s in (maker.state.get('books') or {}).items()
+            if s.get('position') and str(t) not in have]
+    if held:
+        learn_missing_names(held)
     known = known_markets()
     extra = []
     for token, slot in (maker.state.get('books') or {}).items():
