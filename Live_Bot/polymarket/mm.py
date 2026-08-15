@@ -273,6 +273,11 @@ def step(maker, markets, live=False, day_loss=0.0, deadline=None):
     ошибается, и знать это надо раньше, чем размер вырастет.
     """
     by_token = {m['token_id']: m for m in markets}
+    # СПРАВОЧНИК ПОПОЛНЯЕТСЯ ТЕМ, ЧТО В РАБОТЕ, а не только отобранным. Отбор
+    # отдаёт горсть лучших, но позиция может остаться на рынке, который из
+    # отбора уже выпал, — и панель показывала её прочерком. Здесь проходит
+    # ровно то, что мы котируем прямо сейчас, поэтому имя есть у всего.
+    remember_markets(markets)
     books = book_mod.fetch_many(list(by_token))
     marks, placed, fills, skipped, sent, cancelled = {}, 0, [], {}, 0, 0
     mismatch = None

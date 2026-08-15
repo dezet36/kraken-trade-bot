@@ -64,6 +64,17 @@ class TestMarketsAreRememberedByName:
         assert rows[0]['question'] == '—', 'врать название нельзя'
 
 
+    def test_working_markets_are_remembered_too(self):
+        """
+        Отбор отдаёт горсть лучших, но позиция может остаться на рынке, который
+        из отбора уже выпал. Пополняем справочник тем, что котируем сейчас.
+        """
+        text = open(os.path.join(ROOT, 'polymarket', 'mm.py'),
+                    encoding='utf-8').read()
+        spot = text.index('def step(')
+        assert 'remember_markets(markets)' in text[spot:spot + 2500]
+
+
 class TestOnePositionCannotSinkTheAccount:
 
     def test_the_limit_is_a_share_of_cost(self):
