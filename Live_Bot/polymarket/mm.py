@@ -276,6 +276,20 @@ def step(maker, markets, live=False, day_loss=0.0):
                 cancelled += 1
             mismatch = check
 
+    # ЛЕНТЫ БЕРУТСЯ ОДНИМ ПАКЕТОМ НА ВЕСЬ ТАКТ, А НЕ ПО ОДНОЙ НА РЫНОК.
+    #
+    # Здесь стоял отдельный сетевой запрос внутри цикла по рынкам: десять
+    # рынков — десять запросов, и каждый со своей задержкой. Такт растягивался
+    # на минуты, а котировки за это время устаревали. Ровно эта же ошибка уже
+    # исправлялась в отборе — там пакетная выборка сократила семь минут до
+    # сорока восьми секунд, — но в торговом цикле осталась.
+    #
+    # Берём только те рынки, где у нас есть заявки: остальным лента не нужна.
+    need_tape = [m['condition_id'] for token, m in by_token.items()
+                 if ((maker._slot(token).get('orders') or {}).get('bid')
+                     or (maker._slot(token).get('orders') or {}).get('ask'))]
+    tapes = book_mod.tape_many(need_tape) if need_tape else {}
+
     exposure = maker.exposure(marks)
 
     # СРОК УДЕРЖАНИЯ ПРОВЕРЯЕТСЯ КАЖДЫЙ ТАКТ, и до сих пор он не проверялся
@@ -333,7 +347,7 @@ def step(maker, markets, live=False, day_loss=0.0):
         has_orders = ((slot.get('orders') or {}).get('bid')
                       or (slot.get('orders') or {}).get('ask'))
         if has_orders:
-            tape = book_mod.tape(market['condition_id'], limit=200)
+            tape = tapes.get(market['condition_id']) or []
             if live:
                 # МОДЕЛЬ ИДЁТ РЯДОМ, А НЕ ВМЕСТО. В живом режиме позиции и
                 # деньги ведёт биржа; модель отвечает на свой вопрос и

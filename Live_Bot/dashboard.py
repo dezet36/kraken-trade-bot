@@ -26,7 +26,7 @@ import os
 import sys
 import threading
 from datetime import datetime
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import config
 import scan_report
@@ -1701,7 +1701,17 @@ def start_dashboard(port=None, trade_manager=None, broker=None, host=None):
     host = host or config.DASHBOARD_HOST
 
     try:
-        server = HTTPServer((host, port), _Handler)
+        # СЕРВЕР МНОГОПОТОЧНЫЙ, И ЭТО НЕ ОПТИМИЗАЦИЯ, А ИСПРАВЛЕНИЕ.
+        #
+        # Обычный HTTPServer обрабатывает запросы ПО ОДНОМУ. Снимок Polymarket
+        # ходит на биржу трижды — остаток, заявки, сделки, — и на это время
+        # замирала ВСЯ панель: страница не открывалась, кнопки не отвечали,
+        # снаружи это выглядело как зависшее приложение. Наблюдалось прямо на
+        # запуске: процесс жив, порт слушает, а ответа нет две минуты.
+        #
+        # Потоки демонские: сервер не должен удерживать выход из программы.
+        server = ThreadingHTTPServer((host, port), _Handler)
+        server.daemon_threads = True
     except Exception as exc:
         log(f"⚠️ Дашборд не запущен ({host}:{port}): {exc}")
         return None
