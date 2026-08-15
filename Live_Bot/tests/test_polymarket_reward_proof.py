@@ -74,9 +74,15 @@ class TestRewardBeatsAModelEstimate:
     проверена отправкой и платится независимо от того, закроется круг или нет.
     """
 
-    def _market(self, pool, per_hour, depth=400.0, price=0.5):
+    def _market(self, pool, per_hour, depth=400.0, price=0.5, rivals=200.0):
+        # ОЧКИ НАГРАДЫ ЗАДАЮТСЯ ЯВНО, как их считает отбор по живой книге:
+        # допуск 4.5 цента, шаг тик, отсюда вес одной заявки 0.605. Без этих
+        # полей награда честно равна нулю — считать долю не из чего.
         return {'id': 'M', 'question': 'рынок', 'condition_id': 'C',
                 'rewards_daily': pool, 'rewardsMinSize': 20,
+                'rewardsMaxSpread': 4.5, 'tick': 0.01,
+                'reward_unit': selector._spread_score(0.045, 0.01),
+                'reward_rivals': rivals,
                 'price': price, 'order_min': 5, 'size': 5,
                 'cost': selector.quote_cost(5, price),
                 'bid_usd': depth, 'ask_usd': depth, 'liquidity': depth,

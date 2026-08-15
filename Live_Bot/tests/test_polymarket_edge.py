@@ -270,6 +270,12 @@ class TestFlowIsNotABurst:
     Медиана по нашим шестнадцати рынкам: НОЛЬ сделок в час, а с последней
     сделки прошло 6.6 часа. При этом девять заявок из семнадцати стояли ПЕРВЫМИ
     в очереди — позиция была прекрасной, торговать было не с кем.
+
+    ПЕРЕНОСА ЗНАМЕНАТЕЛЯ НА «ДО СЕЙЧАС» ОКАЗАЛОСЬ МАЛО. Усреднение за сутки всё
+    равно выдавало вчерашнюю толчею за сегодняшний поток: следующий отбор обещал
+    круг в 46 минут на рынке, молчавшем восемь часов. Вес сделки теперь падает
+    как exp(−возраст/срок) — ровный рынок оценивается по-прежнему, сгусток
+    двадцатичасовой давности сжимается в семьсот раз.
     """
 
     def _rate(self, monkeypatch, ages_hours):
@@ -292,26 +298,94 @@ class TestFlowIsNotABurst:
     def test_an_old_burst_is_not_a_fast_market(self, monkeypatch):
         """
         Пять сделок по десять контрактов, все двадцать часов назад. Рынок с тех
-        пор молчит, и честная скорость — 50 контрактов за 20 часов, то есть 2.5
-        в час. Прежний счёт делил на промежуток МЕЖДУ сделками (двенадцать
-        минут, снизу ограниченные получасом) и давал 100 в час — сорокакратное
-        завышение.
+        пор молчит — и звать нас туда нечему. Прежний счёт делил на промежуток
+        МЕЖДУ сделками и давал сто контрактов в час; вес свежести оставляет от
+        сгустка сотые доли.
         """
         row = self._rate(monkeypatch, [20.0, 20.05, 20.1, 20.15, 20.2])
-        assert row['flow_in'] == pytest.approx(2.5, rel=0.1)
+        assert row['flow_in'] < 0.1
 
     def test_a_steady_market_keeps_its_rate(self, monkeypatch):
-        """Те же пять сделок за последние два с половиной часа — скорость выше."""
-        row = self._rate(monkeypatch, [0.5, 1.0, 1.5, 2.0, 2.5])
-        assert row['flow_in'] > 15
+        """
+        Ровный рынок оценивается ЧЕСТНО, а не занижается заодно со сгустком.
+
+        Десять контрактов в час ровно сутки подряд обязаны и остаться десятью:
+        вес и знаменатель — один и тот же интеграл, и для постоянной скорости
+        они сокращаются.
+        """
+        row = self._rate(monkeypatch, [h + 0.5 for h in range(24)])
+        assert 8 < row['flow_in'] < 12
 
     def test_silence_lowers_the_rate(self, monkeypatch):
         """Та же горсть сделок, но давно — скорость обязана быть ниже."""
         fresh = self._rate(monkeypatch, [0.2, 0.4, 0.6])
         stale = self._rate(monkeypatch, [18.0, 18.2, 18.4])
-        assert stale['flow_in'] < fresh['flow_in'] / 5
+        assert stale['flow_in'] < fresh['flow_in'] / 50
 
-    def test_the_denominator_is_time_since_the_first_trade(self):
+    def test_yesterdays_rush_does_not_promise_a_fast_round_trip(self,
+                                                               monkeypatch):
+        """
+        Замер, ради которого всё и переделано.
+
+        Восемьсот контрактов прошли за двадцать минут — и было это восемь часов
+        назад. Прежний счёт делил их на промежуток МЕЖДУ сделками и обещал круг
+        за двадцать две секунды. Вес свежести оставляет от той скорости
+        девятипроцентную долю, и обещание становится полчаса с лишним —
+        поправка в полтораста раз.
+
+        Больше от этой заготовки требовать нечего: рынок и правда торговал, и
+        сказать «никогда» о нём было бы такой же неправдой, как «сейчас».
+        """
+        import time
+
+        from polymarket import book as book_mod, selector
+
+        now = time.time()
+        trades = [{'ts': now - (8 + i * 0.02) * 3600, 'price': p, 'size': 20.0,
+                   'side': s, 'asset': 'T'}
+                  for i in range(20) for p, s in [(0.20, 'SELL'),
+                                                  (0.24, 'BUY')]]
+        monkeypatch.setattr(book_mod, 'tape_many', lambda conds: {'C': trades})
+        row = {'token_id': 'T', 'token_no': 'N', 'condition_id': 'C',
+               'tick': 0.01, 'order_min': 5, 'size': 5,
+               'bid_usd': 500.0, 'ask_usd': 500.0}
+        selector.measure_wait([row], {'T': {'bids': [(0.20, 500.0)],
+                                            'asks': [(0.24, 500.0)]}})
+        assert row['wait_hours'] > 0.5
+
+    def test_the_step_is_chosen_by_income_not_by_spread(self, monkeypatch):
+        """
+        ОЧЕРЕДЬ ВХОДИТ В ВЫБОР ШАГА, и без неё выбиралось худшее.
+
+        Спред три тика, поток 158 контрактов в час, впереди 2000:
+
+            шаг 0:  берём 0.03, но стоим за очередью → круг 18.8 часа
+            шаг 1:  берём 0.01 при пустой очереди    → круг 0.05 часа
+
+        Прежняя мера — «спред на поток» — предпочитала первый, потому что
+        тройной спред перевешивал. А он в четыреста раз медленнее, и рынок
+        отсеивался как безнадёжный при круге в три минуты.
+        """
+        import time
+
+        from polymarket import book as book_mod, selector
+
+        now = time.time()
+        trades = [{'ts': now - 600, 'price': 0.49, 'size': 500.0,
+                   'side': 'SELL', 'asset': 'T'},
+                  {'ts': now - 300, 'price': 0.52, 'size': 500.0,
+                   'side': 'BUY', 'asset': 'T'}]
+        monkeypatch.setattr(book_mod, 'tape_many', lambda conds: {'C': trades})
+        row = {'token_id': 'T', 'token_no': 'N', 'condition_id': 'C',
+               'tick': 0.01, 'order_min': 5, 'size': 5,
+               'bid_usd': 1000.0, 'ask_usd': 1000.0}
+        selector.measure_wait([row], {'T': {'bids': [(0.49, 2000.0)],
+                                            'asks': [(0.52, 2000.0)]}})
+        assert row['step_ticks'] == 1, 'встали бы за очередь из двух тысяч'
+        assert row['wait_hours'] < 1
+
+    def test_the_weight_decays_with_age(self):
         text = open(os.path.join(ROOT, 'polymarket', 'selector.py'),
                     encoding='utf-8').read()
-        assert "span = max((now - min(t['ts'] for t in mine))" in text
+        assert "t['weight'] = math.exp(-((now - t['ts']) / 3600) / decay)" in text
+        assert "t['size'] * t['weight']" in text

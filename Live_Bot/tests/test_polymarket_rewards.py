@@ -27,9 +27,13 @@ import pytest  # noqa: E402
 from polymarket import params, selector  # noqa: E402
 
 
-def _market(pool=20.0, min_size=20, depth=400.0, price=0.5, per_hour=0.01):
+def _market(pool=20.0, min_size=20, depth=400.0, price=0.5, per_hour=0.01,
+            rivals=200.0, allowance=4.5):
     return {'id': 'M', 'question': 'рынок', 'condition_id': 'C',
             'rewards_daily': pool, 'rewardsMinSize': min_size,
+            'rewardsMaxSpread': allowance, 'tick': 0.01,
+            'reward_unit': selector._spread_score(allowance / 100.0, 0.01),
+            'reward_rivals': rivals,
             'price': price, 'order_min': 5, 'size': 5,
             'cost': selector.quote_cost(5, price),
             'bid_usd': depth, 'ask_usd': depth, 'liquidity': depth,
@@ -38,23 +42,74 @@ def _market(pool=20.0, min_size=20, depth=400.0, price=0.5, per_hour=0.01):
             'queue_in': 0.0, 'queue_out': 0.0, 'event_id': None}
 
 
-class TestRewardBelowTheThresholdIsZero:
+class TestTheFormulaMatchesThePayout:
+    """
+    ЗДЕСЬ БЫЛО ЗАПИСАНО НЕВЕРНОЕ УБЕЖДЕНИЕ, И ЕГО ОПРОВЕРГЛА ВЫПЛАТА.
 
-    def test_five_contracts_earn_nothing(self):
-        """Наши пять против минимума в двадцать — биржа не засчитывает."""
-        assert selector.reward_per_hour(_market(), 5) == 0.0
+    Считалось, что заявка меньше `rewardsMinSize` не участвует вовсе. Биржа
+    заплатила за пять контрактов при пороге двадцать:
 
-    def test_the_threshold_itself_earns(self):
-        assert selector.reward_per_hour(_market(), 20) > 0
+        рынок «Democratic House retirements»
+            наша заявка   SELL 0.436, пять контрактов, одна сторона
+            заплачено     $0.076684 за сутки
+            формула даёт  $0.073111 — расхождение 5%
+
+    Порог решает, попадёт ли заявка в отдельный список поощряемых; очки же
+    начисляются и без него. Прежний расчёт — доля наших долларов в общей
+    глубине — обещал по этому рынку $0.0011, то есть в семьдесят раз меньше
+    того, что пришло.
+    """
+
+    def test_below_the_threshold_still_earns(self):
+        assert selector.reward_per_hour(_market(), 5) > 0
+
+    def test_the_threshold_itself_earns_more(self):
+        assert (selector.reward_per_hour(_market(), 20)
+                > selector.reward_per_hour(_market(), 5))
 
     def test_a_market_without_rewards_earns_nothing(self):
         assert selector.reward_per_hour(_market(pool=0), 20) == 0.0
 
+    def test_distance_from_the_middle_counts_squared(self):
+        """
+        Вдвое дальше от середины — вчетверо меньше очков. Это и есть та часть
+        формулы, из-за которой стоять близко важнее, чем стоять крупно.
+        """
+        near = selector._spread_score(0.04, 0.01)
+        far = selector._spread_score(0.04, 0.025)
+        assert near == pytest.approx((0.75) ** 2)
+        assert far == pytest.approx((0.375) ** 2)
+        assert selector._spread_score(0.04, 0.04) == 0.0
+
+    def test_one_side_earns_a_third_inside_the_band(self):
+        cheap = selector.reward_per_hour(_market(price=0.5), 20, one_sided=True)
+        both = selector.reward_per_hour(_market(price=0.5), 20)
+        assert cheap < both
+
+    def test_one_side_earns_nothing_outside_the_band(self):
+        """
+        ПРИЧИНА ВОСЬМИ ЦЕНТОВ ЗА СУТКИ. Вне полосы 0.10..0.90 зачёт равен
+        min(Q₁, Q₂), и одна сторона даёт ровно ноль. Живой счёт стоял ценами
+        0.036, 0.041, 0.05, 0.074 — и ни одной двусторонней котировки.
+        """
+        assert selector.reward_per_hour(_market(price=0.05), 20,
+                                        one_sided=True) == 0.0
+        assert selector.reward_per_hour(_market(price=0.05), 20) > 0
+
     def test_our_share_falls_as_the_book_grows(self):
-        """Доля считается честно: чем толще книга, тем меньше наша часть."""
-        thin = selector.reward_per_hour(_market(depth=100), 20)
-        thick = selector.reward_per_hour(_market(depth=10_000), 20)
+        """Доля считается честно: чем больше чужих очков, тем меньше наша часть."""
+        thin = selector.reward_per_hour(_market(rivals=10), 20)
+        thick = selector.reward_per_hour(_market(rivals=10_000), 20)
         assert thin > thick * 10
+
+    def test_without_a_book_there_is_no_estimate(self):
+        """
+        Молчаливая единица здесь была бы хуже нуля: она вернула бы прежнее
+        враньё под новым именем.
+        """
+        blind = dict(_market())
+        blind.pop('reward_unit')
+        assert selector.reward_per_hour(blind, 20) == 0.0
 
 
 class TestTheEmptyBookTrapStaysShut:

@@ -35,6 +35,7 @@
 """
 
 import json
+import math
 import time
 from datetime import datetime, timezone
 
@@ -229,6 +230,12 @@ def scan(budget=None, limit=None, pages=30, min_volume=None,
             # исполнятся только тогда, когда кому-то станет ясно, куда идёт
             # цена, — то есть против нас.
             'spread_share': round(top['spread'] / max(top['mid'], 1e-9), 4),
+            # ОЧКИ НАГРАДЫ СЧИТАЮТСЯ ЗДЕСЬ, ПОТОМУ ЧТО ЗДЕСЬ ЕСТЬ КНИГА.
+            # Ниже по течению остаются только числа, а доля в награде зависит
+            # от КАЖДОГО уровня чужих заявок с его весом. Считать её по общей
+            # глубине — то, что делалось раньше, — значит не считать вовсе.
+            'reward_rivals': round(_rival_score(live, top['mid'], row), 3),
+            'reward_unit': round(_own_unit(top['mid'], row), 5),
         })
         good.append(row)
 
@@ -331,39 +338,109 @@ def _measured_factor():
         return 1.0
 
 
-def reward_per_hour(row, size):
+# Множитель площадки за одностороннюю ликвидность. Стоя одной стороной, мы
+# получаем треть очков — и только в полосе цен 0.10..0.90. Вне полосы одна
+# сторона не приносит НИЧЕГО.
+REWARD_ONE_SIDED_PENALTY = 3.0
+
+
+def _spread_score(allowance, distance):
+    """
+    Очки за одну заявку: ((допуск − расстояние) / допуск)².
+
+    Формула площадки, а не наша выдумка. Квадрат означает, что расстояние до
+    середины важнее размера: заявка на полпути к границе допуска приносит
+    четверть того, что заявка вплотную к середине.
+    """
+    if allowance <= 0 or distance < 0 or distance >= allowance:
+        return 0.0
+    return ((allowance - distance) / allowance) ** 2
+
+
+def _rival_score(live, mid, row):
+    """Очки ЧУЖИХ заявок — то, с чем мы делим пул."""
+    allowance = float(row.get('rewardsMaxSpread') or 0) / 100.0
+    if allowance <= 0 or not live:
+        return 0.0
+    bids = sum(_spread_score(allowance, mid - price) * size
+               for price, size in (live.get('bids') or []))
+    asks = sum(_spread_score(allowance, price - mid) * size
+               for price, size in (live.get('asks') or []))
+    return _qualifying(bids, asks, mid)
+
+
+def _own_unit(mid, row):
+    """Очки за ОДИН контракт, если встать в тике от середины."""
+    allowance = float(row.get('rewardsMaxSpread') or 0) / 100.0
+    return _spread_score(allowance, float(row.get('tick') or 0.01))
+
+
+def _qualifying(one, two, mid):
+    """
+    Зачётные очки из двух сторон — правило площадки целиком.
+
+    В полосе 0.10..0.90 односторонняя ликвидность засчитывается с делением на
+    три. Вне полосы — только двусторонняя: там min(одна, ноль) = ноль.
+    """
+    if 0.10 <= mid <= 0.90:
+        return max(min(one, two), max(one, two) / REWARD_ONE_SIDED_PENALTY)
+    return min(one, two)
+
+
+def reward_per_hour(row, size, one_sided=False):
     """
     Сколько награда даст в час, если поставить столько-то контрактов.
 
-    НАГРАДА ПЛАТИТСЯ ЗА ЛИКВИДНОСТЬ, А НЕ ЗА СДЕЛКИ, и это другой источник
-    дохода, чем спред. Биржа делит дневной пул между теми, кто стоит близко к
-    середине, пропорционально выставленному объёму. Значит наша доля — это наш
-    объём против всего, что стоит в книге.
+    ФОРМУЛА ВЗЯТА У ПЛОЩАДКИ И СВЕРЕНА С ВЫПЛАТОЙ. Прежний расчёт делил пул
+    пропорционально нашим долларам против всей глубины книги, и врал в обе
+    стороны разом: на рынке «Democratic House retirements» он обещал $0.0011 в
+    сутки там, где биржа заплатила $0.0767 — в семьдесят раз меньше factum, — а
+    по счёту в целом сулил $2.85 в сутки при настоящих восьми центах.
 
-    ПОРОГ РАЗМЕРА ОБЯЗАТЕЛЕН: заявка меньше rewardsMinSize не участвует вовсе.
-    Спрошено у самой биржи про наши пятнадцать стоящих заявок — под награду не
-    попадала НИ ОДНА, потому что мы ставим пять контрактов, а минимум везде
-    двадцать.
+    Настоящий счёт устроен иначе:
 
-    ЛОВУШКА, В КОТОРУЮ ЭТОТ РАСЧЁТ ЗАВОДИТ, ОПИСАНА В ЗАГОЛОВКЕ МОДУЛЯ И
-    СТОИЛА УЖЕ ТРЁХ РАЗБОРОВ. Отношение награды к ликвидности поднимает наверх
-    ПУСТЫЕ книги: пул $3 при книге в $2 даёт «2744% в месяц», и это не доход, а
-    приглашение стать всем рынком сразу. Поэтому функция считает долю честно —
-    от полной глубины, — а отсев по качеству книги остаётся выше и снимается
-    только через свой параметр.
+        S(v, s) = ((v − s) / v)²      v — допуск рынка, s — до середины
+        Q       = сумма S × размер по каждой стороне
+        зачёт   = max(min(Q₁, Q₂), max(Q₁, Q₂)/3)   при цене 0.10..0.90
+                = min(Q₁, Q₂)                       вне этой полосы
+        доля    = наш зачёт / (наш + чужой) × дневной пул
+
+    ПРОВЕРЕНО НА ВЫПЛАТЕ: для нашей заявки в пять контрактов одной стороной
+    формула даёт $0.0731 в сутки, биржа заплатила $0.0767. Расхождение 5%.
+
+    ДВА СЛЕДСТВИЯ, КОТОРЫХ НЕ БЫЛО В ПРЕЖНЕЙ МОДЕЛИ. Первое: расстояние до
+    середины входит В КВАДРАТЕ, поэтому стоять близко важнее, чем стоять
+    крупно. Второе: вне полосы 0.10..0.90 односторонняя котировка не приносит
+    ничего — а именно дешёвые рынки мы и выбирали, и именно на них стояли
+    одной стороной.
+
+    ПОРОГ РАЗМЕРА НЕ ОБНУЛЯЕТ. Здесь было записано обратное со ссылкой на
+    ответ биржи о скоринге, и это оказалось неверно: заплатили как раз за
+    пять контрактов при «пороге» двадцать. Порог решает, попадёт ли заявка в
+    отдельный список поощряемых, но очки начисляются и без него.
+
+    ЛОВУШКА, КОТОРАЯ НИКУДА НЕ ДЕЛАСЬ И СТОИЛА УЖЕ ТРЁХ РАЗБОРОВ. Доля тем
+    больше, чем меньше чужих очков, — и наверх всплывают ПУСТЫЕ книги: пул $3
+    при книге в $2 даёт «2744% в месяц», что означает не доход, а приглашение
+    стать всем рынком сразу. Формула считает честно и потому в эту ловушку
+    заводит сама; держит вход закрытым отсев по глубине книги ВЫШЕ, и снимать
+    его можно только своим параметром.
     """
     pool = float(row.get('rewards_daily') or 0)
-    if pool <= 0:
+    if pool <= 0 or size <= 0:
         return 0.0
-    floor = float(row.get('rewardsMinSize') or 0)
-    if floor and size < floor:
-        return 0.0                      # меньше порога — не участвуем вовсе
-    price = float(row.get('price') or row.get('meta_price') or 0.5)
-    depth = min(float(row.get('bid_usd') or 0), float(row.get('ask_usd') or 0))
-    ours = float(size) * price
-    if ours <= 0:
+    unit = float(row.get('reward_unit') or 0)
+    if unit <= 0:
+        # Книги под рукой нет — считать нечем. Молчаливая единица здесь была бы
+        # хуже нуля: она вернула бы прежнее враньё под новым именем.
         return 0.0
-    return pool * ours / max(depth + ours, 1e-9) / 24.0
+    mid = float(row.get('price') or 0.5)
+    ours = unit * float(size)
+    mine = _qualifying(ours, 0.0, mid) if one_sided else ours
+    if mine <= 0:
+        return 0.0
+    rivals = float(row.get('reward_rivals') or 0)
+    return pool * mine / (mine + rivals) / 24.0
 
 
 def reward_size(row):
@@ -385,6 +462,22 @@ def _step_options(ticks):
     return [0] + [d for d in (1, 2, 3, 5, 8, 12) if d <= room]
 
 
+def _both_wait(queue_in, queue_out, size, flow_in, flow_out):
+    """
+    Часы до того, как исполнятся ОБЕ стороны. Бесконечность, если одной нет.
+
+    Для независимых ожиданий со средними a и b среднее время, когда случатся
+    оба, равно a + b − ab/(a+b): всегда меньше суммы и всегда больше большего
+    из двух.
+    """
+    if flow_in <= 0 or flow_out <= 0:
+        return float('inf')
+    wait_in = (queue_in + size) / flow_in
+    wait_out = (queue_out + size) / flow_out
+    total = wait_in + wait_out
+    return total - (wait_in * wait_out / total) if total > 0 else 0.0
+
+
 def _recompute_wait(row):
     """
     Ожидание и доход под окончательный размер заявки.
@@ -399,18 +492,10 @@ def _recompute_wait(row):
     сторонах, то есть занижало доход настолько же.
     """
     size = float(row['size'])
-    flow_in = float(row.get('flow_in') or 0)
-    flow_out = float(row.get('flow_out') or 0)
-    wait_in = ((row.get('queue_in', 0) + size) / flow_in
-               if flow_in > 0 else float('inf'))
-    wait_out = ((row.get('queue_out', 0) + size) / flow_out
-                if flow_out > 0 else float('inf'))
-    if wait_in == float('inf') or wait_out == float('inf'):
-        both = float('inf')
-    else:
-        total = wait_in + wait_out
-        both = total - (wait_in * wait_out / total) if total > 0 else 0.0
-    row['wait_hours'] = round(both, 3)
+    both = _both_wait(row.get('queue_in', 0), row.get('queue_out', 0), size,
+                      float(row.get('flow_in') or 0),
+                      float(row.get('flow_out') or 0))
+    row['wait_hours'] = round(both, 3) if both != float('inf') else both
     row['usd_per_hour'] = round(size * row['our_gain'] / row['wait_hours'], 5)         if row['wait_hours'] not in (0, float('inf')) else 0.0
     return row
 
@@ -509,24 +594,33 @@ def measure_wait(rows, books, limit=None):
         trades = tapes.get(row['condition_id']) or []
         mine = [t for t in as_yes(trades, row['token_id'], row.get('token_no'))
                 if now - t['ts'] < day]
-        # ПОТОК ДЕЛИТСЯ НА ПРОШЕДШЕЕ ВРЕМЯ, А НЕ НА ПРОМЕЖУТОК МЕЖДУ СДЕЛКАМИ.
+        # СКОРОСТЬ СЧИТАЕТСЯ ПО СВЕЖЕСТИ, А НЕ СРЕДНИМ ЗА СУТКИ.
         #
         # ЗДЕСЬ БЫЛА ГЛАВНАЯ ПРИЧИНА, ПО КОТОРОЙ НИЧЕГО НЕ ИСПОЛНЯЛОСЬ.
         # Знаменателем служил промежуток от первой сделки до последней — и
-        # сгусток превращался в мнимую скорость. Замерено на живых рынках, где
-        # мы стояли заявками:
+        # сгусток превращался в мнимую скорость. Первая правка перенесла
+        # знаменатель на «до сейчас», но этого мало: усреднение за сутки всё
+        # равно выдаёт вчерашнюю толчею за сегодняшний поток.
         #
-        #     «Republicans win Arkansas»  7 сделок за сутки, все за 15 минут
-        #                                 старый счёт: 27.5 сделок в час
-        #                                 на деле:      0.3 в час, тишина 2.9ч
+        #     «Arc launch a token»   обещанный круг 46 минут
+        #                            тишина на деле восемь часов
+        #     «Base FDV above $10B»  обещанный круг 43 минуты
+        #                            тишина на деле семь часов
         #
-        # Медиана по нашим шестнадцати рынкам: НОЛЬ сделок в час, а с последней
-        # сделки прошло 6.6 часа. При этом девять заявок из семнадцати стояли
-        # ПЕРВЫМИ в очереди — позиция была прекрасной, торговать было не с кем.
+        # Заявка стоит СЕЙЧАС, и значение имеет то, что происходит сейчас.
+        # Вес сделки падает как exp(−возраст/срок), знаменатель — тот же
+        # интеграл по окну. Для рынка с ровным потоком оценка не меняется: за
+        # сутки при сроке в три часа интеграл равен трём часам, и десять
+        # контрактов в час так и остаются десятью. Сгусток же двадцатичасовой
+        # давности сжимается в семьсот раз и перестаёт звать нас на мёртвый
+        # рынок.
         #
-        # Правильный знаменатель — время от первой сделки в окне ДО СЕЙЧАС:
-        # тишина после сгустка входит в него и честно опускает скорость.
-        span = max((now - min(t['ts'] for t in mine)) / 3600, 0.5) if mine else 1.0
+        # Проверка вселенной, 400 рынков наугад: за час торгует лишь 11%.
+        # Мёртвый рынок — это НОРМА, и отбор обязан отличать его на глаз.
+        decay = max(params.MM_FLOW_DECAY_HOURS, 1e-6)
+        for t in mine:
+            t['weight'] = math.exp(-((now - t['ts']) / 3600) / decay)
+        span = decay * (1 - math.exp(-(day / 3600) / decay))
         top = row.get('top') or (book_mod.top(live) if live else None)
         if not top or not live:
             row['wait_hours'] = float('inf')
@@ -535,8 +629,8 @@ def measure_wait(rows, books, limit=None):
                  if t['side'] == 'SELL' and t['price'] <= top['bid'] + 1e-9]
         buys = [t for t in mine
                 if t['side'] == 'BUY' and t['price'] >= top['ask'] - 1e-9]
-        flow_in = sum(t['size'] for t in sells) / span
-        flow_out = sum(t['size'] for t in buys) / span
+        flow_in = sum(t['size'] * t['weight'] for t in sells) / span
+        flow_out = sum(t['size'] * t['weight'] for t in buys) / span
         size = row.get('size') or params.MM_MIN_ORDER_SIZE
         ticks = int(round(top['spread'] / row['tick'])) if row['tick'] > 0 else 0
 
@@ -554,8 +648,21 @@ def measure_wait(rows, books, limit=None):
         # выросло вдесятеро. По четырём рынкам подбор дал вдевятеро больше
         # жёсткого тика.
         #
-        # Берём шаг с наибольшим произведением «что остаётся» на «что
-        # доходит»: это и есть доход в единицу времени с точностью до размера.
+        # ШАГ ВЫБИРАЕТСЯ ПО ДОХОДУ В ЧАС, А НЕ ПО ПРОИЗВЕДЕНИЮ «СПРЕД НА ПОТОК».
+        #
+        # Прежняя мера не смотрела на ОЧЕРЕДЬ и потому раз за разом выбирала
+        # худшее. Разобрано на проверке, которая это и поймала:
+        #
+        #     спред три тика, поток 158 контрактов в час, впереди 2000
+        #         шаг 0:  берём 0.03, но стоим за очередью → круг 18.8 часа
+        #         шаг 1:  берём 0.01 при пустой очереди    → круг 0.05 часа
+        #
+        # Старая мера предпочитала первый: тройной спред перевешивал. А он в
+        # четыреста раз медленнее, и рынок отсеивался как безнадёжный — при том
+        # что круг там три минуты.
+        #
+        # Доход в час — это «что остаётся», делённое на время круга, и очередь
+        # входит в него там, где ей место.
         best = None
         for depth in _step_options(ticks):
             if depth == 0:
@@ -569,11 +676,13 @@ def measure_wait(rows, books, limit=None):
             take = price_ask - price_bid
             if take <= 0:
                 continue
-            f_in = sum(t['size'] for t in mine if t['side'] == 'SELL'
+            f_in = sum(t['size'] * t['weight'] for t in mine
+                       if t['side'] == 'SELL'
                        and t['price'] <= price_bid + 1e-9) / span
-            f_out = sum(t['size'] for t in mine if t['side'] == 'BUY'
+            f_out = sum(t['size'] * t['weight'] for t in mine
+                        if t['side'] == 'BUY'
                         and t['price'] >= price_ask - 1e-9) / span
-            score = take * min(f_in, f_out)
+            score = take / _both_wait(q_in, q_out, size, f_in, f_out)
             if best is None or score > best['score']:
                 best = {'score': score, 'depth': depth, 'gain': take,
                         'flow_in': f_in, 'flow_out': f_out,
@@ -761,20 +870,43 @@ def allocate(markets, budget=None):
     taken = {id(m) for m in chosen}
     pool = [m for m in markets
             if id(m) not in taken and m.get('pays_reward')]
+    # СТОРОННОСТЬ ВЫБИРАЕТСЯ СЧЁТОМ, А НЕ УМОЛЧАНИЕМ.
+    #
+    # Одна сторона даёт треть очков, но и стоит она min(p, 1−p) вместо целого
+    # доллара за контракт. На рынке по 0.26 это втрое меньше очков за впятеро
+    # меньшие деньги — то есть выгоднее. А на рынке по 0.05 одна сторона даёт
+    # РОВНО НОЛЬ: вне полосы 0.10..0.90 зачёт равен min(Q₁, Q₂).
+    #
+    # Поэтому считаем оба способа и берём тот, что даёт больше на вложенный
+    # доллар. Замер по всей выдаче: при $40 лучшая раскладка — двадцать рынков,
+    # пять из них двусторонних, $1.85 награды в сутки. Наш прежний счёт при том
+    # же бюджете принёс восемь центов.
     for market in pool:
         market['reward_stake'] = reward_size(market)
     pool = [m for m in pool if m['reward_stake']]
     for market in pool:
-        market['reward_rate'] = (reward_per_hour(market, market['reward_stake'])
-                                 / max(quote_cost(market['reward_stake'],
-                                                  market['price']), 1e-9))
+        best = None
+        for one_sided in (True, False):
+            size = market['reward_stake']
+            cost = quote_cost(size, market['price'], one_sided=one_sided)
+            gain = reward_per_hour(market, size, one_sided=one_sided)
+            if gain <= 0 or cost <= 0:
+                continue
+            rate = gain / cost
+            if best is None or rate > best['rate']:
+                best = {'rate': rate, 'one_sided': one_sided, 'cost': cost,
+                        'gain': gain}
+        market['reward_rate'] = best['rate'] if best else 0.0
+        market['reward_plan'] = best
+    pool = [m for m in pool if m.get('reward_plan')]
     pool.sort(key=lambda m: -m['reward_rate'])
     for market in pool:
         size = market['reward_stake']
-        cost = quote_cost(size, market['price'])
+        cost = market['reward_plan']['cost']
         if cost > cap or used + cost > budget:
             continue
-        gain = reward_per_hour(market, size)
+        gain = market['reward_plan']['gain']
+        market['reward_one_sided'] = market['reward_plan']['one_sided']
         if gain <= 0:
             continue
         market['size'] = size
@@ -787,8 +919,14 @@ def allocate(markets, budget=None):
         used += cost
 
     edge = sum(m['spread_share'] * m['cost'] / 2 for m in chosen)
-    rewards = sum(m['rewards_daily'] * m['cost'] / max(m['liquidity'] + m['cost'], 1)
-                  for m in chosen)
+    # СВОДКА ПО НАГРАДЕ СЧИТАЕТСЯ ТОЙ ЖЕ ФОРМУЛОЙ, ЧТО И ОТБОР. Здесь стояла
+    # своя — доля от глубины книги, — и панель показывала сотни процентов в
+    # месяц там, где биржа платила центы. Две разные формулы на одно число
+    # означают, что неверна хотя бы одна.
+    rewards = sum(
+        reward_per_hour(m, m['size'],
+                        one_sided=bool(m.get('reward_one_sided'))) * 24
+        for m in chosen)
     return {
         'markets': chosen, 'used': round(used, 2),
         'free': round(budget - used, 2), 'cap_per_market': round(cap, 2),
