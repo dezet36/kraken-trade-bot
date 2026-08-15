@@ -128,3 +128,45 @@ class TestPollingStaysAsTheFallback:
         text = open(os.path.join(ROOT, 'polymarket', 'stream.py'),
                     encoding='utf-8').read()
         assert 'ThreadedResolver()' in text
+
+
+class TestDeltasWithoutASnapshotAreNotABook:
+    """
+    Изменения уровней приходят и ДО первого снимка, и по ним собирается огрызок
+    из двух-трёх цен. Лучшая цена по такому огрызку выдумана.
+
+    Наблюдалось в работе: «край 0.119» там, где спред рынка полтора цента, и
+    одиннадцать котировок из двадцати пяти оказались без края вовсе.
+    """
+
+    def setup_method(self):
+        with stream._lock:
+            stream._books.clear()
+
+    def test_a_delta_alone_gives_nothing(self):
+        stream._apply_change({'price_changes': [
+            {'asset_id': 'T', 'price': '0.21', 'size': '30', 'side': 'BUY'},
+            {'asset_id': 'T', 'price': '0.90', 'size': '30', 'side': 'SELL'}]})
+        assert stream.top('T') is None, 'по двум уровням цену не выдумываем'
+        assert stream.book('T') is None
+
+    def test_a_snapshot_makes_it_usable(self):
+        stream._apply_change({'price_changes': [
+            {'asset_id': 'T', 'price': '0.21', 'size': '30', 'side': 'BUY'}]})
+        stream._apply_book({'asset_id': 'T',
+                            'bids': [{'price': '0.20', 'size': '100'}],
+                            'asks': [{'price': '0.24', 'size': '50'}]})
+        assert stream.top('T') is not None
+
+    def test_deltas_after_a_snapshot_still_work(self):
+        stream._apply_book({'asset_id': 'T',
+                            'bids': [{'price': '0.20', 'size': '100'}],
+                            'asks': [{'price': '0.24', 'size': '50'}]})
+        stream._apply_change({'price_changes': [
+            {'asset_id': 'T', 'price': '0.22', 'size': '10', 'side': 'BUY'}]})
+        assert stream.top('T')['bid'] == pytest.approx(0.22)
+
+    def test_unsynced_books_are_not_counted_as_fresh(self):
+        stream._apply_change({'price_changes': [
+            {'asset_id': 'T', 'price': '0.21', 'size': '30', 'side': 'BUY'}]})
+        assert stream.status()['fresh'] == 0

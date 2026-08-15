@@ -56,7 +56,7 @@ def status():
         out = dict(_state)
         out['books'] = len(_books)
         fresh = sum(1 for b in _books.values()
-                    if time.time() - b['at'] < FRESH_SECONDS)
+                    if b.get('synced') and time.time() - b['at'] < FRESH_SECONDS)
         out['fresh'] = fresh
     return out
 
@@ -70,7 +70,12 @@ def top(token):
     """
     with _lock:
         row = _books.get(str(token))
-        if not row:
+        if not row or not row.get('synced'):
+            # ДЕЛЬТЫ БЕЗ СНИМКА — НЕ КНИГА. Изменения уровней приходят и до
+            # первого снимка, и по ним собирается огрызок из двух-трёх цен.
+            # Лучшая цена по такому огрызку выдумана: наблюдалось «край 0.119»
+            # там, где спред рынка полтора цента, и одиннадцать котировок из
+            # двадцати пяти оказались без края вовсе.
             return None
         if time.time() - row['at'] > FRESH_SECONDS:
             return None
@@ -92,7 +97,8 @@ def book(token):
     """Полный стакан по потоку либо None. Форма как у book.fetch_many."""
     with _lock:
         row = _books.get(str(token))
-        if not row or time.time() - row['at'] > FRESH_SECONDS:
+        if (not row or not row.get('synced')
+                or time.time() - row['at'] > FRESH_SECONDS):
             return None
         return {'bids': list(row.get('bids') or []),
                 'asks': list(row.get('asks') or [])}
@@ -126,7 +132,10 @@ def _apply_book(payload):
     asks = [(float(x['price']), float(x['size']))
             for x in (payload.get('asks') or []) if x.get('price')]
     with _lock:
-        _books[token] = {'bids': bids, 'asks': asks, 'at': time.time()}
+        # СНИМОК ДЕЛАЕТ КНИГУ ПРИГОДНОЙ. До него у нас в лучшем случае
+        # несколько уровней из дельт, и «лучшая цена» по ним — выдумка.
+        _books[token] = {'bids': bids, 'asks': asks, 'at': time.time(),
+                         'synced': True}
 
 
 def _apply_change(payload):
@@ -148,7 +157,8 @@ def _apply_change(payload):
         side = 'bids' if str(change.get('side', '')).upper() == 'BUY' else 'asks'
         with _lock:
             row = _books.setdefault(token, {'bids': [], 'asks': [],
-                                            'at': time.time()})
+                                            'at': time.time(),
+                                            'synced': False})
             levels = [lvl for lvl in row[side] if abs(lvl[0] - price) > 1e-12]
             if size > 0:
                 levels.append((price, size))
