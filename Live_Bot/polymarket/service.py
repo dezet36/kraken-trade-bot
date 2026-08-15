@@ -86,6 +86,11 @@ def _loop(poll_seconds):
         return
 
     maker = engine.PaperMaker()
+    # РЫНКИ С ОТКРЫТОЙ ПОЗИЦИЕЙ ВОЗВРАЩАЮТСЯ В РАБОТУ. Свежий отбор их не
+    # знает: он смотрит, где выгодно вставать сейчас. А позиция живёт до
+    # закрытия, и закрыть её можно только котируя. Замерено в работе: десять
+    # позиций, восемь без котировки, треть счёта заморожена.
+    markets = mm.with_open_positions(markets, maker)
     live = wallet.status()['can_trade_live']
     log(f"◈ Polymarket: маркет-мейкер запущен, рынков {len(markets)}, "
         f"режим {'ЖИВЫЕ ДЕНЬГИ' if live else 'бумага'}, "

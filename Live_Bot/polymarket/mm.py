@@ -148,6 +148,48 @@ def _save_plan(plan):
         pass
 
 
+def with_open_positions(markets, maker):
+    """
+    Дописывает в рабочий список рынки, где у нас ОТКРЫТА позиция.
+
+    БЕЗ ЭТОГО ПОЗИЦИЯ ОСТАЁТСЯ БЕЗ ПРИСМОТРА, и замер это показал прямо в
+    работе: десять открытых позиций, восемь из них никто не котирует, $12.13
+    заморожено — треть счёта.
+
+    Причина в том, что при запуске рабочий список берётся из СВЕЖЕГО отбора.
+    Отбор смотрит, где выгодно вставать сейчас, и знать не знает, где мы
+    стояли вчера. Позиция при этом живёт до закрытия, а закрыть её можно
+    только котируя — наклон против запаса работает лишь пока мы в рынке.
+
+    Пересмотр списка (rotate) эту дыру не закрывает: он бережёт позиции в уже
+    имеющемся списке, но вернуть в него рынок, которого там нет, не может.
+
+    Названия и шаг цены берутся из справочника: рынка может уже не быть ни в
+    одном отборе, а закрывать позицию всё равно надо.
+    """
+    have = {str(m.get('token_id')) for m in markets}
+    known = known_markets()
+    extra = []
+    for token, slot in (maker.state.get('books') or {}).items():
+        if not slot.get('position') or str(token) in have:
+            continue
+        card = known.get(str(token)) or {}
+        extra.append({
+            'token_id': str(token),
+            'token_no': card.get('token_no'),
+            'condition_id': card.get('condition_id'),
+            'question': card.get('question') or '—',
+            'tick': float(card.get('tick') or 0.001),
+            'order_min': params.MM_MIN_ORDER_SIZE,
+            'size': params.MM_MIN_ORDER_SIZE,
+            # Шаг внутрь не выбираем: цель здесь не заработать спред, а выйти.
+            'step_ticks': 0,
+            'joined_ts': time.time(),
+            'holding_only': True,
+        })
+    return list(markets) + extra
+
+
 def rotate(maker, current, budget=None):
     """
     Пересматривает список рынков: уходит из затихших, входит в новые.
@@ -653,6 +695,7 @@ def main(loop=False):
         return
     markets = select_markets()
     maker = engine.PaperMaker()
+    markets = with_open_positions(markets, maker)
     state = wallet.status()
     live = state['can_trade_live']
 
