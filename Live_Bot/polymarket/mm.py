@@ -85,7 +85,8 @@ def select_markets(limit=None, min_liquidity=None, refresh=False, budget=None):
     from . import selector
 
     money = float(budget if budget is not None else params.bankroll_for('MM'))
-    rows = selector.scan(budget=money, limit=limit or params.MM_MARKETS)
+    rows = selector.scan(budget=money, limit=limit or params.MM_MARKETS,
+                         remember=remember_markets)
     plan = selector.allocate(rows, budget=money)
     CANDIDATES = plan['markets']
     remember_markets(rows)

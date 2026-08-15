@@ -133,7 +133,7 @@ def _candidates(pages, min_volume, price_lo, price_hi):
 
 
 def scan(budget=None, limit=None, pages=30, min_volume=None,
-         min_depth=None, min_balance=None):
+         min_depth=None, min_balance=None, remember=None):
     """
     Рынки, где двусторонняя котировка имеет смысл. Лучшие первыми.
 
@@ -152,6 +152,19 @@ def scan(budget=None, limit=None, pages=30, min_volume=None,
 
     rows = _candidates(pages, min_volume, params.MM_MIN_PRICE,
                        params.MM_MAX_PRICE)
+    # СПРАВОЧНИК ПОПОЛНЯЕТСЯ ВСЕМИ КАНДИДАТАМИ, А НЕ ТОЛЬКО ОТОБРАННЫМИ.
+    #
+    # Отбор оставляет горстку лучших, а позиция может пережить его и остаться
+    # на рынке, который больше никуда не проходит. Панель тогда показывает
+    # открытую позицию прочерком: названия взять неоткуда. Замерено в работе —
+    # семь позиций из тринадцати оказались без имени.
+    #
+    # Здесь же, до всякой фильтрации, названия есть у всех тысячи с лишним.
+    if remember:
+        try:
+            remember(rows)
+        except Exception:                                  # noqa: BLE001
+            pass                                           # справочник — удобство
     if not rows:
         return []
 

@@ -89,3 +89,49 @@ class TestBothEntryPointsUseIt:
                     encoding='utf-8').read()
         body = text[text.index('def main('):]
         assert 'with_open_positions(markets, maker)' in body
+
+
+class TestTheCatalogueCoversEveryCandidate:
+    """
+    Отбор оставляет горстку лучших, а позиция может пережить его и остаться на
+    рынке, который больше никуда не проходит. Панель тогда показывает открытую
+    позицию прочерком: названия взять неоткуда.
+
+    Замерено в работе: семь позиций из тринадцати оказались без имени.
+    """
+
+    def test_scan_hands_every_candidate_to_the_catalogue(self, monkeypatch):
+        from polymarket import selector
+
+        seen = []
+        pages = [[{'id': '1', 'question': 'рынок',
+                   'clobTokenIds': '["T","N"]',
+                   'outcomePrices': '["0.5","0.5"]',
+                   'spread': 0.02, 'volume': 100000, 'orderMinSize': 5,
+                   'orderPriceMinTickSize': 0.01,
+                   'endDate': '2027-01-01T00:00:00Z'}], []]
+        monkeypatch.setattr(selector.client, '_get',
+                            lambda url: pages.pop(0) if pages else [])
+        monkeypatch.setattr(selector.params, 'PAUSE', 0)
+        monkeypatch.setattr(selector.book_mod, 'fetch_many', lambda t: {})
+        selector.scan(budget=100, remember=seen.append)
+        assert seen and seen[0][0]['question'] == 'рынок'
+
+    def test_a_broken_catalogue_never_stops_the_scan(self, monkeypatch):
+        """Справочник — удобство: его сбой не имеет права уронить отбор."""
+        from polymarket import selector
+
+        pages = [[], []]
+        monkeypatch.setattr(selector.client, '_get',
+                            lambda url: pages.pop(0) if pages else [])
+        monkeypatch.setattr(selector.params, 'PAUSE', 0)
+
+        def boom(rows):
+            raise OSError('диск полон')
+
+        assert selector.scan(budget=100, remember=boom) == []
+
+    def test_select_markets_passes_it_through(self):
+        text = open(os.path.join(ROOT, 'polymarket', 'mm.py'),
+                    encoding='utf-8').read()
+        assert 'remember=remember_markets' in text
