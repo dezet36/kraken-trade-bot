@@ -135,3 +135,52 @@ class TestTheCatalogueCoversEveryCandidate:
         text = open(os.path.join(ROOT, 'polymarket', 'mm.py'),
                     encoding='utf-8').read()
         assert 'remember=remember_markets' in text
+
+
+class TestThePlaceholderNeverOverwritesARealName:
+    """
+    ТИХАЯ ПОРЧА СОБСТВЕННЫХ ДАННЫХ. Рынок с открытой позицией возвращается в
+    работу через with_open_positions, и если имени для него ещё нет, туда
+    ставится прочерк. Отсюда же он попадал обратно в справочник как
+    «название» — и рынок терял имя НАВСЕГДА, даже когда отбор позже приносил
+    настоящее.
+
+    Замерено: пять позиций из тринадцати остались прочерками при полностью
+    исправном справочнике.
+    """
+
+    def _catalogue(self, monkeypatch, tmp_path, start=None):
+        import json
+
+        from polymarket import mm
+
+        path = tmp_path / 'markets.json'
+        if start is not None:
+            path.write_text(json.dumps(start), encoding='utf-8')
+        monkeypatch.setattr(mm, 'CATALOGUE', str(path))
+        return mm
+
+    def test_a_dash_does_not_replace_a_known_name(self, monkeypatch, tmp_path):
+        mm = self._catalogue(monkeypatch, tmp_path,
+                             {'T': {'question': 'настоящее имя'}})
+        mm.remember_markets([{'token_id': 'T', 'question': '—'}])
+        assert mm.known_markets()['T']['question'] == 'настоящее имя'
+
+    def test_an_empty_name_does_not_replace_it_either(self, monkeypatch, tmp_path):
+        mm = self._catalogue(monkeypatch, tmp_path,
+                             {'T': {'question': 'настоящее имя'}})
+        mm.remember_markets([{'token_id': 'T', 'question': None}])
+        assert mm.known_markets()['T']['question'] == 'настоящее имя'
+
+    def test_a_real_name_still_replaces_a_dash(self, monkeypatch, tmp_path):
+        """Обратный порядок обязан работать: отбор приносит имя позже."""
+        mm = self._catalogue(monkeypatch, tmp_path, {'T': {'question': None}})
+        mm.remember_markets([{'token_id': 'T', 'question': 'нашлось'}])
+        assert mm.known_markets()['T']['question'] == 'нашлось'
+
+    def test_an_unknown_market_is_still_recorded(self, monkeypatch, tmp_path):
+        """Без имени, но с токеном и тиком — этого хватает, чтобы котировать."""
+        mm = self._catalogue(monkeypatch, tmp_path, {})
+        mm.remember_markets([{'token_id': 'T', 'question': '—', 'tick': 0.01}])
+        assert 'T' in mm.known_markets()
+        assert mm.known_markets()['T']['question'] is None

@@ -113,7 +113,19 @@ def remember_markets(markets):
             token = str(market.get('token_id') or '')
             if not token:
                 continue
-            known[token] = {'question': market.get('question'),
+            # ЗАПОЛНИТЕЛЬ НЕ ЗАТИРАЕТ НАСТОЯЩЕЕ ИМЯ, и это была тихая порча
+            # собственных данных. Рынок с открытой позицией возвращается в
+            # работу через with_open_positions, и если имени для него ещё нет,
+            # туда ставится прочерк. Отсюда же он попадал обратно в справочник
+            # как «название» — и рынок терял имя НАВСЕГДА, даже когда отбор
+            # позже приносил настоящее. Замерено: пять позиций из тринадцати
+            # так и остались прочерками при полностью исправном справочнике.
+            name = market.get('question')
+            if not name or name == '—':
+                if token in known and (known[token] or {}).get('question'):
+                    continue                   # уже знаем лучше — не портим
+                name = None
+            known[token] = {'question': name,
                             'condition_id': market.get('condition_id'),
                             'token_no': market.get('token_no'),
                             'tick': market.get('tick')}
