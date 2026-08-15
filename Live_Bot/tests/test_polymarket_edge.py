@@ -25,6 +25,8 @@ import sys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
+import pytest  # noqa: E402
+
 from polymarket import engine, params  # noqa: E402
 
 
@@ -162,3 +164,63 @@ class TestEdgeIsMeasuredEveryCycle:
         assert (html.index('Берём ли мы спред')
                 < html.index('Обещание модели против дела')), \
             'главная мерка стоит выше медленных'
+
+
+class TestEdgeIsMeasuredWhenWePlace:
+    """
+    КРАЙ НЕЛЬЗЯ СЧИТАТЬ ОТ СЕРЕДИНЫ В МОМЕНТ ИСПОЛНЕНИЯ, и это ошибка самого
+    замера, из-за которой вывод «медиана края ноль» оказался отчасти артефактом.
+
+    Об исполнении мы узнаём в СЛЕДУЮЩЕМ такте и берём середину оттуда. Но
+    сделка сама двигает книгу: покупка у нас толкает середину вниз, и наш же
+    край выглядит меньше, чем был. Замерять надо от середины в момент, когда мы
+    ВСТАЛИ, — это и есть край, на который мы рассчитывали.
+
+    Снос цены ПОСЛЕ исполнения остаётся отдельным числом: это другой вопрос —
+    не выбирают ли нас систематически.
+    """
+
+    def test_the_order_remembers_the_mid_it_was_placed_at(self, tmp_path):
+        maker = _maker(tmp_path)
+        quote = {'bid': 0.400, 'ask': 0.440, 'size': 5}
+        maker.place('T', quote, _top(0.400, 0.440), _book(0.400, 0.440),
+                    market_tick=0.001)
+        order = maker.state['books']['T']['orders']['bid']
+        assert order['mid_at_place'] == pytest.approx(0.420)
+
+    def test_the_edge_is_computed_from_that_mid(self, tmp_path):
+        maker = _maker(tmp_path)
+        maker.state['drift_pending'] = [{
+            'token': 'T', 'side': 'bid', 'price': 0.400, 'size': 5,
+            'mid_at_fill': 0.401, 'mid_at_place': 0.420,
+            'ts': engine._now() - 10_000}]
+        ripe = maker.measure_drift({'T': 0.405})
+        assert ripe and ripe[0]['edge_at_place'] == pytest.approx(0.020), \
+            'край считается от середины при выставлении, а не при исполнении'
+
+    def test_a_sell_edge_has_the_right_sign(self, tmp_path):
+        maker = _maker(tmp_path)
+        maker.state['drift_pending'] = [{
+            'token': 'T', 'side': 'ask', 'price': 0.440, 'size': 5,
+            'mid_at_fill': 0.439, 'mid_at_place': 0.420,
+            'ts': engine._now() - 10_000}]
+        ripe = maker.measure_drift({'T': 0.435})
+        assert ripe[0]['edge_at_place'] == pytest.approx(0.020)
+
+    def test_an_old_record_without_the_mid_is_not_a_zero_edge(self, tmp_path):
+        """Записи прежних прогонов не должны притворяться нулевым краем."""
+        maker = _maker(tmp_path)
+        maker.state['drift_pending'] = [{
+            'token': 'T', 'side': 'bid', 'price': 0.400, 'size': 5,
+            'mid_at_fill': 0.401, 'ts': engine._now() - 10_000}]
+        ripe = maker.measure_drift({'T': 0.405})
+        assert ripe[0]['edge_at_place'] is None
+
+    def test_drift_still_measures_what_happened_after(self, tmp_path):
+        maker = _maker(tmp_path)
+        maker.state['drift_pending'] = [{
+            'token': 'T', 'side': 'bid', 'price': 0.400, 'size': 5,
+            'mid_at_fill': 0.400, 'mid_at_place': 0.420,
+            'ts': engine._now() - 10_000}]
+        ripe = maker.measure_drift({'T': 0.410})
+        assert ripe[0]['gain_per_contract'] == pytest.approx(0.010)

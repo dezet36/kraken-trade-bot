@@ -261,7 +261,13 @@ class PaperMaker:
             self.state.setdefault('drift_pending', []).append({
                 'token': str(fill['token']), 'side': fill['side'],
                 'price': fill['price'], 'size': fill['size'],
-                'mid_at_fill': mid, 'ts': _now()})
+                'mid_at_fill': mid,
+                # Край, с которым мы ВСТАЛИ, — отдельно от того, куда цена
+                # ушла потом. Это два разных вопроса, и смешивать их нельзя:
+                # первый говорит, умеем ли мы котировать, второй — не
+                # выбирают ли нас систематически.
+                'mid_at_place': fill.get('mid_at_place'),
+                'ts': _now()})
 
     def measure_drift(self, marks, minutes=None):
         """
@@ -283,7 +289,18 @@ class PaperMaker:
             # Знак приводится к нашей выгоде: после покупки рост — в плюс,
             # после продажи рост — в минус.
             gain = moved if item['side'] == 'bid' else -moved
+            # КРАЙ, С КОТОРЫМ МЫ ВСТАЛИ — отдельным числом рядом со сносом.
+            # Это два разных вопроса: умеем ли мы котировать выгодно и не
+            # выбирают ли нас систематически. Считать край от середины В МОМЕНТ
+            # ИСПОЛНЕНИЯ нельзя: сделка сама двигает книгу, и наш же край
+            # выглядит меньше, чем был.
+            placed = item.get('mid_at_place')
+            edge = None
+            if placed is not None:
+                edge = ((placed - item['price']) if item['side'] == 'bid'
+                        else (item['price'] - placed))
             ripe.append({'at': _stamp(), **item, 'mid_now': mid,
+                         'edge_at_place': round(edge, 6) if edge is not None else None,
                          'moved': round(moved, 6),
                          'gain_per_contract': round(gain, 6),
                          'gain_usd': round(gain * item['size'], 4),
@@ -374,6 +391,13 @@ class PaperMaker:
                 # можно только в момент исполнения, а к тому времени план
                 # отбора успевает смениться.
                 'expected_seconds': quote.get('expected_seconds'),
+                # СЕРЕДИНА В МОМЕНТ ВЫСТАВЛЕНИЯ — то, с чем сравнивать наш
+                # край. Прежде край считался от середины в момент, когда мы
+                # УЗНАЛИ об исполнении, то есть уже ПОСЛЕ сделки. А сделка сама
+                # двигает книгу: покупка у нас толкает середину вниз, и наш же
+                # край выглядел меньше, чем был. Замер «медиана края ноль» был
+                # отчасти следствием этого, а не только устаревших котировок.
+                'mid_at_place': (top or {}).get('mid'),
             }
         return orders, replaced
 
@@ -455,6 +479,7 @@ class PaperMaker:
             done.append({'at': _stamp(), 'source': 'exchange',
                          'token': trade['token'], 'side': trade['side'],
                          'price': trade['price'], 'size': trade['size'],
+                         'mid_at_place': trade.get('mid_at_place'),
                          'trade_id': key,
                          'position_after': slot['position'],
                          'realized_after': round(slot['realized'], 4)})

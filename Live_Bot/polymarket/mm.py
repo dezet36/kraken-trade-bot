@@ -451,6 +451,14 @@ def step(maker, markets, live=False, day_loss=0.0, deadline=None,
             # исполненная продажа приходила бы обратно ПОКУПКОЙ ДРУГОГО токена
             # и заводила бы вторую позицию вместо сокращения первой.
             got = as_our_side(got, markets)
+            # К сделке подставляется середина В МОМЕНТ ВЫСТАВЛЕНИЯ той заявки,
+            # по которой она прошла: только с ней сравнение края честное.
+            for trade in got:
+                slot = maker.state['books'].get(str(trade.get('token'))) or {}
+                for side in ('bid', 'ask'):
+                    order = (slot.get('orders') or {}).get(side)
+                    if order and order.get('live_id') == trade.get('order_id'):
+                        trade['mid_at_place'] = order.get('mid_at_place')
             for done in maker.apply_exchange_trades(got):
                 # КОНТЕКСТ КЛАДЁТСЯ РЯДОМ С ИСПОЛНЕНИЕМ, а не добывается потом.
                 # Разбирать статистику по рынкам, имея один номер токена,
