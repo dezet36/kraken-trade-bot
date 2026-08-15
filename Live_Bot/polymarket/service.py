@@ -69,7 +69,7 @@ def stop():
 def _loop(poll_seconds):
     from logger import log
 
-    from . import engine, executor, mm, params, wallet
+    from . import engine, executor, mm, params, stream, wallet
 
     # ЧЕМ ЗАНЯТ ПОТОК — ГОВОРИТСЯ ВСЛУХ. Первичный отбор обходит больше тысячи
     # рынков: страницы выдачи, стаканы, ленты. Это занимает минуты, и всё это
@@ -95,6 +95,14 @@ def _loop(poll_seconds):
     log(f"◈ Polymarket: маркет-мейкер запущен, рынков {len(markets)}, "
         f"режим {'ЖИВЫЕ ДЕНЬГИ' if live else 'бумага'}, "
         f"капитал ${maker.bankroll:,.0f}")
+    # ПОДПИСКА ПОДНИМАЕТСЯ ОДИН РАЗ И ЖИВЁТ ВЕСЬ ПРОГОН. Список рынков она
+    # получает каждый такт и меняет его на лету: переподключаться ради этого
+    # нельзя, разрыв стоит секунд, а за секунды нас и подбирают.
+    if stream.start([m['token_id'] for m in markets]):
+        log('◈ Polymarket: подписка на стакан поднята')
+    else:
+        log(f"⚠️ Polymarket: подписка не поднялась "
+            f"({stream.status().get('last_error')}) — работаю опросом")
     _state['running'] = True
     _state['live'] = live
     _state['stage'] = 'котирую'
@@ -173,6 +181,7 @@ def _loop(poll_seconds):
             _wake.wait(poll_seconds)
     finally:
         _state['running'] = False
+        stream.stop()
         if live:
             log(f"◈ Polymarket: снимаю заявки — {executor.cancel_all()}")
 

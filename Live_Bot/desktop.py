@@ -349,7 +349,8 @@ def selftest():
                'polymarket.preflight', 'polymarket.connect', 'polymarket.oneside',
                'polymarket.oneside_run', 'polymarket.selector',
                'polymarket.strategy',
-               'polymarket.wallet', 'polymarket.executor',
+               'polymarket.wallet', 'polymarket.executor', 'polymarket.stream',
+               'aiohttp',
                'polymarket.engine', 'polymarket.book')
     import importlib
     failed = []

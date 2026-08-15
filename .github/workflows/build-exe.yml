@@ -80,6 +80,8 @@ jobs:
             --hidden-import polymarket.book `
             --hidden-import polymarket.store `
             --hidden-import polymarket.strategy `
+            --hidden-import polymarket.stream `
+            --hidden-import aiohttp `
             --hidden-import polymarket.selector `
             --hidden-import polymarket.preflight `
             --hidden-import polymarket.connect `

@@ -304,6 +304,15 @@ def _drift_summary(rows):
     }
 
 
+def _stream_safely():
+    """Состояние подписки. Её отсутствие не должно ронять снимок."""
+    try:
+        from . import stream
+        return stream.status()
+    except Exception as exc:                                # noqa: BLE001
+        return {'connected': False, 'last_error': str(exc)[:120]}
+
+
 def _edge_summary(rows):
     """
     Край стоящих заявок: берём ли мы вообще спред.
@@ -539,6 +548,8 @@ def snapshot(limit_markets=20, limit_fills=30):
         # Край котировок — главная мерка мейкера, и видна она без единого
         # исполнения: просто сравнением наших цен с серединой.
         'edges': edges,
+        # Подписка на стакан: сколько книг живых и держится ли связь.
+        'stream': _stream_safely(),
         # Статистика для улучшения стратегии: что вышло на самом деле, рядом
         # с тем, что обещал отбор. Читается с диска и переживает перезапуск.
         'stats': _stats_safely(),

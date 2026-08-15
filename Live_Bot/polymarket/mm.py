@@ -44,7 +44,7 @@ import sys
 import time
 
 from . import book as book_mod
-from . import client, engine, executor, params, store, strategy, wallet
+from . import client, engine, executor, params, store, strategy, stream, wallet
 
 # Мнение модели в живом режиме — рядом с реальностью, а не вместо неё.
 SHADOW = os.path.join(store.DIR, 'mm_shadow.jsonl')
@@ -421,12 +421,33 @@ def step(maker, markets, live=False, day_loss=0.0, deadline=None,
     ошибается, и знать это надо раньше, чем размер вырастет.
     """
     by_token = {m['token_id']: m for m in markets}
+    # ПОТОК ОПЕРЕЖАЕТ ОПРОС, А НЕ ЗАМЕНЯЕТ ЕГО.
+    #
+    # Подписка присылает изменение стакана в тот момент, когда оно случилось,
+    # и это единственный способ снять заявку раньше, чем её подберут: между
+    # двумя опросами рынок успевает пройти сквозь нашу цену. Замерено — у
+    # стоящих котировок край +0.0095, а к исполнению остаётся +0.0005.
+    #
+    # Но поток рвётся, отстаёт от списка рынков и молчит по тихим рынкам,
+    # поэтому опрос остаётся: спрашиваем ТОЛЬКО то, чего в потоке нет свежего.
+    # Так и заявки видят живую книгу, и ни один рынок не остаётся без цены.
+    stream.watch(list(by_token) + [m.get('token_no') for m in markets
+                                   if m.get('token_no')])
     # СПРАВОЧНИК ПОПОЛНЯЕТСЯ ТЕМ, ЧТО В РАБОТЕ, а не только отобранным. Отбор
     # отдаёт горсть лучших, но позиция может остаться на рынке, который из
     # отбора уже выпал, — и панель показывала её прочерком. Здесь проходит
     # ровно то, что мы котируем прямо сейчас, поэтому имя есть у всего.
     remember_markets(markets)
-    books = book_mod.fetch_many(list(by_token))
+    books = {}
+    ask_rest = []
+    for token in by_token:
+        live = stream.book(token)
+        if live and live['bids'] and live['asks']:
+            books[str(token)] = live
+        else:
+            ask_rest.append(token)
+    if ask_rest:
+        books.update(book_mod.fetch_many(ask_rest))
     marks, placed, fills, skipped, sent, cancelled = {}, 0, [], {}, 0, 0
     mismatch = None
 
