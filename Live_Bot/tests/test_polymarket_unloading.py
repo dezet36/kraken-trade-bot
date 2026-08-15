@@ -92,7 +92,13 @@ class TestStalePositionGetsOut:
         assert quote['only'] == 'bid'
         assert quote['bid'] == pytest.approx(TOP['bid'])
 
-    def test_no_position_means_nothing_to_close(self):
+    def test_no_position_means_nothing_to_close(self, monkeypatch):
+        """
+        Нет позиции — закрывать нечего. Сторону при этом всё равно выбираем по
+        цене, поэтому режим входа одной стороной здесь выключаем: проверяется
+        именно правило просрочки.
+        """
+        monkeypatch.setattr(params, 'MM_CAPITAL_LIGHT', False)
         quote = strategy.desired_quote(TOP, dict(MARKET, stale=True), position=0)
         assert quote['only'] is None
 

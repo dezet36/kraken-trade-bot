@@ -513,10 +513,25 @@ def step(maker, markets, live=False, day_loss=0.0, deadline=None):
         # ДЕНЬГИ КОНЧИЛИСЬ — ДАЛЬШЕ НЕ КОТИРУЕМ. Рынки идут по убыванию
         # оборота, поэтому обрезается хвост, а не середина. Сокращающую
         # сторону оставляем: она не тратит денег, а высвобождает их.
-        need = float(quote['size']) if not quote.get('only') else 0.0
+        # СКОЛЬКО ДЕНЕГ СВЯЖЕТ ЭТА КОТИРОВКА. Двусторонняя связывает ровно
+        # размер; вход одной стороной — только свою цену. Считать одинаково
+        # значило бы в разы завысить потребность и обрезать список рынков там,
+        # где денег на самом деле хватает.
+        if quote.get('only') == 'bid':
+            need = float(quote['size']) * float(quote['bid'])
+        elif quote.get('only') == 'ask':
+            need = float(quote['size']) * (1.0 - float(quote['ask']))
+        else:
+            need = float(quote['size'])
+        # Закрывающая сторона денег не требует: продаём то, что держим.
+        if slot['position'] and quote.get('only'):
+            closing = 'ask' if slot['position'] > 0 else 'bid'
+            if quote['only'] == closing:
+                need = 0.0
         if committed + need > budget:
             if slot['position']:
                 quote['only'] = 'ask' if slot['position'] > 0 else 'bid'
+                need = 0.0
             else:
                 skipped['бюджет исчерпан'] = skipped.get('бюджет исчерпан', 0) + 1
                 continue

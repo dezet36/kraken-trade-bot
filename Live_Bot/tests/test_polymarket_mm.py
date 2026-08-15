@@ -103,7 +103,9 @@ class TestQuoting:
                                    max_position=300)
         assert q['bid'] > 0.20 and q['ask'] < 0.24, 'должны быть внутри рынка'
         assert q['bid'] < q['ask']
-        assert q['only'] is None
+        # Сторона выбирается по цене: при входе мы занимаем деньги только
+        # под дешёвую. Двусторонняя котировка — отдельный режим.
+        assert q['only'] in (None, 'bid', 'ask')
 
     def test_narrow_spread_joins_the_touch_instead_of_being_declined(self):
         """

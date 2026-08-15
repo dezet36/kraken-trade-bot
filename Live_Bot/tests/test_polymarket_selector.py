@@ -53,11 +53,14 @@ class TestQuoteCost:
         Двусторонняя котировка стоит РОВНО размер, при любой цене.
 
         Покупка берёт p за контракт, продажа — (1-p): продавать надо то, чего у
-        нас нет. В сумме единица. Отсюда и вся арифметика малого счёта: пять
-        контрактов стоят $5, и сотня долларов — это двадцать рынков, а не пять.
+        нас нет. В сумме единица.
+
+        ВХОД ОДНОЙ СТОРОНОЙ стоит иначе, и это отдельный договор — см.
+        test_polymarket_capital_light. Здесь проверяется именно двусторонний
+        случай, поэтому он и запрашивается явно.
         """
         for price in (0.02, 0.1, 0.5, 0.9):
-            assert selector.quote_cost(5, price) == pytest.approx(5.0)
+            assert selector.quote_cost(5, price, one_sided=False) == pytest.approx(5.0)
 
 
 class TestScanLooksAtTheRealBook:
@@ -98,7 +101,12 @@ class TestScanLooksAtTheRealBook:
         # Стоимость по-прежнему равна размеру: двусторонняя котировка берёт p
         # за покупку и (1-p) за продажу, в сумме единицу при любой цене.
         assert rows[0]['size'] >= 5
-        assert rows[0]['cost'] == pytest.approx(rows[0]['size'])
+        # Стоимость считается по способу входа: двусторонняя котировка берёт
+        # ровно размер, вход одной стороной — только свою цену.
+        # Стоимость хранится округлённой до цента, поэтому сравниваем с
+        # точностью до него же.
+        assert rows[0]['cost'] == pytest.approx(
+            selector.quote_cost(rows[0]['size'], rows[0]['price']), abs=0.01)
 
     def test_quiet_market_falls_back_to_the_exchange_minimum(self, monkeypatch):
         """Слабый поток не даёт ставить меньше, чем разрешает биржа."""
@@ -245,6 +253,7 @@ class TestAllocationSpreadsRisk:
         вместе с размером, и доход в час от размера не зависит вовсе.
         """
         monkeypatch.setattr(params, 'MM_MAX_MARKET_SHARE', 0.34)
+        monkeypatch.setattr(params, 'MM_CAPITAL_LIGHT', False)
         plan = selector.allocate(self._rows(20, cost_each=5.0), budget=40)
         assert len(plan['markets']) == 8, 'сорок долларов — это восемь рынков по $5'
         assert all(m['size'] == 5 for m in plan['markets'])
@@ -257,9 +266,20 @@ class TestAllocationSpreadsRisk:
         событиях, а не на нескольких крупных.
         """
         monkeypatch.setattr(params, 'MM_MAX_MARKET_SHARE', 0.34)
+        monkeypatch.setattr(params, 'MM_CAPITAL_LIGHT', False)
         plan = selector.allocate(self._rows(50, cost_each=5.0), budget=100)
         assert len(plan['markets']) == 20
         assert plan['used'] == pytest.approx(100.0)
+
+    def test_one_sided_entry_covers_far_more_markets(self, monkeypatch):
+        """
+        Та же сотня, но входим дешёвой стороной: при цене 0.5 котировка стоит
+        вдвое меньше, и рынков помещается вдвое больше.
+        """
+        monkeypatch.setattr(params, 'MM_MAX_MARKET_SHARE', 0.34)
+        monkeypatch.setattr(params, 'MM_CAPITAL_LIGHT', True)
+        plan = selector.allocate(self._rows(50, cost_each=5.0), budget=100)
+        assert len(plan['markets']) == 40
 
     def test_one_market_never_takes_the_whole_budget(self, monkeypatch):
         monkeypatch.setattr(params, 'MM_MAX_MARKET_SHARE', 0.34)
@@ -280,6 +300,7 @@ class TestAllocationSpreadsRisk:
         обещание — ни того, ни другого мы пока не наблюдали.
         """
         monkeypatch.setattr(params, 'MM_MAX_MARKET_SHARE', 1.0)
+        monkeypatch.setattr(params, 'MM_CAPITAL_LIGHT', False)
         plan = selector.allocate(self._rows(20, cost_each=5.0, spread_share=0.1),
                                  budget=100)
         # Половина спреда на вложенное: 0.1 / 2 × $100 = $5 за полный оборот.

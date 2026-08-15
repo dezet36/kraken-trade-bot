@@ -289,17 +289,19 @@ class TestSmallBudgetStillStandsSomewhere:
                  'ask_usd': 0.0, 'rewards_daily': 0.0, 'liquidity': 1000.0,
                  'question': f'рынок {i}'} for i in range(count)]
 
-    def test_ten_dollars_still_gets_two_markets(self):
-        from polymarket import selector
+    def test_ten_dollars_still_gets_two_markets(self, monkeypatch):
+        from polymarket import params, selector
 
+        monkeypatch.setattr(params, 'MM_CAPITAL_LIGHT', False)
         plan = selector.allocate(self._rows(10), budget=10)
         assert len(plan['markets']) == 2, 'десять долларов — это два рынка по $5'
         assert plan['used'] == pytest.approx(10.0)
 
-    def test_a_market_above_the_whole_budget_is_still_refused(self):
+    def test_a_market_above_the_whole_budget_is_still_refused(self, monkeypatch):
         """Предел смягчён до минимума биржи, а не отменён."""
-        from polymarket import selector
+        from polymarket import params, selector
 
+        monkeypatch.setattr(params, 'MM_CAPITAL_LIGHT', False)
         rows = [dict(r, order_min=50) for r in self._rows(3)]
         assert selector.allocate(rows, budget=10)['markets'] == []
 
