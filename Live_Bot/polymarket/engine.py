@@ -291,7 +291,7 @@ class PaperMaker:
         self.state['drift_pending'] = pending
         return ripe
 
-    def place(self, token, quote, top, book):
+    def place(self, token, quote, top, book, market_tick=None):
         """
         Выставляет (переставляет) двусторонние заявки.
 
@@ -302,6 +302,7 @@ class PaperMaker:
 
         Возвращает (заявки, список биржевых номеров на снятие).
         """
+        market_tick = market_tick or quote.get('tick') or 0.001
         slot = self._slot(token)
         orders = slot.setdefault('orders', {})
         # Заявки, которые заменяются или снимаются, возвращаются наружу СО
@@ -318,8 +319,25 @@ class PaperMaker:
                 orders[side] = None
                 continue
             price = quote[side]
-            if current and abs(current['price'] - price) < 1e-9:
-                continue                        # цена не изменилась — не трогаем
+            # ЗАЯВКА НЕ ПЕРЕСТАВЛЯЕТСЯ ИЗ-ЗА КАЖДОГО ДРОЖАНИЯ ЦЕНЫ.
+            #
+            # Здесь стояло сравнение на точное равенство: сдвинулась цена на
+            # один тик — снимаем и ставим заново. А новая заявка встаёт в КОНЕЦ
+            # новой очереди, то есть каждая перестановка обнуляет всё
+            # накопленное ожидание.
+            #
+            # Замерено за сутки: 125 выставленных заявок на 29 котировок, то
+            # есть 4.3 перестановки на каждую, а у отдельных по шестнадцать.
+            # При обещанном круге в 46 минут мы шестнадцать раз возвращались в
+            # хвост очереди и не доходили никуда — отсюда и доля исполнения в
+            # 13.8%.
+            #
+            # Допуск в два тика ограничивает и обратный риск: если рынок уйдёт
+            # против нас, мы переставимся, сдвинувшись не больше чем на два
+            # тика — величину того же порядка, что и захватываемый спред.
+            room = params.MM_REQUOTE_TICKS * float(market_tick or 0.001)
+            if current and abs(current['price'] - price) < max(room, 1e-9):
+                continue                        # цена почти та же — не трогаем
             if current and current.get('live_id'):
                 replaced.append(current['live_id'])
             orders[side] = {

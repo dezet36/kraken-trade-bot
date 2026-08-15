@@ -383,7 +383,8 @@ def step(maker, markets, live=False, day_loss=0.0):
         committed += need
 
         before = json.dumps(slot.get('orders') or {}, sort_keys=True)
-        _, replaced = maker.place(token, quote, top, live_book)
+        _, replaced = maker.place(token, quote, top, live_book,
+                                  market_tick=market.get('tick'))
         placed += 1
 
         # СНАЧАЛА снимаем старое, потом ставим новое. Обратный порядок оставил
