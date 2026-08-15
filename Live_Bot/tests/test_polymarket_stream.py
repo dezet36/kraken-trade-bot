@@ -170,3 +170,45 @@ class TestDeltasWithoutASnapshotAreNotABook:
         stream._apply_change({'price_changes': [
             {'asset_id': 'T', 'price': '0.21', 'size': '30', 'side': 'BUY'}]})
         assert stream.status()['fresh'] == 0
+
+
+class TestOrdersFromThePastAreNotInherited:
+    """
+    При запуске на бирже могут стоять наши же заявки от прошлого прогона —
+    выставленные другой версией кода, по другим ценам, из книги, которой мы
+    больше не верим.
+
+    Наблюдалось прямо в работе, после первого включения потока с неполными
+    книгами:
+
+        аск по 0.998 при середине 0.079
+        бид по 0.010 при середине 0.545
+
+    Такие не исполнятся, но занимают деньги, засоряют стакан и портят замер
+    края: медиана по всем котировкам показывала 0.119 при спреде рынка в
+    полтора цента.
+    """
+
+    def test_the_service_cancels_them_at_start(self):
+        text = open(os.path.join(ROOT, 'polymarket', 'service.py'),
+                    encoding='utf-8').read()
+        body = text[text.index('def _loop('):text.index('def start(')]
+        spot = body.index('executor.cancel_all()')
+        assert spot < body.index('while True:'), 'снимать надо ДО первого такта'
+        assert 'заявки прошлого прогона' in body
+
+    def test_our_own_record_is_cleared_too(self):
+        """
+        Снять на бирже мало: у нас остаётся память о заявках, которых больше
+        нет. Иначе сверка увидит призраков и решит, что мы котируем.
+        """
+        text = open(os.path.join(ROOT, 'polymarket', 'service.py'),
+                    encoding='utf-8').read()
+        spot = text.index('заявки прошлого прогона')
+        assert 'forget_orders' in text[spot:spot + 400]
+
+    def test_paper_mode_has_nothing_to_cancel(self):
+        text = open(os.path.join(ROOT, 'polymarket', 'service.py'),
+                    encoding='utf-8').read()
+        spot = text.index('заявки прошлого прогона')
+        assert 'if live:' in text[max(0, spot - 700):spot]
