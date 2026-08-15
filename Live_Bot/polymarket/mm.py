@@ -451,7 +451,8 @@ def step(maker, markets, live=False, day_loss=0.0, deadline=None):
         market = dict(market,
                       stale=str(token) in stale or str(token) in hurt)
         quote = strategy.desired_quote(top, market, position=slot['position'],
-                                       max_position=params.MM_MAX_POSITION)
+                                       max_position=params.MM_MAX_POSITION,
+                                       avg_cost=slot.get('avg_cost') or 0.0)
         if not quote or quote.get('reason'):
             reason = (quote or {}).get('reason') or 'котировка не собралась'
             skipped[reason] = skipped.get(reason, 0) + 1
