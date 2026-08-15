@@ -206,7 +206,7 @@ def as_our_side(trades, markets):
     return out
 
 
-def step(maker, markets, live=False, day_loss=0.0):
+def step(maker, markets, live=False, day_loss=0.0, deadline=None):
     """
     Один проход: стаканы пачкой, исполнения, новые котировки.
 
@@ -214,6 +214,14 @@ def step(maker, markets, live=False, day_loss=0.0):
     рынков занимали семь секунд, сотня — почти полминуты, и котировка успевала
     устареть раньше, чем её выставляли. Пачкой те же двадцать пять приходят за
     полсекунды: замерено 0.49 против 7.
+
+    У ТАКТА ЕСТЬ СРОК, И ЭТО НЕ ПЕРЕСТРАХОВКА. Каждый рынок стоит нам
+    нескольких обращений к бирже, а у каждого обращения свой предел в пять
+    секунд. Десяток рынков с медленно отвечающей биржей — и такт растягивается
+    на минуты: счётчик циклов стоит, панель показывает ноль, снаружи бот
+    выглядит мёртвым. Наблюдалось на живом счёте при перебоях у площадки.
+    Дойдя до срока, доделываем текущий рынок и выходим: лучше обойти половину
+    списка вовремя, чем весь список неизвестно когда.
 
     ЖИВОЕ ИСПОЛНЕНИЕ ЗЕРКАЛИТ БУМАЖНОЕ, А НЕ ЗАМЕНЯЕТ ЕГО. Бумажный движок
     считает всегда — он остаётся моделью, с которой сверяется реальность.
@@ -329,7 +337,11 @@ def step(maker, markets, live=False, day_loss=0.0):
         except Exception:                                   # noqa: BLE001
             pass                                            # не спросили — идём по бумаге
 
+    ran_out = 0
     for token, market in by_token.items():
+        if deadline and time.time() > deadline:
+            ran_out += 1
+            continue
         live_book = books.get(str(token))
         if not live_book or str(token) not in marks:
             continue
@@ -427,6 +439,8 @@ def step(maker, markets, live=False, day_loss=0.0):
                 order = (slot.get('orders') or {}).get(side)
                 if not order or order.get('live_id'):
                     continue
+                if order.get('retry_at') and time.time() < order['retry_at']:
+                    continue
                 # ВСТРЕЧНЫЙ ТОКЕН И ЗАПАС ПЕРЕДАЮТСЯ ОБЯЗАТЕЛЬНО. Без них
                 # продажа уходит на биржу как есть — и отвергается, потому
                 # что продавать нечего. Так и было: на Polymarket стояли одни
@@ -435,8 +449,24 @@ def step(maker, markets, live=False, day_loss=0.0):
                                      day_loss_usd=day_loss, tick=market['tick'],
                                      twin_token=market.get('token_no'),
                                      holding=slot['position'])
+                # ОТВЕРГНУТАЯ ЗАЯВКА ПОВТОРЯЕТСЯ С ОТСТУПОМ, А НЕ КАЖДЫЙ ТАКТ.
+                #
+                # Причина отказа чаще всего не меняется за тридцать секунд:
+                # не тот счёт, не хватает денег, рынок закрылся. Повторяя
+                # каждый такт, мы тратили на безнадёжные отправки всё время
+                # цикла — в журнале за сутки 2480 ошибок против 125 удачных
+                # заявок. Отступ удваивается, поэтому безнадёжное затихает
+                # само, а временное восстановится на следующей попытке.
+                if not out.get('ok'):
+                    wait = min(float(order.get('retry_wait') or
+                                     params.MM_RETRY_SECONDS),
+                               params.MM_RETRY_MAX_SECONDS)
+                    order['retry_wait'] = wait * 2
+                    order['retry_at'] = time.time() + wait
                 if out.get('ok'):
                     order['live_id'] = out.get('order_id')
+                    order.pop('retry_at', None)
+                    order.pop('retry_wait', None)
                     # ПРЕЖНЯЯ ОШИБКА СТИРАЕТСЯ. Без этого строка в панели вечно
                     # показывала отказ, которого уже нет: заявка стоит на
                     # бирже, а рядом с ней висит текст прошлой неудачи.
@@ -462,9 +492,12 @@ def step(maker, markets, live=False, day_loss=0.0):
                                   'drift_pending': len(maker.state.get('drift_pending', [])),
                                   'live': bool(live)})
     maker.save()
+    if ran_out:
+        skipped['не успели за такт'] = ran_out
     return {'placed': placed, 'fills': fills, 'report': report,
             'skipped': skipped, 'marks': marks, 'sent': sent,
-            'cancelled': cancelled, 'mismatch': mismatch}
+            'cancelled': cancelled, 'mismatch': mismatch,
+            'ran_out': ran_out}
 
 
 def _single_instance():

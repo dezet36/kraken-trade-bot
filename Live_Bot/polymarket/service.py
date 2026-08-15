@@ -113,8 +113,15 @@ def _loop(poll_seconds):
                     live = now_live
                     _state['live'] = live
                 before = maker.mark_to_market({})
+                # Срок такта: биржа бывает медленной, и обход всего списка не
+                # должен превращаться в бесконечность. Не успевшие рынки
+                # дождутся следующего такта — они никуда не денутся.
                 out = mm.step(maker, markets, live=live,
-                              day_loss=max(0.0, -before['pnl']))
+                              day_loss=max(0.0, -before['pnl']),
+                              deadline=time.time() + params.MM_STEP_BUDGET_SECONDS)
+                if out.get('ran_out'):
+                    log(f"◈ Polymarket: за такт не успели {out['ran_out']} "
+                        f"рынков — биржа отвечает медленно")
                 _state['cycles'] += 1
                 # Отметка живости на замке: без неё замок службы протухал бы
                 # через пять минут, и вторая копия сочла бы его брошенным.
