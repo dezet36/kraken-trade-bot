@@ -155,7 +155,7 @@ def _exchange_safely():
         return {'asked': False, 'why': f'{type(exc).__name__}: {str(exc)[:120]}'}
 
 
-def _standing_quotes(books, planned):
+def _standing_quotes(books, planned, catalogue=None):
     """
     Где бот стоит сейчас: цены, сторона, сколько ждёт и чего ждёт.
 
@@ -169,7 +169,15 @@ def _standing_quotes(books, planned):
     этих двух чисел и есть первый признак, что модель врёт.
     """
     import time as _time
-    by_token = {str(m.get('token_id')): m for m in planned}
+    # СПРАВОЧНИК ПОДСТРАХОВЫВАЕТ ПЛАН. План отбора перезаписывается при каждом
+    # пересмотре, а позиция живёт до закрытия — и рынок, где мы стоим, из плана
+    # исчезает. Панель показывала такую строку прочерком вместо названия:
+    # открытая позиция без единого признака, на каком она рынке. Замерено на
+    # живом счёте: десять позиций из десяти оказались вне плана.
+    by_token = {str(t): dict(m or {}) for t, m in (catalogue or {}).items()}
+    for m in planned:
+        token = str(m.get('token_id'))
+        by_token.setdefault(token, {}).update(m)
     now = _time.time()
     rows = []
     for token, slot in (books or {}).items():
@@ -398,12 +406,15 @@ def snapshot(limit_markets=20, limit_fills=30):
             state = {}
 
     books = state.get('books') or {}
+    known = mm.known_markets()
     positions = []
     for token, slot in books.items():
         if not slot.get('position'):
             continue
         positions.append({
-            'token': token, 'position': slot['position'],
+            'token': token,
+            'question': (known.get(str(token)) or {}).get('question') or '—',
+            'position': slot['position'],
             'avg_cost': round(slot.get('avg_cost') or 0, 4),
             'realized': round(slot.get('realized') or 0, 2),
             'trades': slot.get('trades') or 0,
@@ -429,7 +440,8 @@ def snapshot(limit_markets=20, limit_fills=30):
                 plan_on_disk = json.load(fh)
         except Exception:                                  # noqa: BLE001
             plan_on_disk = {}
-    live_quotes = _standing_quotes(books, plan_on_disk.get('markets') or [])
+    live_quotes = _standing_quotes(books, plan_on_disk.get('markets') or [],
+                                   catalogue=mm.known_markets())
 
     # ЗАВЕРШЁННЫЕ КРУГИ — главная мерка работы мейкера. Отдельные исполнения
     # ничего не говорят: купить может каждый, а заработок появляется только

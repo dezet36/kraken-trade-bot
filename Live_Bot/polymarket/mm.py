@@ -52,6 +52,11 @@ SHADOW = os.path.join(store.DIR, 'mm_shadow.jsonl')
 # маркет-мейкера заглянуть не может: без файла она показывала бы прочерки
 # вместо названий рынков и «неизвестно» вместо ожидаемого времени круга.
 PLAN_FILE = os.path.join(store.DIR, 'mm_plan.json')
+# СПРАВОЧНИК ВСЕХ РЫНКОВ, ЧТО МЫ КОГДА-ЛИБО ВЕЛИ. План отбора перезаписывается
+# при каждом пересмотре, а позиции остаются — и панель, ища название по токену,
+# не находила его и рисовала прочерк. Человек видел открытую позицию без
+# единого признака, на каком она рынке.
+CATALOGUE = os.path.join(store.DIR, 'mm_markets.json')
 
 # Через сколько замок считается брошенным. Работающий цикл трогает файл каждый
 # такт (тридцать секунд), поэтому пять минут — с большим запасом на медленный
@@ -80,10 +85,48 @@ def select_markets(limit=None, min_liquidity=None, refresh=False, budget=None):
     rows = selector.scan(budget=money, limit=limit or params.MM_MARKETS)
     plan = selector.allocate(rows, budget=money)
     CANDIDATES = plan['markets']
+    remember_markets(rows)
     LAST_PLAN.clear()
     LAST_PLAN.update(plan)
     _save_plan(plan)
     return CANDIDATES
+
+
+def remember_markets(markets):
+    """
+    Пополняет справочник: токен → название рынка и его тик.
+
+    Нужен затем, что план отбора живёт ровно до следующего пересмотра, а
+    позиция живёт до закрытия. Без справочника панель показывала открытую
+    позицию прочерком вместо названия — и понять, где мы стоим, было нельзя.
+    """
+    try:
+        known = {}
+        if os.path.exists(CATALOGUE):
+            with open(CATALOGUE, encoding='utf-8') as fh:
+                known = json.load(fh) or {}
+        for market in markets or []:
+            token = str(market.get('token_id') or '')
+            if not token:
+                continue
+            known[token] = {'question': market.get('question'),
+                            'condition_id': market.get('condition_id'),
+                            'token_no': market.get('token_no'),
+                            'tick': market.get('tick')}
+        os.makedirs(os.path.dirname(CATALOGUE), exist_ok=True)
+        with open(CATALOGUE, 'w', encoding='utf-8') as fh:
+            json.dump(known, fh, ensure_ascii=False)
+    except Exception:                                      # noqa: BLE001
+        pass                                               # справочник — удобство
+
+
+def known_markets():
+    """Справочник с диска. Пустой словарь, если его ещё нет."""
+    try:
+        with open(CATALOGUE, encoding='utf-8') as fh:
+            return json.load(fh) or {}
+    except Exception:                                      # noqa: BLE001
+        return {}
 
 
 def _save_plan(plan):
@@ -306,6 +349,28 @@ def step(maker, markets, live=False, day_loss=0.0, deadline=None):
     # stale_positions существовала и не вызывалась ни разу. Позиция могла
     # висеть сутками, держа деньги, которые должны работать на других рынках.
     stale = set(maker.stale_positions())
+
+    # ПОЗИЦИЯ, УШЕДШАЯ СЛИШКОМ ДАЛЕКО, ЗАКРЫВАЕТСЯ ТАК ЖЕ, КАК ПРОСРОЧЕННАЯ.
+    #
+    # Срок ловит застой, а это ловит движение. Замерено на двенадцати живых
+    # позициях: настоящий убыток $1.56, и $0.94 из него сделала одна — рынок
+    # переоценился с 0.637 до 0.450 за считанные часы. Одиннадцать остальных
+    # вместе дали $0.62. Без предела одна такая позиция стоит дороже, чем
+    # приносят все удачные круги за сутки.
+    hurt = set()
+    for token, slot in (maker.state.get('books') or {}).items():
+        position = float(slot.get('position') or 0)
+        cost = float(slot.get('avg_cost') or 0)
+        mark = marks.get(str(token))
+        if not position or not cost or mark is None:
+            continue
+        loss = (mark - cost) / cost if position > 0 else (cost - mark) / cost
+        if loss <= -params.MM_MAX_POSITION_LOSS:
+            hurt.add(str(token))
+    if hurt:
+        from logger import log as _hurt_say
+        _hurt_say(f'◈ Polymarket: {len(hurt)} позиций ушли дальше '
+                  f'{params.MM_MAX_POSITION_LOSS:.0%} — закрываю, не доливаю')
     if stale:
         from logger import log as _say
         _say(f'◈ Polymarket: {len(stale)} позиций держатся дольше '
@@ -383,7 +448,8 @@ def step(maker, markets, live=False, day_loss=0.0, deadline=None):
         # Признак просрочки едет в котировку: решает её стратегия, а знает о
         # сроке — состояние. Смешивать эти два знания в одном месте значило бы
         # тащить время жизни позиции в чистую функцию котирования.
-        market = dict(market, stale=str(token) in stale)
+        market = dict(market,
+                      stale=str(token) in stale or str(token) in hurt)
         quote = strategy.desired_quote(top, market, position=slot['position'],
                                        max_position=params.MM_MAX_POSITION)
         if not quote or quote.get('reason'):

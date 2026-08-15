@@ -2844,11 +2844,15 @@ function renderPolymarket() {
   }
 
   if ((PM.positions || []).length) {
+    /* РЫНОК НАЗЫВАЕТСЯ ПО ИМЕНИ, А НЕ НОМЕРОМ ТОКЕНА. План отбора живёт до
+       следующего пересмотра, позиция — до закрытия, и рынок из плана исчезал:
+       строка показывалась прочерком. Название теперь берётся из справочника
+       всех рынков, что мы вели. */
     html += '<h3 style="margin:18px 0 8px">Запас по рынкам</h3><div class="scroll">'
-      + '<table><thead><tr><th>токен</th><th>позиция</th><th>средняя</th>'
+      + '<table><thead><tr><th>рынок</th><th>позиция</th><th>средняя</th>'
       + '<th>зафиксировано</th><th>сделок</th></tr></thead><tbody>'
       + PM.positions.map(p => `<tr>
-          <td><code>${esc(String(p.token).slice(0, 12))}…</code></td>
+          <td title="${esc(String(p.token))}">${esc((p.question || '—').slice(0, 44))}</td>
           <td>${Number(p.position).toFixed(0)}</td>
           <td>${Number(p.avg_cost).toFixed(3)}</td>
           <td>${pmMoney(p.realized)}</td>

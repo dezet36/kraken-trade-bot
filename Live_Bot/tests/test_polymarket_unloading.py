@@ -101,7 +101,7 @@ class TestStalePositionGetsOut:
         text = open(os.path.join(ROOT, 'polymarket', 'mm.py'),
                     encoding='utf-8').read()
         assert 'maker.stale_positions()' in text
-        assert "market = dict(market, stale=" in text
+        assert "stale=str(token) in stale" in text
 
 
 class TestPatienceMatchesThePromise:
