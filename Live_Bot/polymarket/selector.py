@@ -653,8 +653,19 @@ def allocate(markets, budget=None):
         if wanted and market['size'] < wanted:
             cost = quote_cost(wanted, market['price'])
             gain = reward_per_hour(market, wanted)
+            # НАГРАДА ПРЕДПОЧИТАЕТСЯ РАСЧЁТНОМУ СПРЕДУ, и это решение принято
+            # по делу, а не по вкусу. Доход от спреда — ОЦЕНКА модели, и она
+            # пока не сбылась: за сутки четыре круга и минус тридцать центов
+            # при обещанных сотнях в месяц. Награда же проверена отправкой:
+            # биржа ответила scoring=True и платит её независимо от того,
+            # закроется круг или нет.
+            #
+            # Поэтому сравниваем не с полной оценкой спреда, а с её долей.
+            # Единица здесь означала бы «верим модели как факту» — а мы уже
+            # знаем, что верить нельзя.
+            worth = market['usd_per_hour'] * params.MM_REWARD_PREFER
             if (cost <= cap and used - market['cost'] + cost <= budget
-                    and gain > market['usd_per_hour']):
+                    and gain > worth):
                 used += cost - market['cost']
                 market['size'] = wanted
                 market['cost'] = round(cost, 2)
