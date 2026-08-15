@@ -2586,6 +2586,14 @@ function renderPolymarket() {
     }
   }
 
+  /* ЧЕМ ЗАНЯТ БОТ ПРЯМО СЕЙЧАС. Первичный отбор идёт минутами, и всё это
+     время тактов ноль — без этой строки человек видит «0» и решает, что
+     программа зависла. */
+  if (svc.stage && svc.stage !== 'котирую') {
+    html += '<div class="hint" style="padding:8px 4px">Сейчас: ' + esc(svc.stage)
+      + (svc.stage_seconds ? ' — уже ' + svc.stage_seconds + ' с' : '') + '</div>';
+  }
+
   const cards = [
     ['Режим', mode],
     ['Итог', pnlText],

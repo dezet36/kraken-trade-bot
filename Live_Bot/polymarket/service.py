@@ -23,7 +23,8 @@ import time
 
 _thread = None
 _state = {'running': False, 'cycles': 0, 'last_error': None,
-          'last_at': None, 'stopping': False, 'live': None}
+          'last_at': None, 'stopping': False, 'live': None,
+          'stage': '', 'stage_since': None}
 
 # Сон между тактами прерываемый. Обычный time.sleep держал бы поток до конца
 # такта — до полуминуты, — а всё это время на Polymarket стоят наши заявки.
@@ -45,6 +46,10 @@ def status():
     # считать в бумаге — ровно то расхождение, из-за которого заявки не
     # уходили, а на экране всё выглядело правильно.
     out['live_now'] = _state.get('live')
+    # Сколько поток занят текущим делом: без этого «отбираю рынки» неотличимо
+    # от «завис на отборе рынков».
+    since = _state.get('stage_since')
+    out['stage_seconds'] = round(time.time() - since) if since else None
     return out
 
 
@@ -66,6 +71,12 @@ def _loop(poll_seconds):
 
     from . import engine, executor, mm, params, wallet
 
+    # ЧЕМ ЗАНЯТ ПОТОК — ГОВОРИТСЯ ВСЛУХ. Первичный отбор обходит больше тысячи
+    # рынков: страницы выдачи, стаканы, ленты. Это занимает минуты, и всё это
+    # время счётчик тактов стоит на нуле — снаружи неотличимо от зависшего
+    # бота. Наблюдалось: шесть минут «тактов 0» при полностью исправной работе.
+    _state['stage'] = 'отбираю рынки — обхожу больше тысячи книг, это минуты'
+    _state['stage_since'] = time.time()
     try:
         markets = mm.select_markets()
     except Exception as exc:                                # noqa: BLE001
@@ -81,6 +92,7 @@ def _loop(poll_seconds):
         f"капитал ${maker.bankroll:,.0f}")
     _state['running'] = True
     _state['live'] = live
+    _state['stage'] = 'котирую'
 
     try:
         while True:

@@ -95,3 +95,34 @@ class TestBothBooksAreTheSameBook:
                     encoding='utf-8').read()
         assert 'ОДНА И ТА ЖЕ КНИГА' in text, \
             'иначе эту мысль предложат заново через месяц'
+
+
+class TestTheThreadSaysWhatItIsDoing:
+    """
+    Первичный отбор обходит больше тысячи рынков: страницы выдачи, стаканы,
+    ленты. Это занимает минуты, и всё это время счётчик тактов стоит на нуле —
+    снаружи неотличимо от зависшего бота. Наблюдалось: шесть минут «тактов 0»
+    при полностью исправной работе, такты пошли сразу после отбора.
+    """
+
+    def test_status_carries_the_current_stage(self):
+        from polymarket import service
+
+        got = service.status()
+        assert 'stage' in got
+        assert 'stage_seconds' in got, 'без времени «отбираю» неотличимо от «завис»'
+
+    def test_the_selection_stage_is_named_before_it_starts(self):
+        text = open(os.path.join(ROOT, 'polymarket', 'service.py'),
+                    encoding='utf-8').read()
+        body = text[text.index('def _loop('):]
+        assert body.index("_state['stage'] = 'отбираю рынки") < body.index('mm.select_markets()')
+
+    def test_quoting_replaces_the_stage(self):
+        text = open(os.path.join(ROOT, 'polymarket', 'service.py'),
+                    encoding='utf-8').read()
+        assert "_state['stage'] = 'котирую'" in text
+
+    def test_the_panel_shows_it(self):
+        html = open(os.path.join(ROOT, 'dashboard.html'), encoding='utf-8').read()
+        assert 'svc.stage' in html and 'stage_seconds' in html
