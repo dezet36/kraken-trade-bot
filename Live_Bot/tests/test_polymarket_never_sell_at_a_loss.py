@@ -105,3 +105,54 @@ class TestNoPositionMeansNoFloor:
                     encoding='utf-8').read()
         assert "avg_cost=slot.get('avg_cost') or 0.0" in text, \
             'без цены входа правило не работает вовсе'
+
+
+class TestAStuckPositionLeavesThroughTheMarket:
+    """
+    ЗАСТРЯВШАЯ ПОЗИЦИЯ ВЫХОДИТ ЧЕРЕЗ РЫНОК, А НЕ ЖДЁТ ЕЩЁ СУТКИ.
+
+    Встать лучшей ценой на мёртвом рынке значит не выйти НИКОГДА. Замер по
+    нашим заявкам: три из четырнадцати без встречного потока вовсе, очереди по
+    четыре и девять тысяч контрактов, тишина до тридцати трёх часов.
+
+    Цена выхода — пересечение спреда и комиссия тейкера, 4-7% от p×(1−p). Цена
+    бездействия — весь капитал позиции: $38.77 в запасе при $1.45 свободных и
+    три сделки за девять часов.
+    """
+
+    def _quote(self, market_extra, position=5.0, cost=0.30):
+        top = {'bid': 0.20, 'ask': 0.30, 'mid': 0.25,
+               'bid_size': 100, 'ask_size': 100}
+        market = dict({'tick': 0.01, 'order_min': 5, 'size': 5,
+                       'step_ticks': 0}, **market_extra)
+        return strategy.desired_quote(top, market, position=position,
+                                      avg_cost=cost)
+
+    def test_the_first_deadline_only_joins_the_best_price(self):
+        """Первый срок — «встань лучшей ценой», это ещё не выход через рынок."""
+        assert self._quote({'stale': True})['ask'] == pytest.approx(0.30)
+
+    def test_the_second_deadline_crosses_to_the_bid(self):
+        """Второй срок — продаём ПО БИДУ, то есть исполняемся сразу."""
+        assert self._quote({'desperate': True})['ask'] == pytest.approx(0.20)
+
+    def test_a_short_crosses_to_the_ask(self):
+        got = self._quote({'desperate': True}, position=-5.0, cost=0.20)
+        assert got['bid'] == pytest.approx(0.30)
+
+    def test_it_quotes_only_the_closing_side(self):
+        assert self._quote({'desperate': True})['only'] == 'ask'
+
+    def test_a_healthy_position_is_not_dumped(self):
+        """Без срока цена остаётся мейкерской: спред мы всё-таки зарабатываем."""
+        got = self._quote({})
+        assert got['ask'] > 0.20
+
+    def test_the_cost_floor_does_not_trap_it(self):
+        """
+        Порог «не продавать ниже себестоимости» держал пять заявок из
+        тринадцати выше рынка — исполниться они могли только при росте. Выход
+        по сроку этим порогом не связан.
+        """
+        got = self._quote({'desperate': True}, position=5.0, cost=0.90)
+        assert got['ask'] == pytest.approx(0.20)

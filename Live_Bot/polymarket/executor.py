@@ -27,6 +27,7 @@
 import json
 import os
 import time
+import urllib.request
 
 from . import params, store, wallet
 
@@ -503,3 +504,52 @@ def reconcile(expected_orders):
     return {'ghost': sorted(ours - live_ids),
             'orphan': sorted(live_ids - ours),
             'live_count': len(live_ids), 'our_count': len(ours)}
+
+
+def exchange_positions():
+    """
+    ЧЕМ МЫ ВЛАДЕЕМ ПО МНЕНИЮ ПЛОЩАДКИ. Возвращает {токен: {размер, цена входа}}.
+
+    ЗАЧЕМ, ЕСЛИ ЕСТЬ ЖУРНАЛ СДЕЛОК. Журнал знает только то, что видел сам:
+    исполнение, случившееся при остановленном боте или потерянное при обрыве,
+    в него не попадёт никогда. А позиция от этого не исчезает — она лежит на
+    счёте, стоит денег и никем не управляется.
+
+    Замерено на живом счёте: биржа держала шестнадцать позиций, бот знал о
+    четырнадцати, и шесть из них были ему неизвестны вовсе — $11.69, за
+    которыми никто не следил. Среди них две полные пары «ДА+НЕТ» на $10:
+    закрытые круги, из которых просто не вынули деньги.
+
+    Возвращает None, если спросить не удалось: пустой ответ и «не спросили» —
+    разные вещи, и на втором решение строить нельзя.
+    """
+    account = wallet.funder()
+    if not account:
+        return None
+    url = (f'https://data-api.polymarket.com/positions?user={account}'
+           f'&limit=500')
+    try:
+        # ЗАГОЛОВОК ОБЯЗАТЕЛЕН: без него data-api отвечает 403 Forbidden.
+        request = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+        with urllib.request.urlopen(request, timeout=15) as answer:
+            rows = json.loads(answer.read().decode())
+    except Exception:                                       # noqa: BLE001
+        return None
+    if not isinstance(rows, list):
+        return None
+    out = {}
+    for row in rows:
+        try:
+            size = float(row.get('size') or 0)
+        except (TypeError, ValueError):
+            continue
+        if size <= 0:
+            continue
+        out[str(row.get('asset'))] = {
+            'size': size,
+            'avg_price': float(row.get('avgPrice') or 0),
+            'value': float(row.get('currentValue') or 0),
+            'question': row.get('title') or '',
+            'condition_id': row.get('conditionId'),
+        }
+    return out

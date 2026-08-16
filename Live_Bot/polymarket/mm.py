@@ -71,6 +71,35 @@ CANDIDATES = None          # кэш отбора внутри процесса
 LAST_PLAN = {}             # последняя раскладка бюджета, для панели
 
 
+def _spendable(budget):
+    """
+    Сколько денег план вправе разложить: настройка, но не больше свободных.
+
+    ПЛАН СТРОИЛСЯ НА СОРОК ДОЛЛАРОВ, КОГДА НА СЧЁТЕ БЫЛО ПОЛТОРА. Замерено на
+    живом счёте: двадцать пять котировок в плане, одиннадцать на бирже, три
+    отказа «не хватает денег» и десять заявок, которые даже не отправлялись.
+    Снаружи это выглядит как зависший бот, а на деле план просто описывал
+    деньги, которых нет.
+
+    Занятые деньги никуда не делись — они в позициях, и вернутся продажей.
+    Пока не вернулись, раскладывать их второй раз нельзя.
+
+    В бумажном режиме биржу не спрашиваем: там весь смысл в том, чтобы
+    проверить раскладку на заданном капитале.
+    """
+    try:
+        if not (wallet.live_enabled() and wallet.configured()):
+            return budget
+        free = wallet.balance()
+    except Exception:                                       # noqa: BLE001
+        return budget                # не спросили — идём по настройке
+    if free is None:
+        return budget
+    # Минимальный размер биржи остаётся полом: план из нуля рынков не сообщает
+    # ничего, а план из одного честно показывает, на что хватает.
+    return max(min(float(budget), float(free)), params.MM_MIN_ORDER_SIZE)
+
+
 def select_markets(limit=None, min_liquidity=None, refresh=False, budget=None):
     """
     Рынки под наш капитал. Отбор живёт в selector — здесь только кэш.
@@ -86,6 +115,7 @@ def select_markets(limit=None, min_liquidity=None, refresh=False, budget=None):
     from . import selector
 
     money = float(budget if budget is not None else params.bankroll_for('MM'))
+    money = _spendable(money)
     rows = selector.scan(budget=money, limit=limit or params.MM_MARKETS,
                          remember=remember_markets)
     plan = selector.allocate(rows, budget=money)
@@ -395,6 +425,21 @@ def as_our_side(trades, markets):
 
     Перевод тот же, что и для ленты: цена зеркалится, сторона переворачивается,
     размер остаётся. Контракт «нет» и контракт «да» — одна и та же единица.
+
+    НО ДЕНЬГИ ПЕРЕВОДИТЬ НЕЛЬЗЯ, И ЗДЕСЬ БЫЛА ОШИБКА РОВНО В ДОЛЛАР НА КОНТРАКТ.
+
+    Позиция переворачивается честно: купить «НЕТ» и продать «ДА» — одна и та же
+    ставка. А вот денежный поток у них ПРОТИВОПОЛОЖНЫЙ. Продажа «ДА» приносит
+    p за контракт; покупка «НЕТ» ЗАБИРАЕТ (1−p). Учёт же считал по переведённой
+    стороне и прибавлял p там, где биржа списывала (1−p), — ошибка p + (1−p),
+    то есть ровно доллар на каждый контракт.
+
+    Чем это кончилось на живом счёте: бухгалтерия показывала $29.03 наличными,
+    биржа — $1.45. Бот раз за разом строил план на сорок долларов, получал от
+    биржи «не хватает денег» и не понимал почему. Весь счёт при этом тихо
+    перетёк в запас: каждая «продажа» делала книги богаче, а счёт беднее.
+
+    Поэтому рядом с переведённой сделкой кладём НАСТОЯЩЕЕ движение денег.
     """
     twins = {}
     for market in markets or []:
@@ -407,11 +452,80 @@ def as_our_side(trades, markets):
         if not ours:
             out.append(trade)
             continue
+        # Настоящая цена — та, по которой прошла сделка встречного токена.
+        paid = float(trade['price']) * float(trade['size'])
         out.append({**trade, 'token': ours,
                     'side': 'ask' if trade['side'] == 'bid' else 'bid',
                     'price': round(1.0 - float(trade['price']), 10),
-                    'mirrored': True})
+                    'mirrored': True,
+                    'cash': -paid if trade['side'] == 'bid' else paid})
     return out
+
+
+def adopt_exchange_positions(maker, catalogue=None):
+    """
+    Забирает под управление позиции, о которых бот не знал.
+
+    ПОЧЕМУ ЭТО НЕ РОСКОШЬ. Управлять можно только тем, что видишь: наклон
+    котировки, разгрузка по сроку, предел вложенного — всё считается по нашим
+    книгам. Позиция, которой в них нет, не разгружается никогда и держит деньги
+    до самого разрешения рынка.
+
+    Замерено на живом счёте: биржа держала шестнадцать позиций, бот знал о
+    четырнадцати. Шесть были ему неизвестны вовсе — $11.69 без всякого
+    присмотра, и среди них две полные пары «ДА+НЕТ» на $10, то есть закрытые
+    круги, из которых просто не вынули деньги.
+
+    ПЕРЕВОД В НАШУ СИСТЕМУ КООРДИНАТ ОБЯЗАТЕЛЕН. Биржа считает по токенам и
+    всегда в плюс: держим пять «НЕТ». Мы считаем по рынку и со знаком: минус
+    пять «ДА». Записав биржевой ответ как есть, мы завели бы вторую позицию на
+    том же рынке и посчитали бы вложенное вдвое.
+
+    ЧУЖОГО НЕ ТРОГАЕМ. Уже известные позиции остаются как есть: у них своя
+    средняя цена и свой зафиксированный итог, и переписывать их ответом биржи
+    значило бы потерять историю ради строки, которая и так совпадает.
+    """
+    theirs = executor.exchange_positions()
+    if not theirs:
+        return []                   # не спросили либо позиций нет — не выдумываем
+
+    known = catalogue if catalogue is not None else known_markets()
+    # Токен «НЕТ» → токен «ДА» того же рынка: справочник хранит связь в обе
+    # стороны, и нам нужна та, что ведёт к нашей записи.
+    twin_of = {}
+    for token, card in known.items():
+        other = (card or {}).get('token_no')
+        if other:
+            twin_of[str(other)] = str(token)
+
+    adopted = []
+    for token, row in theirs.items():
+        ours, sign = token, 1.0
+        if token not in maker.state['books'] and token in twin_of:
+            # Держим встречный контракт — у нас это минус по основному.
+            mate = twin_of[token]
+            if mate in maker.state['books']:
+                ours, sign = mate, -1.0
+        slot = maker.state['books'].get(str(ours))
+        if slot and slot.get('position'):
+            continue                # знаем и ведём — не вмешиваемся
+        fresh = maker._slot(str(ours))
+        fresh['position'] = sign * row['size']
+        # Цена входа берётся биржевая: своей у нас нет, а без неё не работают
+        # ни порог «не продавать ниже себестоимости», ни предел убытка.
+        fresh['avg_cost'] = (row['avg_price'] if sign > 0
+                             else round(1.0 - row['avg_price'], 6))
+        fresh.setdefault('realized', 0.0)
+        # Срок удержания отсчитывается с момента, когда мы её увидели: когда
+        # она открылась на самом деле, узнать неоткуда, а держать её вечно
+        # только потому, что метки нет, — худший из вариантов.
+        fresh['opened_ts'] = fresh.get('opened_ts') or engine._now()
+        adopted.append({'token': str(ours), 'size': fresh['position'],
+                        'question': row.get('question') or '',
+                        'value': row.get('value')})
+    if adopted:
+        maker.save()
+    return adopted
 
 
 def step(maker, markets, live=False, day_loss=0.0, deadline=None,
@@ -485,6 +599,32 @@ def step(maker, markets, live=False, day_loss=0.0, deadline=None,
     # уже произошло, и только потом решаем, что делать дальше. Обратный порядок
     # считал бы позицию по устаревшим данным.
     if live:
+        # НАЛИЧНЫЕ НАЗЫВАЕТ БИРЖА, А НЕ НАША БУХГАЛТЕРИЯ.
+        #
+        # Сколько денег свободно — это факт, а не вывод. Наш счётчик копит
+        # движения и вместе с ними копит ошибку: на живом счёте он показывал
+        # $29.03 при $1.45 на бирже. Ошибка нашлась и исправлена, но полагаться
+        # на безошибочность счётчика больше незачем — правду отдают даром.
+        #
+        # Запас при этом остаётся нашим: биржа знает остаток, но оценка позиций
+        # по середине рынка считается здесь, и смешивать источники нельзя.
+        try:
+            free = wallet.balance()
+            if free is not None:
+                maker.state['cash'] = float(free)
+        except Exception:                                   # noqa: BLE001
+            pass                    # не спросили — идём по своим числам
+
+        # ЧУЖИХ ПОЗИЦИЙ НА СВОЁМ СЧЕТУ НЕ БЫВАЕТ. Всё, чем владеем, должно быть
+        # под управлением: иначе оно держит деньги и никогда не разгружается.
+        try:
+            for taken in adopt_exchange_positions(maker):
+                _say(f'◈ Polymarket: подобрана позиция {taken["size"]:+.0f} '
+                     f'на «{(taken.get("question") or "?")[:40]}» — '
+                     f'она была на счету, но не в учёте')
+        except Exception:                                   # noqa: BLE001
+            pass                    # сведение — улучшение, а не условие работы
+
         got = executor.own_trades()
         if got:
             # СДЕЛКИ ВСТРЕЧНОГО ТОКЕНА ПЕРЕВОДЯТСЯ В НАШУ СТОРОНУ. Без этого
@@ -559,6 +699,11 @@ def step(maker, markets, live=False, day_loss=0.0, deadline=None,
     # stale_positions существовала и не вызывалась ни разу. Позиция могла
     # висеть сутками, держа деньги, которые должны работать на других рынках.
     stale = set(maker.stale_positions())
+    # ВТОРОЙ СРОК — ЭТО УЖЕ НЕ ОЖИДАНИЕ, А ЗАСТРЕВАНИЕ. Первый срок означает
+    # «встань лучшей ценой»; если и это не помогло, ждать больше нечего —
+    # выходим через рынок. Замер: три заявки из четырнадцати вообще без
+    # встречного потока, тишина до тридцати трёх часов.
+    desperate = set(maker.stale_positions(params.MM_MAX_HOLD_HOURS * 2))
 
     # ПОЗИЦИЯ, УШЕДШАЯ СЛИШКОМ ДАЛЕКО, ЗАКРЫВАЕТСЯ ТАК ЖЕ, КАК ПРОСРОЧЕННАЯ.
     #
@@ -659,7 +804,8 @@ def step(maker, markets, live=False, day_loss=0.0, deadline=None,
         # сроке — состояние. Смешивать эти два знания в одном месте значило бы
         # тащить время жизни позиции в чистую функцию котирования.
         market = dict(market,
-                      stale=str(token) in stale or str(token) in hurt)
+                      stale=str(token) in stale or str(token) in hurt,
+                      desperate=str(token) in desperate)
         quote = strategy.desired_quote(top, market, position=slot['position'],
                                        max_position=params.MM_MAX_POSITION,
                                        avg_cost=slot.get('avg_cost') or 0.0)

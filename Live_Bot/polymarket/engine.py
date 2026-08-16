@@ -417,7 +417,23 @@ class PaperMaker:
             mark = marks.get(token)
             if mark is None:
                 mark = slot['avg_cost']
-            inventory += slot['position'] * mark
+            if slot['position'] < 0:
+                # ОТРИЦАТЕЛЬНАЯ ПОЗИЦИЯ — ЭТО НЕ ДОЛГ, А ВСТРЕЧНЫЕ КОНТРАКТЫ.
+                #
+                # Продать «ДА», которого нет, биржа не даст. Продажа уходит
+                # покупкой «НЕТ», и в учёте записывается минусом по «ДА» —
+                # ставка та же. Но лежит у нас при этом ПОЛОЖИТЕЛЬНЫЙ запас
+                # встречных контрактов, и стоит он (1 − цена) за штуку.
+                #
+                # Оценивая минус по цене «ДА», мы вычитали то, что на самом
+                # деле лежит в активе, и ошибались ровно на доллар с контракта
+                # — той же величиной, что и денежный счёт, только в другую
+                # сторону. В сумме они гасили друг друга, и итог сходился при
+                # двух неверных слагаемых. Стоило поправить одно — поехало бы
+                # всё.
+                inventory += -slot['position'] * (1.0 - mark)
+            else:
+                inventory += slot['position'] * mark
         realized = sum(s['realized'] for s in self.state['books'].values())
         return {'cash': self.state['cash'], 'inventory': inventory,
                 'equity': self.state['cash'] + inventory,
@@ -425,13 +441,20 @@ class PaperMaker:
                 'pnl': self.state['cash'] + inventory - self.bankroll}
 
     def exposure(self, marks):
-        """Сколько денег стоит в запасе — по модулю, обе стороны считаются."""
+        """
+        Сколько денег стоит в запасе — по модулю, обе стороны считаются.
+
+        Минус по «ДА» означает встречные контракты, и стоят они (1 − цена):
+        та же поправка, что и в оценке капитала. Без неё предел вложенного
+        считался по дешёвой стороне и пропускал впятеро больше, чем разрешено.
+        """
         total = 0.0
         for token, slot in self.state['books'].items():
             if not slot['position']:
                 continue
             mark = marks.get(token) or slot['avg_cost']
-            total += abs(slot['position'] * mark)
+            total += (-slot['position'] * (1.0 - mark) if slot['position'] < 0
+                      else slot['position'] * mark)
         return total
 
     def stale_positions(self, hours=None):
@@ -464,8 +487,18 @@ class PaperMaker:
             seen.add(key)
             slot = self._slot(trade['token'])
             self._apply_fill(slot, trade['side'], trade['price'], trade['size'])
-            cash = -trade['price'] * trade['size'] if trade['side'] == 'bid' \
-                else trade['price'] * trade['size']
+            # ДЕНЬГИ БЕРУТСЯ ИЗ САМОЙ СДЕЛКИ, ЕСЛИ ОНА ИХ НЕСЁТ.
+            #
+            # Продажа «ДА» уходит на биржу покупкой «НЕТ», и обратно приходит
+            # сделкой встречного токена. Позиция при переводе переворачивается
+            # верно, а денежный поток — нет: продажа приносит p, покупка
+            # встречного ЗАБИРАЕТ (1−p). Считая по переведённой стороне, учёт
+            # ошибался ровно на доллар с контракта и показывал $29.03 там, где
+            # на бирже лежало $1.45.
+            cash = trade.get('cash')
+            if cash is None:
+                cash = -trade['price'] * trade['size'] if trade['side'] == 'bid' \
+                    else trade['price'] * trade['size']
             self.state['cash'] += cash
             # Заявка, по которой прошло исполнение, у биржи уже закрыта.
             # ЗАОДНО СВЕРЯЕМ ОБЕЩАНИЕ С ДЕЛОМ. Другого способа узнать, врёт ли
