@@ -40,6 +40,21 @@ Write-Host "Собираю Kraken.exe (несколько минут: ccxt, pand
 # --hidden-import: ccxt и apscheduler подгружают модули биржи по имени в рантайме,
 #   статический анализ PyInstaller их не видит и без явного указания
 #   собранная программа падает при первом обращении к бирже.
+#
+# СТРОГИЙ РЕЖИМ ОШИБОК НА ВРЕМЯ СБОРКИ СНИМАЕТСЯ, И ЭТО НЕ НЕБРЕЖНОСТЬ.
+#
+# PyInstaller пишет ход работы в поток ОШИБОК, а не вывода — так устроен он, а
+# не мы. При $ErrorActionPreference = 'Stop' PowerShell считает фатальной первую
+# же строку «INFO: PyInstaller 6.21.0» и обрывает сборку, не начав её.
+#
+# Сборка при этом молча оставалась прежней: файл на месте, дата старая. Так и
+# вышло — Kraken.exe отстал на 138 коммитов и десять дней, а человек запускал
+# его и не понимал, почему нет ни одной правки.
+#
+# Успех проверяем не отсутствием ошибок, а тем, что положено проверять: кодом
+# возврата и наличием файла.
+$before = $ErrorActionPreference
+$ErrorActionPreference = 'Continue'
 python -m PyInstaller `
     --noconfirm --clean --onefile --windowed `
     --name Kraken `
@@ -69,7 +84,19 @@ python -m PyInstaller `
     --exclude-module research `
     "$botDir\desktop.py"
 
+$code = $LASTEXITCODE
+$ErrorActionPreference = $before
+if ($code -ne 0) { throw "PyInstaller вернул код $code — сборка не удалась" }
+
 if (-not (Test-Path "$dist\Kraken.exe")) { throw "Сборка не создала $dist\Kraken.exe" }
+
+# СВЕЖЕСТЬ ФАЙЛА ПРОВЕРЯЕТСЯ ОТДЕЛЬНО. Прежний Kraken.exe остаётся на месте,
+# если сборка не дошла до записи, — и «файл есть» перестаёт быть признаком
+# успеха. Ровно так десятидневная сборка выдавала себя за новую.
+$built = (Get-Item "$dist\Kraken.exe").LastWriteTime
+if ($built -lt (Get-Date).AddMinutes(-30)) {
+    throw "Kraken.exe не обновился (файл от $built) — сборка не записала его"
+}
 
 Write-Host ""
 Write-Host "Готово: $dist\Kraken.exe"
