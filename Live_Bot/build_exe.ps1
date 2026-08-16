@@ -76,6 +76,7 @@ python -m PyInstaller `
     --collect-all webview `
     --hidden-import webview.platforms.winforms `
     --hidden-import clr_loader `
+    --hidden-import clr `
     --hidden-import first_run `
     --hidden-import updater_app `
     --hidden-import tkinter `
