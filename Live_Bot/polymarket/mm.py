@@ -894,8 +894,22 @@ def step(maker, markets, live=False, day_loss=0.0, deadline=None,
         market = dict(market,
                       stale=str(token) in stale or str(token) in hurt,
                       desperate=str(token) in desperate)
+        # ПОТОЛОК ЗАПАСА НА РЫНОК СЧИТАЕТСЯ В ДЕНЬГАХ, А НЕ В КОНТРАКТАХ.
+        #
+        # В настройке он стоял числом — триста контрактов, — и при цене 0.20
+        # это шестьдесят долларов, то есть ПОЛТОРА СЧЁТА. Предел, превышающий
+        # счёт, не связывает никогда: ровно та же ошибка, что была у предела
+        # вложенного ($500 при счёте $40), и обнаружилась она тем же способом.
+        #
+        # Контракт стоит от цента до доллара, поэтому один и тот же «потолок в
+        # контрактах» означает совершенно разные деньги на разных рынках.
+        # Деньги и есть то, чем мы рискуем, — их и ограничиваем, а в контракты
+        # переводим по цене этого рынка.
+        cap_usd = params.bankroll_for('MM') * params.MM_MAX_MARKET_SHARE
+        cap_lots = min(cap_usd / max(top['mid'] or 0.01, 0.01),
+                       params.MM_MAX_POSITION)
         quote = strategy.desired_quote(top, market, position=slot['position'],
-                                       max_position=params.MM_MAX_POSITION,
+                                       max_position=cap_lots,
                                        avg_cost=slot.get('avg_cost') or 0.0)
         if not quote or quote.get('reason'):
             reason = (quote or {}).get('reason') or 'котировка не собралась'
