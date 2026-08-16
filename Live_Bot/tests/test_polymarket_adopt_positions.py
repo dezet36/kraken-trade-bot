@@ -172,3 +172,30 @@ class TestTheExposureCapScalesWithTheAccount:
     def test_a_quarter_stays_free_at_the_cap(self):
         share = mm.params.MM_MAX_EXPOSURE_USD / mm.params.bankroll_for('MM')
         assert share == pytest.approx(mm.params.MM_MAX_EXPOSURE_SHARE, abs=0.01)
+
+
+class TestAnAdoptedPositionIsAlreadyOverdue:
+    """
+    Подобранная позиция лежала без присмотра — это и привело к жалобе «весь
+    бюджет завис в паре сделок». Дать ей ещё сутки покоя значило бы повторить
+    ровно то, что чинится.
+
+    Первый срок означает не сброс, а отказ от шага внутрь спреда: встаём лучшей
+    ценой и ждём. Риск такой уступки мал, простоя капитала — велик.
+    """
+
+    def test_the_clock_starts_already_expired(self, tmp_path, monkeypatch):
+        _exchange(monkeypatch, {'YES': {'size': 5.0, 'avg_price': 0.20,
+                                        'value': 1.0, 'question': 'рынок'}})
+        maker = _maker(tmp_path)
+        mm.adopt_exchange_positions(maker, CATALOGUE)
+        assert maker.stale_positions() == ['YES']
+
+    def test_but_it_is_not_dumped_at_once(self, tmp_path, monkeypatch):
+        """Выход через рынок — второй срок, и до него ещё надо дожить."""
+        _exchange(monkeypatch, {'YES': {'size': 5.0, 'avg_price': 0.20,
+                                        'value': 1.0, 'question': 'рынок'}})
+        maker = _maker(tmp_path)
+        mm.adopt_exchange_positions(maker, CATALOGUE)
+        later = mm.params.MM_MAX_HOLD_HOURS * mm.params.MM_DESPERATE_AFTER
+        assert maker.stale_positions(later) == []
