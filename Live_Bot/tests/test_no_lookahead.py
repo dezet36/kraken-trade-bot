@@ -1,138 +1,157 @@
 """
-Сквозная проверка отсутствия подглядывания в будущее.
+Заявка не наливается ходом цены, которого мы не застали.
 
-Идея теста: решение, принятое на свече i, не должно зависеть от того, есть ли
-в данных свечи после i. Строим контекст на ПОЛНОЙ истории и на истории,
-обрезанной ровно по i, и требуем совпадения результата evaluate(i).
+ОТКУДА ЭТО. В журнале у четырёх сделок время ожидания входа отрицательное:
+−2 и −3 минуты. Заявка не может исполниться раньше, чем выставлена, — значит
+считалась она по свече, открывшейся ДО постановки.
 
-Это самый важный тест в наборе. Ошибка такого рода не роняет код и не видна
-в логах — она просто делает результаты бэктеста недостижимыми в реальности.
-Именно так был найден баг с разрешением времени: bias читался из конца года,
-а бэктест при этом выглядел правдоподобно.
+Так и было. При постановке заявке присваивалось `last_ts = now - BAR_MS` с
+пометкой «начинаем со свечи, идущей сейчас», а свеча, идущая сейчас, открылась
+в прошлом. Заявка, выставленная в 10:03, попадала на свечу 10:00–10:05 и
+наливалась, если цена задела лимит в 10:01 — когда заявки ещё не существовало.
 
-Тест намеренно медленнее остальных: он строит контекст заново на каждой
-проверяемой свече.
+Итог этих четырёх сделок — −$52.49 при одном плюсе из четырёх: выборке дефект
+не польстил. Но завышает он не прибыль, а ДОЛЮ ИСПОЛНЕНИЙ, и в этом его вред:
+часть сетапов выглядела рабочей за счёт хода, которого мы не застали.
+
+Плата за честность — до одной свечи задержки перед первой проверкой.
 """
 
 import os
 import sys
 
-import numpy as np
-import pandas as pd
+import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from smc import signal as smc_signal  # noqa: E402
+BAR_MS = 300_000
 
 
-def synthetic_market(bars=900, seed=7):
-    """
-    Детерминированный ряд свечей с трендами, откатами и шумом.
+class FakeClient:
+    def __init__(self):
+        self.candles = {}
 
-    Нужен ряд, на котором реально формируются структура, зоны и имбалансы —
-    на идеальном зигзаге половина логики не активируется и тест ничего не
-    проверит.
-    """
-    rng = np.random.default_rng(seed)
+    def fetch_ohlcv(self, symbol, timeframe, since=None, limit=None):
+        rows = list(self.candles.get(symbol, []))
+        if since is not None:
+            rows = [c for c in rows if c[0] >= since]
+        return rows[:limit] if limit else rows
 
-    # Кусочный дрейф: чередование трендов и боковиков
-    drift = np.concatenate([
-        np.full(200, 0.0012), np.full(150, -0.0009), np.full(120, 0.0002),
-        np.full(180, 0.0015), np.full(130, -0.0014), np.full(bars, 0.0005),
-    ])[:bars]
-
-    shocks = rng.normal(0, 0.006, bars)
-    closes = 100 * np.exp(np.cumsum(drift + shocks))
-
-    opens = np.empty(bars)
-    opens[0] = closes[0]
-    opens[1:] = closes[:-1]
-
-    span = np.abs(closes - opens) + closes * rng.uniform(0.001, 0.005, bars)
-    highs = np.maximum(opens, closes) + span * rng.uniform(0, 0.6, bars)
-    lows = np.minimum(opens, closes) - span * rng.uniform(0, 0.6, bars)
-
-    return pd.DataFrame({
-        'timestamp': pd.date_range('2026-01-01', periods=bars, freq='h', tz='UTC'),
-        'open': opens, 'high': highs, 'low': lows, 'close': closes,
-        'volume': rng.uniform(50, 500, bars),
-    })
+    def fetch_funding_rate(self, symbol):
+        raise RuntimeError('ставка недоступна')
 
 
-def frames_from(df_1h):
-    """Готовит раскладку таймфреймов так же, как это делает бэктест."""
-    def agg(rule):
-        return (df_1h.set_index('timestamp')
-                .resample(rule)
-                .agg({'open': 'first', 'high': 'max', 'low': 'min',
-                      'close': 'last', 'volume': 'sum'})
-                .dropna().reset_index())
-
-    return {'bias': agg('1D'), 'htf': agg('4h'), 'poi': df_1h}
-
-
-def describe(result):
-    """Сводит сетап к сравнимому виду (без объектов и меток времени)."""
-    setup, reason = result
-    if setup is None:
-        return ('НЕТ', reason)
-    trade = setup['params']
-    return (
-        setup['direction'],
-        setup['poi']['type'],
-        setup['poi']['index'],
-        round(setup['confluence'], 4),
-        round(trade['entry'], 8),
-        round(trade['stop_loss'], 8),
-        tuple(round(t, 8) for t in trade['targets']),
-    )
+@pytest.fixture()
+def env(tmp_path, monkeypatch):
+    """Прежние модули возвращаются на место — см. фикстур в test_candle_gap."""
+    monkeypatch.setenv('BOT_DATA_DIR', str(tmp_path))
+    monkeypatch.setenv('TRADING_MODE', 'PAPER')
+    monkeypatch.setenv('PAPER_START_BALANCE', '10000')
+    monkeypatch.setenv('PAPER_FUNDING', '0')
+    saved = {m: sys.modules.pop(m, None) for m in ('config', 'paper_broker')}
+    import paper_broker
+    yield paper_broker
+    for name, module in saved.items():
+        if module is None:
+            sys.modules.pop(name, None)
+        else:
+            sys.modules[name] = module
 
 
-class TestNoLookahead:
-    def test_decision_matches_truncated_history(self):
+def signal(entry=100.0, stop=90.0, tp1=130.0, pair='BTCUSDT'):
+    return {
+        'trading_pair': pair,
+        'strategy': 'FIBO',
+        'setup': {'type': 'LONG', 'start_price': 80.0, 'end_price': 120.0,
+                  'size': 40.0},
+        'trigger': {'zone': 'Zone_A'},
+        'htf_trend': 'BULLISH',
+        'scan': {'score': 71.5, 'proximity': 0.8},
+        'params': {
+            'entry': entry, 'stop_loss': stop,
+            'take_profit_1': tp1, 'take_profit_2': tp1,
+            'be_level': None, 'breakeven_after_tp': True,
+            'max_same_direction': 0,
+            'tp_targets': [tp1], 'tp_fractions': [1.0],
+            'rr': abs(tp1 - entry) / abs(entry - stop),
+            'position_size': 1.0, 'risk_amount': 100.0,
+        },
+    }
+
+
+class TestAFreshOrderIgnoresTheCandleItWasBornIn:
+
+    def test_the_candle_that_opened_before_placement_is_not_processed(self, env,
+                                                                     monkeypatch):
         """
-        Решение на свече i идентично при полной и обрезанной истории.
-
-        Расхождение означает, что какой-то слой заглядывает вперёд: либо
-        свинг размечен до подтверждения, либо уровень взят из будущего
-        периода, либо таймфреймы связаны неверно.
+        РОВНО ТОТ ДЕФЕКТ. Заявка выставлена в середине свечи; эта свеча своим
+        минимумом накрывает лимит. Наливаться нечему: минимум мог случиться
+        до постановки, и знать этого мы не можем.
         """
-        full = synthetic_market()
-        ctx_full = smc_signal.build_context(frames_from(full.copy()), pair='TEST')
+        bar_open = 1_700_000_000_000
+        placed = bar_open + 3 * 60_000                # 10:03 при свече на 10:00
+        monkeypatch.setattr(env, '_now_ms', lambda: placed)
 
-        # Проверяем срез свечей, а не все 900: контекст строится заново каждый раз
-        checkpoints = range(300, len(full) - 1, 47)
-        mismatches = []
+        broker = env.PaperBroker(FakeClient(), strategies=('FIBO',))
+        assert broker.open('FIBO', signal(entry=100.0))
+        order = broker.pending('FIBO')['BTCUSDT']
 
-        for i in checkpoints:
-            truncated = full.iloc[:i + 1].reset_index(drop=True)
-            ctx_cut = smc_signal.build_context(frames_from(truncated), pair='TEST')
+        assert not (bar_open > order['last_ts']), (
+            f"свеча, открывшаяся за {(placed - bar_open) // 60000} мин до "
+            f"постановки, попала бы в обработку — это заглядывание вперёд")
 
-            got_full = describe(ctx_full.evaluate(i))
-            got_cut = describe(ctx_cut.evaluate(i))
+    def test_the_next_candle_is_processed(self, env, monkeypatch):
+        """Правило обязано резать только прошлое, иначе заявка не наливается."""
+        bar_open = 1_700_000_000_000
+        placed = bar_open + 3 * 60_000
+        monkeypatch.setattr(env, '_now_ms', lambda: placed)
 
-            if got_full != got_cut:
-                mismatches.append((i, got_full, got_cut))
+        broker = env.PaperBroker(FakeClient(), strategies=('FIBO',))
+        broker.open('FIBO', signal(entry=100.0))
+        order = broker.pending('FIBO')['BTCUSDT']
 
-        assert not mismatches, (
-            'Обнаружено подглядывание в будущее на свечах '
-            + ', '.join(str(m[0]) for m in mismatches[:5])
-            + f'\nпример: полная={mismatches[0][1]}\n        обрезанная={mismatches[0][2]}'
-        )
+        assert bar_open + BAR_MS > order['last_ts'], (
+            'следующая свеча обязана обрабатываться, иначе заявка мертва')
 
-    def test_context_sees_no_unconfirmed_swings(self):
-        """Ни один свинг не может быть подтверждён позже, чем существует."""
-        df = synthetic_market(bars=400)
-        ctx = smc_signal.build_context(frames_from(df), pair='TEST')
+    def test_a_candle_opening_exactly_at_placement_is_processed(self, env,
+                                                                monkeypatch):
+        """Совпадение с точностью до миллисекунды — это уже не прошлое."""
+        placed = 1_700_000_000_000
+        monkeypatch.setattr(env, '_now_ms', lambda: placed)
+        broker = env.PaperBroker(FakeClient(), strategies=('FIBO',))
+        broker.open('FIBO', signal(entry=100.0))
+        assert placed > broker.pending('FIBO')['BTCUSDT']['last_ts']
 
-        for point in ctx.structure['points']:
-            assert point['confirmed_at'] >= point['index'], 'подтверждение раньше свинга'
-            assert point['confirmed_at'] < len(df) + 10
 
-    def test_sweeps_complete_before_they_are_used(self):
-        """Снятие ликвидности засчитывается только после возврата цены."""
-        df = synthetic_market(bars=400)
-        ctx = smc_signal.build_context(frames_from(df), pair='TEST')
+class TestTheFillIsNeverStampedBeforeThePlacement:
+    """
+    Смысловая проверка: отрицательное ожидание входа в журнале — признак того,
+    что дефект вернулся. Именно по нему он и был найден.
+    """
 
-        for sweep in ctx.sweeps:
-            assert sweep['reclaimed_at'] >= sweep['index'], 'возврат раньше прокола'
+    def test_wait_cannot_come_out_negative(self, env, monkeypatch):
+        bar_open = 1_700_000_000_000
+        placed = bar_open + 3 * 60_000
+        monkeypatch.setattr(env, '_now_ms', lambda: placed)
+
+        client = FakeClient()
+        broker = env.PaperBroker(client, strategies=('FIBO',))
+        broker.open('FIBO', signal(entry=100.0))
+        order = broker.pending('FIBO')['BTCUSDT']
+
+        # Обе свечи накрывают лимит своим минимумом: первая открылась ДО
+        # постановки и обязана быть пропущена, вторая — после.
+        bars = [
+            [bar_open, 101.0, 105.0, 99.0, 101.0, 0],
+            [bar_open + BAR_MS, 101.0, 105.0, 99.0, 101.0, 0],
+        ]
+        broker._advance('FIBO', 'BTCUSDT', bars, 0.0)
+
+        pos = broker.positions('FIBO').get('BTCUSDT')
+        assert pos is not None, 'заявка обязана была налиться на второй свече'
+        wait = int((pos['opened_ts'] - pos['placed_ts']) / 60000)
+        assert wait >= 0, (
+            f'ожидание входа {wait} мин — заявка исполнилась раньше, чем '
+            f'выставлена')
+        assert pos['opened_ts'] == bar_open + BAR_MS, (
+            'налилась не на той свече: взята та, что открылась до постановки')
