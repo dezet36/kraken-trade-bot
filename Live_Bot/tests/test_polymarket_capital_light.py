@@ -53,7 +53,9 @@ from polymarket import params, selector, strategy  # noqa: E402
 MARKET = {'tick': 0.01, 'order_min': 5, 'size': 5, 'step_ticks': 0}
 
 
-def _quote(price, position=0, cost=0.0, **extra):
+def _quote(price, position=0, cost=0.0, hours_left=None, **extra):
+    if hours_left is not None:
+        extra['hours_left'] = hours_left
     top = {'bid': round(price - 0.01, 4), 'ask': round(price + 0.01, 4),
            'mid': price, 'bid_size': 100, 'ask_size': 100}
     return strategy.desired_quote(top, dict(MARKET, **extra),
@@ -168,3 +170,63 @@ class TestTheRiskThatComesWithIt:
         flat = _quote(0.22, position=0)
         loaded = _quote(0.22, position=5, cost=0.22)
         assert loaded['bid'] < flat['bid']
+
+
+class TestTwoSidedLocksCapitalUntilResolution:
+    """
+    ДВУСТОРОННЯЯ КОТИРОВКА ЗАПИРАЕТ ДЕНЬГИ ДО РАЗРЕШЕНИЯ, И ВЫНУТЬ ИХ НЕЛЬЗЯ.
+
+    Выяснено разбором самой площадки. Когда исполняются обе стороны, на руках
+    пара «ДА+НЕТ»: по ставке ноль, по деньгам ровно доллар за штуку — но лежащий
+    мёртво. Обратно в залог пара гасится вызовом mergePositions, а наш счёт это
+    депозитный кошелёк Polymarket:
+
+        кошелёк принимает вызовы только от своей фабрики   OnlyFactory()
+        фабрика — только от операторов площадки            OnlyOperator()
+
+    Проверено симуляцией: сам mergePositions проходит и стоит 290 тысяч газа,
+    но подать его нам некуда.
+
+    Замерено на живом счёте:
+
+        «Democratic House»  пара по 0.9700 → +3.09% за две недели (~80% годовых)
+        «Dplus LCK»         пара по 0.9970 → +0.30% за 4.5 месяца (<1% годовых)
+
+    Разница не в качестве круга, а в сроке, на который заперты деньги.
+    """
+
+    def test_a_distant_market_outside_the_band_is_refused(self):
+        """
+        Вне полосы одна сторона не приносит НИЧЕГО, значит остаётся
+        двусторонняя — а она запрёт деньги на полгода ради круга, который
+        вернёт полпроцента. Такой рынок не берём вовсе.
+        """
+        got = _quote(0.05, hours_left=24 * 180)
+        assert got['bid'] is None and got['ask'] is None
+        assert 'запрутся в паре' in got['reason']
+
+    def test_the_same_market_is_taken_when_resolution_is_near(self):
+        """Разрешение на днях — пара вернёт деньги быстро, круг того стоит."""
+        got = _quote(0.05, hours_left=48)
+        assert got['bid'] is not None and got['ask'] is not None
+
+    def test_inside_the_band_the_horizon_does_not_matter(self):
+        """
+        Внутри полосы беды нет: односторонний вход выходит продажей того, что
+        держим, и деньги возвращаются сразу.
+        """
+        assert _quote(0.30, hours_left=24 * 180)['only'] == 'bid'
+
+    def test_a_market_without_a_date_keeps_the_old_behaviour(self):
+        """Срока не знаем — решаем как раньше, по цене."""
+        assert _quote(0.30)['only'] == 'bid'
+        assert _quote(0.05)['bid'] is not None
+
+    def test_unloading_is_never_blocked_by_the_horizon(self):
+        """
+        Разгрузка запаса — правило риска, сроком разрешения не связана. Отказ
+        касается только ВХОДА: бросить уже открытую позицию без котировки
+        значило бы перестать ею управлять.
+        """
+        got = _quote(0.05, position=5, cost=0.05, hours_left=24 * 180)
+        assert got['bid'] is not None or got['ask'] is not None
