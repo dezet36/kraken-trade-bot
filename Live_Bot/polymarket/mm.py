@@ -503,23 +503,64 @@ def adopt_exchange_positions(maker, catalogue=None):
         if other:
             twin_of[str(other)] = str(token)
 
-    adopted = []
+    # ЧИСТАЯ ПОЗИЦИЯ РЫНКА В НАШИХ КООРДИНАТАХ. Биржа считает по токенам и
+    # всегда в плюс; мы — по рынку и со знаком. Держать «ДА» и «НЕТ» разом
+    # значит быть в нуле по ставке, и складывать их надо с разными знаками.
+    # СПРАВОЧНИК УКАЗЫВАЕТ В ОБЕ СТОРОНЫ: у «ДА» встречный «НЕТ», у «НЕТ» —
+    # «ДА». Поэтому «главный» токен нельзя вывести из одной связи, и выбирается
+    # он по нашему же учёту: главный тот, по которому позиция уже ведётся.
+    # Если не ведётся ни по одному — главным становится сам токен, и запись
+    # заводится обычной, положительной.
+    def _main_of(token):
+        token = str(token)
+        if token in maker.state['books']:
+            return token, 1.0
+        mate = twin_of.get(token)
+        if mate and mate in maker.state['books']:
+            return mate, -1.0
+        return token, 1.0
+
+    net = {}
     for token, row in theirs.items():
-        ours, sign = token, 1.0
-        if token not in maker.state['books'] and token in twin_of:
-            # Держим встречный контракт — у нас это минус по основному.
-            mate = twin_of[token]
-            if mate in maker.state['books']:
-                ours, sign = mate, -1.0
+        main, sign = _main_of(token)
+        entry = net.setdefault(main, {'size': 0.0, 'avg_price': None,
+                                      'question': '', 'value': 0.0})
+        entry['size'] += sign * row['size']
+        entry['value'] += row.get('value') or 0.0
+        entry['question'] = entry['question'] or row.get('question') or ''
+        if entry['avg_price'] is None:
+            entry['avg_price'] = (row['avg_price'] if sign > 0
+                                  else round(1.0 - row['avg_price'], 6))
+
+    adopted = []
+    for ours, row in net.items():
         slot = maker.state['books'].get(str(ours))
-        if slot and slot.get('position'):
-            continue                # знаем и ведём — не вмешиваемся
+        held = float((slot or {}).get('position') or 0)
+        if slot and held:
+            # РАЗМЕР ПРАВИТСЯ ПО БИРЖЕ, СРЕДНЯЯ ЦЕНА ОСТАЁТСЯ НАША.
+            #
+            # Замерено: по «Snapchat» биржа держала +5, а учёт помнил −15 —
+            # расхождение в двадцать контрактов. По такому числу считается
+            # наклон котировки, размер выхода и предел вложенного, то есть
+            # ошибались ВСЕ решения по этому рынку разом.
+            #
+            # Средняя цена своя: биржа считает её по всем сделкам счёта, мы —
+            # по нашим кругам, и на ней держатся порог себестоимости и предел
+            # убытка. Менять её ответом биржи значило бы потерять историю ради
+            # числа, которое и так почти всегда совпадает.
+            if abs(held - row['size']) > 0.01:
+                adopted.append({'token': str(ours), 'size': row['size'],
+                                'was': held, 'fixed': True,
+                                'question': row.get('question') or ''})
+                slot['position'] = row['size']
+            continue
+        if not row['size']:
+            continue                # пара «ДА+НЕТ» в ноль — вести нечего
         fresh = maker._slot(str(ours))
-        fresh['position'] = sign * row['size']
+        fresh['position'] = row['size']
         # Цена входа берётся биржевая: своей у нас нет, а без неё не работают
         # ни порог «не продавать ниже себестоимости», ни предел убытка.
-        fresh['avg_cost'] = (row['avg_price'] if sign > 0
-                             else round(1.0 - row['avg_price'], 6))
+        fresh['avg_cost'] = float(row.get('avg_price') or 0)
         fresh.setdefault('realized', 0.0)
         # СРОК УДЕРЖАНИЯ У ПОДОБРАННОЙ ПОЗИЦИИ СЧИТАЕТСЯ ИСТЁКШИМ.
         #
@@ -549,13 +590,12 @@ def adopt_exchange_positions(maker, catalogue=None):
     #
     # УБИРАЕМ ТОЛЬКО ПРИ НЕПУСТОМ ОТВЕТЕ. Пустой список бывает и от сбоя, а
     # стереть по нему все позиции разом значило бы потерять учёт целиком.
-    held = set(theirs)
+    held = set(net)
     for token in list(maker.state['books']):
         slot = maker.state['books'][token]
         if not slot.get('position'):
             continue
-        twin = str((known.get(str(token)) or {}).get('token_no') or '')
-        if str(token) in held or (twin and twin in held):
+        if str(token) in held:
             continue
         adopted.append({'token': str(token), 'size': 0.0, 'gone': True,
                         'was': slot['position'],

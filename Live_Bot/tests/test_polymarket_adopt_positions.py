@@ -67,21 +67,57 @@ class TestUnknownPositionsAreTakenOver:
         # по 0.20, иначе порог «не продавать ниже себестоимости» врал бы.
         assert maker.state['books']['YES']['avg_cost'] == pytest.approx(0.20)
 
-    def test_a_known_position_is_left_alone(self, tmp_path, monkeypatch):
+    def test_a_wrong_size_is_corrected_by_the_exchange(self, tmp_path,
+                                                       monkeypatch):
         """
-        У известной позиции своя средняя цена и свой зафиксированный итог.
-        Переписывать их ответом биржи значило бы потерять историю.
+        РАЗМЕР ПРАВИТСЯ ПО БИРЖЕ, ИСТОРИЯ ОСТАЁТСЯ НАША.
+
+        Замерено: по «Snapchat» биржа держала +5, а учёт помнил −15 —
+        расхождение в двадцать контрактов. По этому числу считается наклон
+        котировки, размер выхода и предел вложенного, то есть ошибались ВСЕ
+        решения по рынку разом.
+
+        Средняя цена и зафиксированный итог свои: на них держатся порог
+        себестоимости и предел убытка, а биржа считает среднюю по всем сделкам
+        счёта. Менять их ответом биржи значило бы потерять историю.
         """
         maker = _maker(tmp_path)
         slot = maker._slot('YES')
-        slot['position'] = 3.0
+        slot['position'] = -15.0
         slot['avg_cost'] = 0.11
         slot['realized'] = 0.42
         _exchange(monkeypatch, {'YES': {'size': 5.0, 'avg_price': 0.20,
                                         'value': 1.0, 'question': 'рынок'}})
-        assert mm.adopt_exchange_positions(maker, CATALOGUE) == []
-        assert maker.state['books']['YES']['position'] == pytest.approx(3.0)
+        got = mm.adopt_exchange_positions(maker, CATALOGUE)
+        assert any(row.get('fixed') for row in got)
+        assert maker.state['books']['YES']['position'] == pytest.approx(5.0)
+        assert maker.state['books']['YES']['avg_cost'] == pytest.approx(0.11)
         assert maker.state['books']['YES']['realized'] == pytest.approx(0.42)
+
+    def test_a_matching_size_is_left_alone(self, tmp_path, monkeypatch):
+        """Совпало — не трогаем: лишняя запись в журнале это шум."""
+        maker = _maker(tmp_path)
+        slot = maker._slot('YES')
+        slot['position'] = 5.0
+        slot['avg_cost'] = 0.11
+        _exchange(monkeypatch, {'YES': {'size': 5.0, 'avg_price': 0.20,
+                                        'value': 1.0, 'question': 'рынок'}})
+        assert mm.adopt_exchange_positions(maker, CATALOGUE) == []
+
+    def test_a_pair_of_both_legs_nets_to_flat(self, tmp_path, monkeypatch):
+        """
+        Держать «ДА» и «НЕТ» разом значит быть в нуле по ставке. Складывать их
+        надо с разными знаками, иначе одна позиция посчиталась бы дважды.
+        """
+        maker = _maker(tmp_path)
+        maker._slot('YES')
+        _exchange(monkeypatch, {
+            'YES': {'size': 5.0, 'avg_price': 0.20, 'value': 1.0,
+                    'question': 'рынок'},
+            'NO': {'size': 5.0, 'avg_price': 0.80, 'value': 4.0,
+                   'question': 'рынок'}})
+        mm.adopt_exchange_positions(maker, CATALOGUE)
+        assert maker.state['books']['YES']['position'] == pytest.approx(0.0)
 
     def test_the_hold_clock_starts_ticking(self, tmp_path, monkeypatch):
         """
