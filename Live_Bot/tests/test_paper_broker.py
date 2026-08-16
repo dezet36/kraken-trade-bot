@@ -20,13 +20,24 @@ BAR_MS = 5 * 60 * 1000
 
 
 class FakeClient:
-    """Свечи задаются тестом; ордера отправлять нечем — этого метода нет."""
+    """
+    Свечи задаются тестом; ордера отправлять нечем — этого метода нет.
+
+    `since` ЗДЕСЬ НЕ УКРАШЕНИЕ. Брокер догружает пропущенный промежуток
+    страницами, и без этого параметра запрос падал бы на TypeError. Падение
+    глушится общим `except` в _fetch_candles и возвращает пустой список — то
+    есть макет, не знающий про `since`, молча выдавал бы «свечей нет» вместо
+    ошибки, и три десятка проверок ломались бы с невнятным IndexError.
+    """
 
     def __init__(self):
         self.candles = {}
 
-    def fetch_ohlcv(self, symbol, timeframe, limit=None):
-        return list(self.candles.get(symbol, []))
+    def fetch_ohlcv(self, symbol, timeframe, since=None, limit=None):
+        rows = list(self.candles.get(symbol, []))
+        if since is not None:
+            rows = [c for c in rows if c[0] >= since]
+        return rows[:limit] if limit else rows
 
     def fetch_funding_rate(self, symbol):
         raise RuntimeError('ставка недоступна')

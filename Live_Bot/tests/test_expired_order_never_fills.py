@@ -33,11 +33,18 @@ HOUR = 3_600_000
 
 @pytest.fixture()
 def broker(tmp_path, monkeypatch):
+    """Брокер со своей папкой данных; прежние модули возвращаются на место —
+       почему именно возвращаются, а не удаляются, см. тот же фикстур в
+       test_candle_gap."""
     monkeypatch.setenv('BOT_DATA_DIR', str(tmp_path))
-    for module in ('config', 'paper_broker'):
-        sys.modules.pop(module, None)
+    saved = {m: sys.modules.pop(m, None) for m in ('config', 'paper_broker')}
     import paper_broker
-    return paper_broker
+    yield paper_broker
+    for name, module in saved.items():
+        if module is None:
+            sys.modules.pop(name, None)
+        else:
+            sys.modules[name] = module
 
 
 def an_order(expires_ts, direction='LONG', limit=100.0, entry_type='LIMIT'):
