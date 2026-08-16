@@ -297,3 +297,69 @@ class TestGhostPositionsAreRemoved:
         mm.adopt_exchange_positions(first, CATALOGUE)
         again = engine.PaperMaker(bankroll=100, state_path=path)
         assert again.state['books']['GHOST']['position'] == 0.0
+
+
+class TestAPairIsLockedCapital:
+    """
+    ПАРА «ДА+НЕТ» — ЭТО НЕ НОЛЬ, А ЗАПЕРТЫЙ ДОЛЛАР ЗА ШТУКУ.
+
+    Держа обе стороны, мы по СТАВКЕ в нуле: один контракт погасится единицей,
+    другой нулём. Но капитал занят, и стоит пара ровно доллар — гарантированно,
+    без всякой оценки.
+
+    Знаковая запись такую пару уничтожает: +5 и −5 дают ноль, позиция пропадает
+    из учёта вместе со своими деньгами. Замерено на живом счёте: биржа насчитала
+    $40.52, панель показывала $30.77 — ровно две пары по пять контрактов.
+    """
+
+    def _both_legs(self, monkeypatch, yes=5.0, no=5.0):
+        _exchange(monkeypatch, {
+            'YES': {'size': yes, 'avg_price': 0.20, 'value': yes * 0.2,
+                    'question': 'рынок'},
+            'NO': {'size': no, 'avg_price': 0.80, 'value': no * 0.8,
+                   'question': 'рынок'}})
+
+    def _only_slot(self, maker):
+        """Пара живёт ОДНОЙ записью: какой именно токен станет главным —
+        произвол, но выбор обязан быть одинаков для обеих сторон."""
+        held = [slot for slot in maker.state['books'].values()
+                if slot.get('position') or slot.get('pair')]
+        assert len(held) == 1, 'пара распалась на две записи'
+        return held[0]
+
+    def test_the_pair_is_remembered(self, tmp_path, monkeypatch):
+        self._both_legs(monkeypatch)
+        maker = _maker(tmp_path)
+        mm.adopt_exchange_positions(maker, CATALOGUE)
+        assert self._only_slot(maker)['pair'] == pytest.approx(5.0)
+
+    def test_a_pair_counts_a_dollar_each(self, tmp_path, monkeypatch):
+        self._both_legs(monkeypatch)
+        maker = _maker(tmp_path)
+        mm.adopt_exchange_positions(maker, CATALOGUE)
+        got = maker.mark_to_market({'YES': 0.20})
+        assert got['inventory'] == pytest.approx(5.0)
+
+    def test_an_uneven_pair_counts_only_the_matched_part(self, tmp_path,
+                                                        monkeypatch):
+        """Семь «ДА» и пять «НЕТ» — это пара из пяти и ставка на два сверху."""
+        self._both_legs(monkeypatch, yes=7.0, no=5.0)
+        maker = _maker(tmp_path)
+        mm.adopt_exchange_positions(maker, CATALOGUE)
+        slot = self._only_slot(maker)
+        assert slot['pair'] == pytest.approx(5.0)
+        assert abs(slot['position']) == pytest.approx(2.0)
+
+    def test_a_single_leg_has_no_pair(self, tmp_path, monkeypatch):
+        _exchange(monkeypatch, {'YES': {'size': 5.0, 'avg_price': 0.20,
+                                        'value': 1.0, 'question': 'рынок'}})
+        maker = _maker(tmp_path)
+        mm.adopt_exchange_positions(maker, CATALOGUE)
+        assert not maker.state['books']['YES'].get('pair')
+
+    def test_both_legs_land_in_one_record(self, tmp_path, monkeypatch):
+        """Две записи на один рынок — это удвоенный учёт вложенного."""
+        self._both_legs(monkeypatch)
+        maker = _maker(tmp_path)
+        mm.adopt_exchange_positions(maker, CATALOGUE)
+        self._only_slot(maker)

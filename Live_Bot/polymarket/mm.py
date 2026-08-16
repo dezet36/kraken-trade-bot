@@ -515,16 +515,24 @@ def adopt_exchange_positions(maker, catalogue=None):
         token = str(token)
         if token in maker.state['books']:
             return token, 1.0
-        mate = twin_of.get(token)
+        mate = str(twin_of.get(token) or '')
         if mate and mate in maker.state['books']:
             return mate, -1.0
+        # НИ ОДИН НЕ ВЕДЁТСЯ — ВЫБОР ДОЛЖЕН БЫТЬ ОДИНАКОВ ДЛЯ ОБЕИХ СТОРОН.
+        # Иначе «ДА» и «НЕТ» одного рынка станут двумя записями, каждая сама
+        # себе главная, и пара распадётся: вместо запертого доллара за штуку
+        # учёт увидит две независимые ставки.
+        if mate and mate in theirs:
+            return ((token, 1.0) if token < mate else (mate, -1.0))
         return token, 1.0
 
     net = {}
     for token, row in theirs.items():
         main, sign = _main_of(token)
         entry = net.setdefault(main, {'size': 0.0, 'avg_price': None,
-                                      'question': '', 'value': 0.0})
+                                      'question': '', 'value': 0.0,
+                                      'legs': {}})
+        entry['legs'][1.0 if sign > 0 else -1.0] = row['size']
         entry['size'] += sign * row['size']
         entry['value'] += row.get('value') or 0.0
         entry['question'] = entry['question'] or row.get('question') or ''
@@ -534,6 +542,19 @@ def adopt_exchange_positions(maker, catalogue=None):
 
     adopted = []
     for ours, row in net.items():
+        # ПАРА «ДА+НЕТ» — ЭТО НЕ НОЛЬ, А ЗАПЕРТЫЙ ДОЛЛАР ЗА ШТУКУ.
+        #
+        # Держа обе стороны, мы по СТАВКЕ в нуле: один контракт погасится
+        # единицей, другой нулём. Но капитал при этом занят, и стоит пара ровно
+        # доллар — гарантированно, без всякой оценки.
+        #
+        # Знаковая запись такую пару уничтожает: +5 и −5 дают ноль, позиция
+        # пропадает из учёта вместе со своими деньгами. Замерено на живом
+        # счёте: биржа насчитала $40.52, панель показывала $30.77 — ровно две
+        # пары по пять контрактов, $10 невидимого капитала.
+        legs = row.get('legs') or {}
+        row['pair'] = min(legs.get(1.0, 0.0), legs.get(-1.0, 0.0))
+
         slot = maker.state['books'].get(str(ours))
         held = float((slot or {}).get('position') or 0)
         if slot and held:
@@ -548,16 +569,18 @@ def adopt_exchange_positions(maker, catalogue=None):
             # по нашим кругам, и на ней держатся порог себестоимости и предел
             # убытка. Менять её ответом биржи значило бы потерять историю ради
             # числа, которое и так почти всегда совпадает.
+            slot['pair'] = row['pair']
             if abs(held - row['size']) > 0.01:
                 adopted.append({'token': str(ours), 'size': row['size'],
                                 'was': held, 'fixed': True,
                                 'question': row.get('question') or ''})
                 slot['position'] = row['size']
             continue
-        if not row['size']:
-            continue                # пара «ДА+НЕТ» в ноль — вести нечего
+        if not row['size'] and not row['pair']:
+            continue                # ни ставки, ни пары — вести нечего
         fresh = maker._slot(str(ours))
         fresh['position'] = row['size']
+        fresh['pair'] = row['pair']
         # Цена входа берётся биржевая: своей у нас нет, а без неё не работают
         # ни порог «не продавать ниже себестоимости», ни предел убытка.
         fresh['avg_cost'] = float(row.get('avg_price') or 0)
