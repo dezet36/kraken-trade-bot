@@ -897,96 +897,11 @@
         <div id="summary-body">загружаю…</div>
       </section>
 
-      <!-- ── Стратегии Polymarket ─────────────────────────────────────────
-           У направления их пять, и статус у каждой свой: одна торгует, одна
-           выключена, три считают на бумаге и живого пути не имеют вовсе.
-           Показывать их одним списком с биржевыми было бы смешением рынков. -->
-      <section class="page" data-page="pmstrat" hidden>
-        <div id="pmstrat-body">загружаю…</div>
-      </section>
-
-      <!-- ── Подключения ──────────────────────────────────────────────────
-           БИРЖА И КОШЕЛЁК В ОДНОМ МЕСТЕ. Прежде ключи биржи лежали в
-           «Управление → Приложение», а кошелёк Polymarket — на вкладке
-           маркет-мейкера: два разных места для одного по сути действия
-           «подключить, откуда берутся деньги». -->
+      <!-- ── Подключения ──────────────────────────────────────────────── -->
       <section class="page" data-page="connect" hidden>
         <div id="connect-intro"></div>
         <div id="exchange"></div>
         <div id="keys"></div>
-        <div class="card" id="pm-wallet">
-          <div class="row" style="justify-content:space-between;align-items:baseline">
-            <h3 style="margin:0">Кошелёк</h3>
-            <span class="hint" id="pm-wallet-state">—</span>
-          </div>
-          <!-- ПРЕДУПРЕЖДЕНИЕ СТОИТ ПЕРЕД ПОЛЕМ, А НЕ ПОСЛЕ. Ключ биржи можно
-               урезать в правах; приватный ключ Polygon урезать нельзя — он
-               распоряжается всем, что лежит на адресе. Прочитать об этом
-               нужно до того, как ключ вставлен, а не после. -->
-          <p class="hint" id="pm-wallet-warn">
-            Приватный ключ распоряжается <b>всеми</b> средствами адреса и
-            подписывает любую операцию, включая перевод остатка. Урезать его в
-            правах, как ключ биржи, нельзя. Заведите для бота
-            <b>отдельный кошелёк</b> и держите на нём только ту сумму, которой
-            не жаль в эксперименте.
-          </p>
-          <div id="pm-wallet-form">
-            <label class="field">
-              <span>Приватный ключ</span>
-              <input type="password" id="pm-key" autocomplete="off"
-                     placeholder="0x… 64 знака" spellcheck="false">
-            </label>
-            <label class="field">
-              <span>Адрес счёта Polymarket</span>
-              <input type="text" id="pm-funder" autocomplete="off"
-                     placeholder="0x… с polymarket.com/settings" spellcheck="false">
-            </label>
-            <div class="row-end" style="gap:8px">
-              <button type="button" class="btn sm" id="pm-wallet-save">Подключить</button>
-              <button type="button" class="btn ghost sm" id="pm-wallet-check">Проверить</button>
-              <button type="button" class="btn ghost sm" id="pm-wallet-forget" hidden>Отключить</button>
-            </div>
-            <!-- РАЗБОР ПО ШАГАМ. «Кошелёк не подключён» не отличает нехватку
-                 библиотеки от закрытой сети, ограничения по стране и негодного
-                 ключа — а лечатся они по-разному. На сервере консоли нет, и
-                 посмотреть было негде. -->
-            <div id="pm-check"></div>
-            <p class="hint">
-              Нужен приватный <b>ключ</b> (64 знака), а не секретная фраза из
-              слов: фраза распоряжается всеми кошельками сразу. В Phantom:
-              Настройки → Управление аккаунтами → аккаунт → Показать приватный
-              ключ. Берите ключ <b>EVM</b>-аккаунта, не Solana.
-            </p>
-            <p class="hint">
-              <b>Адрес счёта нужен почти всегда.</b> У кошелька, заведённого
-              через сайт Polymarket, деньги лежат НЕ на адресе ключа, а на
-              отдельном счёте — вычислить его нельзя, возьмите на
-              polymarket.com/settings. Пустое поле означает «деньги на самом
-              кошельке», и тогда остаток покажется нулевым.
-              Ключ проверяется до записи и обратно не показывается.
-              Подключение <b>не включает</b> живую торговлю.
-            </p>
-          </div>
-          <div class="row" style="gap:12px;margin-top:12px;flex-wrap:wrap">
-            <label class="field" style="max-width:220px">
-              <span>Бюджет маркет-мейкера</span>
-              <input type="text" id="pm-budget" autocomplete="off"
-                     placeholder="20, max или 80%" spellcheck="false">
-            </label>
-            <button type="button" class="btn ghost sm" id="pm-budget-save">Сохранить сумму</button>
-          </div>
-          <p class="hint" id="pm-budget-note"></p>
-          <!-- ЖИВАЯ ТОРГОВЛЯ — ОТДЕЛЬНЫЙ РУБИЛЬНИК. Подключить кошелёк и
-               разрешить тратить с него деньги суть разные решения, и одно
-               действие не должно делать оба. -->
-          <div class="row" style="gap:10px;margin-top:14px;align-items:center">
-            <button type="button" class="btn sm" id="pm-live-toggle" disabled>
-              Включить живую торговлю
-            </button>
-            <span class="hint" id="pm-live-state">кошелёк не подключён</span>
-          </div>
-        </div>
-        <div id="connect-pm"></div>
       </section>
 
       <!-- ── Обзор ────────────────────────────────────────────────────── -->
@@ -1069,24 +984,7 @@
       </section>
 
       <!-- ── Управление ───────────────────────────────────────────────── -->
-
-      <!-- ── Polymarket: маркет-мейкер ────────────────────────────────── -->
-      <section class="page" data-page="polymarket" hidden>
-        <div class="panel-head bare">
-          <h2>Маркет-мейкер Polymarket</h2>
-          <span class="hint" id="pm-hint"></span>
-          <div class="row-end">
-            <button type="button" class="btn sm" id="pm-run">Запустить</button>
-            <button type="button" class="btn ghost sm" id="pm-stop">Аварийная остановка</button>
-          </div>
-        </div>
-        <!-- КОШЕЛЁК ОТДЕЛЬНЫМ БЛОКОМ И ВЫШЕ ОСТАЛЬНОГО. Без него на вкладке
-             нечего смотреть: маркет-мейкер работает на бумаге и ничего не
-             отправляет. Прятать подключение под таблицы значило бы прятать
-             единственное, что отделяет замер от торговли. -->
-        <div id="pm-body">загружаю…</div>
-      </section>
-      <section class="page" data-page="control" hidden>
+<section class="page" data-page="control" hidden>
         <!-- Вкладки внутри страницы: шесть панелей подряд занимали два
              экрана и смешивали то, что трогают ежедневно (пауза, пределы), с
              тем, что настраивают раз в месяц (ключи, обновление). Чтобы
@@ -1100,7 +998,7 @@
         </div>
         <div class="subpage" data-sub="app" hidden>
           <!-- Подключение биржи и ключи переехали в раздел «Подключения»:
-               там же кошелёк Polymarket, и действие у них одно — сказать
+               и действие у них одно — сказать
                боту, откуда берутся деньги. Здесь остаётся то, что настраивают
                раз в месяц и что к деньгам отношения не имеет. -->
           <div id="notify"></div>
@@ -1108,6 +1006,7 @@
           <div id="settings-history"></div>
         </div>
       </section>
+
 
       <!-- ── Ошибки ───────────────────────────────────────────────────── -->
       <!-- Ошибки и журнал сведены в один раздел: назначение у них одно —
@@ -2007,7 +1906,7 @@ function closedTable(rows) {
    В приложении два рынка с РАЗНЫМИ деньгами, разными стратегиями и разной
    механикой. Меню было плоским, и четыре раздела из семи говорили только про
    биржу, нигде этого не называя: человек, открывший «Обзор», не мог знать, что
-   Polymarket туда не входит, а весь Polymarket с пятью стратегиями ютился в
+   второе направление туда не входило, а само оно ютилось в
    одной вкладке сбоку.
 
    Теперь принадлежность раздела видна до нажатия, а «Сводка» — единственное
@@ -2022,9 +1921,6 @@ const PAGES = [
   { id: 'history',   ic: '≡', title: 'История',   dir: 'exchange' },
   { id: 'analytics', ic: '◨', title: 'Аналитика', dir: 'exchange' },
 
-  { group: 'Polymarket', dir: 'polymarket' },
-  { id: 'polymarket', ic: '◈', title: 'Маркет-мейкер', dir: 'polymarket' },
-  { id: 'pmstrat',    ic: '◇', title: 'Стратегии',     dir: 'polymarket' },
 
   { group: 'Приложение' },
   { id: 'connect',   ic: '⚭', title: 'Подключения' },
@@ -2033,7 +1929,7 @@ const PAGES = [
 ];
 const PAGE_IDS = PAGES.filter(p => p.id);
 /* Какому направлению принадлежит раздел. Нужно затем, чтобы прятать фильтры
-   периода и стратегии на страницах Polymarket: они относятся к сделкам биржи
+   периода и стратегии на чужих страницах: они относятся к сделкам биржи
    и там не действуют вовсе. Фильтр, который ничего не фильтрует, хуже
    отсутствующего — он обещает управление, которого нет. */
 const PAGE_DIR = Object.fromEntries(PAGE_IDS.map(p => [p.id, p.dir || '']));
@@ -2130,7 +2026,6 @@ function showPage() {
   buildSubtabs(page);
   // Маркет-мейкер живёт отдельным процессом, и его состояние не входит в общий
   // опрос: тянем при открытии вкладки, а дальше обновляем по такту.
-  if (page === 'polymarket') loadPolymarket();
   if (page === 'diag' && currentSub('diag') === 'errors') loadErrors();
   // Настройки могли отрисоваться раньше, чем пришли данные бота: тогда в
   // карточках не было полей, зависящих от режима (депозит есть только в
@@ -2139,18 +2034,16 @@ function showPage() {
   if (page === 'control' && SETTINGS && CONTROLS_BLIND && DATA) renderControls();
   if (page === 'diag' && currentSub('diag') === 'log' && !LOG_LOADED) refreshLog();
   if (page === 'summary') renderSummary();
-  if (page === 'pmstrat') { renderPmStrategies(); loadPolymarket(); }
   if (page === 'connect') {
     renderKeys(DATA && DATA.writable !== false);
     if (!SETTINGS) loadSettings();
-    loadPolymarket();
   }
 
   const def = PAGE_IDS.find(p => p.id === page);
   document.getElementById('page-title').textContent = def ? def.title : '';
 
   /* ФИЛЬТРЫ ПРЯЧУТСЯ ТАМ, ГДЕ НЕ ДЕЙСТВУЮТ. Период и стратегия относятся к
-     сделкам биржи; на страницах Polymarket они не фильтруют ничего, но своим
+     сделкам биржи; на чужих страницах они не фильтруют ничего, но своим
      видом обещают управление, которого нет. Пустое место честнее. */
   const filters = document.querySelector('.filters');
   if (filters) filters.hidden = PAGE_DIR[page] !== 'exchange';
@@ -2177,7 +2070,7 @@ function renderSummary() {
     + (v >= 0 ? '+' : '') + money(v) + '</span>';
 
   let html = dirs.map(d => {
-    const link = d.id === 'exchange' ? 'overview' : 'polymarket';
+    const link = 'overview';
     const rows = (d.strategies || []).map(s => {
       const off = !s.enabled;
       return `<tr${off ? ' style="opacity:.5"' : ''}>
@@ -2217,59 +2110,13 @@ function renderSummary() {
   }).join('');
 
   /* ОБЩИЙ ИТОГ НЕ ПОКАЗЫВАЕТСЯ ОДНИМ ЧИСЛОМ, и это осознанный отказ. Сорок
-     тысяч бумажных на бирже и сто настоящих долларов на Polymarket — величины
+     тысяч бумажных на бирже и сто настоящих долларов рядом — величины
      разной природы: сложив их, мы получили бы число, которое ничего не
      значит, зато выглядит убедительно. */
   html += '<div class="hint" style="padding:8px 4px">Направления показаны '
     + 'порознь и не складываются: у них разные деньги и разная механика. '
     + 'Общая сумма выглядела бы убедительно и не значила бы ничего.</div>';
   box.innerHTML = html;
-}
-
-/* ── Стратегии Polymarket ───────────────────────────────────────────────────
-   У направления их пять, и статус у каждой свой: одна торгует, одна выключена
-   бюджетом, три считают на бумаге и живого пути не имеют вовсе. Смешивать их
-   с биржевыми в одном списке значило бы смешивать рынки. */
-function renderPmStrategies() {
-  const box = el('pmstrat-body');
-  if (!box) return;
-  const dir = ((DATA && DATA.directions) || []).find(d => d.id === 'polymarket');
-  if (!dir) { box.innerHTML = '<div class="hint">данных пока нет</div>'; return; }
-
-  /* Статус берётся из того, что известно, а не назначается: бюджет ноль —
-     выключена; идёт прогон — работает; иначе стоит. Про три стратегии-
-     предсказателя сказано прямо, что живого пути у них нет: без этого их
-     сумма выглядела бы обещанием торговли, которой не будет. */
-  const NOTES = {
-    MM: 'Двусторонняя котировка. Единственная с живым путём на биржу.',
-    ONESIDE: 'Односторонняя на дешёвых рынках. Только бумага.',
-    WEATHER: 'Предсказание температуры. Проверена против климата, но не против цены.',
-    CRYPTO: 'Волатильность против корзин. Проверка не проводилась.',
-    LONGSHOT: 'Продажа дешёвых исходов. Проверка провалена — живого пути нет.',
-  };
-  const rows = (dir.strategies || []).map(s => {
-    const state = !s.enabled ? '<span class="hint">выключена бюджетом</span>'
-      : (s.live ? '<span style="color:var(--good)">работает</span>'
-                : '<span class="hint">стоит</span>');
-    return `<tr>
-      <td><b>${esc(s.name)}</b><div class="hint">${esc(NOTES[s.key] || '')}</div></td>
-      <td>${state}</td>
-      <td class="num">${pmMoney(s.invested)}</td>
-      <td class="num">${pmMoney(s.equity)}</td>
-      <td class="num" style="color:var(--${s.pnl >= 0 ? 'good' : 'bad'})">${
-        (s.pnl >= 0 ? '+' : '') + pmMoney(s.pnl)}</td></tr>`;
-  }).join('');
-
-  box.innerHTML = `<div class="panel card-pad">
-      <div class="scroll"><table>
-        <thead><tr><th>стратегия</th><th>состояние</th><th class="num">бюджет</th>
-        <th class="num">стало</th><th class="num">итог</th></tr></thead>
-        <tbody>${rows}</tbody></table></div>
-    </div>
-    <div class="hint" style="padding:8px 4px">Бюджеты независимы: правка одного
-      не двигает остальные, ноль означает «не торгует». Задаются в
-      <a href="?page=connect">Подключениях</a> или настройкой
-      <code>PM_BUDGET_&lt;ИМЯ&gt;</code>.</div>`;
 }
 
 /* ── Полоса внимания ────────────────────────────────────────────────────── */
@@ -2467,703 +2314,6 @@ function reportBlock() {
     + '<button type="button" class="btn" data-export="report">Выгрузить отчёт</button>'
     + '<span class="hint" id="export-note-report"></span>'
     + '</div>';
-}
-
-/* ── Polymarket: маркет-мейкер ──────────────────────────────────────────── */
-/* Данные читаются ИЗ ФАЙЛОВ маркет-мейкера, а не из его процесса: он живёт
-   отдельно, и панель не должна ни ждать его, ни падать вместе с ним. */
-let PM = null;
-
-async function loadPolymarket() {
-  const box = el('pm-body');
-  if (!box) return;
-  try {
-    const resp = await fetch('/api/polymarket', { cache: 'no-store' });
-    PM = await resp.json();
-  } catch (e) {
-    box.innerHTML = '<div class="warn-box">не читается: ' + esc(e.message) + '</div>';
-    return;
-  }
-  renderPolymarket();
-}
-
-function pmMoney(v) {
-  if (v === null || v === undefined) return '—';
-  return '$' + Number(v).toLocaleString('ru-RU',
-    { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-}
-
-function renderPolymarket() {
-  const box = el('pm-body');
-  if (!PM) return;
-
-  /* КОШЕЛЁК РИСУЕТСЯ ПЕРВЫМ И ВСЕГДА, до любых проверок и выходов.
-     Прежде он рисовался в самом конце — и пока маркет-мейкер не запущен,
-     отрисовка выходила раньше, чем до него доходила. Блок навсегда оставался
-     с надписью «не подключён», хотя ключ был сохранён и проверка это
-     подтверждала. Человек видел прямое противоречие: проверки пройдены,
-     кошелёк не подключён, — и справедливо считал, что ничего не работает.
-
-     Здесь же причина, по которой блок вообще должен рисоваться отдельно:
-     он живёт на СТРАНИЦЕ ПОДКЛЮЧЕНИЙ, где никакого «pm-body» может не быть
-     вовсе, а состояние кошелька нужно. */
-  renderPmWallet(PM.connect || null);
-  if (!box) return;
-
-  const svc = PM.service || {};
-  if (!PM.running) {
-    /* СОВЕТА «ВЫПОЛНИТЕ КОМАНДУ» ЗДЕСЬ БОЛЬШЕ НЕТ. На сервере работает
-       собранное приложение, консоли там не бывает, и такой совет отсылал
-       человека туда, куда он попасть не может. Запуск — кнопкой. */
-    let why = 'Маркет-мейкер остановлен. Нажмите «Запустить» — он поднимется '
-      + 'фоновым потоком и начнёт котировать в бумаге.';
-    if (svc.last_error) why += '<br>Последняя ошибка: ' + esc(svc.last_error);
-    if (PM.has_history) why += '<br>Данные прошлых запусков сохранены.';
-    if (PM.error) why += '<br>Не читается: ' + esc(PM.error);
-    box.innerHTML = '<div class="warn-box">' + why + '</div>';
-    const runBtn = el('pm-run');
-    if (runBtn) runBtn.textContent = 'Запустить';
-    return;
-  }
-
-  const w = PM.wallet || {};
-  const eq = PM.equity || {};
-  /* СОСТОЯНИЕ КОШЕЛЬКА ПОКАЗЫВАЕТСЯ АДРЕСОМ, А НЕ КЛЮЧОМ. Ключ сюда не
-     приходит и прийти не может: сервер его не отдаёт. */
-  const mode = w.can_trade_live
-    ? '<b style="color:var(--bad)">ЖИВЫЕ ДЕНЬГИ</b>'
-    : (w.configured ? 'кошелёк подключён, живой режим выключен' : 'бумага');
-
-  /* ИТОГ СТАВИТСЯ ПЕРВЫМ И СЧИТАЕТСЯ ОТ БЮДЖЕТА, а не показывается капиталом.
-     «Капитал $100» не отвечает на вопрос «сколько получили»: чтобы ответить,
-     человеку приходилось вычитать в уме начальную сумму, которой на экране
-     не было вовсе. */
-  const start = (PM.connect || {}).budget_usd;
-  const pnl = (eq.equity !== undefined && start) ? (eq.equity - start) : null;
-  const pnlText = pnl === null ? '—'
-    : `<span style="color:var(--${pnl >= 0 ? 'good' : 'bad'})">`
-      + (pnl >= 0 ? '+' : '') + pmMoney(pnl) + '</span>';
-
-  /* ФАКТ ОТ БИРЖИ ИДЁТ ПЕРВЫМ, РАСЧЁТ БОТА — ВТОРЫМ, И ЭТО ГЛАВНАЯ ПРАВКА
-     ЭТОЙ ПАНЕЛИ. Раньше всё вперемешку показывало бумажную модель, и она
-     выглядела бы точно так же, даже если бы ни одна заявка до биржи не дошла.
-     Человек читал «стоим на трёх рынках», открывал Polymarket, не видел там
-     ничего — и не мог понять, кто из двоих врёт. Теперь слева факт, справа
-     расчёт, и подписаны они именно так. */
-  const ex = PM.exchange || {};
-  const plan = PM.plan || {};
-  let html = '';
-
-  if (w.configured) {
-    const num = (x) => (x === null || x === undefined) ? '—' : x;
-    /* ИТОГ СЧИТАЕТСЯ ПО БИРЖЕ, А НЕ ПО МОДЕЛИ, и запас оценивается по БИДУ.
-       Середина — цена, по которой никто не обязан у нас покупать. Разница
-       выглядит мелочью при одной позиции и становится всем результатом при
-       двенадцати: панель показывала -$0.04, а на счёте было -$2.89. */
-    const held = ex.positions_value;
-    const real = (ex.balance !== null && ex.balance !== undefined
-                  && held !== null && held !== undefined)
-      ? ex.balance + held : null;
-    const startPm = (PM.connect || {}).budget_usd;
-    const factCards = [
-      ['Деньги на счёте', ex.balance === null || ex.balance === undefined
-        ? '—' : pmMoney(ex.balance)],
-      ['Токены на руках', held === null || held === undefined
-        ? '—' : pmMoney(held) + (ex.positions_count ? ` (${ex.positions_count})` : '')],
-      ['Всего на бирже', real === null ? '—' : pmMoney(real)],
-      ['Итог к вложенному', (real === null || !startPm) ? '—'
-        : `<span style="color:var(--${real - startPm >= 0 ? 'good' : 'bad'})">`
-          + (real - startPm >= 0 ? '+' : '') + pmMoney(real - startPm) + '</span>'],
-      ['Заявок стоит', num(ex.orders)],
-      ['Сделок было', num(ex.trades)],
-    ];
-    html += '<h3 style="margin:2px 0 8px">Что видно на бирже</h3>'
-      + '<div class="panel card-pad"><div class="kpis">'
-      + factCards.map(([k, v]) =>
-          `<div class="kpi"><div class="k">${k}</div><div class="v">${v}</div></div>`
-        ).join('')
-      + '</div></div>';
-    if (!ex.asked) {
-      html += '<div class="warn-box">Биржу спросить не вышло: '
-        + esc(ex.why || 'причина неизвестна') + '. Числа ниже — расчёт бота, '
-        + 'а не то, что происходит на Polymarket.</div>';
-    } else if (ex.orders === 0 && (PM.standing || []).length) {
-      /* РАСХОЖДЕНИЕ НАЗЫВАЕТСЯ ПРЯМО. Бот считает, что котирует, а биржа наших
-         заявок не видит — это либо отвергнутая отправка, либо живой режим
-         выключен. Молчать об этом нельзя: именно здесь и рождается вопрос
-         «почему на Polymarket пусто». */
-      html += '<div class="warn-box">Бот считает, что стоит на '
-        + (PM.standing || []).length + ' рынках, а биржа НИ ОДНОЙ нашей заявки '
-        + 'не видит. ' + (w.can_trade_live
-            ? 'Значит отправка отвергается — причина в столбце «на бирже» ниже.'
-            : 'Живой режим выключен: заявки считаются, но на биржу не уходят.')
-        + '</div>';
-    }
-  }
-
-  /* ЧЕМ ЗАНЯТ БОТ ПРЯМО СЕЙЧАС. Первичный отбор идёт минутами, и всё это
-     время тактов ноль — без этой строки человек видит «0» и решает, что
-     программа зависла. */
-  if (svc.stage && svc.stage !== 'котирую') {
-    html += '<div class="hint" style="padding:8px 4px">Сейчас: ' + esc(svc.stage)
-      + (svc.stage_seconds ? ' — уже ' + svc.stage_seconds + ' с' : '') + '</div>';
-  }
-
-  const cards = [
-    ['Режим', mode],
-    ['Итог', pnlText],
-    ['Было / стало', pmMoney(start) + ' → ' + pmMoney(eq.equity)],
-    ['Зафиксировано', pmMoney(eq.realized)],
-    ['В запасе', pmMoney(eq.inventory)],
-    ['Кругов завершено', PM.rounds_total || 0],
-    ['Заработано кругами', pmMoney(PM.rounds_gain_usd)],
-    ['Котируем рынков', (PM.standing || []).length],
-    ['Позиций открыто', PM.positions_total || 0],
-    ['Тактов', svc.cycles || 0],
-  ];
-  if (plan.used !== undefined) {
-    cards.push(['Разложено по рынкам', pmMoney(plan.used)]);
-    cards.push(['Потолок за оборот', pmMoney(plan.ceiling_per_round_usd)]);
-    cards.push(['Награда сверх', pmMoney(plan.rewards_monthly) + '/мес']);
-  }
-  /* Классы взяты СУЩЕСТВУЮЩИЕ (.kpis/.kpi), а не заведены свои: вкладка
-     обязана выглядеть как остальная панель, а не почти как она. */
-  html += '<h3 style="margin:18px 0 8px">Расчёт бота</h3>'
-    + '<div class="panel card-pad"><div class="kpis">' + cards.map(([k, v]) =>
-    `<div class="kpi"><div class="k">${k}</div><div class="v">${v}</div></div>`
-  ).join('') + '</div></div>';
-
-  if (plan.used !== undefined) {
-    /* ПОТОЛОК НАЗЫВАЕТСЯ ПОТОЛКОМ. Он предполагает, что обе стороны
-       исполнились по нашим ценам и ни разу не против нас — ни того, ни другого
-       мы пока не наблюдали. Показать его как ожидание значило бы выдать
-       арифметику за обещание. */
-    html += '<div class="hint" style="padding:8px 4px">«Потолок за оборот» — '
-      + 'сколько дал бы один полный оборот всех рынков, если обе стороны '
-      + 'исполнятся по нашим ценам и ни разу не против нас. Это верхняя '
-      + 'граница, а не ожидание.</div>';
-  }
-  if (PM.kill_switch) {
-    html += '<div class="warn-box">Включена аварийная остановка: заявки на '
-      + 'биржу не уходят. Снять — удалить файл STOP в папке данных.</div>';
-  }
-  /* КАКОЙ АДРЕС ЗА ЧТО ОТВЕЧАЕТ — ВОПРОС, КОТОРЫЙ ЗАДАЛИ ПРЯМО. Раньше здесь
-     стояли два адреса подряд без пояснения, а у кошелька из расширения они
-     ещё и совпадают — строка выглядела как повтор и не отвечала ни на что. */
-  if (w.configured && w.address) {
-    const same = w.funder && w.funder.toLowerCase() === (w.address || '').toLowerCase();
-    html += '<div class="hint" style="padding:8px 4px">'
-      + '<b>Подписывает заявки</b> ключ адреса <code>' + esc(w.address) + '</code>'
-      + '<br><b>Деньги списываются со счёта</b> <code>'
-      + esc(w.funder || '—') + '</code>'
-      + (same ? '<br><b style="color:var(--bad)">Это один и тот же адрес — '
-                + 'биржа такие заявки отвергает.</b> Нужен адрес СЧЁТА на '
-                + 'Polymarket: он создаётся площадкой и отличается от адреса '
-                + 'вашего кошелька. Посмотрите его на polymarket.com в профиле '
-                + '(Deposit / адрес счёта).' : '')
-      + '<br>Проверить можно на polymarket.com — там этот счёт и его сделки.'
-      + '</div>';
-  }
-
-  /* ЧТО БОТ ДЕЛАЕТ ПРЯМО СЕЙЧАС. Раньше на этот вопрос ответить было нечем:
-     показывались только рынки с позицией, то есть где нас УЖЕ исполнили. Но
-     мейкер большую часть времени именно СТОИТ, и это его работа. */
-  if ((PM.standing || []).length) {
-    html += '<h3 style="margin:18px 0 8px">Где стоим сейчас</h3><div class="scroll">'
-      + '<table><thead><tr><th>рынок</th><th>на бирже</th><th>бид</th><th>аск</th>'
-      + '<th>держим</th><th>размер</th><th>очередь</th>'
-      + '<th>стоит</th><th>ждали</th><th>позиция</th></tr></thead><tbody>'
-      + PM.standing.slice(0, 20).map(q => {
-          /* Расхождение «стоит» и «ждали» — первый признак, что модель врёт.
-             Поэтому оба числа рядом, а не в разных таблицах. */
-          const late = q.expected_min && q.standing_min > q.expected_min * 2;
-          /* СТОЛБЕЦ «НА БИРЖЕ» ОТВЕЧАЕТ НА ГЛАВНЫЙ ВОПРОС строки: это заявка,
-             которую видит Polymarket, или только расчёт бота. Причина отказа
-             записывалась и раньше — но не читалась никем. */
-          let where;
-          /* НОМЕР С БИРЖИ ВАЖНЕЕ ПРОШЛОЙ ОШИБКИ. Порядок был обратный, и
-             стоящая на бирже заявка показывалась отказом — тем, что случился
-             до неё. */
-          if (q.live_ids) {
-            where = `<span style="color:var(--good)">да (${q.live_ids})</span>`;
-          } else if (q.live_error) {
-            /* ПРИЧИНА ПИШЕТСЯ В СТРОКЕ, А НЕ ПРЯЧЕТСЯ ПОД НАВЕДЕНИЕ. Ответ на
-               «почему на бирже пусто» должен читаться с экрана сразу: под
-               наведением его не ищут, потому что не знают, что там что-то
-               есть. Проверено на себе — искал причину полчаса, а она была
-               записана и не показана. */
-            where = `<span style="color:var(--bad)" title="${esc(q.live_error)}">не ушла: ${
-              esc(String(q.live_error).slice(0, 38))}</span>`;
-          } else if (PM.service && PM.service.live_now) {
-            /* ЖИВОЙ РЕЖИМ ВКЛЮЧЁН, А НОМЕРА НЕТ И ОШИБКИ НЕТ — значит заявку
-               ещё не отправляли. Прежде здесь стояло «только расчёт» с
-               подсказкой «живой режим выключен», и это была заведомая
-               неправда: человек искал поломку там, где её нет. */
-            where = '<span class="muted">ещё не отправлена</span>';
-          } else {
-            where = '<span class="muted">только расчёт</span>';
-          }
-          return `<tr>
-            <td>${esc((q.question || '—').slice(0, 40))}</td>
-            <td>${where}</td>
-            <td>${q.bid === null ? '—' : Number(q.bid).toFixed(3)}</td>
-            <td>${q.ask === null ? '—' : Number(q.ask).toFixed(3)}</td>
-            <td>${q.spread_kept === null ? '—' : Number(q.spread_kept).toFixed(3)}</td>
-            <td>${Number(q.size || 0).toFixed(0)}</td>
-            <td>${Number(q.queue_bid || 0).toFixed(0)} / ${Number(q.queue_ask || 0).toFixed(0)}</td>
-            <td${late ? ' style="color:var(--bad)"' : ''}>${q.standing_min} мин</td>
-            <td>${q.expected_min ? q.expected_min + ' мин' : '—'}</td>
-            <td>${Number(q.position || 0).toFixed(0)}</td></tr>`;
-        }).join('')
-      + '</tbody></table></div>'
-      + '<div class="hint" style="padding:6px 4px">«На бирже» — приняла ли '
-      + 'Polymarket нашу заявку: «да» и число сторон, «не ушла» с причиной при '
-      + 'наведении, «ещё не отправлена» — котировка посчитана, но до отправки '
-      + 'такт ещё не дошёл, «только расчёт» — если живой режим выключен. '
-      + '«Держим» — '
-      + 'что останется нам, если исполнятся обе стороны. «Очередь» — сколько '
-      + 'контрактов впереди нас: ноль значит, что мы первые. Красное время '
-      + 'означает, что заявка стоит вдвое дольше расчётного — модель '
-      + 'ожидания ошиблась.</div>';
-  }
-
-  /* ЗАВЕРШЁННЫЕ КРУГИ — главная мерка. Отдельные исполнения не говорят
-     ничего: купить может каждый, заработок появляется только при закрытии. */
-  if ((PM.rounds || []).length) {
-    html += '<h3 style="margin:18px 0 8px">Завершённые круги</h3><div class="scroll">'
-      + '<table><thead><tr><th>время</th><th>купили</th><th>продали</th>'
-      + '<th>размер</th><th>заработок</th><th>заняло</th></tr></thead><tbody>'
-      + PM.rounds.slice(0, 20).map(r => `<tr>
-          <td>${esc((r.at || '').slice(11, 19))}</td>
-          <td>${Number(r.bought).toFixed(3)}</td>
-          <td>${Number(r.sold).toFixed(3)}</td>
-          <td>${Number(r.size).toFixed(0)}</td>
-          <td style="color:var(--${r.gain_usd >= 0 ? 'good' : 'bad'})">${
-            (r.gain_usd >= 0 ? '+' : '') + pmMoney(r.gain_usd)}</td>
-          <td>${r.minutes} мин</td></tr>`).join('')
-      + '</tbody></table></div>';
-  }
-
-  /* КРАЙ КОТИРОВОК — ГЛАВНАЯ МЕРКА МЕЙКЕРА, и стоит она первой из проверок.
-     Положительный край означает, что мы покупаем ниже середины и продаём выше;
-     нулевой — что торгуем по справедливой цене, то есть с нулевым ожиданием до
-     всяких издержек. Замер по 21 исполнению однажды дал медиану РОВНО НОЛЬ. */
-  const eg = PM.edges || {};
-  if (eg.count) {
-    const bad = eg.without_edge || 0;
-    html += '<h3 style="margin:18px 0 8px">Берём ли мы спред</h3>'
-      + '<div class="panel card-pad"><div class="kpis">'
-      + `<div class="kpi"><div class="k">Край сейчас</div><div class="v" style="color:var(--${(eg.now || 0) > 0 ? 'good' : 'bad'})">${Number(eg.now || 0).toFixed(4)}</div></div>`
-      + `<div class="kpi"><div class="k">Медиана за прогон</div><div class="v">${Number(eg.median || 0).toFixed(4)}</div></div>`
-      + `<div class="kpi"><div class="k">Котировок</div><div class="v">${eg.quotes || 0}</div></div>`
-      + `<div class="kpi"><div class="k">Без края</div><div class="v" style="color:var(--${bad ? 'bad' : 'good'})">${bad}</div></div>`
-      + '</div></div>'
-      + '<div class="hint" style="padding:6px 4px">Край — насколько наша цена '
-      + 'лучше середины рынка. Это и есть заработок мейкера: ноль означает, что '
-      + 'мы торгуем по справедливой цене и не зарабатываем ничего. Заявка, '
-      + 'потерявшая край, снимается в тот же такт.</div>';
-  }
-
-  /* ОБЕЩАНИЕ МОДЕЛИ ПРОТИВ ДЕЛА. Расчёт ожидания считает стороны
-     независимыми: бид ждёт своего потока, аск своего. На деле они связаны и
-     связаны ПРОТИВ нас — цена ушла вниз, покупку исполнили, продажу нет.
-     Насколько расчёт оптимистичен, показывает только эта сверка. */
-  const tm = PM.timing || {};
-  if (tm.count) {
-    html += '<h3 style="margin:18px 0 8px">Обещание модели против дела</h3>'
-      + '<div class="panel card-pad"><div class="kpis">'
-      + `<div class="kpi"><div class="k">Исполнений сверено</div><div class="v">${tm.count}</div></div>`
-      + `<div class="kpi"><div class="k">Обещано</div><div class="v">${tm.promised_min} мин</div></div>`
-      + `<div class="kpi"><div class="k">Вышло</div><div class="v">${tm.waited_min} мин</div></div>`
-      + `<div class="kpi"><div class="k">Модель оптимистичнее в</div><div class="v" style="color:var(--${tm.measured > 1.5 ? 'bad' : 'good'})">${tm.measured}×</div></div>`
-      + '</div></div>'
-      + '<div class="hint" style="padding:6px 4px">'
-      + (tm.enough
-          ? 'Поправка применяется к расчёту дохода: рынки отбираются по '
-            + 'исправленному числу, а не по обещанному.'
-          : 'Поправка пока НЕ применяется — нужно ещё ' + tm.need
-            + ' исполнений. Несколько наблюдений это шум, а не поправка.')
-      + '</div>';
-  }
-
-  /* ЧТО ВЫШЛО НА САМОМ ДЕЛЕ, рядом с тем, что обещал отбор. Панель отвечает
-     на вопрос «что сейчас», а улучшать стратегию можно только по вопросу
-     «что вышло»: рынок с исполнениями и без кругов занимает деньги впустую, и
-     по расчётному доходу этого не видно. */
-  const stx = (PM.stats || {}).overview || {};
-  if (stx.fills || stx.orders_placed) {
-    html += '<h3 style="margin:18px 0 8px">Что вышло на самом деле</h3>'
-      + '<div class="panel card-pad"><div class="kpis">'
-      + `<div class="kpi"><div class="k">Исполнений</div><div class="v">${stx.fills}</div></div>`
-      + `<div class="kpi"><div class="k">Кругов закрыто</div><div class="v">${stx.rounds}</div></div>`
-      + `<div class="kpi"><div class="k">Не закрыто</div><div class="v">${stx.open_fills}</div></div>`
-      + `<div class="kpi"><div class="k">Заработано</div><div class="v" style="color:var(--${stx.gain_usd >= 0 ? 'good' : 'bad'})">${pmMoney(stx.gain_usd)}</div></div>`
-      + `<div class="kpi"><div class="k">Заявок выставлено</div><div class="v">${stx.orders_placed}</div></div>`
-      + `<div class="kpi"><div class="k">Доля исполнения</div><div class="v">${
-          stx.fill_rate === null || stx.fill_rate === undefined ? '—' : (stx.fill_rate * 100).toFixed(1) + '%'}</div></div>`
-      + '</div></div>';
-    const rows = (PM.stats || {}).markets || [];
-    if (rows.length) {
-      html += '<div class="scroll"><table><thead><tr><th>рынок</th>'
-        + '<th>исполнений</th><th>кругов</th><th>не закрыто</th>'
-        + '<th>заработано</th><th>потрачено</th><th>обещано в час</th></tr>'
-        + '</thead><tbody>'
-        + rows.slice(0, 20).map(r => `<tr>
-            <td>${esc((r.question || '—').slice(0, 40))}</td>
-            <td>${r.fills}</td><td>${r.rounds}</td><td>${r.open_fills}</td>
-            <td style="color:var(--${r.gain_usd >= 0 ? 'good' : 'bad'})">${pmMoney(r.gain_usd)}</td>
-            <td>${pmMoney(r.spent_usd)}</td>
-            <td>${r.promised_per_hour === null || r.promised_per_hour === undefined
-                  ? '—' : Number(r.promised_per_hour).toFixed(4)}</td></tr>`).join('')
-        + '</tbody></table></div>'
-        + '<div class="hint" style="padding:6px 4px">Рынок с исполнениями и '
-        + 'без кругов занимает деньги впустую — по расчётному доходу этого не '
-        + 'видно. <a href="/api/polymarket/stats.csv">Выгрузить таблицей</a> '
-        + 'для разбора вне приложения.</div>';
-    }
-  }
-
-  /* НЕБЛАГОПРИЯТНЫЙ ОТБОР — число, решающее судьбу затеи. И оговорка к нему,
-     без которой оно вводит в заблуждение. */
-  const dr = PM.drift || {};
-  if (dr.count) {
-    const sign = dr.avg_per_contract < 0 ? 'bad' : 'good';
-    html += '<h3 style="margin:18px 0 8px">Куда шла цена после наших сделок</h3>'
-      + '<div class="panel card-pad"><div class="kpis">'
-      + `<div class="kpi"><div class="k">Замеров</div><div class="v">${dr.count}</div></div>`
-      + `<div class="kpi"><div class="k">В сумме</div><div class="v" style="color:var(--${sign})">${pmMoney(dr.total_usd)}</div></div>`
-      + `<div class="kpi"><div class="k">На контракт</div><div class="v" style="color:var(--${sign})">${Number(dr.avg_per_contract).toFixed(5)}</div></div>`
-      + `<div class="kpi"><div class="k">Против нас</div><div class="v">${dr.against_us} из ${dr.count}</div></div>`
-      + '</div></div>'
-      + '<div class="hint" style="padding:6px 4px">Отрицательное число значит, '
-      + 'что нас исполняют перед движением против нас. ВАЖНО: по завершённому '
-      + 'кругу снос сокращается сам собой — на покупке он одного знака, на '
-      + 'продаже другого. Судить надо по позициям, которые НЕ закрылись.</div>';
-  }
-
-  /* МОДЕЛЬ ПРОТИВ БИРЖИ — только в живом режиме, и только когда есть что
-     сравнивать. */
-  const sh = PM.shadow || {};
-  if (sh.count) {
-    html += '<div class="hint" style="padding:6px 4px">Модель сверялась с '
-      + `биржей ${sh.count} раз; «исполнилось бы» сказала ${sh.model_said_filled} раз. `
-      + 'Расхождение с настоящими исполнениями показывает, насколько можно '
-      + 'верить бумажному расчёту при увеличении размера.</div>';
-  }
-
-  /* Исполнения — главное, чего ждём: пока их нет, неизвестно, переживает ли
-     захваченный спред неблагоприятный отбор. */
-  if (!(PM.fills || []).length) {
-    html += '<div class="warn-box">Исполнений пока нет. Это не поломка: мы '
-      + 'стоим в конце очереди на рынках, где проходит порядка двух сделок в '
-      + 'час. Пока их не наберётся, судить о доходности нечем.</div>';
-  } else {
-    html += '<h3 style="margin:18px 0 8px">Последние исполнения</h3><div class="scroll">'
-      + '<table><thead><tr><th>время</th><th>сторона</th><th>цена</th>'
-      + '<th>размер</th><th>позиция после</th><th>зафиксировано</th></tr></thead><tbody>'
-      + PM.fills.slice(0, 25).map(f => `<tr>
-          <td>${esc((f.at || '').slice(11, 19))}</td>
-          <td>${f.side === 'bid' ? 'купили' : 'продали'}</td>
-          <td>${Number(f.price).toFixed(3)}</td>
-          <td>${Number(f.size).toFixed(0)}</td>
-          <td>${Number(f.position_after).toFixed(0)}</td>
-          <td>${pmMoney(f.realized_after)}</td></tr>`).join('')
-      + '</tbody></table></div>';
-  }
-
-  if ((PM.positions || []).length) {
-    /* РЫНОК НАЗЫВАЕТСЯ ПО ИМЕНИ, А НЕ НОМЕРОМ ТОКЕНА. План отбора живёт до
-       следующего пересмотра, позиция — до закрытия, и рынок из плана исчезал:
-       строка показывалась прочерком. Название теперь берётся из справочника
-       всех рынков, что мы вели. */
-    html += '<h3 style="margin:18px 0 8px">Запас по рынкам</h3><div class="scroll">'
-      + '<table><thead><tr><th>рынок</th><th>позиция</th><th>средняя</th>'
-      + '<th>зафиксировано</th><th>сделок</th></tr></thead><tbody>'
-      + PM.positions.map(p => `<tr>
-          <td title="${esc(String(p.token))}">${esc((p.question || '—').slice(0, 44))}</td>
-          <td>${Number(p.position).toFixed(0)}</td>
-          <td>${Number(p.avg_cost).toFixed(3)}</td>
-          <td>${pmMoney(p.realized)}</td>
-          <td>${p.trades}</td></tr>`).join('')
-      + '</tbody></table></div>';
-  }
-
-  box.innerHTML = html;
-  const hint = el('pm-hint');
-  if (hint) hint.textContent = eq.at ? 'обновлено ' + eq.at.slice(11, 19) : '';
-  const run = el('pm-run');
-  if (run) run.textContent = PM.running ? 'Остановить' : 'Запустить';
-}
-
-/* Состояние кошелька. КЛЮЧА ЗДЕСЬ НЕТ И БЫТЬ НЕ МОЖЕТ — приходит только адрес,
-   признак настройки и остаток. По адресу всё видно и ничего нельзя подписать. */
-function renderPmWallet(w) {
-  const state = el('pm-wallet-state');
-  const form = el('pm-wallet-form');
-  const forget = el('pm-wallet-forget');
-  const live = el('pm-live-toggle');
-  const liveState = el('pm-live-state');
-  const note = el('pm-budget-note');
-  if (!state) return;
-  if (!w) { state.textContent = 'состояние не пришло'; return; }
-
-  if (w.configured) {
-    /* НЕИЗВЕСТНЫЙ ОСТАТОК И НОЛЬ — РАЗНЫЕ ВЕЩИ. На нуле торговать нельзя
-       осознанно, при неизвестном нельзя вообще: неясно, чем рискуем. */
-    const money = w.balance_known ? ('$' + pmMoney(w.balance_usd))
-                                  : 'остаток не спросился';
-    state.textContent = w.address.slice(0, 8) + '…' + w.address.slice(-6)
-                      + ' · ' + money;
-    if (forget) forget.hidden = false;
-  } else {
-    state.textContent = 'не подключён';
-    if (forget) forget.hidden = true;
-  }
-  if (form) form.classList.toggle('muted-block', !!w.configured);
-  if (note) note.textContent = w.budget_note || '';
-  const budget = el('pm-budget');
-  if (budget && !budget.value) budget.placeholder = w.budget_usd
-    ? ('сейчас $' + pmMoney(w.budget_usd)) : '20, max или 80%';
-
-  if (live) {
-    live.disabled = !w.configured;
-    live.textContent = w.live_enabled ? 'Выключить живую торговлю'
-                                      : 'Включить живую торговлю';
-    live.classList.toggle('ghost', !!w.live_enabled);
-  }
-  if (liveState) {
-    liveState.textContent = !w.configured ? 'кошелёк не подключён'
-      : (w.live_enabled ? 'ВКЛЮЧЕНА — заявки уходят на биржу'
-                        : 'выключена, бот считает на бумаге');
-  }
-}
-
-async function pmPost(url, body) {
-  const resp = await fetch(url, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body || {}),
-  });
-  const data = await resp.json().catch(() => ({}));
-  if (!resp.ok) throw new Error(data.error || data.message || 'не удалось');
-  return data;
-}
-
-document.addEventListener('click', async ev => {
-  const save = ev.target.closest('#pm-wallet-save');
-  if (save) {
-    const key = (el('pm-key') || {}).value || '';
-    const funder = (el('pm-funder') || {}).value || '';
-    if (!key.trim()) { toast('Введите приватный ключ'); return; }
-    save.disabled = true;
-    try {
-      const out = await pmPost('/api/polymarket/wallet',
-                               { private_key: key.trim(), funder: funder.trim() });
-      /* ПОЛЕ ОЧИЩАЕТСЯ СРАЗУ. Ключ, оставшийся в разметке, доступен всякому,
-         кто откроет ту же страницу или посмотрит историю ввода. */
-      if (el('pm-key')) el('pm-key').value = '';
-      toast(out.message || 'кошелёк подключён');
-      renderPmWallet(out.state);
-    } catch (e) { toast('Не принято: ' + e.message); }
-    finally { save.disabled = false; }
-    return;
-  }
-  const chk = ev.target.closest('#pm-wallet-check');
-  if (chk) {
-    const box = el('pm-check');
-    chk.disabled = true;
-    if (box) box.innerHTML = '<div class="hint">проверяю…</div>';
-    try {
-      const out = await pmPost('/api/polymarket/check');
-      const mark = m => m === 'НЕТ' ? 'bad' : (m === 'внимание' ? 'warn' : 'good');
-      if (box) box.innerHTML = (out.groups || []).map(g =>
-        '<div style="margin-top:10px"><b>' + esc(g.title) + '</b>'
-        + (g.rows || []).map(r =>
-            '<div style="padding:2px 0">'
-            + '<span style="color:var(--' + mark(r.mark) + ')">['
-            + esc(r.mark) + ']</span> ' + esc(r.name)
-            + (r.detail ? ' <span class="hint">— ' + esc(r.detail) + '</span>' : '')
-            + '</div>').join('')
-        + '</div>').join('')
-        + (out.blockers
-            ? '<div class="warn-box" style="margin-top:10px">Препятствий: '
-              + out.blockers + '. Живая торговля не начнётся.</div>'
-            : '<div class="hint" style="margin-top:10px">Препятствий нет.</div>');
-    } catch (e) {
-      if (box) box.innerHTML = '<div class="warn-box">не вышло: ' + esc(e.message) + '</div>';
-    } finally { chk.disabled = false; }
-    return;
-  }
-  const drop = ev.target.closest('#pm-wallet-forget');
-  if (drop) {
-    if (!confirm('Отключить кошелёк? Живая торговля тоже выключится.')) return;
-    drop.disabled = true;
-    try {
-      const out = await pmPost('/api/polymarket/wallet/forget');
-      toast(out.message || 'отключён');
-      renderPmWallet(out.state);
-    } catch (e) { toast('Не удалось: ' + e.message); }
-    finally { drop.disabled = false; }
-    return;
-  }
-  const money = ev.target.closest('#pm-budget-save');
-  if (money) {
-    const value = ((el('pm-budget') || {}).value || '').trim();
-    if (!value) { toast('Укажите сумму, «max» или долю'); return; }
-    money.disabled = true;
-    try {
-      const out = await pmPost('/api/polymarket/budget', { budget: value });
-      toast('Бюджет: ' + out.note);
-      renderPmWallet(out.state);
-    } catch (e) { toast('Не принято: ' + e.message); }
-    finally { money.disabled = false; }
-    return;
-  }
-  const liveBtn = ev.target.closest('#pm-live-toggle');
-  if (liveBtn) {
-    const turningOn = liveBtn.textContent.indexOf('Включить') === 0;
-    /* ПОДТВЕРЖДЕНИЕ ТОЛЬКО НА ВКЛЮЧЕНИЕ. Выключение — всегда безопасное
-       действие, и спрашивать о нём значит мешать в тот момент, когда спешат. */
-    if (turningOn && !confirm(
-        'Включить живую торговлю? Бот начнёт отправлять заявки на биржу '
-        + 'и тратить средства кошелька.')) return;
-    liveBtn.disabled = true;
-    try {
-      const out = await pmPost('/api/polymarket/live', { enabled: turningOn });
-      toast(out.message);
-      renderPmWallet(out.state);
-    } catch (e) { toast('Не удалось: ' + e.message); }
-    finally { liveBtn.disabled = false; }
-    return;
-  }
-  const run = ev.target.closest('#pm-run');
-  if (run) {
-    /* Кнопка одна на два действия: пока не работает — «Запустить», как
-       заработал — «Остановить». Две кнопки, из которых одна всегда лишняя,
-       заставляют думать над выбором там, где выбора нет. */
-    run.disabled = true;
-    try {
-      const url = (PM && PM.running) ? '/api/polymarket/halt'
-                                     : '/api/polymarket/start';
-      /* POST, А НЕ GET. Действие меняет состояние, и обработчик его принимает
-         только методом POST — там же живёт проверка «только с этой машины».
-         Прежде запрос уходил методом чтения и отвечал 404 молча. */
-      await pmPost(url);
-      /* Первый такт занимает около минуты: идёт отбор рынков с опросом лент.
-         Ждём дольше и говорим об этом, иначе выглядит как «ничего не
-         произошло» — а человек в это время жмёт кнопку второй раз. */
-      const body = el('pm-body');
-      if (body) body.innerHTML = '<div class="hint">запускаю: отбираю рынки, '
-        + 'это занимает около минуты…</div>';
-      await new Promise(r => setTimeout(r, 3000));
-      await loadPolymarket();
-    } catch (e) {
-      /* ОШИБКА ПОКАЗЫВАЕТСЯ, А НЕ ГЛОХНЕТ. Прежде здесь не было перехвата:
-         запрос падал, обработчик обрывался, кнопка возвращалась в исходное —
-         и человек видел ровно ничего. Чаще всего падал он отказом «только с
-         этой машины», о котором догадаться было невозможно. */
-      const body = el('pm-body');
-      if (body) body.innerHTML = '<div class="warn-box">Запустить не вышло: '
-        + esc(e.message) + '</div>';
-      toast('Не вышло: ' + e.message);
-    } finally { run.disabled = false; }
-    return;
-  }
-  const btn = ev.target.closest('#pm-stop');
-  if (!btn) return;
-  /* Остановка создаёт тот же файл, что и рука: маркет-мейкер проверяет его
-     перед каждой заявкой, поэтому действует со следующей секунды. */
-  const stopping = !(PM && PM.kill_switch);
-  const url = stopping ? '/api/polymarket/stop' : '/api/polymarket/resume';
-  btn.disabled = true;
-  try {
-    await pmPost(url);
-    await loadPolymarket();
-  } finally {
-    btn.disabled = false;
-  }
-});
-
-function renderErrors() {
-  const box = el('errors');
-  if (!box || !ERRORS) return;
-  const list = ERRORS.errors || [];
-
-  if (!list.length) {
-    box.innerHTML = '<div class="panel card-pad">'
-      + '<div class="panel-head bare"><h2>Ошибки</h2></div>'
-      + '<div class="empty">Ошибок не было. Здесь появится всё, на чём бот '
-      + 'споткнулся: недоступная биржа, отказ в правах на файл, сбой '
-      + 'стратегии — с числом повторов и временем последнего случая.</div>'
-      + reportBlock() + '</div>';
-    return;
-  }
-
-  const cats = {};
-  list.forEach(g => { cats[g.category] = (cats[g.category] || 0) + g.count; });
-  const chips = Object.entries(cats).sort((a, b) => b[1] - a[1])
-    .map(([c, n]) => '<span class="err-chip">' + errIcon(c) + ' ' + esc(c)
-      + ' <b>' + n + '</b></span>').join('');
-
-  const rows = list.map((g, idx) => {
-    const sample = (g.samples || [])[0] || {};
-    const ctx = sample.context
-      ? Object.entries(sample.context).map(([k, v]) => esc(k) + ': ' + esc(v)).join(' · ')
-      : '';
-    const samples = (g.samples || []).map(sm =>
-      '<div class="err-sample"><div class="err-sample-at">' + fmtWhen(sm.at)
-      + '</div><div>' + esc(sm.text) + '</div>'
-      + (sm.traceback ? '<pre class="err-trace">' + esc(sm.traceback) + '</pre>' : '')
-      + '</div>').join('');
-    return '<div class="err-row ' + (g.level === 'WARN' ? 'warn' : 'bad') + '">'
-      + '<div class="err-head" data-err="' + idx + '">'
-      + '<span class="err-cat">' + errIcon(g.category) + ' ' + esc(g.category) + '</span>'
-      + '<span class="err-text">' + esc(g.signature) + '</span>'
-      + '<span class="err-count">' + g.count + '\u00d7</span>'
-      + '<span class="err-when">' + fmtWhen(g.last) + '</span></div>'
-      + '<div class="err-body" id="err-' + idx + '" hidden>'
-      + '<div class="err-meta">впервые ' + fmtWhen(g.first) + ' · последний раз '
-      + fmtWhen(g.last) + ' · всего ' + g.count + '</div>'
-      + (ctx ? '<div class="err-meta">' + ctx + '</div>' : '')
-      + samples + '</div></div>';
-  }).join('');
-
-  box.innerHTML = '<div class="panel card-pad">'
-    + '<div class="panel-head bare"><h2>Ошибки</h2>'
-    + '<span class="hint">одинаковые собраны вместе; нажмите строку, чтобы '
-    + 'раскрыть подробности</span></div>'
-    + '<div class="err-chips">' + chips + '</div>'
-    + '<div class="err-list">' + rows + '</div>'
-    + '<div class="ctl-foot">'
-    + '</div>' + reportBlock() + '<div class="ctl-foot">'
-    + '<button type="button" class="btn ghost" id="err-reload">Обновить</button>'
-    + '<button type="button" class="btn ghost" id="err-clear"'
-    + (ERRORS.writable ? '' : ' disabled') + '>Очистить</button>'
-    + '<span class="saved" id="err-msg"></span></div>'
-    + '<div class="ctl-note">Очищать имеет смысл после того, как разобрались: '
-    + 'счётчик покажет, вернулась ли проблема.</div></div>';
-
-  box.querySelectorAll('.err-head').forEach(h => {
-    h.onclick = () => {
-      const body = el('err-' + h.dataset.err);
-      if (body) body.hidden = !body.hidden;
-    };
-  });
-  el('err-reload').onclick = () => loadErrors();
-  const clear = el('err-clear');
-  if (clear) clear.onclick = async () => {
-    try {
-      const resp = await fetch('/api/errors/clear', { method: 'POST',
-        headers: { 'Content-Type': 'application/json' }, body: '{}' });
-      const data = await resp.json();
-      if (!resp.ok) throw new Error(data.error || resp.status);
-      await loadErrors();
-      const m = el('err-msg');
-      if (m) { m.style.color = 'var(--good)'; m.textContent = data.message; }
-    } catch (e) {
-      const m = el('err-msg');
-      if (m) { m.style.color = 'var(--bad)'; m.textContent = 'Не выполнено: ' + e.message; }
-    }
-  };
 }
 
 /* ── Предел на весь портфель ────────────────────────────────────────────── */
@@ -5012,11 +4162,10 @@ async function refreshLog() {
 function render() {
   if (!DATA) return;
   buildFilters();
-  // Сводка и стратегии Polymarket живут на данных общего опроса, поэтому
+  // Сводка живёт на данных общего опроса, поэтому
   // обновляются здесь же: рисовать их только при открытии вкладки значило бы
   // показывать вчерашние числа тому, кто держит панель открытой.
   if (page === 'summary') renderSummary();
-  if (page === 'pmstrat') renderPmStrategies();
 
   const closed = pick(DATA.closed);
   // Открытые позиции и ожидающие ордера существуют СЕЙЧАС: фильтр периода
@@ -5117,7 +4266,6 @@ refresh();
 setInterval(refresh, 15000);
 // Маркет-мейкер обновляется только когда его вкладка открыта: опрашивать его
 // файлы постоянно незачем, а при закрытой вкладке это чистая трата.
-setInterval(() => { if (page === 'polymarket') loadPolymarket(); }, 15000);
 // Журнал обновляем чаще: в окне приложения он заменяет консоль, и по нему
 // видно, что бот жив, даже когда сделок нет неделю.
 setInterval(refreshLog, 5000);

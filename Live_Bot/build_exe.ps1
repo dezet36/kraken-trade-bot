@@ -66,8 +66,6 @@ python -m PyInstaller `
     --add-data "$botDir\app_icon.ico;." `
     --add-data "$versionFile;." `
     --add-data "$(Join-Path $root '.env.example');." `
-    --hidden-import aiohttp `
-    --hidden-import polymarket.stream `
     --hidden-import ccxt.bybit `
     --hidden-import ccxt.bingx `
     --hidden-import apscheduler.schedulers.blocking `

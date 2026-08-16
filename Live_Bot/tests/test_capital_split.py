@@ -116,39 +116,27 @@ class TestCapitalSplit:
 
 class TestDirectionsDoNotShareMoney:
     """
-    Биржевой бот и Polymarket — РАЗНЫЕ системы с разными деньгами.
+    Депозиты стратегий считаются РАЗДЕЛЬНО и не занимают друг у друга.
 
-    Требование поставлено прямо: бюджет на торговлю и бюджет на предсказания
-    считаются отдельно, и ни одно направление не должно уметь занять у другого.
-    Общий счёт означал бы, что удачный месяц на бирже молча увеличивает ставки
-    на площадке, где ещё ничего не подтверждено.
+    Рядом стояло второе направление — Polymarket, — и правило писалось ради
+    него: удачный месяц на бирже не должен молча увеличивать ставки там, где
+    ещё ничего не подтверждено. Направление вырезано (ветка
+    polymarket-archive), а правило осталось: оно про любые две кассы, а не про
+    ту конкретную.
     """
 
-    def test_polymarket_budget_does_not_read_the_exchange_deposit(self,
-                                                                  monkeypatch):
-        import importlib
-        from polymarket import params
-        before = params.bankroll_for('MM')
-        monkeypatch.setenv('PAPER_START_BALANCE', '1000000')
-        importlib.reload(config)
-        assert params.bankroll_for('MM') == before
-
-    def test_exchange_deposit_does_not_read_the_polymarket_budget(self,
-                                                                  monkeypatch):
+    def test_each_strategy_keeps_its_own_deposit(self, monkeypatch):
         import importlib
         before = dict(config.PAPER_START_BALANCES)
-        monkeypatch.setenv('PM_BUDGET_MM', '1000000')
+        monkeypatch.setenv('PAPER_START_BALANCE_FIBO', '123456')
         importlib.reload(config)
-        assert dict(config.PAPER_START_BALANCES) == before
+        try:
+            after = dict(config.PAPER_START_BALANCES)
+            assert after['FIBO'] == 123456.0
+            for name, value in before.items():
+                if name != 'FIBO':
+                    assert after[name] == value, name
+        finally:
+            monkeypatch.delenv('PAPER_START_BALANCE_FIBO', raising=False)
+            importlib.reload(config)
 
-    def test_neither_direction_names_the_other(self):
-        """
-        Ни один модуль направления не читает капитал чужого.
-
-        Проверка идёт по тексту, а не по значению: значения могут совпасть
-        случайно, а импорт — это уже связь, которая рано или поздно сработает.
-        """
-        import glob
-        for path in glob.glob(os.path.join(ROOT, 'polymarket', '*.py')):
-            text = open(path, encoding='utf-8').read()
-            assert 'PAPER_START_BALANCE' not in text, os.path.basename(path)

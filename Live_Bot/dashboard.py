@@ -601,18 +601,13 @@ def _live_payload():
 
 def _directions():
     """
-    Сводка по НАПРАВЛЕНИЯМ: биржа и Polymarket рядом, одной меркой.
+    Сводка по направлению: сколько вложено, сколько стало, сколько работает.
 
-    ЗАЧЕМ ЭТО ОТДЕЛЬНО. В приложении два разных рынка с разными деньгами,
-    разными стратегиями и разной механикой, но панель показывала их так, будто
-    биржа — это «всё», а Polymarket — ещё одна вкладка сбоку. Четыре раздела из
-    семи говорили только про биржу, нигде этого не называя: человек, открывший
-    «Обзор», не мог знать, что Polymarket туда не входит.
-
-    Здесь оба направления отвечают на один вопрос — сколько вложено, сколько
-    стало, сколько стратегий работает, — и потому сравнимы. Считается на
-    сервере, чтобы панель не складывала деньги сама: сложение чужих сумм в
-    браузере — верный способ однажды сложить несуммируемое.
+    НАПРАВЛЕНИЕ ОСТАЛОСЬ ОДНО — биржа. Рядом стояло второе, Polymarket, и
+    сводка писалась ради их сравнения; теперь оно вырезано и живёт в ветке
+    polymarket-archive. Форма ответа сохранена: она отвечает на тот же вопрос
+    и не требует от панели складывать чужие суммы самой — сложение в браузере
+    верный способ однажды сложить несуммируемое.
     """
     out = []
 
@@ -666,51 +661,6 @@ def _directions():
         'connected': bool(config.EXCHANGE_NAME),
     })
 
-    # ── Polymarket ──────────────────────────────────────────────────────────
-    try:
-        from polymarket import params as pm_params
-        import polymarket as pm
-        shot = pm.snapshot(limit_markets=1, limit_fills=1)
-        equity_row = shot.get('equity') or {}
-        rows = []
-        pm_invested = pm_current = 0.0
-        for key, title in (('MM', 'Маркет-мейкер'),
-                           ('ONESIDE', 'Односторонний'),
-                           ('WEATHER', 'Погода'),
-                           ('CRYPTO', 'Крипта'),
-                           ('LONGSHOT', 'Лонгшоты')):
-            budget = pm_params.bankroll_for(key)
-            # Живой результат есть только у маркет-мейкера: остальные считают
-            # на бумаге в своих файлах, и подменять их нулём было бы враньём —
-            # показываем сумму и молчим о результате, пока его нет.
-            equity = float(equity_row.get('equity') or budget) if key == 'MM' \
-                else budget
-            pm_invested += budget
-            pm_current += equity
-            rows.append({
-                'name': title, 'key': key,
-                'invested': round(budget, 2), 'equity': round(equity, 2),
-                'pnl': round(equity - budget, 2),
-                'open': shot.get('positions_total', 0) if key == 'MM' else 0,
-                'enabled': budget > 0,
-                'live': bool(shot.get('running')) if key == 'MM' else False,
-            })
-        connect = shot.get('connect') or {}
-        out.append({
-            'id': 'polymarket', 'title': 'Polymarket',
-            'subtitle': 'рынки предсказаний · маркет-мейкинг',
-            'invested': round(pm_invested, 2), 'equity': round(pm_current, 2),
-            'pnl': round(pm_current - pm_invested, 2),
-            'strategies': rows,
-            'connected': bool(connect.get('configured')),
-            'rounds': shot.get('rounds_total', 0),
-            'standing': len(shot.get('standing') or []),
-        })
-    except Exception as exc:                                # noqa: BLE001
-        out.append({'id': 'polymarket', 'title': 'Polymarket',
-                    'subtitle': 'не читается', 'error': str(exc)[:160],
-                    'invested': 0, 'equity': 0, 'pnl': 0, 'strategies': [],
-                    'connected': False})
     return out
 
 
@@ -1193,30 +1143,6 @@ class _Handler(BaseHTTPRequestHandler):
             self._send_json({'app': 'kraken-trade-bot',
                              'pid': _os.getpid(),
                              'version': _app_version()})
-        elif path == '/api/polymarket/stats.csv':
-            # ВЫГРУЗКА ДЛЯ РАЗБОРА ВНЕ ПРИЛОЖЕНИЯ. Решения об отборе принимают
-            # по таблице, а не по экрану: строка на рынок, обещанное рядом с
-            # вышедшим.
-            try:
-                from polymarket import stats
-                body = stats.to_csv().encode('utf-8-sig')
-                self.send_response(200)
-                self.send_header('Content-Type', 'text/csv; charset=utf-8')
-                self.send_header('Content-Disposition',
-                                 'attachment; filename=polymarket_stats.csv')
-                self.send_header('Content-Length', str(len(body)))
-                self.end_headers()
-                self.wfile.write(body)
-            except Exception as exc:                        # noqa: BLE001
-                self._fail(500, f'не собралось ({type(exc).__name__})')
-        elif path == '/api/polymarket':
-            # Читается из файлов маркет-мейкера, а не из его процесса: он живёт
-            # отдельно, и панель не должна ни ждать его, ни падать вместе с ним.
-            try:
-                import polymarket
-                self._send_json(polymarket.snapshot())
-            except Exception as exc:               # noqa: BLE001
-                self._send_json({'running': False, 'error': str(exc)[:200]})
         elif path.startswith('/api/report.txt'):
             # Отчёт собирается на лету, а не лежит файлом: он должен отражать
             # состояние на момент нажатия, иначе присланное описывает не ту
@@ -1312,16 +1238,7 @@ class _Handler(BaseHTTPRequestHandler):
         path = self.path.split('?')[0]
         if path not in ('/api/settings', '/api/deposit', '/api/action',
                         '/api/update', '/api/update/rollback',
-                        '/api/errors/clear', '/api/keys',
-                        # Действия Polymarket: запуск, остановка, кошелёк,
-                        # разрешение торговать, бюджет. Все меняют состояние,
-                        # поэтому идут только POST и только с этой машины.
-                        '/api/polymarket/start', '/api/polymarket/halt',
-                        '/api/polymarket/stop', '/api/polymarket/resume',
-                        '/api/polymarket/wallet',
-                        '/api/polymarket/check',
-                        '/api/polymarket/wallet/forget',
-                        '/api/polymarket/live', '/api/polymarket/budget'):
+                        '/api/errors/clear', '/api/keys'):
             self.send_error(404)
             return
         if not _controls_allowed():
@@ -1350,131 +1267,6 @@ class _Handler(BaseHTTPRequestHandler):
             self._fail(400, f'Неверные данные: {exc}')
             return
 
-        # ДЕЙСТВИЯ POLYMARKET ЖИВУТ ЗДЕСЬ, А НЕ В do_GET, И ЭТО ИСПРАВЛЕНИЕ
-        # ДЫРЫ. Они меняют состояние — поднимают маркет-мейкера, включают
-        # аварийную остановку, подключают кошелёк, — а лежали в обработчике
-        # чтения, где нет проверки «только с этой машины». Дотянувшийся до
-        # порта мог остановить торговлю или подменить кошелёк.
-        #
-        # Заодно чинится молчаливый отказ: панель шлёт их методом POST, а
-        # объявлены они были в GET, и запрос уходил в никуда с ответом 404.
-        # Снаружи это выглядело как «кошелёк не подключён» без объяснения.
-        if path == '/api/polymarket/start':
-            # ЗАПУСК ПО КНОПКЕ, минуя PM_AUTOSTART. Переменная отвечает на
-            # вопрос «поднимать ли самому при старте бота»; нажатие — это уже
-            # ответ. На сервере с собранным приложением другого способа нет:
-            # консоли там не бывает.
-            try:
-                from polymarket import service
-                started = service.start(force=True)
-                self._send_json({'ok': True, 'started': started,
-                                 'state': service.status()})
-            except Exception as exc:               # noqa: BLE001
-                self._fail(500, f'не запустился: {exc}')
-        elif path == '/api/polymarket/halt':
-            try:
-                from polymarket import service
-                service.stop()
-                self._send_json({'ok': True, 'state': service.status()})
-            except Exception as exc:               # noqa: BLE001
-                self._fail(500, f'не остановился: {exc}')
-        elif path == '/api/polymarket/stop':
-            # Аварийная остановка ИЗ ПАНЕЛИ. Она создаёт тот же файл, что и
-            # рука: маркет-мейкер проверяет его перед каждой заявкой, поэтому
-            # действует со следующей секунды, а не с перезапуска.
-            try:
-                from polymarket import executor
-                executor.engage_kill_switch('нажато в панели')
-                self._send_json({'ok': True, 'stopped': True})
-            except Exception as exc:               # noqa: BLE001
-                self._fail(500, f'не удалось: {exc}')
-        elif path == '/api/polymarket/resume':
-            try:
-                from polymarket import executor
-                executor.release_kill_switch()
-                self._send_json({'ok': True, 'stopped': False})
-            except Exception as exc:               # noqa: BLE001
-                self._fail(500, f'не удалось: {exc}')
-        elif path == '/api/polymarket/check':
-            # ПРОВЕРКА ИЗ ПАНЕЛИ. На сервере консоли нет, а именно там и нужен
-            # разбор: «кошелёк не подключён» без причины не отличает нехватку
-            # библиотеки от закрытой сети, ограничения по стране и негодного
-            # ключа. Проверка ничего не меняет и ничего не отправляет.
-            try:
-                from polymarket import preflight
-                groups, bad = preflight.run()
-                self._send_json({'ok': True, 'blockers': bad,
-                                 'groups': [{'title': t, 'rows': r}
-                                            for t, r in groups]})
-            except Exception as exc:               # noqa: BLE001
-                self._fail(500, f'проверка не прошла ({type(exc).__name__})')
-        elif path == '/api/polymarket/wallet':
-            # КОШЕЛЁК ПОДКЛЮЧАЕТСЯ ОТСЮДА, и это выправление непоследовательности.
-            # Ключи биржи в этом приложении давно задаются панелью, а для
-            # Polymarket держался особый случай — без основания, зато оставляя
-            # человека с сервером без способа подключить кошелёк вообще.
-            #
-            # Ключ проверяется ДО записи и НИКОГДА не отдаётся обратно: наружу
-            # уходит только адрес. Живая торговля при этом не включается —
-            # подключить кошелёк и разрешить тратить деньги решаются отдельно.
-            try:
-                from polymarket import connect
-                ok, address, message = connect.save(
-                    changes.get('private_key'), changes.get('funder'))
-                if not ok:
-                    self._fail(400, message)
-                    return
-                log('🔑 Polymarket: кошелёк подключён оператором '
-                    f'({address})')
-                self._send_json({'ok': True, 'address': address,
-                                 'message': message,
-                                 'state': connect.state()})
-            except Exception as exc:               # noqa: BLE001
-                # Наружу идёт только тип ошибки: её текст способен содержать
-                # сам ключ — у некоторых версий библиотеки он попадает туда
-                # целиком.
-                self._fail(500, f'не удалось сохранить ({type(exc).__name__})')
-        elif path == '/api/polymarket/wallet/forget':
-            try:
-                from polymarket import connect
-                _, message = connect.forget()
-                log('🔑 Polymarket: кошелёк отключён оператором')
-                self._send_json({'ok': True, 'message': message,
-                                 'state': connect.state()})
-            except Exception as exc:               # noqa: BLE001
-                self._fail(500, f'не удалось ({type(exc).__name__})')
-        elif path == '/api/polymarket/live':
-            try:
-                from polymarket import connect
-                want = bool(changes.get('enabled'))
-                ok, message = connect.set_live(want)
-                if not ok:
-                    self._fail(409, message)
-                    return
-                log(f'⚡ Polymarket: живая торговля '
-                    f'{"ВКЛЮЧЕНА" if want else "выключена"} оператором')
-                self._send_json({'ok': True, 'message': message,
-                                 'state': connect.state()})
-            except Exception as exc:               # noqa: BLE001
-                self._fail(500, f'не удалось ({type(exc).__name__})')
-        elif path == '/api/polymarket/budget':
-            # Сумма задаётся числом, «max» или долей — тем же разбором, что и
-            # в настройке PM_BUDGET_MM. Панель лишь пишет её в то же место.
-            try:
-                import first_run
-                from polymarket import connect, params as pm_params
-                raw = str(changes.get('budget') or '').strip()
-                if not raw:
-                    self._fail(400, 'укажите сумму, «max» или долю вида 80%')
-                    return
-                first_run._write_env({'PM_BUDGET_MM': raw})
-                os.environ['PM_BUDGET_MM'] = raw
-                amount, why = pm_params.budget_plan('MM')
-                log(f'💰 Polymarket: бюджет задан «{raw}» → ${amount:,.2f}')
-                self._send_json({'ok': True, 'budget_usd': round(amount, 2),
-                                 'note': why, 'state': connect.state()})
-            except Exception as exc:               # noqa: BLE001
-                self._fail(500, f'не удалось ({type(exc).__name__})')
         if path == '/api/keys':
             # Ключи биржи меняются отсюда, а не правкой .env в блокноте.
             # Окно первого запуска эту работу уже делает, но оно показывается

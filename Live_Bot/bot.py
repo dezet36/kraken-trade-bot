@@ -592,31 +592,9 @@ def _start_paper():
     log("   Одна пара может быть открыта обеими стратегиями одновременно")
 
     dashboard.start_dashboard(broker=broker)
-    _start_polymarket()
     tg.bot_started(broker.get_real_balance())
 
 
-
-def _start_polymarket():
-    """
-    Поднимает маркет-мейкер Polymarket, если он включён.
-
-    ОТДЕЛЬНОЙ ФУНКЦИЕЙ И С ЛОВЛЕЙ ВСЕГО. Polymarket — другая площадка и другие
-    деньги; его неудача не имеет права остановить торговлю на бирже. Пакет
-    может отсутствовать в сборке, зависимость не встать, ключ оказаться
-    негодным — во всех случаях бот обязан продолжить работу и сказать об этом.
-
-    Выключен по умолчанию: включается PM_AUTOSTART=1.
-    """
-    try:
-        from polymarket import service
-        if not service.autostart_enabled():
-            return
-        if service.start():
-            log("◈ Polymarket: маркет-мейкер поднят фоновым потоком")
-    except Exception as exc:                       # noqa: BLE001
-        log(f"⚠️ Polymarket не запустился ({str(exc)[:120]}) — "
-            "торговля на бирже продолжается")
 
 def main():
     global trade_manager, _last_summary_date
@@ -676,7 +654,6 @@ def main():
     # Дашборд поднимается после подключения к бирже, чтобы сразу показывать
     # актуальный баланс. Сбой запуска торговлю не прерывает.
     dashboard.start_dashboard(trade_manager=trade_manager)
-    _start_polymarket()
 
     # Первый daily summary — на текущую дату (чтобы не слать пустой)
     _last_summary_date = date.today()

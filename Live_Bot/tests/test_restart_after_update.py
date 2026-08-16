@@ -219,78 +219,23 @@ class TestClosingActuallyCloses:
         desktop._shutdown()
         assert ended.get('code') == 0
 
-    def test_shutdown_cancels_polymarket_orders_first(self, monkeypatch):
+    def test_shutdown_is_not_delayed_by_anything(self, monkeypatch):
         """
-        Заявки стоят НА БИРЖЕ и переживут закрытие программы: исполнятся без
-        нас, а вести полученную позицию будет некому.
+        Здесь стояли две проверки про снятие заявок на Polymarket: они стоят на
+        бирже и переживают закрытие программы. Направление вырезано (ветка
+        polymarket-archive), и закрытие обязано быть простым — вышли и вышли.
+
+        Стопы биржевого бота живут на самой бирже и в закрытии не нуждаются; о
+        том, что ведение позиций прекращается, человека спрашивают отдельно.
         """
-        from polymarket import service
-
-        order = []
-        alive = {'yes': True}
-        monkeypatch.setattr(service, 'status', lambda: {'alive': alive['yes']})
-
-        def fake_stop():
-            order.append('остановил маркет-мейкер')
-            alive['yes'] = False
-            return True
-
-        monkeypatch.setattr(service, 'stop', fake_stop)
-        monkeypatch.setattr(desktop.os, '_exit',
-                            lambda code: order.append('закрыл процесс'))
-        desktop._shutdown()
-        assert order == ['остановил маркет-мейкер', 'закрыл процесс']
-
-    def test_shutdown_does_not_hang_forever(self, monkeypatch):
-        """Маркет-мейкер не ответил — закрываемся всё равно, но не молча."""
-        from polymarket import service
-
-        monkeypatch.setattr(service, 'status', lambda: {'alive': True})
-        monkeypatch.setattr(service, 'stop', lambda: True)
-        monkeypatch.setattr(desktop, 'SHUTDOWN_TIMEOUT', 2)
-        monkeypatch.setattr(desktop.time, 'sleep', lambda s: None)
         said = []
         monkeypatch.setattr(desktop, 'log', said.append)
         ended = {}
-        monkeypatch.setattr(desktop.os, '_exit', lambda code: ended.setdefault('code', code))
+        monkeypatch.setattr(desktop.os, '_exit',
+                            lambda code: ended.setdefault('code', code))
         desktop._shutdown()
         assert ended.get('code') == 0
-        assert any('заявки могли остаться' in str(line) for line in said)
-
-
-class TestMarketMakerStopsAtOnce:
-    """
-    Сон между тактами прерываемый: пока поток спит, заявки стоят на бирже.
-
-    Полминуты обычного time.sleep — это полминуты, которые заявки висят без
-    присмотра после нажатия «Остановить» или закрытия окна.
-    """
-
-    def test_stop_wakes_the_sleeping_loop(self):
-        from polymarket import service
-
-        service._wake.clear()
-        started = time.time()
-        done = []
-
-        def sleeper():
-            service._wake.wait(30)
-            done.append(time.time() - started)
-
-        worker = __import__('threading').Thread(target=sleeper, daemon=True)
-        worker.start()
-        time.sleep(0.2)
-        service.stop()
-        worker.join(timeout=5)
-        service._state['stopping'] = False
-        service._wake.clear()
-        assert done and done[0] < 2, 'остановка ждала конца такта'
-
-    def test_start_clears_the_flag(self):
-        """Иначе следующий запуск вышел бы на первом же такте."""
-        text = open(os.path.join(ROOT, 'polymarket', 'service.py'),
-                    encoding='utf-8').read()
-        assert "_state['stopping'] = False\n    _wake.clear()" in text
+        assert any('остановлен' in str(line) for line in said)
 
 
 class TestStartupWiring:

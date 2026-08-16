@@ -292,28 +292,10 @@ def _shutdown():
     Про потерю состояния можно не беспокоиться: и фантомный счёт, и позиции
     пишутся на диск в конце каждого цикла, а не при выходе.
 
-    А ВОТ ЗАЯВКИ НА POLYMARKET СНЯТЬ ОБЯЗАТЕЛЬНО, и до принудительного
-    выхода. Они стоят НА БИРЖЕ и переживут закрытие программы: исполнятся без
-    нас, а вести полученную позицию будет некому. Поэтому сначала просим
-    маркет-мейкер остановиться (он снимает всё в своём finally) и ждём его —
-    но не бесконечно: программа обязана закрываться.
+    Стопы на бирже стоят сами и переживут закрытие: это их работа. Ведение
+    позиции — перевод в безубыток, частичные фиксации, выход по времени — с
+    закрытием прекращается, и об этом человека спрашивают отдельно (_confirm_close).
     """
-    try:
-        from polymarket import service as pm
-
-        if pm.status().get('alive'):
-            log('Закрытие: останавливаю маркет-мейкер и снимаю заявки')
-            pm.stop()
-            for _ in range(SHUTDOWN_TIMEOUT):
-                if not pm.status().get('alive'):
-                    break
-                time.sleep(1)
-            else:
-                log('маркет-мейкер не ответил за '
-                    f'{SHUTDOWN_TIMEOUT} с — закрываюсь, заявки могли остаться')
-    except Exception as exc:                       # noqa: BLE001
-        log(f'остановка маркет-мейкера не отработала: {exc}')
-
     log('Окно приложения закрыто — бот остановлен')
     logging.shutdown()
     os._exit(0)
@@ -386,21 +368,7 @@ def selftest():
                'strategy', 'strategy_smc', 'strategy_levels', 'first_run',
                'updater', 'updater_app', 'ccxt.bybit', 'ccxt.bingx',
                'apscheduler.schedulers.blocking', 'tkinter', 'tkinter.ttk',
-               'webview', 'clr', 'pandas', 'numpy',
-               # ПАКЕТ POLYMARKET ПРОВЕРЯЕТСЯ ОТДЕЛЬНО, И ЭТО НЕ ИЗБЫТОЧНОСТЬ.
-               # Он импортируется только внутри функций и под try/except —
-               # так задумано, чтобы его отсутствие не роняло торговлю на
-               # бирже. Обратная сторона: PyInstaller такие импорты находит
-               # ненадёжно, а пойманное исключение превращает пропажу в тихую
-               # строку журнала. На сервере это выглядело как «маркет-мейкер
-               # не запускался» без объяснения причины.
-               'polymarket', 'polymarket.mm', 'polymarket.service',
-               'polymarket.preflight', 'polymarket.connect', 'polymarket.oneside',
-               'polymarket.oneside_run', 'polymarket.selector',
-               'polymarket.strategy',
-               'polymarket.wallet', 'polymarket.executor', 'polymarket.stream',
-               'aiohttp',
-               'polymarket.engine', 'polymarket.book')
+               'webview', 'clr', 'pandas', 'numpy')
     import importlib
     failed = []
     for name in modules:
@@ -653,7 +621,7 @@ def is_our_bot(holder, port=None):
         if not cmd:
             return True
         return ('desktop.py' in cmd or 'bot.py' in cmd
-                or 'kraken' in cmd or 'polymarket' in cmd)
+                or 'kraken' in cmd)
     return False
 
 
