@@ -148,3 +148,38 @@ class TestTheStartupWaitPicksTheLightPage:
         spot = text.index('def _wait_for_dashboard')
         block = text[spot:spot + 1400]
         assert '/api/whoami' in block and '49 секунд' in block
+
+
+class TestAnInstantExitIsNotAClosedWindow:
+    """
+    Chrome с чужим или испорченным профилем выходит сразу, ничего не показав.
+    Прежде это читалось как «человек закрыл окно», и программа честно
+    останавливала бота: в журнале три строки одной секундой — открыл, закрыл,
+    остановился. Снаружи это выглядит как «запустил, и оно само выключилось».
+
+    Живой человек не успевает закрыть окно за пару секунд.
+    """
+
+    def _source(self):
+        return open(os.path.join(ROOT, 'desktop.py'), encoding='utf-8').read()
+
+    def test_a_quick_exit_falls_through(self):
+        text = self._source()
+        spot = text.index('def _open_window(')
+        block = text[spot:spot + 3600]
+        assert 'WINDOW_ALIVE_SECONDS' in block
+        assert 'TimeoutExpired' in block
+
+    def test_surviving_the_threshold_means_the_window_is_real(self):
+        """Дожил до порога — значит окно показано, ждём закрытия по-настоящему."""
+        text = self._source()
+        spot = text.index('def _open_window(')
+        block = text[spot:spot + 3600]
+        assert 'открыто окном браузера' in block
+        assert block.index('TimeoutExpired') < block.index('открыто окном браузера')
+
+    def test_the_threshold_is_short_but_not_zero(self):
+        import re
+        text = self._source()
+        got = re.search(r'WINDOW_ALIVE_SECONDS = (\d+)', text)
+        assert got and 2 <= int(got.group(1)) <= 10
