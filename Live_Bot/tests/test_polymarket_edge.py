@@ -389,3 +389,71 @@ class TestFlowIsNotABurst:
                     encoding='utf-8').read()
         assert "t['weight'] = math.exp(-((now - t['ts']) / 3600) / decay)" in text
         assert "t['size'] * t['weight']" in text
+
+
+class TestWeCountWhatWeActuallyCapture:
+    """
+    ПОЧЕМУ БЫЛИ УБЫТКИ. Тринадцать закрытых кругов, шесть в плюс, семь в минус:
+
+        купили 0.554 → продали 0.527   −0.027   обещано +0.014
+        купили 0.235 → продали 0.208   −0.027   обещано +0.019
+        купили 0.047 → продали 0.024   −0.023   обещано +0.009
+
+        взято    −$0.37
+        обещано  +$0.97
+        доля      −41.6%
+
+    В КАЖДОМ УБЫТОЧНОМ КРУГЕ МЫ ПРОДАЛИ ДЕШЕВЛЕ, ЧЕМ КУПИЛИ. Модель считает,
+    что обе стороны исполнятся по нашим ценам при неподвижной середине. Между
+    двумя исполнениями проходит время, и мейкера подбирают по одной стороне
+    ровно тогда, когда вторая уже невыгодна.
+
+    Единственные прибыльные круги — те две пары, где обе стороны исполнились
+    быстро: +0.30% и +3.09%.
+    """
+
+    def _row(self, capture=None):
+        from polymarket import selector
+
+        row = {'size': 5.0, 'our_gain': 0.02, 'flow_in': 10.0,
+               'flow_out': 10.0, 'queue_in': 0.0, 'queue_out': 0.0}
+        if capture is not None:
+            row['capture'] = capture
+        return selector._recompute_wait(row)
+
+    def test_a_measured_zero_kills_the_spread_income(self):
+        """
+        Доля ноль означает «на спред рассчитывать нельзя» — и план перестаёт
+        обещать с него доход. Награда при этом считается отдельно и остаётся.
+        """
+        assert self._row(capture=0.0)['usd_per_hour'] == 0.0
+
+    def test_full_capture_leaves_the_estimate_alone(self):
+        assert self._row(capture=1.0)['usd_per_hour'] > 0
+
+    def test_half_capture_halves_the_estimate(self):
+        assert self._row(capture=0.5)['usd_per_hour'] == pytest.approx(
+            self._row(capture=1.0)['usd_per_hour'] / 2, rel=0.01)
+
+    def test_without_a_measurement_nothing_changes(self):
+        """Пока кругов мало, идём по модели — как и раньше."""
+        assert self._row()['usd_per_hour'] == \
+            pytest.approx(self._row(capture=1.0)['usd_per_hour'])
+
+    def test_the_factor_never_flatters_the_model(self, monkeypatch):
+        """
+        Сверху единица: забрать больше, чем оставляет спред, нельзя. Снизу ноль:
+        отрицательная доля означает «не рассчитывать», а не «спред отнимает
+        деньги пропорционально ставке» — этого замер не говорит.
+        """
+        from polymarket import selector, stats
+
+        for measured, want in ((-0.416, 0.0), (0.5, 0.5), (3.0, 1.0)):
+            monkeypatch.setattr(stats, 'capture_factor', lambda **kw: measured)
+            assert selector._capture_factor() == pytest.approx(want)
+
+    def test_too_few_rounds_means_no_correction(self, monkeypatch):
+        from polymarket import selector, stats
+
+        monkeypatch.setattr(stats, 'capture_factor', lambda **kw: None)
+        assert selector._capture_factor() == 1.0
