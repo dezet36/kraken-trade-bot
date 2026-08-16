@@ -56,15 +56,18 @@ class TestEveryPositionGetsAVerdict:
         assert got[0]['verdict'] == 'без заявки'
         assert got[0]['position'] == 5.0
 
-    def test_an_order_beyond_the_market_is_not_working(self, tmp_path):
+    def test_a_price_far_from_the_market_says_so(self, tmp_path):
         """
-        Продажа дороже, чем берут, исполнится только если рынок сам дойдёт до
-        неё. Это надежда, а не заявка, и называть её работой нельзя.
+        Продажа дороже лучшего аска ИСПОЛНИМА — просто после тех, кто дешевле.
+        Разница не в возможности, а в длине очереди, и подменять число словом
+        нельзя. Но расстояние до середины называется отдельно: тридцать центов
+        от неё — это уже не очередь, а другая цена.
         """
         got = _review(_maker(tmp_path),
                       orders={'YES': [{'price': 0.60, 'original_size': 5}]})
-        assert got[0]['verdict'] == 'вне рынка'
         assert got[0]['from_mid'] == pytest.approx(0.39, abs=0.01)
+        assert got[0]['worse_than_best'] == pytest.approx(0.38, abs=0.01)
+        assert 'от середины' in got[0]['why']
 
     def test_the_front_of_the_queue_is_recognised(self, tmp_path):
         """Наша цена лучше всех — исполнят следующей встречной сделкой."""
@@ -158,3 +161,55 @@ class TestTheSummarySeparatesWorkFromWaiting:
         got = control.summary(control.review(maker, {}, CATALOGUE))
         assert got['positions'] == 0
         assert got['stuck'] == 0
+
+
+class TestTheClosingSideAsksForWhatWeHold:
+    """
+    ТИХАЯ И ДОРОГАЯ ОШИБКА, НАЙДЕННАЯ ПОСТОЯННЫМ КОНТРОЛЕМ.
+
+    Частичное исполнение оставляет остаток вроде 4.9926 контракта. Продажа же
+    просилась ровно на пять — а продать больше, чем держишь, биржа не даёт, и
+    отправка честно превращала продажу в ПОКУПКУ встречного токена по 0.927:
+
+        держим 4.9926 по 0.078, хотим продать 5
+        уходит покупка «НЕТ» на $4.64 — денег нет, отказ каждый такт
+
+    Снаружи это выглядело как «позиция без заявки»: выход не выставлен, и
+    почему — не сказано.
+    """
+
+    def _quote(self, position, size=5, order_min=5):
+        from polymarket import strategy
+        top = {'bid': 0.20, 'ask': 0.30, 'mid': 0.25,
+               'bid_size': 100, 'ask_size': 100}
+        market = {'tick': 0.01, 'order_min': order_min, 'size': size,
+                  'step_ticks': 0, 'stale': True}
+        return strategy.desired_quote(top, market, position=position,
+                                      avg_cost=0.20)
+
+    def test_we_sell_only_what_we_have(self):
+        got = self._quote(position=7.0, size=20)
+        assert got['size'] == pytest.approx(7.0)
+
+    def test_a_whole_position_is_sold_whole(self):
+        got = self._quote(position=20.0, size=20)
+        assert got['size'] == pytest.approx(20.0)
+
+    def test_dust_below_the_exchange_minimum_is_named(self):
+        """
+        Заявка на 4.99 при минимуме 5 будет отвергнута. Притворяться, что
+        выход выставлен, незачем — остаток называется прямо.
+        """
+        got = self._quote(position=4.9926)
+        assert got['bid'] is None and got['ask'] is None
+        assert 'меньше минимума' in got['reason']
+
+    def test_an_opening_quote_keeps_its_size(self):
+        """Ограничение касается только закрывающей стороны."""
+        from polymarket import strategy
+        top = {'bid': 0.20, 'ask': 0.30, 'mid': 0.25,
+               'bid_size': 100, 'ask_size': 100}
+        got = strategy.desired_quote(top, {'tick': 0.01, 'order_min': 5,
+                                           'size': 20, 'step_ticks': 0},
+                                     position=0.0, avg_cost=0.0)
+        assert got['size'] == pytest.approx(20.0)
