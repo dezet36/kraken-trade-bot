@@ -305,6 +305,54 @@ def _shutdown():
     os._exit(0)
 
 
+def _browser_window_alive():
+    """
+    Держит ли кто-нибудь наш профиль браузера. Это и есть «окно открыто».
+
+    Смотрим не на свой Popen — он завершается, когда Chrome передаёт работу
+    другому процессу того же профиля, — а на то, работает ли хоть один браузер
+    с нашим каталогом профиля. Он и есть окно.
+    """
+    profile = os.path.join(config.DATA_DIR, 'app_window')
+    try:
+        flags = getattr(subprocess, 'CREATE_NO_WINDOW', 0)
+        out = subprocess.run(
+            ['wmic', 'process', 'where',
+             "name='chrome.exe' or name='msedge.exe'", 'get', 'CommandLine'],
+            capture_output=True, timeout=15, creationflags=flags)
+        text = out.stdout.decode('utf-8', 'replace')
+    except Exception:                              # noqa: BLE001
+        return None                                # спросить нечем — не гадаем
+    return profile.lower() in text.lower()
+
+
+def _wait_for_browser_window(seconds=WINDOW_ALIVE_SECONDS * 4):
+    """Ждёт появления окна. None от проверки означает «считаем, что есть»."""
+    deadline = time.time() + seconds
+    while time.time() < deadline:
+        alive = _browser_window_alive()
+        if alive is None:
+            return True                            # спросить нечем — доверяем
+        if alive:
+            return True
+        time.sleep(0.5)
+    return False
+
+
+def _wait_while_browser_window():
+    """Держит программу, пока окно браузера живо."""
+    missing = 0
+    while True:
+        alive = _browser_window_alive()
+        if alive is None:
+            threading.Event().wait()               # спросить нечем — просто ждём
+        # Одна пропажа — не закрытие: браузер перезапускает свои процессы.
+        missing = missing + 1 if not alive else 0
+        if missing >= 3:
+            return
+        time.sleep(2)
+
+
 def _open_window(url):
     """
     Открывает интерфейс лучшим доступным способом и ждёт его закрытия.
@@ -335,23 +383,26 @@ def _open_window(url):
     log('Окно: пробую окно браузера в режиме приложения')
     process = _open_app_window(url)
     if process is not None:
-        # МГНОВЕННЫЙ ВЫХОД БРАУЗЕРА — ЭТО ОТКАЗ, А НЕ ЗАКРЫТОЕ ОКНО.
+        # ЖДЁМ ОКНО, А НЕ ПРОЦЕСС, КОТОРЫЙ ЕГО ЗАПУСТИЛ.
         #
-        # Chrome с чужим или испорченным профилем выходит сразу, ничего не
-        # показав. Прежде это читалось как «человек закрыл окно», и программа
-        # честно останавливала бота: в журнале три строки одной секундой —
-        # открыл, закрыл, остановился. Снаружи — «запустил и оно само выключилось».
+        # Chrome устроен так, что запущенный экземпляр может ПЕРЕДАТЬ работу
+        # другому процессу того же профиля и сразу выйти. Окно при этом живёт
+        # своей жизнью, а наш Popen завершается за доли секунды.
         #
-        # Живой человек не успевает закрыть окно за пару секунд. Значит такой
-        # выход означает, что окна и не было, и надо пробовать следующий путь.
-        try:
-            process.wait(timeout=WINDOW_ALIVE_SECONDS)
-            log('Окно: браузер вышел сразу — окна не было, пробую своё окно')
-        except subprocess.TimeoutExpired:
+        # Пока мы ждали Popen, это читалось как «человек закрыл окно», и
+        # программа честно останавливала бота: в журнале три строки одной
+        # секундой — открыл, закрыл, остановился. Снаружи выглядело как
+        # «запустил, и оно само выключилось».
+        #
+        # Признак «окно есть» — живой процесс браузера, держащий НАШ профиль.
+        # Он переживает передачу работы и исчезает ровно тогда, когда окно
+        # закрыли.
+        if _wait_for_browser_window():
             log('Окно: открыто окном браузера')
-            process.wait()
+            _wait_while_browser_window()
             log('Окно: закрыто пользователем')
             return
+        log('Окно: браузер окна не показал — пробую своё окно')
     else:
         log('Окно: браузер не найден — пробую своё окно')
 

@@ -150,36 +150,45 @@ class TestTheStartupWaitPicksTheLightPage:
         assert '/api/whoami' in block and '49 секунд' in block
 
 
-class TestAnInstantExitIsNotAClosedWindow:
+class TestWeWaitForTheWindowNotForTheLauncher:
     """
-    Chrome с чужим или испорченным профилем выходит сразу, ничего не показав.
-    Прежде это читалось как «человек закрыл окно», и программа честно
-    останавливала бота: в журнале три строки одной секундой — открыл, закрыл,
-    остановился. Снаружи это выглядит как «запустил, и оно само выключилось».
+    Chrome может ПЕРЕДАТЬ работу другому процессу того же профиля и сразу
+    выйти. Окно живёт своей жизнью, а наш Popen завершается за доли секунды.
 
-    Живой человек не успевает закрыть окно за пару секунд.
+    Пока ждали Popen, это читалось как «человек закрыл окно», и программа
+    останавливала бота: в журнале три строки одной секундой — открыл, закрыл,
+    остановился. Снаружи — «запустил, и оно само выключилось».
+
+    Признак «окно есть» — живой браузер, держащий НАШ профиль: он переживает
+    передачу работы и исчезает ровно тогда, когда окно закрыли.
     """
 
     def _source(self):
         return open(os.path.join(ROOT, 'desktop.py'), encoding='utf-8').read()
 
-    def test_a_quick_exit_falls_through(self):
+    def test_the_window_is_judged_by_the_profile(self):
         text = self._source()
         spot = text.index('def _open_window(')
         block = text[spot:spot + 3600]
-        assert 'WINDOW_ALIVE_SECONDS' in block
-        assert 'TimeoutExpired' in block
+        assert '_wait_for_browser_window()' in block
+        assert '_wait_while_browser_window()' in block
 
-    def test_surviving_the_threshold_means_the_window_is_real(self):
-        """Дожил до порога — значит окно показано, ждём закрытия по-настоящему."""
+    def test_the_check_looks_at_the_profile_directory(self):
         text = self._source()
-        spot = text.index('def _open_window(')
-        block = text[spot:spot + 3600]
-        assert 'открыто окном браузера' in block
-        assert block.index('TimeoutExpired') < block.index('открыто окном браузера')
+        spot = text.index('def _browser_window_alive(')
+        block = text[spot:spot + 1200]
+        assert "'app_window'" in block
 
-    def test_the_threshold_is_short_but_not_zero(self):
-        import re
+    def test_an_unanswerable_check_does_not_guess(self):
+        """Спросить нечем — считаем, что окно есть: иначе закроемся зря."""
         text = self._source()
-        got = re.search(r'WINDOW_ALIVE_SECONDS = (\d+)', text)
-        assert got and 2 <= int(got.group(1)) <= 10
+        spot = text.index('def _browser_window_alive(')
+        assert 'return None' in text[spot:spot + 1200]
+        spot2 = text.index('def _wait_for_browser_window(')
+        assert 'is None' in text[spot2:spot2 + 700]
+
+    def test_one_disappearance_is_not_a_close(self):
+        """Браузер перезапускает свои процессы; закрытие — это устойчивая пропажа."""
+        text = self._source()
+        spot = text.index('def _wait_while_browser_window(')
+        assert 'missing >= 3' in text[spot:spot + 800]
