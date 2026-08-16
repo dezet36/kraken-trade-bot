@@ -61,6 +61,11 @@ EDGES = os.path.join(store.DIR, 'mm_edges.jsonl')
 # не находила его и рисовала прочерк. Человек видел открытую позицию без
 # единого признака, на каком она рынке.
 CATALOGUE = os.path.join(store.DIR, 'mm_markets.json')
+# РАЗБОР ПОЗИЦИЙ ДЛЯ ПАНЕЛИ. Считается здесь, в торговом такте, где стаканы и
+# заявки уже в руках: пересчёт в панели стоил бы десятка обращений к бирже на
+# каждое обновление и показывал бы ДРУГОЕ мгновение, а не то, по которому бот
+# принимал решение.
+CONTROL_FILE = os.path.join(store.DIR, 'mm_control.json')
 
 # Через сколько замок считается брошенным. Работающий цикл трогает файл каждый
 # такт (тридцать секунд), поэтому пять минут — с большим запасом на медленный
@@ -533,6 +538,33 @@ def adopt_exchange_positions(maker, catalogue=None):
         adopted.append({'token': str(ours), 'size': fresh['position'],
                         'question': row.get('question') or '',
                         'value': row.get('value')})
+    # ── ПРИЗРАКОВ УБИРАЕМ ТОЖЕ. Сверка только в одну сторону оставляла в учёте
+    # позиции, которых на бирже нет, и бот честно пытался их продать. Биржа
+    # отвечала «not enough balance / allowance» — продавать нечего, — и так
+    # каждый такт. Замерено: четыре призрака из четырнадцати позиций, и на
+    # каждый уходила заявка, отказ и строка в журнале.
+    #
+    # Взяться они могли только из нашего же счёта: исполнение, проведённое
+    # дважды, или зеркальная сделка, записанная не на тот токен.
+    #
+    # УБИРАЕМ ТОЛЬКО ПРИ НЕПУСТОМ ОТВЕТЕ. Пустой список бывает и от сбоя, а
+    # стереть по нему все позиции разом значило бы потерять учёт целиком.
+    held = set(theirs)
+    for token in list(maker.state['books']):
+        slot = maker.state['books'][token]
+        if not slot.get('position'):
+            continue
+        twin = str((known.get(str(token)) or {}).get('token_no') or '')
+        if str(token) in held or (twin and twin in held):
+            continue
+        adopted.append({'token': str(token), 'size': 0.0, 'gone': True,
+                        'was': slot['position'],
+                        'question': (known.get(str(token)) or {}).get('question')
+                        or ''})
+        slot['position'] = 0.0
+        slot['avg_cost'] = 0.0
+        slot['opened_ts'] = None
+
     if adopted:
         maker.save()
     return adopted
@@ -629,9 +661,14 @@ def step(maker, markets, live=False, day_loss=0.0, deadline=None,
         # под управлением: иначе оно держит деньги и никогда не разгружается.
         try:
             for taken in adopt_exchange_positions(maker):
-                _say(f'◈ Polymarket: подобрана позиция {taken["size"]:+.0f} '
-                     f'на «{(taken.get("question") or "?")[:40]}» — '
-                     f'она была на счету, но не в учёте')
+                if taken.get('gone'):
+                    _say(f'◈ Polymarket: позиции {taken["was"]:+.0f} на '
+                         f'«{(taken.get("question") or "?")[:40]}» на бирже '
+                         f'нет — убрана из учёта')
+                else:
+                    _say(f'◈ Polymarket: подобрана позиция {taken["size"]:+.0f} '
+                         f'на «{(taken.get("question") or "?")[:40]}» — '
+                         f'она была на счету, но не в учёте')
         except Exception:                                   # noqa: BLE001
             pass                    # сведение — улучшение, а не условие работы
 
@@ -972,10 +1009,42 @@ def step(maker, markets, live=False, day_loss=0.0, deadline=None,
     maker.save()
     if ran_out:
         skipped['не успели за такт'] = ran_out
+    # РАЗБОР ПОЗИЦИЙ ПИШЕТСЯ КАЖДЫЙ ТАКТ. Стаканы и заявки уже собраны выше —
+    # разбор не стоит ни одного лишнего обращения к бирже, зато отвечает на
+    # вопрос, на который ни список позиций, ни список заявок не отвечают:
+    # ведётся эта позиция или висит мёртвым грузом.
+    _save_control(maker, books, live=live)
+
     return {'placed': placed, 'fills': fills, 'report': report,
             'skipped': skipped, 'marks': marks, 'sent': sent,
             'cancelled': cancelled, 'mismatch': mismatch,
             'ran_out': ran_out}
+
+
+def _save_control(maker, books, live=False):
+    """
+    Кладёт разбор позиций на диск для панели. Сбой записи не роняет такт.
+
+    ЗАЯВКИ БЕРУТСЯ У БИРЖИ, А НЕ ИЗ СВОЕГО УЧЁТА, и это не перестраховка. Весь
+    смысл разбора в сверке намерения с делом: наш учёт помнит, что мы ХОТЕЛИ
+    выставить, а исполнить нас могут только по тому, что там действительно
+    стоит. Спрашивая себя, мы получили бы ответ «всё хорошо» ровно тогда, когда
+    всё плохо. В бумаге биржу не спрашиваем — там её нет.
+    """
+    try:
+        from . import control
+
+        orders = {}
+        if live:
+            for order in executor.open_orders() or []:
+                orders.setdefault(str(order.get('asset_id')), []).append(order)
+        rows = control.review(maker, books, known_markets(), orders=orders)
+        os.makedirs(os.path.dirname(CONTROL_FILE), exist_ok=True)
+        with open(CONTROL_FILE, 'w', encoding='utf-8') as fh:
+            json.dump({'at': engine._stamp(), 'rows': rows}, fh,
+                      ensure_ascii=False)
+    except Exception:                                      # noqa: BLE001
+        pass                        # разбор — взгляд, а не условие работы
 
 
 def _single_instance():

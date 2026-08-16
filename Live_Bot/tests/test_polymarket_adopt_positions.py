@@ -199,3 +199,65 @@ class TestAnAdoptedPositionIsAlreadyOverdue:
         mm.adopt_exchange_positions(maker, CATALOGUE)
         later = mm.params.MM_MAX_HOLD_HOURS * mm.params.MM_DESPERATE_AFTER
         assert maker.stale_positions(later) == []
+
+
+class TestGhostPositionsAreRemoved:
+    """
+    СВЕРКА ТОЛЬКО В ОДНУ СТОРОНУ ОСТАВЛЯЛА ПРИЗРАКОВ.
+
+    Позиция числилась у нас, но на бирже её не было — и бот честно пытался её
+    продать. Биржа отвечала «not enough balance / allowance»: продавать нечего.
+    И так каждый такт.
+
+    Замерено: четыре призрака из четырнадцати позиций. По каждому уходила
+    заявка, приходил отказ, и в панели это выглядело как «позиция без заявки»
+    — то есть как зависшая позиция, которой на самом деле не существует.
+    """
+
+    def test_a_position_the_exchange_does_not_have_is_cleared(self, tmp_path,
+                                                              monkeypatch):
+        maker = _maker(tmp_path)
+        slot = maker._slot('GHOST')
+        slot['position'] = 5.0
+        slot['avg_cost'] = 0.5
+        _exchange(monkeypatch, {'YES': {'size': 5.0, 'avg_price': 0.20,
+                                        'value': 1.0, 'question': 'рынок'}})
+        got = mm.adopt_exchange_positions(maker, CATALOGUE)
+        assert maker.state['books']['GHOST']['position'] == 0.0
+        assert any(row.get('gone') for row in got)
+
+    def test_a_holding_on_the_twin_is_not_a_ghost(self, tmp_path, monkeypatch):
+        """
+        Минус по «ДА» означает встречные контракты. Биржа держит их под другим
+        токеном — и приняв это за пропажу, мы стёрли бы настоящую позицию.
+        """
+        maker = _maker(tmp_path)
+        slot = maker._slot('YES')
+        slot['position'] = -5.0
+        slot['avg_cost'] = 0.20
+        _exchange(monkeypatch, {'NO': {'size': 5.0, 'avg_price': 0.80,
+                                       'value': 4.0, 'question': 'рынок'}})
+        mm.adopt_exchange_positions(maker, CATALOGUE)
+        assert maker.state['books']['YES']['position'] == pytest.approx(-5.0)
+
+    def test_an_empty_answer_erases_nothing(self, tmp_path, monkeypatch):
+        """
+        Пустой список бывает и от сбоя. Стереть по нему все позиции разом
+        значило бы потерять учёт целиком.
+        """
+        maker = _maker(tmp_path)
+        maker._slot('YES')['position'] = 5.0
+        for answer in (None, {}):
+            _exchange(monkeypatch, answer)
+            mm.adopt_exchange_positions(maker, CATALOGUE)
+            assert maker.state['books']['YES']['position'] == pytest.approx(5.0)
+
+    def test_the_removal_survives_a_restart(self, tmp_path, monkeypatch):
+        path = os.path.join(str(tmp_path), 's.json')
+        first = engine.PaperMaker(bankroll=100, state_path=path)
+        first._slot('GHOST')['position'] = 5.0
+        _exchange(monkeypatch, {'YES': {'size': 5.0, 'avg_price': 0.20,
+                                        'value': 1.0, 'question': 'рынок'}})
+        mm.adopt_exchange_positions(first, CATALOGUE)
+        again = engine.PaperMaker(bankroll=100, state_path=path)
+        assert again.state['books']['GHOST']['position'] == 0.0

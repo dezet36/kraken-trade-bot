@@ -313,6 +313,36 @@ def _stream_safely():
         return {'connected': False, 'last_error': str(exc)[:120]}
 
 
+def _control_safely():
+    """
+    Разбор позиций, СЧИТАННЫЙ С ДИСКА, а не пересчитанный заново.
+
+    ПОЧЕМУ НЕ СЧИТАТЬ ЗДЕСЬ. Разбору нужны стаканы и заявки биржи, а панель
+    читает состояние часто — на каждое обновление уходил бы десяток обращений
+    к площадке. Проверено вживую: запрос состояния перестал отвечать вовсе.
+
+    Считает его торговый такт: там стаканы и заявки уже в руках, лишних
+    обращений не нужно, и — что важнее — разбор показывает ровно то, что видел
+    бот, когда принимал решение. Пересчёт в панели показывал бы другое
+    мгновение и тихо расходился бы с действиями.
+    """
+    try:
+        import json
+        import os
+
+        from . import control, mm
+        rows = []
+        if os.path.exists(mm.CONTROL_FILE):
+            with open(mm.CONTROL_FILE, encoding='utf-8') as fh:
+                saved = json.load(fh) or {}
+            rows = saved.get('rows') or []
+            return {'rows': rows, 'summary': control.summary(rows),
+                    'at': saved.get('at')}
+        return {'rows': [], 'summary': control.summary([])}
+    except Exception as exc:                                # noqa: BLE001
+        return {'rows': [], 'summary': {}, 'error': str(exc)[:160]}
+
+
 def _reward_check_safely():
     """
     Обещанная награда против выплаченной.
@@ -583,4 +613,9 @@ def snapshot(limit_markets=20, limit_fills=30):
         # знает точный ответ по дням, значит проверять можно вычитанием, а не
         # рассуждением.
         'reward_check': _reward_check_safely(),
+        # ПОСТОЯННЫЙ КОНТРОЛЬ ПОЗИЦИЙ. По списку позиций и списку заявок нельзя
+        # было ответить на главный вопрос — ведётся позиция или висит мёртвым
+        # грузом. «Держим пять по 0.637» и «продаём по 0.619» выглядят как
+        # работа, пока не увидишь, что рынок ушёл на 0.474.
+        'control': _control_safely(),
     }
