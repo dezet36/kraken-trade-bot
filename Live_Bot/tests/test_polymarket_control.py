@@ -213,3 +213,43 @@ class TestTheClosingSideAsksForWhatWeHold:
                                            'size': 20, 'step_ticks': 0},
                                      position=0.0, avg_cost=0.0)
         assert got['size'] == pytest.approx(20.0)
+
+
+class TestAPhantomQuoteIsNotShownAsWork:
+    """
+    ЗАЯВКА БЕЗ БИРЖЕВОГО НОМЕРА И БЕЗ ОШИБКИ — ПРИЗРАК.
+
+    Пропуская рынок по деньгам, мы к нему в этом такте больше не вернёмся — а
+    вместе с ним и к заявке, которую успели сочинить раньше. Она остаётся в
+    наших книгах без номера и без ошибки: на бирже её нет, отправлять некому,
+    причины никто не записал.
+
+    Панель показывала такую строку как «только расчёт» с подсказкой «живой
+    режим выключен» — при включённом живом режиме. Замерено: девять строк из
+    тридцати одной, и по каждой человек искал поломку там, где её не было.
+    """
+
+    def test_the_unsent_order_is_dropped_on_a_budget_skip(self):
+        text = open(os.path.join(ROOT, 'polymarket', 'mm.py'),
+                    encoding='utf-8').read()
+        spot = text.index("skipped['бюджет исчерпан']")
+        block = text[spot:spot + 1400]
+        assert "if order and not order.get('live_id')" in block
+        assert "slot['orders'][side] = None" in block
+
+    def test_an_order_on_the_exchange_is_never_dropped(self):
+        """Она стоит и живёт своей жизнью, хватает нам денег или нет."""
+        text = open(os.path.join(ROOT, 'polymarket', 'mm.py'),
+                    encoding='utf-8').read()
+        spot = text.index("skipped['бюджет исчерпан']")
+        assert 'Заявку с номером не трогаем' in text[spot:spot + 1400]
+
+    def test_the_panel_stops_claiming_live_is_off(self):
+        """
+        «Только расчёт» означает «живой режим выключен». При включённом это
+        неправда, и подпись должна быть другой.
+        """
+        html = open(os.path.join(ROOT, 'dashboard.html'), encoding='utf-8').read()
+        assert 'ещё не отправлена' in html
+        spot = html.index('только расчёт</span>')
+        assert 'PM.service.live_now' in html[spot - 700:spot]
