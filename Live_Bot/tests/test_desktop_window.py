@@ -97,6 +97,37 @@ class TestTheBuildCarriesTheWindowParts:
                 'без этого следующий выпуск повторит поломку'
 
 
+class TestTheBuildRefusesEarlyWhenTheAppIsRunning:
+    """
+    Windows не даёт заменить работающий .exe. Сборка доходит до последнего
+    шага, упирается в блокировку и возвращает код 1 — потратив ровно столько
+    же времени, сколько удачная, а причина теряется среди сотен строк INFO.
+
+    Так и вышло: приложение было запущено поверх идущей сборки, пять минут
+    ушли впустую. Отказ должен приходить сразу и называть причину.
+    """
+
+    SCRIPT = open(os.path.join(ROOT, 'build_exe.ps1'), encoding='utf-8-sig').read()
+
+    def test_the_check_exists(self):
+        assert 'Get-Process Kraken' in self.SCRIPT
+
+    def test_it_refuses_rather_than_warns(self):
+        spot = self.SCRIPT.index('Get-Process Kraken')
+        assert 'throw' in self.SCRIPT[spot:spot + 400], (
+            'предупреждение не спасёт: сборка всё равно упрётся в блокировку')
+
+    def test_it_runs_before_pyinstaller_starts(self):
+        """Смысл проверки — в том, чтобы не тратить пять минут впустую."""
+        assert (self.SCRIPT.index('Get-Process Kraken')
+                < self.SCRIPT.index('python -m PyInstaller'))
+
+    def test_the_message_says_what_to_do(self):
+        spot = self.SCRIPT.index('Get-Process Kraken')
+        block = self.SCRIPT[spot:spot + 400]
+        assert 'Закрой приложение' in block
+
+
 class TestTheStartupWaitPicksTheLightPage:
     """
     ПОЧЕМУ ОКНА НЕ БЫЛО ВООБЩЕ — настоящая причина, найденная последней.
