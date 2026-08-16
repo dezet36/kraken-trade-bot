@@ -57,6 +57,23 @@ class TestTheBrowserWindowComesFirst:
         assert 'не возвращает ошибки' in block
 
 
+class TestEveryPathNamesItself:
+    """
+    Разбор «почему нет окна» занял час именно потому, что журнал молчал.
+    Приложение работало, дашборд отвечал, а какой из трёх путей выбран и чем он
+    кончился — узнать было неоткуда.
+    """
+
+    def test_each_branch_writes_a_line(self):
+        text = open(os.path.join(ROOT, 'desktop.py'), encoding='utf-8').read()
+        spot = text.index('def _open_window(')
+        block = text[spot:spot + 3200]
+        assert block.count('log(') >= 4, 'каждый путь обязан назвать себя'
+        assert 'пробую окно браузера' in block
+        assert 'открыто окном браузера' in block
+        assert 'пробую своё окно' in block
+
+
 class TestTheBuildCarriesTheWindowParts:
     """Потерянный модуль — единственная поломка, которой славится упаковка."""
 
@@ -78,3 +95,56 @@ class TestTheBuildCarriesTheWindowParts:
         if os.path.exists(ci):
             assert '--hidden-import clr `' in open(ci, encoding='utf-8').read(), \
                 'без этого следующий выпуск повторит поломку'
+
+
+class TestTheStartupWaitPicksTheLightPage:
+    """
+    ПОЧЕМУ ОКНА НЕ БЫЛО ВООБЩЕ — настоящая причина, найденная последней.
+
+    Перед окном стоит ожидание дашборда, и ждало оно `/api/data` — страницу,
+    которая считает индикаторы по двум десяткам пар. Замер на запуске:
+
+        /api/whoami   ответил через 13 секунд
+        /api/data     ответил через 49 секунд
+        порог                       40 секунд
+
+    Девяти секунд не хватило, и дальше шло по худшему пути: показывалось окно
+    с ошибкой — в оконной сборке НЕВИДИМОЕ, — и приложение вставало на нём
+    навсегда. Снаружи: бот торгует, дашборд отвечает, окна нет, журнал молчит.
+    """
+
+    def _source(self):
+        return open(os.path.join(ROOT, 'desktop.py'), encoding='utf-8').read()
+
+    def test_the_wait_asks_the_cheap_page(self):
+        text = self._source()
+        assert "_wait_for_dashboard(url + 'api/whoami')" in text, \
+            'ждать тяжёлую страницу значит не дождаться'
+
+    def test_the_heavy_page_is_not_the_gate(self):
+        text = self._source()
+        assert "_wait_for_dashboard(url + 'api/data')" not in text
+
+    def test_the_timeout_has_room(self):
+        import re
+        text = self._source()
+        got = re.search(r'STARTUP_TIMEOUT = (\d+)', text)
+        assert got and int(got.group(1)) >= 60, \
+            'запас нужен: на холодном старте сервер поднимается 13 секунд'
+
+    def test_giving_up_is_written_to_the_log_first(self):
+        """
+        Окно с ошибкой в оконной сборке может не показаться вовсе. Причина
+        обязана попасть в журнал ДО него, иначе её негде прочесть.
+        """
+        text = self._source()
+        spot = text.index("_wait_for_dashboard(url + 'api/whoami')")
+        block = text[spot:spot + 700]
+        assert 'log(' in block
+        assert block.index('log(') < block.index('_alert(')
+
+    def test_the_measurement_is_written_where_it_acts(self):
+        text = self._source()
+        spot = text.index('def _wait_for_dashboard')
+        block = text[spot:spot + 1400]
+        assert '/api/whoami' in block and '49 секунд' in block
