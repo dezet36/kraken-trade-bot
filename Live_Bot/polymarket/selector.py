@@ -182,7 +182,25 @@ def scan(budget=None, limit=None, pages=30, min_volume=None,
         # цене 0.002 — это два доллара, и называть такую сторону живой нельзя.
         bid_usd = sum(size * price for price, size in live['bids'])
         ask_usd = sum(size * (1 - price) for price, size in live['asks'])
-        if bid_usd < min_depth or ask_usd < min_depth:
+
+        # У НАГРАДЫ СВОИ ПОРОГИ, И ЭТО НЕ ПОСЛАБЛЕНИЕ, А РАЗНЫЕ ЗАДАЧИ.
+        #
+        # Глубина, перекос и ширина спреда писались под ЗАХВАТ СПРЕДА: там нам
+        # нужен встречный поток, место в очереди и что-то, что останется после
+        # шага внутрь. Награда же платится за СТОЯНИЕ близко к середине, и ей
+        # безразлично, торгует рынок или молчит.
+        #
+        # Цена этой путаницы измерена: из 644 наградных рынков, живущих дольше
+        # двух суток, наш отбор пропускал ВОСЕМЬ. Пулы там по три-тридцать
+        # долларов в день, и делить их почти не с кем.
+        #
+        # ЛОВУШКА ПУСТОЙ КНИГИ ОСТАЁТСЯ ЗАКРЫТОЙ, и стережёт её не глубина, а
+        # прямой вопрос: сколько чужих очков стоит внутри допуска. Глубина
+        # обманывает — книга бывает толстой, но вся далеко от середины. Доля
+        # спрашивает то, что нужно: если она под сотню процентов, мы не берём
+        # долю, а становимся всем рынком, и любая сделка пойдёт против нас.
+        reward_ok = _reward_worth_standing(live, top, row)
+        if (bid_usd < min_depth or ask_usd < min_depth) and not reward_ok:
             continue
         # ПЕРЕКОС МЕРЯЕТСЯ В КОНТРАКТАХ, А НЕ В ДЕНЬГАХ. В деньгах он врёт по
         # построению: при РАВНОЙ глубине в контрактах бид на цене 0.90 стоит
@@ -196,7 +214,7 @@ def scan(budget=None, limit=None, pages=30, min_volume=None,
         bid_lots = sum(size for _, size in live['bids'])
         ask_lots = sum(size for _, size in live['asks'])
         balance = min(bid_lots, ask_lots) / max(bid_lots, ask_lots, 1e-9)
-        if balance < min_balance:
+        if balance < min_balance and not reward_ok:
             continue
 
         # СПРЕД ДОЛЖЕН ВМЕЩАТЬ ШАГ ВНУТРЬ. Условие здесь ТО ЖЕ, что в стратегии,
@@ -236,6 +254,9 @@ def scan(budget=None, limit=None, pages=30, min_volume=None,
             # глубине — то, что делалось раньше, — значит не считать вовсе.
             'reward_rivals': round(_rival_score(live, top['mid'], row), 3),
             'reward_unit': round(_own_unit(top['mid'], row), 5),
+            # Взят ли рынок РАДИ НАГРАДЫ, а не ради спреда. Захват спреда на
+            # нём может быть невозможен вовсе, и требовать от него круга нельзя.
+            'reward_path': bool(reward_ok),
         })
         good.append(row)
 
@@ -355,6 +376,54 @@ def _spread_score(allowance, distance):
     if allowance <= 0 or distance < 0 or distance >= allowance:
         return 0.0
     return ((allowance - distance) / allowance) ** 2
+
+
+def _reward_worth_standing(live, top, row):
+    """
+    Годится ли рынок под НАГРАДУ, даже если под захват спреда не годится.
+
+    Три условия, и каждое закрывает ошибку, найденную замером:
+
+      * пул есть — иначе платить нечего;
+      * внутри допуска стоит КТО-ТО ЕЩЁ. Пустая книга у середины означает, что
+        цену там назначаем мы одни, и согласится с ней только тот, кому она
+        выгодна. Замерено: рынки с нулём чужих очков обещали по формуле пять
+        тысяч процентов в сутки — это не доход, а приглашение стать рынком;
+      * наша доля не больше трети. То же самое, но в числах и мягче: доля под
+        сотню процентов — верный признак, что делить не с кем.
+
+    ПОЧЕМУ НЕ ГЛУБИНА. Глубина обманывает по построению: книга бывает толстой,
+    но вся стоять далеко от середины — за пределами допуска, где очков не дают
+    никому. Доля спрашивает ровно то, что решает деньги.
+    """
+    if not top or top.get('mid') is None:
+        return False
+    if float(row.get('rewards_daily') or 0) <= 0:
+        return False
+    unit = _own_unit(top['mid'], row)
+    if unit <= 0:
+        return False
+    rivals = _rival_score(live, top['mid'], row)
+    if rivals <= 0:
+        return False                # у середины никого — не встаём
+
+    # ПЕРЕКОС НАГРАДЕ БЕЗРАЗЛИЧЕН, А НАШЕМУ ЗАПАСУ НЕТ.
+    #
+    # Книга с двадцатью контрактами по одной стороне и двадцатью тысячами по
+    # другой — это рынок, уходящий в ноль. Награду там платят, но исполнят нас
+    # тонкой стороной, и останется запас, который никому не нужен. Порог здесь
+    # свой и много мягче основного: захвату спреда нужна соразмерность сторон,
+    # награде — лишь бы вторая сторона существовала.
+    bid_lots = sum(size for _, size in (live.get('bids') or []))
+    ask_lots = sum(size for _, size in (live.get('asks') or []))
+    if min(bid_lots, ask_lots) / max(bid_lots, ask_lots, 1e-9) < \
+            params.MM_REWARD_MIN_BALANCE:
+        return False
+    size = max(float(row.get('order_min') or 0), params.MM_MIN_ORDER_SIZE)
+    ours = _qualifying(unit * size, 0.0, top['mid'])
+    if ours <= 0:
+        return False
+    return ours / (ours + rivals) <= params.MM_REWARD_MAX_SHARE
 
 
 def _rival_score(live, mid, row):

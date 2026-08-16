@@ -174,3 +174,69 @@ class TestAllocationCrossesTheThreshold:
         monkeypatch.setattr(params, 'MM_MAX_MARKET_SHARE', 0.2)
         plan = selector.allocate([_market()], budget=40)
         assert plan['markets'][0]['size'] == 5, 'предел на рынок выше награды'
+
+
+class TestTheRewardPathHasItsOwnFilters:
+    """
+    У НАГРАДЫ СВОИ ПОРОГИ, И ЭТО НЕ ПОСЛАБЛЕНИЕ, А РАЗНЫЕ ЗАДАЧИ.
+
+    Глубина, перекос и ширина спреда писались под ЗАХВАТ СПРЕДА: там нужен
+    встречный поток, место в очереди и что-то, что останется после шага внутрь.
+    Награда платится за СТОЯНИЕ близко к середине, и ей безразлично, торгует
+    рынок или молчит.
+
+    Цена путаницы измерена: из 644 наградных рынков, живущих дольше двух суток,
+    отбор пропускал ВОСЕМЬ.
+
+    ЛОВУШКУ ПУСТОЙ КНИГИ СТЕРЕЖЁТ НЕ ГЛУБИНА, А ДОЛЯ. Рынки, где внутри допуска
+    не стоит никто, обещали по формуле пять тысяч процентов в сутки — $513 в
+    день с $25. Формула считает честно; смысл у числа обратный.
+    """
+
+    def _row(self, allowance=4.5, pool=5.0, tick=0.01):
+        return {'rewards_daily': pool, 'rewardsMaxSpread': allowance,
+                'rewardsMinSize': 20, 'tick': tick, 'order_min': 5}
+
+    def _book(self, rival_size):
+        return {'bids': [(0.49, rival_size)], 'asks': [(0.51, rival_size)]}
+
+    def _top(self):
+        return {'bid': 0.49, 'ask': 0.51, 'mid': 0.50, 'spread': 0.02,
+                'bid_size': 1, 'ask_size': 1}
+
+    def test_an_empty_middle_is_refused(self):
+        """Внутри допуска никого — значит цену назначаем мы одни."""
+        empty = {'bids': [(0.10, 500.0)], 'asks': [(0.90, 500.0)]}
+        top = {'bid': 0.10, 'ask': 0.90, 'mid': 0.50, 'spread': 0.80,
+               'bid_size': 500, 'ask_size': 500}
+        assert selector._reward_worth_standing(empty, top, self._row()) is False
+
+    def test_a_crowded_middle_is_accepted(self):
+        """Есть с кем делить — значит рынок настоящий."""
+        assert selector._reward_worth_standing(
+            self._book(500.0), self._top(), self._row()) is True
+
+    def test_taking_most_of_the_pool_is_refused(self):
+        """
+        Доля под сотню процентов — не заработок, а превращение в весь рынок.
+        Двое чужих контрактов против наших пяти дают больше трети.
+        """
+        assert selector._reward_worth_standing(
+            self._book(2.0), self._top(), self._row()) is False
+
+    def test_a_market_without_a_pool_is_refused(self):
+        assert selector._reward_worth_standing(
+            self._book(500.0), self._top(), self._row(pool=0)) is False
+
+    def test_a_falling_knife_is_refused(self):
+        """
+        Двадцать контрактов против двадцати тысяч — не рынок. Награду платят,
+        но исполнят нас тонкой стороной, и останется никому не нужный запас.
+        """
+        lopsided = {'bids': [(0.49, 20.0)], 'asks': [(0.51, 20_000.0)]}
+        assert selector._reward_worth_standing(
+            lopsided, self._top(), self._row()) is False
+
+    def test_the_guard_is_looser_than_the_spread_one(self):
+        """Награде нужна лишь вторая сторона, захвату спреда — соразмерность."""
+        assert params.MM_REWARD_MIN_BALANCE < params.MM_MIN_BALANCE
