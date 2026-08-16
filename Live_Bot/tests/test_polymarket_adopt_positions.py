@@ -363,3 +363,59 @@ class TestAPairIsLockedCapital:
         maker = _maker(tmp_path)
         mm.adopt_exchange_positions(maker, CATALOGUE)
         self._only_slot(maker)
+
+
+class TestAMergedPairLeavesTheLedger:
+    """
+    СХЛОПНУТАЯ ПАРА ИСЧЕЗАЕТ ИЗ ЗАПАСА, ИНАЧЕ ДЕНЬГИ СЧИТАЮТСЯ ДВАЖДЫ.
+
+    Пару можно погасить в залог — человек делает это в интерфейсе площадки.
+    Токены уходят, деньги приходят наличными. Если запись о паре останется,
+    учёт сложит вернувшиеся деньги со стоимостью пары, которой уже нет.
+
+    Замерено ровно так: после схлопывания двух пар по пять контрактов панель
+    показала капитал $50.59 при настоящих $40.59 — на $10 больше.
+
+    Позиция у такой записи НУЛЕВАЯ, поэтому обычная чистка призраков её не
+    трогала: та смотрит только на позицию.
+    """
+
+    def test_the_pair_value_is_dropped(self, tmp_path, monkeypatch):
+        maker = _maker(tmp_path)
+        slot = maker._slot('YES')
+        slot['position'] = 0.0
+        slot['pair'] = 5.0
+        # Биржа держит другой рынок — пары среди позиций больше нет.
+        _exchange(monkeypatch, {'OTHER': {'size': 3.0, 'avg_price': 0.5,
+                                          'value': 1.5, 'question': 'иной'}})
+        mm.adopt_exchange_positions(maker, CATALOGUE)
+        assert maker.state['books']['YES']['pair'] == 0.0
+
+    def test_the_capital_matches_after_a_merge(self, tmp_path, monkeypatch):
+        """Деньги вернулись наличными — в запасе их быть больше не должно."""
+        maker = _maker(tmp_path)
+        maker.state['cash'] = 15.0
+        slot = maker._slot('YES')
+        slot['pair'] = 5.0
+        _exchange(monkeypatch, {'OTHER': {'size': 3.0, 'avg_price': 0.5,
+                                          'value': 1.5, 'question': 'иной'}})
+        mm.adopt_exchange_positions(maker, CATALOGUE)
+        got = maker.mark_to_market({'OTHER': 0.5})
+        assert got['inventory'] == pytest.approx(1.5)
+        assert got['equity'] == pytest.approx(16.5)
+
+    def test_a_live_pair_is_kept(self, tmp_path, monkeypatch):
+        """Пара на месте — трогать её нечего."""
+        maker = _maker(tmp_path)
+        maker._slot('YES')['pair'] = 5.0
+        _exchange(monkeypatch, {
+            'YES': {'size': 5.0, 'avg_price': 0.20, 'value': 1.0,
+                    'question': 'рынок'},
+            'NO': {'size': 5.0, 'avg_price': 0.80, 'value': 4.0,
+                   'question': 'рынок'}})
+        mm.adopt_exchange_positions(maker, CATALOGUE)
+        assert self_pair(maker) == pytest.approx(5.0)
+
+
+def self_pair(maker):
+    return max(float(s.get('pair') or 0) for s in maker.state['books'].values())
