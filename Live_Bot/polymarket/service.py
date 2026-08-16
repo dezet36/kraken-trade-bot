@@ -160,7 +160,13 @@ def _loop(poll_seconds):
                 # рынок и в живом режиме ни на что не влияет.
                 want_shadow = (_state['cycles'] % params.MM_SHADOW_EVERY) == 0
                 out = mm.step(maker, markets, live=live,
-                              day_loss=max(0.0, -before['pnl']),
+                              # УБЫТОК ЗА СУТКИ, А НЕ ЗА ВСЁ ВРЕМЯ. Прежняя
+                              # мера брала общий итог с начала работы и не
+                              # обнулялась никогда: просадка в 5% глушила
+                              # торговлю навсегда. Замерено на живом счёте —
+                              # «убыток 7.79 при пределе 2.00», ноль заявок на
+                              # бирже, а настоящий итог +$0.84.
+                              day_loss=maker.day_loss(),
                               deadline=time.time() + params.MM_STEP_BUDGET_SECONDS,
                               want_shadow=want_shadow)
                 if out.get('ran_out'):

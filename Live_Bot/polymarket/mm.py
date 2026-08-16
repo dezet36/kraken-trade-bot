@@ -1239,7 +1239,7 @@ def main(loop=False):
     try:
         while True:
             report_before = maker.mark_to_market({})
-            day_loss = max(0.0, -report_before['pnl'])
+            day_loss = maker.day_loss()
             out = step(maker, markets, live=live, day_loss=day_loss)
             r = out['report']
             print(f'[{engine._stamp()}] котировок {out["placed"]}, '
