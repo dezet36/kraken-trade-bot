@@ -2449,6 +2449,14 @@ function portfolioLimit(writable) {
       ${on && p.limit_pct > 0 ? `
         <div class="pf-bar"><div class="pf-fill ${p.over ? 'over' : ''}"
           style="width:${bar}%"></div></div>` : ''}
+      ${(p.limits_off && p.limits_off.length) ? `
+        <div class="pf-now" style="color:var(--warn)">
+          Выключено: ${p.limits_off.join(', ')}.
+          ${p.worst_case_pct ? `Если стратегии займут все слоты, одновременно
+            под риском окажется до <b>${p.worst_case_pct}%</b> депозита` : ''}
+          ${(p.unbounded && p.unbounded.length)
+            ? ` · без предела слотов: ${p.unbounded.join(', ')}` : ''}
+        </div>` : ''}
       <div class="ctl-row">
         <label for="pf-risk">Максимум под риском</label>
         <span class="unit">%</span>

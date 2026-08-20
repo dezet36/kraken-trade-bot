@@ -907,6 +907,28 @@ def _portfolio():
     except Exception:                              # noqa: BLE001
         pass
 
+    # ВЫКЛЮЧЕННЫЙ ПРЕДЕЛ НАЗЫВАЕТСЯ ПРЯМО. В поле стоит ноль, и на глаз это
+    # неотличимо от «ещё не задал»: оба портфельных предела стояли
+    # выключенными, а панель показывала их значения так, будто они работают.
+    # Рядом — сколько депозита МОЖЕТ оказаться под риском одновременно, если
+    # каждая стратегия займёт свои слоты: без этого числа «предела нет» звучит
+    # безобидно.
+    import risk_gate
+    off = risk_gate.disabled_limits(max_positions, limit, day_limit)
+    try:
+        import settings_store as st
+        from levels import params as lp
+        from rsibb import params as rp
+        from smc import params as sp
+        worst, unbounded = risk_gate.max_exposure([
+            ('FIBO', st.max_slots('FIBO'), config.RISK_PER_TRADE),
+            ('SMC', st.max_slots('SMC'), sp.RISK_PER_TRADE_PCT),
+            ('LEVELS', st.max_slots('LEVELS'), lp.RISK_PCT),
+            ('RSIBB', st.max_slots('RSIBB'), rp.RISK_PCT),
+        ])
+    except Exception:                              # noqa: BLE001
+        worst, unbounded = 0.0, []
+
     return {
         'risk_usd': round(used, 2), 'risk_pct': round(pct, 2),
         'deposit': round(deposit, 2), 'slots': slots,
@@ -915,6 +937,9 @@ def _portfolio():
         'day_pnl': round(day_pnl, 2), 'day_pct': round(day_pct, 2),
         'day_limit': day_limit,
         'day_stopped': bool(day_limit and day_pnl < 0 and -day_pct >= day_limit),
+        'limits_off': off,
+        'worst_case_pct': round(worst, 1),
+        'unbounded': unbounded,
     }
 
 
