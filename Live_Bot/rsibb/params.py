@@ -45,16 +45,12 @@
 import os
 
 
-def _f(name, default):
-    return float(os.getenv(f'RSIBB_{name}', default))
+# Читатели настроек — общие для всех стратегий (params_env). Свои копии
+# разошлись: одна ловила ошибку разбора, две другие роняли импорт, и
+# «0,5» вместо «0.5» не запускало бота целиком.
+import params_env
 
-
-def _i(name, default):
-    return int(os.getenv(f'RSIBB_{name}', default))
-
-
-def _s(name, default):
-    return os.getenv(f'RSIBB_{name}', default)
+_f, _i, _b, _s = params_env.reader('RSIBB')
 
 
 # ── Рабочий таймфрейм ────────────────────────────────────────────────────────

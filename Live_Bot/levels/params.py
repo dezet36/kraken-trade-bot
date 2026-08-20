@@ -25,18 +25,12 @@
 import os
 
 
-def _f(name, default):
-    try:
-        return float(os.getenv(f'LEVELS_{name}', default))
-    except (TypeError, ValueError):
-        return default
+# Читатели настроек — общие для всех стратегий (params_env). Свои копии
+# разошлись: одна ловила ошибку разбора, две другие роняли импорт, и
+# «0,5» вместо «0.5» не запускало бота целиком.
+import params_env
 
-
-def _i(name, default):
-    try:
-        return int(os.getenv(f'LEVELS_{name}', default))
-    except (TypeError, ValueError):
-        return default
+_f, _i, _b, _s = params_env.reader('LEVELS')
 
 
 # ── Построение уровня ────────────────────────────────────────────────────────

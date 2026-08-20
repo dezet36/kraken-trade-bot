@@ -12,16 +12,12 @@
 import os
 
 
-def _f(name: str, default: float) -> float:
-    return float(os.getenv(f'SMC_{name}', default))
+# Читатели настроек — общие для всех стратегий (params_env). Свои копии
+# разошлись: одна ловила ошибку разбора, две другие роняли импорт, и
+# «0,5» вместо «0.5» не запускало бота целиком.
+import params_env
 
-
-def _i(name: str, default: int) -> int:
-    return int(os.getenv(f'SMC_{name}', default))
-
-
-def _b(name: str, default: bool) -> bool:
-    return os.getenv(f'SMC_{name}', str(default)).lower() in ('1', 'true', 'yes')
+_f, _i, _b, _s = params_env.reader('SMC')
 
 
 # ── Таймфреймы (§2.6: анализ сверху вниз) ────────────────────────────────────

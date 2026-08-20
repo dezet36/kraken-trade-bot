@@ -18,6 +18,7 @@ import os
 from datetime import datetime, timezone
 
 import config
+from logger import log
 
 JOURNAL_FILE  = os.path.join(config.DATA_DIR, 'trades_journal.csv')
 DETAIL_JSONL  = os.path.join(config.DATA_DIR, 'trades_detail.jsonl')
@@ -47,6 +48,31 @@ COLUMNS = [
     'setup_notes',  # почему открылась (краткое описание)
     'strategy',     # FIBO / SMC — какая стратегия открыла сделку
 ]
+
+
+def read_journal(path=None):
+    """
+    Все закрытые боевые сделки списком словарей.
+
+    Появилось ради дневного стоп-крана: он считает потери за сегодня по
+    журналу, а не по счётчику в памяти — счётчик обнуляется при перезапуске, и
+    бот, поднятый посреди плохого дня, начинал бы его заново.
+
+    Отказ чтения возвращает пустой список, а не бросает: журнал — не то, из-за
+    чего стоит останавливать торговлю. Но и молчаливо считать «сегодня ничего
+    не потеряно» нельзя, поэтому вызывающий обязан отличать пустой журнал от
+    нечитаемого — здесь для этого пишется предупреждение.
+    """
+    path = path or JOURNAL_FILE
+    if not os.path.exists(path):
+        return []
+    try:
+        with open(path, 'r', encoding='utf-8-sig', newline='') as f:
+            return list(csv.DictReader(f))
+    except Exception as exc:                       # noqa: BLE001
+        log(f'⚠️ Журнал сделок не прочитан ({exc}) — дневной предел убытка '
+            f'считает по неполным данным')
+        return []
 
 
 def _next_trade_id() -> int:

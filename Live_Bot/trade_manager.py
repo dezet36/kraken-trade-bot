@@ -453,33 +453,56 @@ class LiveTradeManager:
         """Позиций и ожидающих ордеров по всему счёту."""
         return len(self.get_open_pairs())
 
+    def daily_result(self):
+        """
+        Результат сегодняшнего дня: сумма и доля депозита.
+
+        МЕТОДА ЗДЕСЬ НЕ БЫЛО ВОВСЕ, и это стоило дороже, чем выглядит. Дневной
+        стоп-кран добавили 6 августа только в бумажный путь, а панель в боевом
+        режиме спрашивала дневной итог через hasattr — не находила и показывала
+        ноль. То есть на живых деньгах предохранителя не существовало, а
+        приборная доска показывала «сегодня $0.00»: не потому что не потеряли,
+        а потому что не спросили.
+        """
+        import risk_gate
+        import trade_journal
+        from datetime import datetime, timezone
+        deposit = float(self.get_trading_balance() or 0)
+        today = datetime.now(timezone.utc).strftime('%Y-%m-%d')
+        try:
+            rows = trade_journal.read_journal()
+        except Exception:                          # noqa: BLE001
+            rows = []
+        pnl, pct = risk_gate.day_result(rows, deposit, today)
+        return pnl, pct, deposit
+
     def _portfolio_room(self, signal):
-        """Пропускает ли предел портфеля ещё одну сделку."""
+        """
+        Пропускает ли предел портфеля ещё одну сделку.
+
+        Сами правила — в risk_gate, общем для бумаги и боя. Здесь только сбор
+        чисел: у боевого пути счёт один, и риск новой сделки считается от него.
+        """
+        import risk_gate
         try:
             import settings_store as settings
             max_positions = settings.portfolio_max_positions()
-            limit = settings.portfolio_risk_pct()
-        except Exception:                          # noqa: BLE001
+            risk_limit = settings.portfolio_risk_pct()
+            day_limit = settings.daily_loss_pct()
+        except Exception as exc:                   # noqa: BLE001
+            risk_gate.settings_unavailable(exc)
             return True, ''
 
-        if max_positions:
-            used = self.portfolio_slots()
-            if used >= max_positions:
-                return False, (f'предел портфеля: занято {used}/{max_positions} '
-                               f'позиций')
-        if not limit:
-            return True, ''
-
-        used_amount, pct, deposit = self.portfolio_risk()
-        if deposit <= 0:
-            return True, ''
+        used_amount, _pct, deposit = self.portfolio_risk()
+        day_pnl, day_pct, _dep = self.daily_result()
         risk_pct = float((signal.get('params') or {}).get('risk_pct')
                          or config.RISK_PER_TRADE)
-        after = (used_amount + deposit * risk_pct / 100) / deposit * 100
-        if after > limit:
-            return False, (f'предел портфеля: под риском {pct:.1f}%, сделка '
-                           f'добавит до {after:.1f}% при пределе {limit:.1f}%')
-        return True, ''
+        return risk_gate.check(
+            slots_used=self.portfolio_slots(), max_positions=max_positions,
+            risk_used=used_amount, deposit=deposit,
+            adding=deposit * risk_pct / 100,
+            risk_limit_pct=risk_limit,
+            day_pnl=day_pnl, day_pct=day_pct, day_limit_pct=day_limit)
 
     def get_direction_counts(self):
         """{'LONG': n, 'SHORT': n} — реальные позиции биржи + наши pending-лимиты.
@@ -899,7 +922,19 @@ class LiveTradeManager:
                 sl_order = {'id': 'position_sl'}
                 log(f"SL уже выставлен @ ${sl_price:.4f}")
             else:
-                log(f"⚠️ SL не выставлен (программный SL активен): {e}")
+                # ЧТО ИМЕННО ОСТАЛОСЬ ЗАЩИЩАТЬ ПОЗИЦИЮ, зависит от пути входа.
+                # При лимитном входе стоп уходит ВМЕСТЕ с ордером и уже стоит
+                # на бирже — этот вызов лишь уточняет его. При рыночном входе
+                # биржевого стопа нет, и остаётся программный, который живёт
+                # только пока запущено приложение.
+                #
+                # Прежде здесь безусловно писалось «программный SL активен», и
+                # по журналу нельзя было отличить одно от другого.
+                if getattr(self.exchange, 'id', '') != 'bybit':
+                    log(f"⚠️ SL не уточнён (эндпоинт Bybit недоступен на "
+                        f"{getattr(self.exchange, 'id', 'бирже')}): {e}")
+                else:
+                    log(f"⚠️ SL не выставлен (программный SL активен): {e}")
 
         # ── TP ───────────────────────────────────────────────────────────────
         if n_tp == 1:
@@ -1033,7 +1068,14 @@ class LiveTradeManager:
         plan_targets, plan_fractions = tp_plan(params)
 
         try:
-            mode_text = "🔴 LIVE (РЕАЛЬНЫЕ ДЕНЬГИ)" if config.TRADING_MODE == 'LIVE' else "🟢 DEMO"
+            # Режим берётся у КЛИЕНТА, а не из настройки. Пока брали из
+            # настройки, сделка на реальном счёте BingX помечалась зелёным
+            # «DEMO»: человек просил демо, демо не включалось, а подпись
+            # отражала просьбу.
+            from exchange import effective_mode
+            mode_text = ("🟢 DEMO"
+                         if effective_mode(self.exchange, config.TRADING_MODE) == 'DEMO'
+                         else "🔴 LIVE (РЕАЛЬНЫЕ ДЕНЬГИ)")
             log(f"\n{'='*60}")
             log(f" {mode_text}")
             log(f" ОТКРЫТИЕ СДЕЛКИ: {trading_pair}")
@@ -1085,16 +1127,29 @@ class LiveTradeManager:
                 # Bybit V5: прикрепляем стоп-лосс И тейк-профит прямо к ордеру входа —
                 # позиция защищена и ведётся биржей в МОМЕНТ заполнения лимита, даже если бот
                 # не успеет отработать цикл регистрации. Один TP -18% закрывает 100%.
+                # СТОП ПРИКРЕПЛЯЕТСЯ НА ЛЮБОЙ БИРЖЕ, А НЕ ТОЛЬКО НА BYBIT.
+                #
+                # Здесь стояло `if exchange.id == 'bybit'`, и на BingX ордер
+                # уходил БЕЗ стопа вовсе. Оставался программный стоп, которым
+                # управляет сам бот, — а он умирает вместе с закрытым окном.
+                # Для настольного приложения, которое выключают на ночь, это
+                # означало позицию без защиты на несколько суток.
+                #
+                # `stopLoss` и `takeProfit` — общие имена ccxt: и bybit, и
+                # bingx разбирают их в create_order_request. Уточнение
+                # источника цены остаётся у Bybit: это его поле.
+                is_bybit = getattr(self.exchange, 'id', '') == 'bybit'
                 limit_params = {'reduce_only': False, 'timeInForce': 'GTC'}
-                if getattr(self.exchange, 'id', '') == 'bybit':
-                    limit_params['stopLoss']    = str(round(params['stop_loss'], 8))
+                limit_params['stopLoss'] = str(round(params['stop_loss'], 8))
+                if is_bybit:
                     limit_params['slTriggerBy'] = 'LastPrice'
-                    # Тейк вешаем на ордер входа ТОЛЬКО при единственной цели:
-                    # биржевой TP закрывает всю позицию, и при плане с
-                    # частичной фиксацией он обрубил бы дальние цели.
-                    if len(plan_targets) == 1:
-                        limit_params['takeProfit']  = str(round(plan_targets[0], 8))
-                        limit_params['tpTriggerBy']  = 'LastPrice'
+                # Тейк вешаем на ордер входа ТОЛЬКО при единственной цели:
+                # биржевой TP закрывает всю позицию, и при плане с частичной
+                # фиксацией он обрубил бы дальние цели.
+                if len(plan_targets) == 1:
+                    limit_params['takeProfit'] = str(round(plan_targets[0], 8))
+                    if is_bybit:
+                        limit_params['tpTriggerBy'] = 'LastPrice'
                 try:
                     lim_order = self.exchange.create_order(
                         symbol=trading_pair, type='limit', side=side,

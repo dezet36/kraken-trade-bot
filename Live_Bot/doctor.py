@@ -171,20 +171,98 @@ def check_pairs():
     return _result(OK, f'Пул: {len(pool)} пар')
 
 
-def check_risk():
+def _strategy_risks():
+    """
+    Риск на сделку и число слотов КАЖДОЙ стратегии.
+
+    Отказ чтения одной не должен скрывать остальные: стратегия, чей модуль
+    параметров не загрузился, — сама по себе повод для отчёта, а не причина
+    промолчать обо всём.
+    """
     import config
-    risk = config.RISK_PER_TRADE
-    slots = config.MAX_ACTIVE_PAIRS
-    exposure = risk * slots
-    if risk > 2:
-        return _result(WARN, f'Риск на сделку {risk}% — высокий',
-                       f'при {slots} позициях под риском {exposure:.1f}% депозита',
-                       'обычно берут 0.5-1%')
-    if exposure > 10:
-        return _result(WARN, f'Суммарный риск {exposure:.1f}% депозита',
-                       f'{slots} позиций по {risk}%',
-                       'уменьшите число слотов или риск на сделку')
-    return _result(OK, f'Риск {risk}% на сделку, до {exposure:.1f}% суммарно')
+    import settings_store as settings
+    out = []
+    sources = (
+        ('FIBO', lambda: config.RISK_PER_TRADE),
+        ('SMC', lambda: __import__('smc.params', fromlist=['x']).RISK_PER_TRADE_PCT),
+        ('LEVELS', lambda: __import__('levels.params', fromlist=['x']).RISK_PCT),
+        ('RSIBB', lambda: __import__('rsibb.params', fromlist=['x']).RISK_PCT),
+    )
+    for name, get in sources:
+        try:
+            risk = float(get())
+        except Exception:                          # noqa: BLE001
+            out.append((name, None, None))
+            continue
+        try:
+            slots = int(settings.max_slots(name))
+        except Exception:                          # noqa: BLE001
+            slots = 0
+        out.append((name, slots, risk))
+    return out
+
+
+def check_risk():
+    """
+    Риск по ВСЕМ стратегиям и то, какие пределы сейчас выключены.
+
+    Здесь читался только config.RISK_PER_TRADE — параметр FIBO — и по нему
+    выносился вердикт обо всём боте. SMC при этом рискует вдвое больше, и
+    диагностика этого не видела: показывала «риск 0.5%, до 2.5% суммарно»,
+    когда одновременно под риском могло стоять больше сорока процентов.
+    """
+    import risk_gate
+    rows = _strategy_risks()
+
+    broken = [n for n, _s, r in rows if r is None]
+    if broken:
+        return _result(WARN, f'Параметры не прочитаны: {", ".join(broken)}',
+                       'риск этих стратегий неизвестен',
+                       'проверьте значения в .env — числа пишутся через точку')
+
+    total, unbounded = risk_gate.max_exposure(
+        [(n, s, r) for n, s, r in rows])
+    spread = ', '.join(f'{n} {r:g}%' for n, _s, r in rows)
+
+    if unbounded:
+        return _result(WARN,
+                       f'Без предела позиций: {", ".join(unbounded)}',
+                       f'остальные дают до {total:.1f}% депозита под риском '
+                       f'одновременно ({spread})',
+                       'задайте число слотов этим стратегиям')
+    if total > 20:
+        return _result(WARN, f'Одновременно под риском до {total:.1f}% депозита',
+                       f'{spread}',
+                       'уменьшите слоты, риск на сделку или включите предел '
+                       'портфеля')
+    return _result(OK, f'Под риском одновременно до {total:.1f}% депозита',
+                   spread)
+
+
+def check_limits():
+    """
+    Какие предохранители сейчас выключены.
+
+    Выключенный предел выглядит настроенным: в поле стоит ноль, и на глаз это
+    неотличимо от «ещё не задал». Пока об этом никто не говорил, оба
+    портфельных предела стояли выключенными, а панель показывала их значения
+    так, будто они работают.
+    """
+    import risk_gate
+    import settings_store as settings
+    try:
+        off = risk_gate.disabled_limits(settings.portfolio_max_positions(),
+                                        settings.portfolio_risk_pct(),
+                                        settings.daily_loss_pct())
+    except Exception as exc:                       # noqa: BLE001
+        return _result(WARN, 'Пределы портфеля не прочитаны', str(exc),
+                       'проверьте настройки в панели')
+    if not off:
+        return _result(OK, 'Предохранители включены',
+                       'предел позиций, предел риска портфеля и дневной предел')
+    return _result(WARN, f'Выключено предохранителей: {len(off)}',
+                   ', '.join(off),
+                   'задайте их в панели: Управление → Портфель')
 
 
 def check_telegram():
@@ -206,6 +284,7 @@ CHECKS = (
     ('Стратегия', check_strategy),
     ('Пул пар', check_pairs),
     ('Риск', check_risk),
+    ('Предохранители', check_limits),
     ('Telegram', check_telegram),
 )
 

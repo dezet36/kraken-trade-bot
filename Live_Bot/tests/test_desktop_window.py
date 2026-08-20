@@ -21,28 +21,37 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
 
+def _window_function():
+    """
+    Тело `_open_window` целиком.
+
+    Здесь резали фиксированное число символов от начала функции, и проверки
+    ломались, стоило функции подрасти: «_open_native не найден» означало не
+    пропажу запасного пути, а лишний абзац комментария выше. Границу задаёт
+    следующее определение верхнего уровня, а не счёт знаков.
+    """
+    text = open(os.path.join(ROOT, 'desktop.py'), encoding='utf-8').read()
+    start = text.index('def _open_window(')
+    end = text.index('\ndef ', start + 10)
+    return text[start:end]
+
+
 class TestTheBrowserWindowComesFirst:
 
     def _source(self):
         return open(os.path.join(ROOT, 'desktop.py'), encoding='utf-8').read()
 
     def test_the_app_window_is_tried_before_the_native_one(self):
-        text = self._source()
-        spot = text.index('def _open_window(')
-        block = text[spot:spot + 2600]
+        block = _window_function()
         assert block.index('_open_app_window(url)') < block.index('_open_native(url)'), \
             'нативное окно молча не открывается — оно не может идти первым'
 
     def test_the_native_window_is_still_a_fallback(self):
         """На машинах без Chrome оно единственное, что есть."""
-        text = self._source()
-        spot = text.index('def _open_window(')
-        assert '_open_native(url)' in text[spot:spot + 2600]
+        assert '_open_native(url)' in _window_function()
 
     def test_the_plain_browser_is_the_last_resort(self):
-        text = self._source()
-        spot = text.index('def _open_window(')
-        block = text[spot:spot + 3000]
+        block = _window_function()
         assert 'webbrowser.open' in block
 
     def test_the_reason_is_written_down(self):
@@ -50,9 +59,7 @@ class TestTheBrowserWindowComesFirst:
         Молчаливая поломка обязана быть описана там, где принято решение:
         иначе следующий читатель вернёт «настоящее окно» обратно наверх.
         """
-        text = self._source()
-        spot = text.index('def _open_window(')
-        block = text[spot:spot + 2600]
+        block = _window_function()
         assert 'CreateCoreWebView2ControllerAsync' in block
         assert 'не возвращает ошибки' in block
 
@@ -65,9 +72,7 @@ class TestEveryPathNamesItself:
     """
 
     def test_each_branch_writes_a_line(self):
-        text = open(os.path.join(ROOT, 'desktop.py'), encoding='utf-8').read()
-        spot = text.index('def _open_window(')
-        block = text[spot:spot + 3200]
+        block = _window_function()
         assert block.count('log(') >= 4, 'каждый путь обязан назвать себя'
         assert 'пробую окно браузера' in block
         assert 'открыто окном браузера' in block
@@ -198,9 +203,7 @@ class TestWeWaitForTheWindowNotForTheLauncher:
         return open(os.path.join(ROOT, 'desktop.py'), encoding='utf-8').read()
 
     def test_the_window_is_judged_by_the_profile(self):
-        text = self._source()
-        spot = text.index('def _open_window(')
-        block = text[spot:spot + 3600]
+        block = _window_function()
         assert '_wait_for_browser_window()' in block
         assert '_wait_while_browser_window()' in block
 
@@ -223,3 +226,63 @@ class TestWeWaitForTheWindowNotForTheLauncher:
         text = self._source()
         spot = text.index('def _wait_while_browser_window(')
         assert 'missing >= 3' in text[spot:spot + 800]
+
+
+class TestClosingTheWindowIsAsked:
+    """
+    ДИАЛОГ БЫЛ НАПИСАН И НЕ ВЫЗЫВАЛСЯ НИКОГДА.
+
+    `_confirm_close` привязан внутри ветки СВОЕГО окна, а приложение
+    открывается браузером — та ветка пробуется первой и почти всегда
+    срабатывает. То есть предупреждение «бот ведёт N позиций» не показывалось
+    ни разу: 16 августа окно закрыли при шести открытых позициях, в журнале
+    «Окно: закрыто пользователем» — и никакого вопроса.
+
+    Закрытие окна прекращает ведение позиций: перевод в безубыток, частичные
+    фиксации, выход по времени. Человек, закрывший окно случайно, об этом не
+    знает.
+    """
+
+    def test_the_browser_branch_asks_too(self):
+        block = _window_function()
+        assert '_ask_after_browser_close()' in block, (
+            'ветка браузера закрывается молча — именно так предупреждение '
+            'не показывалось ни разу')
+
+    def test_it_asks_before_giving_up(self):
+        """Сначала вопрос, потом возврат: иначе спрашивать уже не у кого."""
+        block = _window_function()
+        assert block.index('_ask_after_browser_close()') < block.index('return')
+
+    def test_agreeing_reopens_the_window(self):
+        """
+        «Продолжить» без окна оставило бы бота работать вслепую: остановить
+        его было бы нечем, кроме диспетчера задач.
+        """
+        block = _window_function()
+        spot = block.index('_ask_after_browser_close()')
+        assert '_open_app_window(url)' in block[spot:]
+
+    def test_the_question_names_the_stakes(self):
+        text = open(os.path.join(ROOT, 'desktop.py'), encoding='utf-8').read()
+        spot = text.index('def _ask_after_browser_close')
+        block = text[spot:text.index('\ndef ', spot + 10)]
+        assert 'позиций' in block
+        assert 'безубыток' in block, 'человек должен знать, что именно прекратится'
+
+    def test_no_positions_means_no_question(self):
+        """Пустой счёт — закрывать нечего, и спрашивать не о чем."""
+        text = open(os.path.join(ROOT, 'desktop.py'), encoding='utf-8').read()
+        spot = text.index('def _ask_after_browser_close')
+        block = text[spot:text.index('\ndef ', spot + 10)]
+        assert 'if not count:' in block
+
+    def test_a_failed_dialog_stops_rather_than_guesses(self):
+        """
+        Не смогли спросить — ведём себя как раньше и останавливаемся. Оставить
+        бота работать без окна значило бы решить за человека молча.
+        """
+        text = open(os.path.join(ROOT, 'desktop.py'), encoding='utf-8').read()
+        spot = text.index('def _ask_after_browser_close')
+        block = text[spot:text.index('\ndef ', spot + 10)]
+        assert 'except Exception' in block and 'return False' in block

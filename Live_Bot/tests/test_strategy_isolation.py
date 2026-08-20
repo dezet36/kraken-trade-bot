@@ -132,7 +132,13 @@ class TestEnvPrefixesDoNotCollide:
     def prefix_of(path):
         """Префикс, которым пакет склеивает имена переменных окружения."""
         text = open(path, encoding='utf-8').read()
-        # Обычная форма: os.getenv(f'RSIBB_{name}', default)
+        # Основная форма: общий читатель, связанный с префиксом пакета.
+        # params_env.reader('RSIBB') — одна реализация на все стратегии, см.
+        # test_params_env о том, почему своих копий больше нет.
+        shared = re.findall(r"params_env\.reader\(['\"]([A-Z][A-Z0-9]*)['\"]\)", text)
+        if shared:
+            return sorted(set(f'{name}_' for name in shared))
+        # Собственный читатель: os.getenv(f'RSIBB_{name}', default)
         glued = re.findall(r"getenv\(f['\"]([A-Z][A-Z0-9]*_)\{", text)
         if glued:
             return sorted(set(glued))

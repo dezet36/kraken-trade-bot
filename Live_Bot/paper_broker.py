@@ -319,74 +319,42 @@ class PaperBroker:
         """
         Результат сегодняшнего дня по всем стратегиям: сумма и доля депозита.
 
-        Считается по журналу закрытых сделок, а не по счётчику в памяти:
-        счётчик обнуляется при перезапуске, и бот, перезапущенный посреди
-        плохого дня, начинал бы его заново с чистого листа — ровно тогда,
-        когда предел нужнее всего.
-
-        «Сегодня» берётся по тем же часам, что и время закрытия сделок, а не
-        по часам машины. Журнал пишется в UTC, и в местный вечер эти два
-        представления о дне расходятся: предел считал бы вчерашние сделки
-        сегодняшними или наоборот.
+        Сам подсчёт живёт в risk_gate: боевому пути нужен точно такой же, и
+        второй экземпляр этой арифметики однажды разошёлся бы с первым — ровно
+        так, как разошёлся весь дневной стоп.
         """
-        today = _iso(_now_ms())[:10]
-        pnl = 0.0
-        for row in read_journal():
-            if str(row.get('close_time', ''))[:10] == today:
-                try:
-                    pnl += float(row.get('pnl_usd') or 0)
-                except (TypeError, ValueError):
-                    continue
+        import risk_gate
         deposit = sum(float(self.balance(s) or 0) for s in self.strategies)
-        pct = (pnl / deposit * 100) if deposit > 0 else 0.0
+        pnl, pct = risk_gate.day_result(read_journal(), deposit,
+                                        _iso(_now_ms())[:10])
         return pnl, pct, deposit
 
-    def _daily_stop_hit(self):
-        """
-        Сработал ли дневной стоп-кран.
-
-        Отдельно от предела портфеля: тот ограничивает риск, стоящий в рынке
-        ОДНОВРЕМЕННО, и молчит, когда десять сделок закрылись в минус по
-        очереди. Плохой день так и выглядит: каждая сделка по правилам, а к
-        вечеру депозита нет.
-
-        Предел не трогает уже открытые позиции — они ведутся до своих стопов
-        и целей. Закрывать их принудительно значило бы фиксировать убыток по
-        худшей цене дня ровно в тот момент, когда рынок и так против.
-        """
-        limit = settings.daily_loss_pct()
-        if not limit:
-            return False, ''
-        pnl, pct, _deposit = self.daily_result()
-        if pnl >= 0 or -pct < limit:
-            return False, ''
-        return True, (f'дневной предел убытка: {pct:.2f}% при пределе {limit:.2f}% — '
-                      f'новые сделки до завтра не открываются')
-
     def _portfolio_room(self, strategy, params):
-        """Пропускает ли предел портфеля ещё одну сделку."""
-        stopped, why = self._daily_stop_hit()
-        if stopped:
-            return False, why
+        """
+        Пропускает ли предел портфеля ещё одну сделку.
 
-        max_positions = settings.portfolio_max_positions()
-        if max_positions and self.portfolio_slots() >= max_positions:
-            return False, (f'предел портфеля: занято '
-                           f'{self.portfolio_slots()}/{max_positions} позиций')
+        Сами правила — в risk_gate, общем для бумаги и боя. Здесь только сбор
+        чисел: у бумажного пути депозиты раздельные по стратегиям, и риск
+        новой сделки считается от депозита СВОЕЙ.
+        """
+        import risk_gate
+        try:
+            max_positions = settings.portfolio_max_positions()
+            risk_limit = settings.portfolio_risk_pct()
+            day_limit = settings.daily_loss_pct()
+        except Exception as exc:                   # noqa: BLE001
+            risk_gate.settings_unavailable(exc)
+            return True, ''
 
-        limit = settings.portfolio_risk_pct()
-        if not limit:
-            return True, ''
-        used, pct, deposit = self.portfolio_risk()
-        if deposit <= 0:
-            return True, ''
+        used, _pct, deposit = self.portfolio_risk()
+        day_pnl, day_pct, _dep = self.daily_result()
         risk_pct = float(params.get('risk_pct') or config.RISK_PER_TRADE)
-        addition = self.balance(strategy) * risk_pct / 100
-        after = (used + addition) / deposit * 100
-        if after > limit:
-            return False, (f'предел портфеля: под риском {pct:.1f}%, '
-                           f'сделка добавит до {after:.1f}% при пределе {limit:.1f}%')
-        return True, ''
+        return risk_gate.check(
+            slots_used=self.portfolio_slots(), max_positions=max_positions,
+            risk_used=used, deposit=deposit,
+            adding=self.balance(strategy) * risk_pct / 100,
+            risk_limit_pct=risk_limit,
+            day_pnl=day_pnl, day_pct=day_pct, day_limit_pct=day_limit)
 
     def slots_used_by(self, strategy):
         return len(self.positions(strategy)) + len(self.pending(strategy))

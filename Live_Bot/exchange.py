@@ -148,10 +148,42 @@ def make_client(exchange_name: str, api_key: str, api_secret: str, mode: str = '
             'enableRateLimit': True, 'options': {'defaultType': 'swap'},
             'timeout': 30000,
         })
-        # BingX: отдельного demo endpoint в ccxt нет — торговля на реальном счёте
+        if mode == 'DEMO':
+            # ДЕМО-КОНТУР У BINGX ЕСТЬ. Здесь стояло «отдельного demo endpoint
+            # в ccxt нет — торговля на реальном счёте», и это было верно
+            # когда-то, а потом устарело молча. Последствие тяжёлое: человек
+            # выбирал DEMO, панель показывала DEMO, подпись каждой сделки была
+            # зелёной — и торговали настоящие деньги.
+            #
+            # ccxt 4.5 отдаёт для bingx контур open-api-vst (VST — виртуальные
+            # средства) через штатный set_sandbox_mode.
+            client.set_sandbox_mode(True)
     else:
         raise ValueError(f"Биржа не поддерживается: {exchange_name}. Доступно: {SUPPORTED_EXCHANGES}")
     return client
+
+
+def effective_mode(client, requested):
+    """
+    Какой режим ПОЛУЧИЛСЯ, а не какой просили.
+
+    Подпись режима бралась из config.TRADING_MODE — то есть из намерения, а не
+    из результата. Пока у BingX не включался демо-контур, каждая сделка
+    помечалась «🟢 DEMO» на реальном счёте. Настройка и факт обязаны быть
+    разными величинами, иначе несоответствие между ними непредставимо.
+
+    Признак — адрес, по которому клиент реально ходит.
+    """
+    if str(requested).upper() != 'DEMO':
+        return 'LIVE'
+    try:
+        urls = client.urls.get('api')
+        text = ' '.join(urls.values()) if isinstance(urls, dict) else str(urls)
+    except Exception:                              # noqa: BLE001
+        return 'LIVE'                              # не смогли убедиться — не обещаем
+    demo = ('api-demo.bybit' in text or 'testnet' in text
+            or 'open-api-vst' in text)
+    return 'DEMO' if demo else 'LIVE'
 
 
 def make_market_client(exchange_name: str = 'bybit'):
@@ -248,9 +280,14 @@ def get_exchange():
             raise Exception("BINGX_API_KEY или BINGX_SECRET_KEY не загружены из .env!")
         _exchange_instance = make_client('bingx', config.BINGX_API_KEY, config.BINGX_SECRET_KEY,
                                          endpoint_mode)
-        log("🔴 Подключение к BingX LIVE (РЕАЛЬНЫЙ СЧЁТ)...")
-        if config.TRADING_MODE == 'DEMO':
-            log("⚠️  BingX не имеет demo endpoint — используется реальный счёт")
+        # Говорим то, что ПОЛУЧИЛОСЬ. Прежде здесь безусловно писалось «LIVE
+        # (РЕАЛЬНЫЙ СЧЁТ)» — и это было правдой, но подпись самих сделок при
+        # этом брала режим из настройки и оставалась зелёной.
+        if effective_mode(_exchange_instance, endpoint_mode) == 'DEMO':
+            label = 'ФАНТОМ' if config.PAPER_MODE else 'DEMO'
+            log(f"🟢 Подключение к BingX {label} (open-api-vst.bingx.com)...")
+        else:
+            log("🔴 Подключение к BingX LIVE (РЕАЛЬНЫЙ СЧЁТ)...")
 
     return _exchange_instance
 
