@@ -986,6 +986,10 @@ def main():
                    'ничего делать не нужно. Чтобы закрепить этот номер,\n'
                    f'добавьте в .env строку DASHBOARD_PORT={moved}.')
 
+    # Отметка в общем на машину списке: копии с РАЗНЫМИ папками данных
+    # замок не ловит по замыслу, но торгуют они один рынок. Так их хотя
+    # бы видно в диагностике — см. single_instance.siblings.
+    single_instance.register(config.DATA_DIR)
     single_instance.mark_running(config.DATA_DIR, my_version,
                                  os.path.abspath(sys.executable))
 

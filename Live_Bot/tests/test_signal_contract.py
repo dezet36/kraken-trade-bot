@@ -92,6 +92,17 @@ def test_levels_trade_opens_end_to_end(tmp_path, monkeypatch):
     signal['strategy'] = 'LEVELS'
 
     import paper_broker as pb
+    # Предел расхода на вход выключен намеренно: в приборе стоп 1.1%, а это
+    # 6.2% риска в комиссиях, и обычный вход с такими числами не проходит.
+    # Проверка эта про ФОРМУ сигнала — доходит ли он от стратегии до брокера
+    # целым, — а не про то, по карману ли он. Настоящие уровни держатся
+    # заметно шире: по журналу сервера медиана 3.4%.
+    #
+    # Гасим через pb.config, а не через свежий `import config`: набор
+    # перезагружает модули между проверками, и патч на другом экземпляре
+    # брокеру не виден — так и вышло с первой попытки.
+    monkeypatch.setattr(pb.config, 'MAX_ENTRY_COST_SHARE_PCT', 0)
+
     broker = pb.PaperBroker(client=None, strategies=('LEVELS',))
     assert broker.open('LEVELS', signal), 'брокер не принял сигнал уровней'
 

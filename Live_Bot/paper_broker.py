@@ -21,8 +21,9 @@
 заниженного):
     * вход  — GTC-лимит, как в бою; заполняется, когда 5-минутная свеча
       КАСАЕТСЯ цены лимита; комиссия мейкера;
-    * выход — комиссия тейкера; на стоповых выходах (SL/BE/тайм-стоп) ещё и
-      проскальзывание против нас;
+    * выход — по цели комиссия мейкера (лимит в стакане), на стоповых
+      выходах (SL/BE/тайм-стоп/ручной) тейкер и ещё проскальзывание
+      против нас;
     * если в одной свече задеты и стоп, и тейк — считаем, что сработал СТОП.
       По OHLC порядок внутри свечи неизвестен, и выбор в свою пользу — самый
       частый способ нарисовать себе несуществующую доходность;
@@ -70,6 +71,16 @@ COLUMNS = [
     # после того, как девять сделок из 23 оказались испорчены 193-часовым
     # простоем, и опознать их удалось только косвенно.
     'data_gap_min',
+    # Какую долю риска съели комиссии за вход и выход, в процентах.
+    # Считается ПРИ ВХОДЕ из тесноты стопа и потому известна заранее.
+    #
+    # Колонка нужна не для отчёта, а чтобы проверяемо ответить на
+    # вопрос, который разбор 364 сделок оставил открытым: правда ли
+    # дешёвые входы (широкий стоп) прибыльнее дорогих. На той выборке
+    # разница была, но порог выбран из семи опробованных, и с поправкой
+    # на перебор p поднимается с 0.012 до ≈0.08. Проверять надо на
+    # НОВЫХ данных, а для этого число должно записываться.
+    'cost_share_pct',
     'gross_pnl_usd', 'fees_usd', 'funding_usd', 'pnl_usd', 'pnl_r', 'pnl_pct',
     'balance_before', 'balance_after', 'result',
     'mfe_price', 'mae_price', 'mfe_r', 'mae_r', 'breakeven_set',
@@ -584,6 +595,17 @@ class PaperBroker:
             log(f"   [{strategy}] {pair}: нулевая дистанция стопа — пропуск")
             return False
 
+        # Предел расхода на вход. Тесный стоп даёт большой объём на тот же
+        # риск, и комиссии съедают его долю ещё до того, как цена двинулась.
+        # Проверка ОДНА на оба пути — см. risk_gate.cost_too_high.
+        import risk_gate
+        pricey, cost_share, why = risk_gate.cost_too_high(
+            limit_price, sl_dist, config.ENTRY_COST_ROUND_TRIP,
+            config.MAX_ENTRY_COST_SHARE_PCT)
+        if pricey:
+            log(f"   [{strategy}] {pair}: {why}")
+            return False
+
         balance = self.balance(strategy)
         if balance <= 0:
             log(f"   [{strategy}] {pair}: депозит обнулён — торговля остановлена")
@@ -627,6 +649,7 @@ class PaperBroker:
             'breakeven_after_tp': bool(params.get(
                 'breakeven_after_tp', getattr(config, 'BREAKEVEN_AT_B', True))),
             'risk_amount': risk_amount,
+            'cost_share_pct': round(cost_share, 3),
             'size': size,
             'rr': float(params.get('rr') or 0),
             'invalidation': self._invalidation(strategy, signal, is_long),
@@ -1053,6 +1076,7 @@ class PaperBroker:
             'tp_hit': 0,
             'realized_pnl': 0.0,
             'fees_paid': fee,
+            'cost_share_pct': order.get('cost_share_pct', ''),
             'funding_paid': 0.0,
             'funding_ts': ts,
             'breakeven_set': False,
@@ -1146,11 +1170,31 @@ class PaperBroker:
         portion = min(pos['size'], pos['initial_size'] * pos['fractions'][index])
         sign = 1 if pos['direction'] == 'LONG' else -1
         pos['realized_pnl'] += sign * (level - pos['entry_price']) * portion
-        pos['fees_paid'] += portion * level * config.PAPER_FEE_TAKER
+        # Частичная фиксация — тот же лимит в стакане, что и полная.
+        pos['fees_paid'] += portion * level * config.PAPER_FEE_MAKER
         pos['size'] = max(0.0, pos['size'] - portion)
         pos['tp_hit'] = index + 1
         log(f"   👻 [{pos['strategy']}] {pos['pair']}: TP{index + 1} @ ${_fmt_p(level)}, "
             f"закрыто {pos['fractions'][index] * 100:.0f}%")
+
+    @staticmethod
+    def _exit_fee_rate(reason):
+        """
+        Ставка комиссии на выходе зависит от того, КАК мы вышли.
+
+        Тейк-профит — лимитная заявка, лежащая в стакане: её исполняет
+        встречный рынок, и биржа берёт МЕЙКЕРСКУЮ ставку. Стоп, безубыток,
+        тайм-стоп и ручное закрытие уходят рынком — там тейкер.
+
+        Раньше тейкер списывался на ЛЮБОМ выходе. Ошибка была односторонней:
+        завышала издержки ровно на прибыльных сделках, потому что убыточные
+        и так закрываются рынком. На выборке сервера (128 выходов по цели из
+        364 сделок) переплата составила $96.59 — по 0.015R на сделку.
+
+        Разница ставок втрое: 0.02% против 0.055%.
+        """
+        return (config.PAPER_FEE_MAKER if str(reason).startswith('TP')
+                else config.PAPER_FEE_TAKER)
 
     def _close(self, strategy, pair, pos, ts, price, reason, slip):
         """Закрывает остаток позиции и пишет сделку в журнал."""
@@ -1164,7 +1208,8 @@ class PaperBroker:
         sign = 1 if is_long else -1
         remaining = pos['size']
         gross = pos['realized_pnl'] + sign * (exit_price - pos['entry_price']) * remaining
-        fees = pos['fees_paid'] + remaining * exit_price * config.PAPER_FEE_TAKER
+        fees = (pos['fees_paid']
+                + remaining * exit_price * self._exit_fee_rate(reason))
         funding = pos.get('funding_paid', 0.0)
         net = gross - fees - funding
 
@@ -1241,6 +1286,7 @@ class PaperBroker:
             # по неполным данным, и брать её в статистику нельзя.
             'data_gap_min': int(pos.get('gap_ms', 0) / 60000),
             'gross_pnl_usd': round(gross, 4),
+            'cost_share_pct': pos.get('cost_share_pct', ''),
             'fees_usd': round(fees, 4),
             'funding_usd': round(funding, 4),
             'pnl_usd': round(net, 4),

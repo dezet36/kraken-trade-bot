@@ -716,6 +716,11 @@ class TestRiskMatchesSetting:
         pb._now_ms = lambda: 1_700_000_000_000
         cfg.LIMIT_ENTRY_OFFSET_PCT = 0.001
         cfg.USE_LIMIT_ENTRY = True
+        # Предел расхода на вход здесь выключен намеренно. Стоп 0.8% — это
+        # 9.4% риска в комиссиях, и обычно такой вход не проходит. Но проверка
+        # эта про АРИФМЕТИКУ РАЗМЕРА, а не про допуск: тесный стоп взят как раз
+        # чтобы смещение лимита 0.1% дало заметные 12.5% сверху.
+        cfg.MAX_ENTRY_COST_SHARE_PCT = 0
 
         broker.open('FIBO', signal(entry=100.0, stop=99.2, tp1=103.0))
         feed(broker, client, 'BTCUSDT', [(100.5, 100.0, 100.2)])
@@ -730,6 +735,11 @@ class TestRiskMatchesSetting:
         pb._now_ms = lambda: 1_700_000_000_000
         cfg.LIMIT_ENTRY_OFFSET_PCT = 0.001
         cfg.USE_LIMIT_ENTRY = True
+        # Предел расхода на вход здесь выключен намеренно. Стоп 0.8% — это
+        # 9.4% риска в комиссиях, и обычно такой вход не проходит. Но проверка
+        # эта про АРИФМЕТИКУ РАЗМЕРА, а не про допуск: тесный стоп взят как раз
+        # чтобы смещение лимита 0.1% дало заметные 12.5% сверху.
+        cfg.MAX_ENTRY_COST_SHARE_PCT = 0
 
         broker.open('FIBO', signal(entry=100.0, stop=99.2, tp1=103.0))
         feed(broker, client, 'BTCUSDT', [(100.5, 100.0, 100.2), (100.2, 99.0, 99.1)])

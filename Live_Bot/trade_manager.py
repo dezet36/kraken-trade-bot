@@ -1033,6 +1033,16 @@ class LiveTradeManager:
             log(f"❌ SL дистанция = 0 — пропускаем")
             return False
 
+        # Тот же предел расхода, что на бумаге, и той же реализацией: правило,
+        # написанное дважды, расходится — так уже вышло с дневным стоп-краном.
+        import risk_gate
+        pricey, cost_share, why = risk_gate.cost_too_high(
+            sizing_entry, sig_sl_dist, config.ENTRY_COST_ROUND_TRIP,
+            config.MAX_ENTRY_COST_SHARE_PCT)
+        if pricey:
+            log(f"⛔ {trading_pair}: {why}")
+            return False
+
         # Процент риска — из сигнала: у стратегий он свой и меняется из
         # дашборда на ходу. Глобальное значение остаётся запасным.
         risk_pct      = float(signal['params'].get('risk_pct') or config.RISK_PER_TRADE)

@@ -160,3 +160,110 @@ def focus_existing(title):
         return True
     except Exception:                        # noqa: BLE001
         return False
+
+# ── Соседи ──────────────────────────────────────────────────────────────────
+#
+# Замок выше защищает КАТАЛОГ ДАННЫХ, и это верно: две копии с разными
+# папками не портят файлы друг другу. Но торгуют они один рынок.
+#
+# Разбор 364 сделок с сервера за 5–29 августа 2026 показал, чем это кончается.
+# Две копии — из исходников и собранная — работали 23 дня одновременно, каждая
+# со своим счётчиком сделок и своей цепочкой баланса. 120 сигналов были взяты
+# ДВАЖДЫ: та же пара, тот же стоп, та же цель. Риск на идею оказался вдвое
+# выше заявленного, а измерения — смесью двух опытов с разными настройками
+# (у одной копии зона B считалась от 61.8%, у другой от 78.6%).
+#
+# Заметить это было нечем: копии друг о друге не знают по устройству. Поэтому
+# каждая отмечается в общем на машину месте, а диагностика показывает соседей.
+# ЗАПРЕЩАТЬ здесь нельзя — две копии с разными папками бывают нужны (проверка
+# новой сборки рядом с рабочей). Решение за человеком, дело кода — показать.
+
+def _registry_dir():
+    base = (os.environ.get('LOCALAPPDATA') or os.environ.get('TMPDIR')
+            or os.environ.get('TMP') or '/tmp')
+    return os.path.join(base, 'KrakenBot', 'instances')
+
+
+def register(data_dir):
+    """Отмечает эту копию в общем на машину списке. Тихо, как и mark_running."""
+    try:
+        import json
+        import time
+        d = _registry_dir()
+        os.makedirs(d, exist_ok=True)
+        digest = hashlib.sha1(os.path.abspath(data_dir).lower()
+                              .encode('utf-8')).hexdigest()[:16]
+        with open(os.path.join(d, f'{digest}.json'), 'w', encoding='utf-8') as fh:
+            json.dump({'pid': os.getpid(), 'data_dir': os.path.abspath(data_dir),
+                       'started': time.time()}, fh, ensure_ascii=False)
+    except Exception:                              # noqa: BLE001
+        pass                                       # отметка — удобство, не условие
+
+
+def _alive(pid):
+    """
+    Жив ли процесс. Мёртвые отметки остаются после аварийного завершения, и
+    принимать их за работающую копию значит пугать человека призраком.
+    """
+    if not pid or pid <= 0:
+        return False
+    if sys.platform != 'win32':
+        try:
+            os.kill(pid, 0)
+            return True
+        except (OSError, ProcessLookupError):
+            return False
+    PROCESS_QUERY_LIMITED = 0x1000
+    STILL_ACTIVE = 259
+    try:
+        k = ctypes.windll.kernel32
+        h = k.OpenProcess(PROCESS_QUERY_LIMITED, False, int(pid))
+        if not h:
+            return False
+        try:
+            code = ctypes.c_ulong()
+            if k.GetExitCodeProcess(h, ctypes.byref(code)):
+                return code.value == STILL_ACTIVE
+            return True
+        finally:
+            k.CloseHandle(h)
+    except Exception:                              # noqa: BLE001
+        return False
+
+
+def siblings(data_dir):
+    """
+    Другие ЖИВЫЕ копии на этой машине. Список словарей с pid и data_dir.
+
+    Своя копия и мёртвые отметки не возвращаются. Отметку мёртвой копии сразу
+    убираем: иначе список растёт с каждым падением и однажды перестаёт что-то
+    значить.
+    """
+    import json
+    out = []
+    mine = os.path.abspath(data_dir).lower()
+    d = _registry_dir()
+    try:
+        names = os.listdir(d)
+    except Exception:                              # noqa: BLE001
+        return out
+    for name in names:
+        if not name.endswith('.json'):
+            continue
+        path = os.path.join(d, name)
+        try:
+            with open(path, encoding='utf-8') as fh:
+                info = json.load(fh)
+        except Exception:                          # noqa: BLE001
+            continue
+        pid = info.get('pid')
+        if pid == os.getpid() or str(info.get('data_dir', '')).lower() == mine:
+            continue
+        if not _alive(pid):
+            try:
+                os.remove(path)
+            except Exception:                      # noqa: BLE001
+                pass
+            continue
+        out.append(info)
+    return out

@@ -251,18 +251,52 @@ def check_limits():
     import risk_gate
     import settings_store as settings
     try:
+        import config
         off = risk_gate.disabled_limits(settings.portfolio_max_positions(),
                                         settings.portfolio_risk_pct(),
-                                        settings.daily_loss_pct())
+                                        settings.daily_loss_pct(),
+                                        config.MAX_ENTRY_COST_SHARE_PCT)
     except Exception as exc:                       # noqa: BLE001
         return _result(WARN, 'Пределы портфеля не прочитаны', str(exc),
                        'проверьте настройки в панели')
     if not off:
         return _result(OK, 'Предохранители включены',
-                       'предел позиций, предел риска портфеля и дневной предел')
+                       'предел позиций, предел риска портфеля, дневной предел '
+                       'и предел расхода на вход')
     return _result(WARN, f'Выключено предохранителей: {len(off)}',
                    ', '.join(off),
                    'задайте их в панели: Управление → Портфель')
+
+
+def check_copies():
+    """
+    Не работает ли рядом вторая копия приложения.
+
+    ЗАЧЕМ. Разбор 364 сделок сервера за 5–29 августа 2026: две копии — из
+    исходников и собранная — торговали 23 дня одновременно, каждая со своим
+    счётчиком сделок и своей цепочкой баланса. 120 сигналов взяты ДВАЖДЫ: та
+    же пара, тот же стоп, та же цель. Риск на идею оказался вдвое выше
+    заявленного, а замеры стали смесью двух опытов с разными настройками.
+
+    Замок пропускает такое ПО ЗАМЫСЛУ: он стережёт каталог данных, а разные
+    папки друг другу не мешают. Но рынок у копий один, и заметить это можно
+    было только вручную, сверяя журнал.
+
+    Не ошибка, а предупреждение: две копии бывают нужны — например, проверить
+    новую сборку рядом с рабочей. Решает человек, дело кода — показать.
+    """
+    import config
+    import single_instance
+    try:
+        others = single_instance.siblings(config.DATA_DIR)
+    except Exception as exc:                       # noqa: BLE001
+        return _result(WARN, 'Соседние копии не проверены', str(exc), '')
+    if not others:
+        return _result(OK, 'Копия одна', 'других запущенных копий не найдено')
+    where = '; '.join(f"PID {o.get('pid')} — {o.get('data_dir')}" for o in others)
+    return _result(WARN, f'Рядом работает копий: {len(others)}', where,
+                   'две копии берут одни сигналы дважды — риск на идею '
+                   'удваивается, а замеры смешиваются. Оставьте одну.')
 
 
 def check_telegram():
@@ -285,6 +319,7 @@ CHECKS = (
     ('Пул пар', check_pairs),
     ('Риск', check_risk),
     ('Предохранители', check_limits),
+    ('Копии приложения', check_copies),
     ('Telegram', check_telegram),
 )
 
