@@ -164,6 +164,43 @@ def get_zones(setup):
 
     return zone_a, zone_b
 
+
+def entry_zone_name(entry_price, zone_a, zone_b):
+    """
+    Как называется место, где стоит лимит. Считается, а не объявляется.
+
+    ОТКУДА ЭТО. В сигнале стояло `'zone': 'Zone_A'` литералом, и это делало
+    мёртвыми сразу трёх потребителей:
+
+      * статистика в trade_manager отбирает сделки по `zone == 'Zone_B'` —
+        список не мог наполниться НИКОГДА;
+      * Telegram показывает по ней значок и описание, и ветка 🅱️ была
+        недостижима;
+      * панель и сводка обещали сравнение зоны A с зоной B, которого не
+        существовало.
+
+    Разбор 193 сделок FIBO с сервера: зона B нарисована на всех графиках,
+    входов в ней ноль. Выглядело как «рынок туда не доходит», а на деле код
+    никогда её и не называл.
+
+    Само место входа задаёт ENTRY_RETRACE (по умолчанию 0.5 — половина
+    отката). Зона A это откат 38.2–61.8%, зона B — 78.6–88.6%. При 0.5 вход
+    честно попадает в зону A; поставив 0.8, человек окажется в зоне B, и
+    теперь отчёты об этом скажут.
+
+    ПОВЕДЕНИЕ НЕ МЕНЯЕТСЯ: имя зоны нигде не решает, торговать ли и по какой
+    цене. Меняется только то, правду ли о себе говорит бот.
+    """
+    for zone in (zone_a, zone_b):
+        if not zone:
+            continue
+        if zone['bottom'] <= entry_price <= zone['top']:
+            return zone['name']
+    # Между зонами (откат 61.8–78.6%) или мельче 38.2%. Врать «зона B» здесь
+    # нельзя — это делала прежняя ветка `else`.
+    return 'Zone_MID'
+
+
 def price_in_zone(price, zone):
     """Проверяет, находится ли цена в зоне"""
     return zone['bottom'] <= price <= zone['top']
@@ -311,7 +348,11 @@ def analyze_market(df_1h, df_5m, trading_pair, balance):
     return {
         'trading_pair': trading_pair,
         'setup':   setup,
-        'trigger': {'zone': 'Zone_A', 'entry_type': 'ZONE_LIMIT', 'trigger_price': entry_price},
+        # Имя зоны СЧИТАЕТСЯ по месту лимита. Здесь стоял литерал 'Zone_A', и
+        # из-за него статистика по зоне B не могла наполниться никогда —
+        # см. entry_zone_name.
+        'trigger': {'zone': entry_zone_name(entry_price, zone_a, zone_b),
+                    'entry_type': 'ZONE_LIMIT', 'trigger_price': entry_price},
         'params':  params,
         'zone_a':  zone_a,
         'zone_b':  zone_b,

@@ -204,7 +204,10 @@ def trade_opened(signal: dict, df_1h=None, telegram_id=None):
     is_long = setup["type"] == "LONG"
 
     direction_icon = "📈 LONG" if is_long else "📉 SHORT"
-    zone_icon      = "🅰️" if trigger["zone"] == "Zone_A" else "🅱️"
+    # Третий случай существует: вход может стоять между зонами. Раньше здесь
+    # было «A или B», и всё, что не A, объявлялось зоной B — включая то, что
+    # ею не является.
+    zone_icon      = {"Zone_A": "🅰️", "Zone_B": "🅱️"}.get(trigger["zone"], "◽")
     htf_icon       = "↗️" if htf == "BULLISH" else ("↘️" if htf == "BEARISH" else "↔️")
 
     impulse_pct = round(setup['size'] / setup['end_price'] * 100, 1)
@@ -231,9 +234,16 @@ def trade_opened(signal: dict, df_1h=None, telegram_id=None):
     if trigger['zone'] == 'Zone_A':
         zone_desc = "Классич. коррекция (38.2%–61.8%)"
         sl_ctx    = "ниже зоны A" if is_long else "выше зоны A"
-    else:
+    elif trigger['zone'] == 'Zone_B':
         zone_desc = "Глубокая коррекция (78.6%–88.6%)"
         sl_ctx    = "ниже старта импульса" if is_long else "выше старта импульса"
+    else:
+        # Вход между зонами. Называем глубину отката числом: выдавать это за
+        # зону B, как делала прежняя ветка `else`, значит писать неправду.
+        _retr = (abs(setup['end_price'] - params['entry']) / setup['size'] * 100
+                 if setup.get('size') else 0)
+        zone_desc = f"Коррекция {_retr:.1f}% — между зонами"
+        sl_ctx    = "ниже зоны A" if is_long else "выше зоны A"
 
     # Цели берём из плана ЭТОЙ сделки: у стратегий он разный, и глобальная
     # настройка показывала бы SMC один тейк вместо трёх.
