@@ -209,3 +209,48 @@ class TestTheAppAndDiagnosticsUseIt:
 
         monkeypatch.setattr(single_instance, 'siblings', boom)
         assert doctor.check_copies()['level'] == 'warn'
+
+class TestTheBlockedCopyLeavesATrace:
+    """
+    ПРОВЕРЕНО ЗАПУСКОМ, а не чтением кода. Вторая копия из той же папки
+    данных ведёт себя правильно: порт не берёт (слушал только первый процесс),
+    сделок не открывает, показывает диалог «Программа уже работает».
+
+    Но в журнале о ней НЕ БЫЛО НИ СТРОКИ — только загрузка настроек и тишина:
+
+        [22:38:36] .env загружен из DATA_DIR ... True
+        [22:38:36]    TRADING_MODE: PAPER
+        (и всё)
+
+    Диалог человек закроет и забудет, а вопрос «почему второй запуск ничего
+    не сделал» возникает позже и уже без диалога. Молчание журнала в этот
+    момент означает, что ответа нет нигде.
+    """
+
+    SRC = open(os.path.join(ROOT, 'desktop.py'), encoding='utf-8').read()
+
+    def _block(self):
+        spot = self.SRC.index('running = info.get(')
+        return self.SRC[spot:spot + 1200]
+
+    def test_the_block_is_written_to_the_log(self):
+        assert 'log(' in self._block(), (
+            'вторая копия снова останавливается молча — в журнале не останется '
+            'следа')
+
+    def test_the_line_names_who_is_running(self):
+        block = self._block()
+        spot = block.index('log(')
+        line = block[spot:spot + 300]
+        assert 'running' in line and 'pid' in line.lower(), (
+            'строка не называет ни версию, ни номер процесса — по ней нельзя '
+            'понять, кого именно встретили')
+
+    def test_it_is_logged_before_the_dialog(self):
+        """
+        Окно модальное и ждёт щелчка. Запись после него означала бы, что
+        журнал пополнится только когда человек нажмёт ОК, — а он может не
+        нажать вовсе.
+        """
+        block = self._block()
+        assert block.index('log(') < block.index('_alert(')
