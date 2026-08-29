@@ -40,6 +40,7 @@
 
 import json
 import os
+import re
 import subprocess
 import sys
 
@@ -111,12 +112,79 @@ def verify_data_untracked():
     return True, ''
 
 
+# Файлы состояния, которые когда-то попали под контроль версий. Это НЕ код и
+# НЕ данные торговли: приложение переписывает их само при каждом запуске и при
+# каждом движении окна.
+#
+# ИЗ-ЗА НИХ ОБНОВЛЕНИЕ ПРОПАДАЛО НА СЕРВЕРЕ, и механизм такой. Запущенный бот
+# переписывает running_app.json → git видит изменение отслеживаемого файла →
+# dirty_tracked() возвращает его → can_update становится ложным, и панель
+# вместо кнопки показывает «на сервере есть незакоммиченные правки кода».
+#
+# Воспроизведено на копии репозитория: даже принудительная перемотка падает —
+# «Your local changes to the following files would be overwritten by merge».
+#
+# В репозитории их больше нет (выведены из-под контроля версий), но сервер к
+# этой правке не придёт сам: чтобы её забрать, нужно обновиться, а обновиться
+# мешают ровно они. Поэтому обновлятор разбирается с ними сам.
+RUNTIME_FILES = (
+    'Live_Bot/running_app.json',
+    'Live_Bot/window.json',
+)
+
+
+def _drop_runtime_changes():
+    """
+    Отбрасывает местные правки файлов состояния, чтобы они не мешали перемотке.
+
+    Терять здесь нечего: running_app.json содержит номер процесса и путь к
+    запущенному файлу, window.json — размер и положение окна. И то и другое
+    приложение запишет заново. Данных торговли среди них нет — их состав
+    проверяется отдельно (verify_data_untracked) и туда эти файлы не входят.
+    """
+    dropped = []
+    for path in RUNTIME_FILES:
+        code, out, _ = _git('ls-files', '--', path)
+        if code != 0 or not out.strip():
+            continue                               # не отслеживается — и хорошо
+        if _git('checkout', '--', path)[0] == 0:
+            dropped.append(path)
+    return dropped
+
+
+def _porcelain_path(line):
+    """
+    Путь из строки `git status --porcelain`, каким бы ни был отступ.
+
+    ЗДЕСЬ СТОЯЛО line[3:], И ЭТО МОЛЧА ПОРТИЛО ПЕРВЫЙ ПУТЬ. Формат porcelain —
+    два знака состояния, пробел, путь; для изменённого в рабочем каталоге это
+    « M Live_Bot/...», и срез с третьего знака верен. Но `_git` обрезает вывод
+    целиком (`stdout.strip()`), и ведущий пробел теряет ПЕРВАЯ строка — только
+    она. У неё срез откусывает лишнюю букву: «ive_Bot/running_app.json».
+
+    Пока список просто показывали человеку, обрезанное имя выглядело опечаткой.
+    Стоило начать сверять по нему — и сверка перестала совпадать.
+    """
+    match = re.match(r'^\s*[MADRCU?!]{1,2}\s+(.+)$', line)
+    if not match:
+        return ''
+    path = match.group(1).strip()
+    # Переименование пишется как «старое -> новое»; нас интересует новое.
+    return path.split(' -> ')[-1].strip('"')
+
+
 def dirty_tracked():
-    """Незакоммиченные изменения ОТСЛЕЖИВАЕМЫХ файлов."""
+    """
+    Незакоммиченные изменения ОТСЛЕЖИВАЕМЫХ файлов кода.
+
+    Файлы состояния из RUNTIME_FILES не в счёт: они меняются сами по себе, и
+    считать их правкой кода значит запретить обновление навсегда.
+    """
     code, out, _ = _git('status', '--porcelain', '--untracked-files=no')
     if code != 0:
         return []
-    return [line[3:] for line in out.splitlines() if line.strip()]
+    return [path for path in (_porcelain_path(line) for line in out.splitlines())
+            if path and path not in RUNTIME_FILES]
 
 
 def _commit_info(ref='HEAD'):
@@ -317,6 +385,13 @@ def apply():
 
     previous = info['current'].get('commit')
     branch = info['branch']
+
+    # Файлы состояния отбрасываем ПЕРЕД перемоткой. Даже не считаясь правкой
+    # кода, изменённый отслеживаемый файл останавливает merge: «Your local
+    # changes would be overwritten». Проверено на копии репозитория.
+    dropped = _drop_runtime_changes()
+    if dropped:
+        log(f"   отброшены местные правки файлов состояния: {', '.join(dropped)}")
 
     code, out, err = _git('merge', '--ff-only', f'origin/{branch}')
     if code != 0:
