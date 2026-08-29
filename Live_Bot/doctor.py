@@ -299,6 +299,41 @@ def check_copies():
                    'удваивается, а замеры смешиваются. Оставьте одну.')
 
 
+def check_strategy_knobs():
+    """
+    Настройки, которые обещают выбор, но выбрать по ним нельзя.
+
+    ЗАЧЕМ ОТДЕЛЬНАЯ ПРОВЕРКА. Такая настройка хуже отсутствующей: человек
+    ставит значение, ждёт другого поведения, замеряет — и получает то же
+    самое. Вывод «разницы нет» при этом верен буквально и обманчив по сути.
+
+    Первый пойманный случай — RSIBB THIN_STOP. Расширение стопа до пола даёт
+    отношение риска к прибыли ниже единицы, а MIN_RR = 1.0 такое отклоняет:
+    'widen' заканчивается тем же отказом, что и 'skip'.
+
+    Второй того же рода — зона B у FIBO: имя зоны стояло литералом, и
+    статистика по ней не наполнялась никогда. Он уже исправлен (v1.3.6), но
+    показывает, что класс дефектов не единичный.
+    """
+    try:
+        from rsibb import core as rsibb_core
+        from rsibb import params as rsibb_params
+    except Exception as exc:                       # noqa: BLE001
+        return _result(WARN, 'Настройки стратегий не проверены', str(exc), '')
+
+    dead = []
+    if (getattr(rsibb_params, 'THIN_STOP', '') == 'widen'
+            and rsibb_core.widen_is_inert()):
+        dead.append(f'RSIBB THIN_STOP=widen при MIN_RR={rsibb_params.MIN_RR} '
+                    f'— то же, что skip')
+    if not dead:
+        return _result(OK, 'Настройки стратегий работают',
+                       'мёртвых развилок не найдено')
+    return _result(WARN, f'Настроек без действия: {len(dead)}', '; '.join(dead),
+                   'значение можно менять, поведение не изменится — '
+                   'замер по такой настройке ничего не покажет')
+
+
 def check_telegram():
     import config
     if not config.TELEGRAM_BOT_TOKEN or not config.TELEGRAM_CHAT_ID:
@@ -320,6 +355,7 @@ CHECKS = (
     ('Риск', check_risk),
     ('Предохранители', check_limits),
     ('Копии приложения', check_copies),
+    ('Настройки стратегий', check_strategy_knobs),
     ('Telegram', check_telegram),
 )
 
