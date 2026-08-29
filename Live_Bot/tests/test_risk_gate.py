@@ -240,3 +240,52 @@ class TestSettingsFailureIsLoud:
         monkeypatch.setattr(risk_gate, 'log', lambda m: said.append(m))
         risk_gate.settings_unavailable(RuntimeError('файл занят'))
         assert said and 'БЕЗ' in said[0]
+
+
+class TestTrailingCannotDivergeSilently:
+    """
+    ТО ЖЕ СЕМЕЙСТВО, ЧТО И ДНЕВНОЙ СТОП, ПОЙМАННОЕ ДО ТОГО, КАК СТОИЛО ДЕНЕГ.
+
+    Трейлинг-стоп реализован в боевом пути (TRAIL_AFTER_TP, trail_distance,
+    расчёт от markPrice) и не реализован в бумажном вовсе — там на его месте
+    константа `'trailing_active': False`.
+
+    Сейчас расхождения нет: в бою он выключен сторожевым значением
+    TRAIL_AFTER_TP = 99 («трейлинг не активируется»), и обе стороны ведут
+    позицию одинаково. Но стоит поставить туда 1 или 2 — и бумага начнёт
+    измерять не то, что торгует бой, молча.
+
+    Это ровно тот способ, которым из боевого пути выпал дневной стоп: правило
+    поменяли в одном месте, второе никто не сверил. Здесь сверяют заранее.
+    """
+
+    def _live_trailing_enabled(self):
+        import config
+        # 99 — сторожевое значение: столько целей не бывает, условие
+        # `tp_hit >= 99` не выполняется никогда.
+        return int(getattr(config, 'TRAIL_AFTER_TP', 99)) < 10
+
+    def _paper_has_trailing(self):
+        text = open(os.path.join(ROOT, 'paper_broker.py'), encoding='utf-8').read()
+        # Настоящий трейлинг двигает стоп за ценой. Константа
+        # 'trailing_active': False в снимке для панели — не реализация.
+        return 'trail_distance' in text or 'TRAIL_AFTER_TP' in text
+
+    def test_paper_keeps_up_if_live_starts_trailing(self):
+        if not self._live_trailing_enabled():
+            return                             # выключен в бою — расхождения нет
+        assert self._paper_has_trailing(), (
+            'в бою включён трейлинг (TRAIL_AFTER_TP), а бумажный брокер его не '
+            'умеет: замер перестанет описывать боевое поведение — ровно так из '
+            'боевого пути выпал дневной стоп-кран')
+
+    def test_the_sentinel_is_still_a_sentinel(self):
+        """
+        Если значение перестанет быть заведомо недостижимым, проверка выше
+        начнёт молчать не потому, что всё хорошо.
+        """
+        import config
+        value = int(getattr(config, 'TRAIL_AFTER_TP', 99))
+        assert value >= 10 or self._paper_has_trailing(), (
+            f'TRAIL_AFTER_TP = {value}: это уже не «выключено», а рабочее '
+            f'значение')
