@@ -34,13 +34,22 @@ class TestEveryPageExists:
         assert menu - pages == set(), f'в меню есть, страницы нет: {menu - pages}'
         assert pages - menu == set(), f'страница есть, в меню нет: {pages - menu}'
 
-    def test_summary_is_the_default_page(self):
+    def test_the_default_page_shows_the_real_numbers(self):
         """
-        Открывается сводка, а не «Обзор». Прежний «Обзор» показывал только
-        биржу и молчал об этом — плохой первый экран для приложения с двумя
-        направлениями.
+        ЗАМЫСЕЛ ТОТ ЖЕ, ЦЕЛЬ ДРУГАЯ. Здесь проверялось, что первой открывается
+        «Сводка»: прежний «Обзор» показывал одну биржу и молчал об этом, а
+        направлений было два.
+
+        Направление осталось одно — Polymarket вырезан, — и «Сводка» стала
+        показывать его же таблицей беднее той, что рядом: без винрейта,
+        ожидания, профит-фактора и просадки. Первым экраном стоял пересказ
+        соседней страницы, и открывался он вместо неё.
+
+        Требование к первому экрану не изменилось: он обязан показывать
+        настоящие числа торговли, а не отсылать за ними дальше.
         """
-        assert "q.get('page') : 'summary'" in HTML
+        assert "q.get('page') : 'overview'" in HTML
+        assert "q.get('page') : 'summary'" not in HTML
 
 
 class TestDirectionsDoNotMix:
@@ -68,10 +77,19 @@ class TestDirectionsDoNotMix:
         Сорок тысяч бумажных на бирже и сто настоящих долларов рядом —
         величины разной природы. Сложив их, мы получили бы число, которое
         ничего не значит, зато выглядит убедительно.
+
+        ПРАВИЛО ПЕРЕЖИВАЕТ СТРАНИЦУ. Проверялось оно на тексте «Сводки», а та
+        удалена: направление осталось одно, и складывать пока нечего. Но
+        «пока» — не гарантия: вернись второе направление, сложение первым
+        делом появилось бы в браузере. Поэтому проверяется не текст
+        объяснения, а само отсутствие сложения.
         """
-        spot = HTML.index('function renderSummary()')
-        block = HTML[spot:spot + 4000]
-        assert 'не складываются' in block
+        server = open(os.path.join(ROOT, 'dashboard.py'), encoding='utf-8').read()
+        for name, src in (('панель', HTML), ('сервер', server)):
+            for bad in ('directions.reduce', 'sum(d[', 'sum(direction'):
+                assert bad not in src, (
+                    f'{name}: суммы по направлениям снова складываются — '
+                    f'бумажные и настоящие деньги дадут убедительное ничто')
 
 
 class TestConnectionsAreInOnePlace:
@@ -119,19 +137,26 @@ class TestRenderersAreIntact:
         return body
 
     def test_new_renderers_are_whole(self):
-        for name in ('renderSummary', 'buildNav', 'showPage'):
+        for name in ('buildNav', 'showPage'):
             self._balanced(name)
 
-    def test_new_renderers_are_actually_called(self):
-        assert 'renderSummary()' in HTML
+    def test_the_removed_renderer_left_nothing_behind(self):
+        """
+        Удалять страницу надо целиком. Забытый вызов исчезнувшей функции — это
+        ошибка в консоли, после которой не рисуется ВСЁ, что шло следом:
+        ровно так панель осталась пустой, когда вырезали Polymarket, а
+        `pmMoney` остался в вызовах.
+        """
+        assert 'renderSummary' not in HTML
+        assert 'summary-body' not in HTML
+        assert "title: 'Сводка'" not in HTML
 
-    def test_summary_refreshes_on_every_poll(self):
-        """
-        Рисовать сводку только при открытии вкладки значило бы показывать
-        вчерашние числа тому, кто держит панель открытой.
-        """
-        spot = HTML.index('function render() {')
-        assert 'renderSummary()' in HTML[spot:spot + 600]
+    def test_the_page_list_has_no_hole(self):
+        """Меню и страницы обязаны совпадать и после удаления."""
+        pages = set(re.findall(r'<section class="page" data-page="(\w+)"', HTML))
+        menu = set(re.findall(r"\{ id: '(\w+)',\s+ic:", HTML))
+        assert pages == menu, (pages ^ menu)
+        assert 'summary' not in pages
 
 
 class TestServerSideSummary:

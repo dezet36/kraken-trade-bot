@@ -889,14 +889,6 @@
       <div id="attention"></div>
       <div id="regime"></div>
 
-      <!-- ── Сводка ───────────────────────────────────────────────────────
-           ЕДИНСТВЕННОЕ МЕСТО, ГДЕ НАПРАВЛЕНИЯ ВСТРЕЧАЮТСЯ, и встречаются
-           намеренно: ответить «сколько всего и где» иначе было нельзя.
-           Дальше они расходятся по своим разделам и больше не смешиваются. -->
-      <section class="page" data-page="summary" hidden>
-        <div id="summary-body">загружаю…</div>
-      </section>
-
       <!-- ── Подключения ──────────────────────────────────────────────── -->
       <section class="page" data-page="connect" hidden>
         <div id="connect-intro"></div>
@@ -1377,15 +1369,46 @@ function summarise(rows) {
   const gl = Math.abs(losses.reduce((s, t) => s + t.pnl, 0));
   const sumR = rows.reduce((s, t) =>
     s + (t.pnl_r != null ? t.pnl_r : (t.risk ? t.pnl / t.risk : 0)), 0);
+  const n = rows.length;
+  const winrate = n ? wins.length / n * 100 : 0;
+  const expectancy = n ? sumR / n : 0;
+
+  /* ПОГРЕШНОСТЬ ПОКАЗЫВАЕТСЯ РЯДОМ С ЧИСЛОМ, А НЕ ПОДРАЗУМЕВАЕТСЯ.
+     Разбор 364 сделок 29 августа 2026 показал, во что обходится её
+     отсутствие: «винрейт 37.7%» читается как факт, тогда как на 193 сделках
+     это 37.7 ± 6.9 процентных пункта, а ожидание +0.012 ± 0.144 R — то есть
+     неотличимо от нуля. По голому числу принимались решения, которых оно не
+     выдерживает. Доля считается по биномиальной ошибке, ожидание — по
+     стандартной ошибке среднего, обе на 95%. */
+  const wrCI = n ? 1.96 * Math.sqrt((winrate / 100) * (1 - winrate / 100) / n) * 100 : 0;
+  let expCI = 0;
+  if (n > 1) {
+    const rs = rows.map(t => t.pnl_r != null ? t.pnl_r : (t.risk ? t.pnl / t.risk : 0));
+    const sd = Math.sqrt(rs.reduce((a, x) => a + (x - expectancy) ** 2, 0) / (n - 1));
+    expCI = 1.96 * sd / Math.sqrt(n);
+  }
+
+  /* ИЗДЕРЖКИ В ДОЛЯХ РИСКА, А НЕ ТОЛЬКО В ДОЛЛАРАХ. Доллары не с чем
+     сравнить: $661 — это много или мало, зависит от объёма. А 0.026 R за
+     сделку стоят рядом с ожиданием, и сразу видно, покрывает оно их или нет. */
+  const fees = rows.reduce((a, t) => a + (t.fees || 0) + (t.funding || 0), 0);
+  const costR = n ? rows.reduce((a, t) => {
+    const c = (t.fees || 0) + (t.funding || 0);
+    return a + (t.risk ? c / t.risk : 0);
+  }, 0) / n : 0;
+
   return {
-    trades: rows.length,
+    trades: n,
     wins: wins.length,
-    winrate: rows.length ? wins.length / rows.length * 100 : 0,
-    pnl: rows.reduce((s, t) => s + t.pnl, 0),
+    winrate, wrCI,
+    pnl: rows.reduce((a, t) => a + t.pnl, 0),
     pf: gl ? gw / gl : null,
     sumR,
-    expectancy: rows.length ? sumR / rows.length : 0,
-    fees: rows.reduce((s, t) => s + (t.fees || 0) + (t.funding || 0), 0),
+    expectancy, expCI,
+    fees, costR,
+    /* Ожидание, каким оно было бы без издержек. Эта пара чисел отвечает на
+       вопрос «стратегия не работает или её съедают комиссии». */
+    grossExpectancy: expectancy + costR,
   };
 }
 
@@ -1454,18 +1477,33 @@ function cards(byStrategy) {
         ${kpi('Сделок', s.stats.trades,
               `${s.stats.wins} в плюс` + (s.stats.skipped
                 ? ` · ${s.stats.skipped} не в счёт: дыра в данных` : ''))}
-        ${kpi('Винрейт', s.stats.winrate.toFixed(1) + '%', '')}
+        ${kpi('Винрейт', s.stats.winrate.toFixed(1) + '%',
+              s.stats.trades > 1 ? `± ${s.stats.wrCI.toFixed(1)} п.п.` : '')}
+        ${/* Ожидание вынесено из подписи в свою клетку: это главное число
+             выборки, и рядом с ним обязана стоять погрешность. Когда интервал
+             накрывает ноль, цвет снимается — иначе плюс читается как прибыль,
+             которой не доказано. */ ''}
+        ${kpi('Ожидание',
+              (s.stats.expectancy >= 0 ? '+' : '') + s.stats.expectancy.toFixed(3) + ' R',
+              s.stats.trades > 1
+                ? (Math.abs(s.stats.expectancy) < s.stats.expCI
+                    ? `± ${s.stats.expCI.toFixed(3)} — неотличимо от нуля`
+                    : `± ${s.stats.expCI.toFixed(3)} R`)
+                : 'сделок мало',
+              (s.stats.trades > 1 && Math.abs(s.stats.expectancy) < s.stats.expCI)
+                ? '' : cls(s.stats.expectancy))}
         ${kpi('Profit factor', s.stats.pf === null ? '—' : s.stats.pf.toFixed(2),
-              s.stats.expectancy.toFixed(3) + ' R/сд')}
-        ${kpi('Сумма R', (s.stats.sumR >= 0 ? '+' : '') + s.stats.sumR.toFixed(1), '',
-              cls(s.stats.sumR))}
+              (s.stats.sumR >= 0 ? '+' : '') + s.stats.sumR.toFixed(1) + ' R всего')}
         ${kpi('Просадка', maxDD(s.rows, base).toFixed(1) + '%', 'от пика')}
         ${/* строка всегда на месте: без неё карточки стратегий имели
              разную высоту и сетка выглядела сломанной */ ''}
         ${kpi('В рынке', openNow ? money(floating) : '—',
               openNow ? 'плавающий' : 'позиций нет',
               openNow ? cls(floating) : '')}
-        ${PAPER ? kpi('Издержки', '$' + s.stats.fees.toFixed(2), 'комиссии и фандинг') : ''}
+        ${PAPER ? kpi('Издержки', s.stats.costR.toFixed(3) + ' R/сд',
+              '$' + s.stats.fees.toFixed(2) + ' · без них '
+              + (s.stats.grossExpectancy >= 0 ? '+' : '')
+              + s.stats.grossExpectancy.toFixed(3) + ' R') : ''}
       </div>
     </div>`;
   }).join('');
@@ -2017,8 +2055,6 @@ function closedTable(rows) {
    место, где направления встречаются, и встречаются намеренно: ответить
    «сколько всего» иначе было нельзя. */
 const PAGES = [
-  { id: 'summary',   ic: '◉', title: 'Сводка' },
-
   { group: 'Биржа', dir: 'exchange' },
   { id: 'overview',  ic: '◎', title: 'Обзор',     dir: 'exchange' },
   { id: 'positions', ic: '▤', title: 'Позиции',   dir: 'exchange' },
@@ -2037,7 +2073,9 @@ const PAGE_IDS = PAGES.filter(p => p.id);
    и там не действуют вовсе. Фильтр, который ничего не фильтрует, хуже
    отсутствующего — он обещает управление, которого нет. */
 const PAGE_DIR = Object.fromEntries(PAGE_IDS.map(p => [p.id, p.dir || '']));
-let page = PAGE_IDS.some(p => p.id === q.get('page')) ? q.get('page') : 'summary';
+/* Открываемся на «Обзоре». Раньше первой была «Сводка», но направление
+   осталось одно, и она повторяла соседнюю страницу таблицей беднее. */
+let page = PAGE_IDS.some(p => p.id === q.get('page')) ? q.get('page') : 'overview';
 
 function buildNav() {
   const counts = {
@@ -2137,7 +2175,6 @@ function showPage() {
   // повторять на каждом такте нельзя, это затирало бы поле под курсором.
   if (page === 'control' && SETTINGS && CONTROLS_BLIND && DATA) renderControls();
   if (page === 'diag' && currentSub('diag') === 'log' && !LOG_LOADED) refreshLog();
-  if (page === 'summary') renderSummary();
   if (page === 'connect') {
     renderKeys(DATA && DATA.writable !== false);
     if (!SETTINGS) loadSettings();
@@ -2164,66 +2201,6 @@ function showPage() {
    стало, разница, — и по ней сравнимы стратегии внутри направления. Список из
    одного элемента честнее итоговой строки: он не обещает суммы там, где её
    не считают. */
-function renderSummary() {
-  const box = el('summary-body');
-  if (!box) return;
-  const dirs = (DATA && DATA.directions) || [];
-  if (!dirs.length) { box.innerHTML = '<div class="hint">данных пока нет</div>'; return; }
-
-  const money = v => pmMoney(v);
-  const sign = v => `<span style="color:var(--${v >= 0 ? 'good' : 'bad'})">`
-    + (v >= 0 ? '+' : '') + money(v) + '</span>';
-
-  let html = dirs.map(d => {
-    const link = 'overview';
-    const rows = (d.strategies || []).map(s => {
-      const off = !s.enabled;
-      return `<tr${off ? ' style="opacity:.5"' : ''}>
-        <td>${esc(s.name)}${off ? ' <span class="hint">выключена</span>' : ''}</td>
-        <td class="num">${money(s.invested)}</td>
-        <td class="num">${money(s.equity)}</td>
-        <td class="num">${sign(s.pnl)}</td>
-        <td class="num">${s.open || 0}</td></tr>`;
-    }).join('');
-
-    /* Подключение показывается тут же: направление без подключения не
-       торгует, и объяснять это в другом разделе — значит заставлять искать. */
-    const conn = d.connected
-      ? '<span class="hint">подключено</span>'
-      : '<span class="hint" style="color:var(--bad)">не подключено — '
-        + '<a href="?page=connect">настроить</a></span>';
-
-    return `<div class="panel card-pad" style="margin-bottom:16px">
-      <div class="row" style="justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:8px">
-        <div>
-          <h3 style="margin:0"><a href="?page=${link}">${esc(d.title)}</a></h3>
-          <div class="hint">${esc(d.subtitle || '')}</div>
-        </div>
-        <div style="text-align:right">
-          <div style="font-size:20px;font-weight:600">${sign(d.pnl)}</div>
-          <div class="hint">${money(d.invested)} → ${money(d.equity)}</div>
-        </div>
-      </div>
-      <div style="margin:10px 0">${conn}</div>
-      <div class="scroll"><table>
-        <thead><tr><th>стратегия</th><th class="num">вложено</th>
-        <th class="num">стало</th><th class="num">итог</th>
-        <th class="num">открыто</th></tr></thead>
-        <tbody>${rows}</tbody></table></div>
-      ${d.error ? '<div class="warn-box">не читается: ' + esc(d.error) + '</div>' : ''}
-    </div>`;
-  }).join('');
-
-  /* ОБЩИЙ ИТОГ НЕ ПОКАЗЫВАЕТСЯ ОДНИМ ЧИСЛОМ, и это осознанный отказ. Сорок
-     тысяч бумажных на бирже и сто настоящих долларов рядом — величины
-     разной природы: сложив их, мы получили бы число, которое ничего не
-     значит, зато выглядит убедительно. */
-  html += '<div class="hint" style="padding:8px 4px">Направления показаны '
-    + 'порознь и не складываются: у них разные деньги и разная механика. '
-    + 'Общая сумма выглядела бы убедительно и не значила бы ничего.</div>';
-  box.innerHTML = html;
-}
-
 /* ── Полоса внимания ────────────────────────────────────────────────────── */
 function attention(items) {
   const box = document.getElementById('attention');
@@ -4282,7 +4259,6 @@ function render() {
   // Сводка живёт на данных общего опроса, поэтому
   // обновляются здесь же: рисовать их только при открытии вкладки значило бы
   // показывать вчерашние числа тому, кто держит панель открытой.
-  if (page === 'summary') renderSummary();
 
   const closed = pick(DATA.closed);
   // Открытые позиции и ожидающие ордера существуют СЕЙЧАС: фильтр периода

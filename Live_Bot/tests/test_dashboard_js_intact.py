@@ -68,7 +68,10 @@ class TestEveryCallHasItsFunction:
             assert f'function {name}(' in HTML, name
 
     def test_the_page_renderers_are_whole(self):
-        for name in ('renderSummary', 'buildNav', 'showPage'):
+        # renderSummary убран вместе со страницей «Сводка»: направление
+        # осталось одно, и она повторяла «Обзор» таблицей беднее. Что от неё
+        # не осталось следов, стережёт test_dashboard_layout.
+        for name in ('buildNav', 'showPage'):
             assert f'function {name}(' in HTML, name
 
 
