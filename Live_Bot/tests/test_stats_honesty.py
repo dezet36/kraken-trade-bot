@@ -113,7 +113,9 @@ class TestTheCardsShowIt:
     def test_an_interval_covering_zero_says_so(self):
         spot = HTML.index("kpi('Ожидание'")
         block = HTML[spot:spot + 700]
-        assert 'неотличимо от нуля' in block
+        # Текст сокращён с «неотличимо от нуля»: в клетке шириной в треть
+        # карточки он ломался на три строки и разъезжал сетку показателей.
+        assert 'не отличить от 0' in block
         assert 'expCI' in block
 
     def test_such_a_number_loses_its_colour(self):

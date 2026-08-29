@@ -294,6 +294,13 @@
   .panel-head .hint { font-size: 12.5px; color: var(--ink-3); }
   .panel-body { padding: 4px 20px 20px; }
   .cols  { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); }
+  /* РОВНО ЧЕТЫРЕ КАРТОЧКИ СТАВЯТСЯ 2×2. При minmax(340px) на обычном экране
+     помещаются три, и четвёртая стратегия оставалась одна в ряду с пустотой
+     в две трети ширины рядом — так это и выглядело на снимке панели.
+     Ширины ниже 760px правило не касается: там колонка и так одна. */
+  @media (min-width: 760px) {
+    .cols:has(> :nth-child(4):last-child) { grid-template-columns: 1fr 1fr; }
+  }
   .cols2 { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); }
 
   /* ── Полоса внимания ─────────────────────────────────────────────── */
@@ -667,7 +674,11 @@
   .hero .side { font-size: 13px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
   .kpis { display: grid; gap: 12px 18px; margin-top: 16px; padding-top: 14px;
           border-top: 1px solid var(--hairline-2);
-          grid-template-columns: repeat(auto-fit, minmax(96px, 1fr)); }
+          grid-template-columns: repeat(3, 1fr); }
+  /* ТРИ КОЛОНКИ, А НЕ auto-fit. Показателей шесть, и при auto-fit на широкой
+     карточке они вставали пятёркой плюс огрызок из одного. Три на два —
+     единственная раскладка, которая делится нацело. */
+  @media (max-width: 520px) { .kpis { grid-template-columns: repeat(2, 1fr); } }
   .kpi .k { font-size: 11px; color: var(--ink-3); font-weight: 500; }
   .kpi .v { font-size: 17px; font-weight: 620; font-variant-numeric: tabular-nums;
             letter-spacing: -0.02em; margin-top: 2px; }
@@ -1467,7 +1478,8 @@ function cards(byStrategy) {
       <div class="stitle">
         <span class="key" style="background:${COLOR[key] || 'var(--muted)'}"></span>
         <span class="nm">${esc(NAMES[key] || key)}</span>
-        <span class="sub">${openNow} в работе${pendingNow ? ` · ${pendingNow} ${waiting}` : ''}</span>
+        <span class="sub">${openNow ? `${openNow} в работе · <b class="${cls(floating)}">${money(floating)}</b>`
+          : '0 в работе'}${pendingNow ? ` · ${pendingNow} ${waiting}` : ''}</span>
       </div>
       <div class="hero">
         <span class="big ${cls(PAPER ? growth : s.stats.pnl)}">${heroValue}</span>
@@ -1487,7 +1499,7 @@ function cards(byStrategy) {
               (s.stats.expectancy >= 0 ? '+' : '') + s.stats.expectancy.toFixed(3) + ' R',
               s.stats.trades > 1
                 ? (Math.abs(s.stats.expectancy) < s.stats.expCI
-                    ? `± ${s.stats.expCI.toFixed(3)} — неотличимо от нуля`
+                    ? `± ${s.stats.expCI.toFixed(3)} · не отличить от 0`
                     : `± ${s.stats.expCI.toFixed(3)} R`)
                 : 'сделок мало',
               (s.stats.trades > 1 && Math.abs(s.stats.expectancy) < s.stats.expCI)
@@ -1495,11 +1507,10 @@ function cards(byStrategy) {
         ${kpi('Profit factor', s.stats.pf === null ? '—' : s.stats.pf.toFixed(2),
               (s.stats.sumR >= 0 ? '+' : '') + s.stats.sumR.toFixed(1) + ' R всего')}
         ${kpi('Просадка', maxDD(s.rows, base).toFixed(1) + '%', 'от пика')}
-        ${/* строка всегда на месте: без неё карточки стратегий имели
-             разную высоту и сетка выглядела сломанной */ ''}
-        ${kpi('В рынке', openNow ? money(floating) : '—',
-              openNow ? 'плавающий' : 'позиций нет',
-              openNow ? cls(floating) : '')}
+        ${/* «В рынке» переехало в шапку карточки. Отдельной клеткой оно
+             пустовало: позиций нет — и в четырёх карточках подряд стоял
+             прочерк с подписью «позиций нет», хотя шапка уже говорила
+             «0 в работе». Показателей осталось шесть — ровно 3×2. */ ''}
         ${PAPER ? kpi('Издержки', s.stats.costR.toFixed(3) + ' R/сд',
               '$' + s.stats.fees.toFixed(2) + ' · без них '
               + (s.stats.grossExpectancy >= 0 ? '+' : '')
@@ -1642,7 +1653,10 @@ function chart(byStrategy) {
   }
 
   const IX = PAPER ? 2 : 1;
-  const W = 1000, H = 320, P = { t: 16, r: 26, b: 30, l: 64 };
+  /* Поле справа расширено с 26 до 62: подписи концов ставятся ЗА графиком,
+     а не поверх него. Слева от точки они ложились прямо на линии — на снимке
+     панели «0.8%» было перечёркнуто синей точкой, а «0.7%» бирюзовой. */
+  const W = 1000, H = 320, P = { t: 16, r: 62, b: 30, l: 64 };
   const pts = keys.map(k => byStrategy[k].curve);
   const all = pts.flat();
   const times = all.map(p => ts(p[0]));
@@ -1676,20 +1690,45 @@ function chart(byStrategy) {
              stroke-linejoin="round" stroke-linecap="round"/>`;
   }).join('');
 
-  const ends = keys.map((k, i) => {
+  /* ПОДПИСИ КОНЦОВ РАЗВОДЯТСЯ ПО ВЫСОТЕ, А НЕ СТАВЯТСЯ КАЖДАЯ НА СВОЁМ МЕСТЕ.
+     Четыре стратегии заканчиваются около нуля, и на снимке панели их подписи
+     наложились в нечитаемое «0.1?8%»: три числа в одной точке. Точка серии
+     остаётся ровно там, где значение, — сдвигается только текст, поэтому
+     график не врёт. Разводим сверху вниз с минимальным зазором. */
+  const endPts = keys.map((k, i) => {
     const last = pts[i][pts[i].length - 1];
-    const cx = x(ts(last[0])), cy = y(last[IX]);
-    return `<circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="4.5" fill="${COLOR[k]}"
+    return { k, cx: x(ts(last[0])), cy: y(last[IX]), v: last[IX] };
+  }).sort((a, b) => a.cy - b.cy);
+
+  const GAP = 15;
+  endPts.forEach((e, i) => {
+    e.ty = i ? Math.max(e.cy, endPts[i - 1].ty + GAP) : e.cy;
+  });
+  /* Если внизу упёрлись в край — сдвигаем всю пачку вверх, иначе последняя
+     подпись уезжает за пределы картинки. */
+  const overflow = endPts.length
+    ? Math.max(0, endPts[endPts.length - 1].ty - (H - P.b - 4)) : 0;
+  if (overflow) endPts.forEach(e => { e.ty -= overflow; });
+
+  const ends = endPts.map(e => {
+    /* Когда подпись увели от точки, ведём к ней тонкую линию — иначе не
+       видно, чьё это число. */
+    const moved = Math.abs(e.ty - e.cy) > 2;
+    const tx = e.cx + 10;                    // справа от точки, на чистом поле
+    return `<circle cx="${e.cx.toFixed(1)}" cy="${e.cy.toFixed(1)}" r="4.5" fill="${COLOR[e.k]}"
               stroke="var(--surface-1)" stroke-width="2"/>
-            <text x="${(cx - 9).toFixed(1)}" y="${(cy - 11).toFixed(1)}" text-anchor="end"
-              font-size="12" font-weight="650" fill="var(--text-primary)">${fmtV(last[IX])}</text>`;
+            ${moved ? `<line x1="${(tx - 3).toFixed(1)}" y1="${e.ty.toFixed(1)}"
+              x2="${(e.cx + 5).toFixed(1)}" y2="${e.cy.toFixed(1)}"
+              stroke="${COLOR[e.k]}" stroke-width="1" opacity=".45"/>` : ''}
+            <text x="${tx.toFixed(1)}" y="${(e.ty + 4).toFixed(1)}" text-anchor="start"
+              font-size="12" font-weight="650" fill="${COLOR[e.k]}">${fmtV(e.v)}</text>`;
   }).join('');
 
   const day = d => new Date(d).toLocaleDateString('ru', { day: '2-digit', month: '2-digit' });
   box.innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Доходность по стратегиям">
     ${g}
     <text x="${P.l}" y="${H - 8}" font-size="11" fill="var(--muted)">${day(t0)}</text>
-    <text x="${W - P.r}" y="${H - 8}" text-anchor="end" font-size="11" fill="var(--muted)">${day(t1)}</text>
+    <text x="${W - 4}" y="${H - 8}" text-anchor="end" font-size="11" fill="var(--muted)">${day(t1)}</text>
     ${paths}${ends}
     <line id="cross" x1="0" y1="${P.t}" x2="0" y2="${H - P.b}" stroke="var(--axis)"
       stroke-width="1" opacity="0"/>
