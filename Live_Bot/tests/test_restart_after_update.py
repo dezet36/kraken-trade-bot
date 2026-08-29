@@ -256,7 +256,7 @@ class TestStartupWiring:
         assert 'Закрыть работающую версию и запустить эту?' in self.text
 
     def test_foreign_port_moves_instead_of_refusing(self):
-        assert 'moved = 0 if ours else free_port(config.DASHBOARD_PORT + 1)' in self.text
+        assert 'free_port(' in self.text
         assert "os.environ['DASHBOARD_PORT'] = str(moved)" in self.text
         assert 'config.DASHBOARD_PORT = moved' in self.text
 
@@ -267,9 +267,21 @@ class TestStartupWiring:
     def test_own_copy_alive_still_stops_us(self):
         """
         Две копии на одних файлах хуже, чем незапуск: они затрут журнал
-        сделок друг друга. Уходить на соседний порт можно только от чужого.
+        сделок друг друга.
+
+        ЗАМЫСЕЛ ТОТ ЖЕ, ЗАПИСЬ ИСПРАВЛЕНА. Здесь стояло `'0 if ours else'` —
+        проверка буквой по исходнику. Но `ours` отвечает на вопрос «это копия
+        нашего приложения», а опасны не копии вообще, а копии на ОДНИХ ФАЙЛАХ.
+        Совпадают эти вещи не всегда: копия из dist/ работает со своим
+        каталогом данных, затирать ей нечего, а `ours` про неё скажет «наша».
+
+        Из-за этого человек получал «Порт 8787 занят: python.exe (PID 19520),
+        снимите её вручную» и шёл в диспетчер задач — при том что замок нашего
+        каталога данных к этому месту уже у нас, то есть общих файлов заведомо
+        нет. Подробности — в tests/test_port_dead_end.py.
         """
-        assert '0 if ours else' in self.text
+        assert 'shares_our_data(holder)' in self.text
+        assert '0 if ours else' not in self.text
 
 
 def _free_port():
