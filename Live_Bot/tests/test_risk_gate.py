@@ -228,18 +228,50 @@ class TestMaxExposureIsComputable:
         assert total == 10.0 and unbounded == ['RSIBB']
 
 
-class TestSettingsFailureIsLoud:
+class TestSettingsFailureDoesNotDisarmTheLimits:
     """
-    Боевой путь глушил ошибку чтения настроек и торговал БЕЗ пределов вовсе.
-    Останавливать торговлю из-за неё нельзя — позиции уже в рынке. Но и
-    молчать нельзя.
+    Боевой путь глушил ошибку чтения настроек и торговал БЕЗ пределов вовсе:
+    занятый или битый файл тихо снимал всю защиту.
+
+    Запрещать торговлю тоже неверно — позиции уже в рынке, и остановка из-за
+    сбоя ввода-вывода останавливает их ведение. Верный ответ третий: судить по
+    последним значениям, которые точно читались.
     """
 
-    def test_it_says_something(self, capsys, monkeypatch):
+    def setup_method(self):
+        risk_gate._last_good = None
+
+    def teardown_method(self):
+        risk_gate._last_good = None
+
+    def test_the_last_known_limits_are_used(self, monkeypatch):
         said = []
         monkeypatch.setattr(risk_gate, 'log', lambda m: said.append(m))
-        risk_gate.settings_unavailable(RuntimeError('файл занят'))
+        risk_gate.remember(12, 7.0, 3.0)
+        assert risk_gate.settings_unavailable(RuntimeError('файл занят')) == (12, 7.0, 3.0)
+        assert said and 'последние известные' in said[0]
+
+    def test_without_any_reading_it_passes_but_says_so(self, monkeypatch):
+        """Сбой на первом же чтении: судить не по чему, и об этом прямо."""
+        said = []
+        monkeypatch.setattr(risk_gate, 'log', lambda m: said.append(m))
+        assert risk_gate.settings_unavailable(RuntimeError('нет файла')) is None
         assert said and 'БЕЗ' in said[0]
+
+    def test_both_paths_remember_what_they_read(self):
+        """
+        Без этого откат пуст: помнить нечего, и защита снимается ровно так же,
+        как раньше.
+        """
+        for module in ('paper_broker', 'trade_manager'):
+            body = TestBothPathsCallTheSameGate()._source(module, '_portfolio_room')
+            assert 'risk_gate.remember(' in body, module
+
+    def test_both_paths_use_the_fallback(self):
+        for module in ('paper_broker', 'trade_manager'):
+            body = TestBothPathsCallTheSameGate()._source(module, '_portfolio_room')
+            assert 'known is None' in body, (
+                f'{module} снова выходит без пределов при сбое чтения')
 
 
 class TestTrailingCannotDivergeSilently:

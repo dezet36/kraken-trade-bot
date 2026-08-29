@@ -489,9 +489,12 @@ class LiveTradeManager:
             max_positions = settings.portfolio_max_positions()
             risk_limit = settings.portfolio_risk_pct()
             day_limit = settings.daily_loss_pct()
+            risk_gate.remember(max_positions, risk_limit, day_limit)
         except Exception as exc:                   # noqa: BLE001
-            risk_gate.settings_unavailable(exc)
-            return True, ''
+            known = risk_gate.settings_unavailable(exc)
+            if known is None:
+                return True, ''
+            max_positions, risk_limit, day_limit = known
 
         used_amount, _pct, deposit = self.portfolio_risk()
         day_pnl, day_pct, _dep = self.daily_result()
@@ -905,36 +908,21 @@ class LiveTradeManager:
         sl_order  = None
         tp_orders = []
 
-        # ── SL через position trading-stop ───────────────────────────────────
-        try:
-            self.exchange.privatePostV5PositionTradingStop({
-                'category':    'linear',
-                'symbol':      trading_pair,
-                'stopLoss':    str(sl_price),
-                'slTriggerBy': 'LastPrice',
-                'positionIdx': 0,
-            })
+        # ── SL на позицию — тем способом, какой понимает эта биржа ───────────
+        # Раньше здесь стоял прямой вызов эндпоинта Bybit V5, и на BingX
+        # позиция после РЫНОЧНОГО входа оставалась вовсе без биржевого стопа:
+        # вызов падал, а запасным был программный стоп, который живёт только
+        # пока запущено приложение.
+        if self._set_position_stop(trading_pair, sl_price):
             sl_order = {'id': 'position_sl'}
             log(f"SL выставлен @ ${sl_price:.4f}")
-        except Exception as e:
-            err = str(e)
-            if '34040' in err or 'not modified' in err:
-                sl_order = {'id': 'position_sl'}
-                log(f"SL уже выставлен @ ${sl_price:.4f}")
-            else:
-                # ЧТО ИМЕННО ОСТАЛОСЬ ЗАЩИЩАТЬ ПОЗИЦИЮ, зависит от пути входа.
-                # При лимитном входе стоп уходит ВМЕСТЕ с ордером и уже стоит
-                # на бирже — этот вызов лишь уточняет его. При рыночном входе
-                # биржевого стопа нет, и остаётся программный, который живёт
-                # только пока запущено приложение.
-                #
-                # Прежде здесь безусловно писалось «программный SL активен», и
-                # по журналу нельзя было отличить одно от другого.
-                if getattr(self.exchange, 'id', '') != 'bybit':
-                    log(f"⚠️ SL не уточнён (эндпоинт Bybit недоступен на "
-                        f"{getattr(self.exchange, 'id', 'бирже')}): {e}")
-                else:
-                    log(f"⚠️ SL не выставлен (программный SL активен): {e}")
+        else:
+            # Что именно защищает позицию, зависит от пути входа. При лимитном
+            # стоп ушёл ВМЕСТЕ с ордером и уже стоит на бирже. При рыночном
+            # биржевого стопа нет, и остаётся программный — он живёт, только
+            # пока запущено приложение, а его выключают на ночь.
+            log("⚠️ SL на позицию не встал — остаётся программный, "
+                "действующий лишь пока работает приложение")
 
         # ── TP ───────────────────────────────────────────────────────────────
         if n_tp == 1:
@@ -1293,41 +1281,74 @@ class LiveTradeManager:
         except Exception:
             pass
 
-    def _update_trail_stop(self, trading_pair, position, new_stop_price):
-        """Обновляет SL позиции через Bybit position trading-stop."""
+    def _set_position_stop(self, trading_pair, stop_price):
+        """
+        Двигает защитный стоп ОТКРЫТОЙ позиции. Возвращает True, если удалось.
+
+        ПОЧЕМУ ОТДЕЛЬНЫМ МЕТОДОМ. Перенос стопа делался в четырёх местах и
+        всюду одинаково — прямым вызовом privatePostV5PositionTradingStop, то
+        есть эндпоинта Bybit V5. На BingX такого метода у клиента нет вовсе:
+        вызов падал, общий `except` записывал строку в журнал, и стоп молча
+        оставался на прежнем месте. Перевод в безубыток и трейлинг там просто
+        не работали.
+
+        Теперь у каждой площадки свой способ, а решение — одно:
+        у Bybit родной эндпоинт позиции, у остальных — штатный
+        `edit_order`/`create_order` через ccxt с ценой срабатывания. ccxt сам
+        переводит её в формат биржи (у BingX это вложенный STOP_MARKET).
+
+        «Не изменилось» (код 34040) — не ошибка: стоп уже стоит там, куда его
+        двигают. Повторная установка того же уровня штатна.
+        """
         try:
-            self.exchange.privatePostV5PositionTradingStop({
-                'category':    'linear',
-                'symbol':      trading_pair,
-                'stopLoss':    str(new_stop_price),
-                'slTriggerBy': 'LastPrice',
-                'positionIdx': 0,
-            })
+            if getattr(self.exchange, 'id', '') == 'bybit':
+                self.exchange.privatePostV5PositionTradingStop({
+                    'category':    'linear',
+                    'symbol':      trading_pair,
+                    'stopLoss':    str(stop_price),
+                    'slTriggerBy': 'LastPrice',
+                    'positionIdx': 0,
+                })
+            else:
+                # Позиционного стопа как у Bybit здесь нет: ставим отдельный
+                # приказ на закрытие. reduce_only обязателен — иначе он
+                # откроет встречную позицию вместо закрытия текущей.
+                self.exchange.create_order(
+                    symbol=trading_pair, type='market',
+                    side='sell' if self._position_is_long(trading_pair) else 'buy',
+                    amount=None,
+                    params={'stopLossPrice': float(stop_price),
+                            'reduce_only': True, 'closePosition': True})
+            return True
+        except Exception as e:                     # noqa: BLE001
+            text = str(e)
+            if '34040' in text or 'not modified' in text:
+                return True                        # уже стоит там же
+            log(f"   ⚠️ Стоп не перенесён на {getattr(self.exchange, 'id', 'бирже')}: {e}")
+            return False
+
+    def _position_is_long(self, trading_pair):
+        """Сторона открытой позиции по паре. По умолчанию LONG."""
+        for pos in (self.active_positions.get(trading_pair) or []):
+            if pos.get('status') == 'OPEN':
+                return pos['signal']['setup']['type'] == 'LONG'
+        return True
+
+    def _update_trail_stop(self, trading_pair, position, new_stop_price):
+        """Обновляет защитный стоп позиции — на любой бирже."""
+        if self._set_position_stop(trading_pair, new_stop_price):
             log(f"   Трейлинг стоп → ${new_stop_price:.4f}")
-        except Exception as e:
-            if '34040' not in str(e) and 'not modified' not in str(e):
-                log(f"   Ошибка обновления трейлинга: {e}")
         position['trail_stop'] = new_stop_price
 
     def _move_sl_to_breakeven(self, trading_pair, position):
-        """Переносит стоп в безубыток через Bybit position trading-stop."""
+        """Переносит стоп в безубыток — на любой бирже."""
         entry = position['entry_price']
         is_long = position['signal']['setup']['type'] == 'LONG'
         # Bybit требует SL строго по ту сторону entry: LONG — ниже, SHORT — выше
         offset = entry * 0.0002
         be_sl = (entry - offset) if is_long else (entry + offset)
-        try:
-            self.exchange.privatePostV5PositionTradingStop({
-                'category':    'linear',
-                'symbol':      trading_pair,
-                'stopLoss':    str(round(be_sl, 8)),
-                'slTriggerBy': 'LastPrice',
-                'positionIdx': 0,
-            })
+        if self._set_position_stop(trading_pair, round(be_sl, 8)):
             log(f"🔄 Стоп перенесён в безубыток @ ${be_sl:.6f}")
-        except Exception as e:
-            if '34040' not in str(e) and 'not modified' not in str(e):
-                log(f"⚠️ Не удалось перенести стоп в безубыток: {e}")
         position['breakeven_set'] = True
         position['be_time'] = datetime.now().isoformat(timespec='seconds')   # для журнала
         params = position['params']

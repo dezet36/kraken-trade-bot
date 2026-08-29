@@ -1451,7 +1451,9 @@ function cards(byStrategy) {
         <span class="side">${heroSide}</span>
       </div>
       <div class="kpis">
-        ${kpi('Сделок', s.stats.trades, `${s.stats.wins} в плюс`)}
+        ${kpi('Сделок', s.stats.trades,
+              `${s.stats.wins} в плюс` + (s.stats.skipped
+                ? ` · ${s.stats.skipped} не в счёт: дыра в данных` : ''))}
         ${kpi('Винрейт', s.stats.winrate.toFixed(1) + '%', '')}
         ${kpi('Profit factor', s.stats.pf === null ? '—' : s.stats.pf.toFixed(2),
               s.stats.expectancy.toFixed(3) + ' R/сд')}
@@ -1978,7 +1980,10 @@ function closedTable(rows) {
     return `<tr class="clickable" data-trade="${esc(r.id)}"
       title="Нажмите, чтобы раскрыть подробности сделки">
       <td>${esc(r.id)}</td>
-      <td>${skey(r.strategy)}${r.suspect
+      <td>${skey(r.strategy)}${r.gap_min > 0
+        ? ' <span class="flag" title="Часть жизни сделки прошла без свечей: '
+          + Math.round(r.gap_min) + ' мин. Считалась по неполным данным и в '
+          + 'статистику не идёт.">дыра в данных</span>' : ''}${r.suspect
         ? ' <span class="flag" title="' + esc(r.suspect) + '">не свой сетап</span>'
         : ''}</td>
       <td class="pair">${esc(r.pair)}</td>
@@ -3530,6 +3535,10 @@ function renderTradeCard(t, data, note) {
     // Предупреждение стоит ПЕРВЫМ и во всю ширину: если сделка посчитана по
     // чужой геометрии, читать её числа ниже бессмысленно, и узнать об этом
     // надо до того, как начал их читать.
+    + (t.gap_min > 0
+        ? '<div class="tc-warn">⚠ дыра в данных: ' + Math.round(t.gap_min)
+          + ' мин без свечей. Сделка считалась по неполным данным и в '
+          + 'статистику не идёт.</div>' : '')
     + (t.suspect ? '<div class="tc-warn">⚠ ' + esc(t.suspect) + '</div>' : '')
     + '<div class="tc-left">'
     + (note ? '<div class="tc-note">' + esc(note) + '</div>' : tradeChart(t, data))

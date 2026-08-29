@@ -116,10 +116,95 @@ class TestTheStopIsAttachedEverywhere:
         spot = block.index("limit_params['slTriggerBy']")
         assert 'if is_bybit' in block[max(0, spot - 200):spot]
 
-    def test_the_message_distinguishes_the_two_cases(self):
+    def test_moving_the_stop_is_not_bound_to_one_exchange(self):
         """
-        «Программный SL активен» — правда только при рыночном входе. При
-        лимитном стоп уже стоит на бирже, и та же фраза вводила бы в
-        заблуждение ровно там, где важна точность.
+        Перенос стопа делался в четырёх местах прямым вызовом эндпоинта Bybit
+        V5. На BingX такого метода у клиента нет: вызов падал, общий except
+        писал строку в журнал, и стоп молча оставался на месте — то есть
+        безубыток и трейлинг там не работали вовсе.
         """
-        assert 'SL не уточнён' in self.SRC
+        assert 'def _set_position_stop' in self.SRC
+        for method in ('_update_trail_stop', '_move_sl_to_breakeven'):
+            spot = self.SRC.index(f'def {method}')
+            body = self.SRC[spot:self.SRC.index('\n    def ', spot + 10)]
+            assert 'privatePostV5PositionTradingStop' not in body, (
+                f'{method} снова зовёт эндпоинт Bybit напрямую')
+            assert '_set_position_stop' in body, method
+
+    def test_the_only_bybit_call_left_is_inside_the_shared_method(self):
+        """
+        Один вызов остаться обязан — это и есть ветка Bybit. Важно, что он
+        ровно один и стоит там, где выбирают способ по площадке.
+        """
+        import re
+        code = re.sub(r'""".*?"""', '', self.SRC, flags=re.S)   # без описаний
+        calls = code.count('privatePostV5PositionTradingStop')
+        assert calls == 2, (
+            f'прямых вызовов эндпоинта Bybit: {calls}. Ожидается два — стоп '
+            f'внутри _set_position_stop и тейк-профит, который защиты не '
+            f'касается')
+
+    def test_the_message_says_what_protects_the_position(self):
+        """
+        «Программный SL активен» — правда только при рыночном входе, и сама по
+        себе она не говорит главного: такой стоп живёт, лишь пока запущено
+        приложение, а его выключают на ночь.
+        """
+        spot = self.SRC.index('SL на позицию не встал')
+        assert 'пока работает приложение' in self.SRC[spot:spot + 300]
+
+
+class TestTheStopActuallyReachesTheExchange:
+    """
+    Проверка НЕ на том, что параметр принят, а на том, что он превращается в
+    настоящий стоп в теле запроса.
+
+    Разница существенная. Убедиться, что `create_order_request` не бросает
+    исключение, — почти ничего не значит: биржа могла тихо выбросить
+    непонятое поле, и ордер ушёл бы голым. Здесь смотрим сам запрос.
+
+    Живого счёта BingX нет, отправить туда ордер не на чем. Но собрать запрос
+    и заглянуть внутрь можно, и это отвечает на нужный вопрос: несёт ли он
+    стоп.
+
+    Требует сети — ccxt берёт описание рынков с биржи. Без неё проверка
+    пропускается: гонять весь набор тестов через интернет незачем.
+    """
+
+    def _payload(self, name):
+        import ccxt
+        import pytest
+        ex = getattr(ccxt, name)()
+        try:
+            ex.load_markets()
+        except Exception:                          # noqa: BLE001
+            pytest.skip(f'{name}: нет сети — описание рынков не загрузилось')
+        params = {'reduce_only': False, 'timeInForce': 'GTC',
+                  'stopLoss': '58000.0'}
+        if name == 'bybit':
+            params['slTriggerBy'] = 'LastPrice'
+        return ex.create_order_request('BTC/USDT:USDT', 'limit', 'buy',
+                                       0.01, 60000.0, params)
+
+    def test_bybit_order_carries_the_stop(self):
+        body = self._payload('bybit')
+        assert 'stopLoss' in body and str(body['stopLoss']).startswith('58000')
+
+    def test_bingx_order_carries_the_stop(self):
+        """
+        РАДИ ЭТОГО ВСЁ И ДЕЛАЛОСЬ. До правки стоп на BingX не прикреплялся
+        вовсе: условие `if exchange.id == 'bybit'` пропускало его мимо.
+
+        ccxt переводит наше значение в родной формат биржи сам — вложенным
+        объектом со stopPrice и типом STOP_MARKET.
+        """
+        body = self._payload('bingx')
+        assert 'stopLoss' in body, 'ордер BingX уходит без стопа'
+        text = str(body['stopLoss'])
+        assert '58000' in text, f'цена стопа потерялась: {text}'
+        assert 'STOP' in text.upper(), f'это не стоп-приказ: {text}'
+
+    def test_both_exchanges_get_one(self):
+        """Симметрия — весь смысл правки: защита не зависит от площадки."""
+        for name in ('bybit', 'bingx'):
+            assert 'stopLoss' in self._payload(name), name

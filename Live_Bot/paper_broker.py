@@ -342,9 +342,12 @@ class PaperBroker:
             max_positions = settings.portfolio_max_positions()
             risk_limit = settings.portfolio_risk_pct()
             day_limit = settings.daily_loss_pct()
+            risk_gate.remember(max_positions, risk_limit, day_limit)
         except Exception as exc:                   # noqa: BLE001
-            risk_gate.settings_unavailable(exc)
-            return True, ''
+            known = risk_gate.settings_unavailable(exc)
+            if known is None:
+                return True, ''
+            max_positions, risk_limit, day_limit = known
 
         used, _pct, deposit = self.portfolio_risk()
         day_pnl, day_pct, _dep = self.daily_result()
