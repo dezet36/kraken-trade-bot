@@ -208,3 +208,72 @@ class TestTheStopActuallyReachesTheExchange:
         """Симметрия — весь смысл правки: защита не зависит от площадки."""
         for name in ('bybit', 'bingx'):
             assert 'stopLoss' in self._payload(name), name
+
+
+class TestTheStopMoveIsBuildableOnEveryExchange:
+    """
+    Ветка для не-Bybit была написана вслепую и НЕ РАБОТАЛА.
+
+    Первая версия передавала в ccxt `amount=None`, полагаясь на closePosition.
+    Запрос не собирался вовсе — AttributeError внутри ccxt, ещё до обращения к
+    сети. То есть перенос стопа на BingX падал бы всегда, а общий `except`
+    записывал бы это одной строкой в журнал.
+
+    Поймано сборкой запроса: способ тот же, что и для стопа на входе — просим
+    ccxt собрать тело и смотрим, что вышло. Живого счёта BingX нет, но этот
+    вопрос он и не требует.
+    """
+
+    def _built(self, amount):
+        import ccxt
+        import pytest
+        ex = ccxt.bingx()
+        try:
+            ex.load_markets()
+        except Exception:                          # noqa: BLE001
+            pytest.skip('нет сети — описание рынков не загрузилось')
+        return ex.create_order_request(
+            'BTC/USDT:USDT', 'market', 'sell', amount, None,
+            {'stopLossPrice': 58000.0, 'reduce_only': True})
+
+    def test_a_size_is_required(self):
+        """Ровно та ошибка: без объёма запрос не собирается."""
+        import pytest
+        with pytest.raises(Exception):
+            self._built(None)
+
+    def test_with_a_size_it_becomes_a_stop_order(self):
+        body = self._built(0.01)
+        assert str(body.get('type')).upper() == 'STOP_MARKET'
+        assert float(body.get('stopPrice')) == 58000.0
+        assert float(body.get('quantity')) == 0.01
+
+    def test_the_code_asks_for_the_size(self):
+        src = open(os.path.join(ROOT, 'trade_manager.py'), encoding='utf-8').read()
+        spot = src.index('def _set_position_stop')
+        body = src[spot:src.index('\n    def ', spot + 10)]
+        # Только код: в описании метод объясняет, ПОЧЕМУ amount=None было
+        # ошибкой, и упоминать её там законно.
+        no_doc = re.sub(r'"""[\s\S]*?"""', '', body)
+        code = '\n'.join(ln for ln in no_doc.splitlines()
+                         if not ln.strip().startswith('#'))
+        assert 'amount=None' not in code, 'снова просим ccxt собрать запрос без объёма'
+        assert '_open_size(' in code
+
+    def test_the_size_is_the_remainder_not_the_original(self):
+        """
+        После частичной фиксации первоначальный объём больше того, что мы
+        держим. Просить у биржи лишнее — получить отказ и остаться без
+        перенесённого стопа.
+        """
+        src = open(os.path.join(ROOT, 'trade_manager.py'), encoding='utf-8').read()
+        spot = src.index('def _open_size')
+        body = src[spot:src.index('\n    def ', spot + 10)]
+        assert 'remaining_size' in body
+
+    def test_no_position_means_no_order(self):
+        """Нечего защищать — нечего и отправлять."""
+        src = open(os.path.join(ROOT, 'trade_manager.py'), encoding='utf-8').read()
+        spot = src.index('def _set_position_stop')
+        body = src[spot:src.index('\n    def ', spot + 10)]
+        assert 'if not size:' in body and 'return False' in body

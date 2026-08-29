@@ -1313,12 +1313,23 @@ class LiveTradeManager:
                 # Позиционного стопа как у Bybit здесь нет: ставим отдельный
                 # приказ на закрытие. reduce_only обязателен — иначе он
                 # откроет встречную позицию вместо закрытия текущей.
+                #
+                # ОБЪЁМ ОБЯЗАТЕЛЕН. Первая версия передавала amount=None в
+                # расчёте на closePosition — и падала внутри ccxt с
+                # AttributeError, ещё не дойдя до сети. Проверено сборкой
+                # запроса: с объёмом получается STOP_MARKET с нужным
+                # stopPrice, без объёма не получается ничего.
+                size = self._open_size(trading_pair)
+                if not size:
+                    log(f"   ⚠️ Стоп не перенесён: не знаю объём открытой "
+                        f"позиции по {trading_pair}")
+                    return False
                 self.exchange.create_order(
                     symbol=trading_pair, type='market',
                     side='sell' if self._position_is_long(trading_pair) else 'buy',
-                    amount=None,
+                    amount=size,
                     params={'stopLossPrice': float(stop_price),
-                            'reduce_only': True, 'closePosition': True})
+                            'reduce_only': True})
             return True
         except Exception as e:                     # noqa: BLE001
             text = str(e)
@@ -1333,6 +1344,21 @@ class LiveTradeManager:
             if pos.get('status') == 'OPEN':
                 return pos['signal']['setup']['type'] == 'LONG'
         return True
+
+    def _open_size(self, trading_pair):
+        """
+        Сколько ещё держим по паре. Ноль — держать нечего.
+
+        Берём ОСТАТОК, а не первоначальный объём: после частичной фиксации их
+        разница и есть та часть, которую стоп закрывать уже не должен. Просить
+        у биржи больше, чем держим, — верный способ получить отказ ордера, а
+        значит остаться без перенесённого стопа.
+        """
+        for pos in (self.active_positions.get(trading_pair) or []):
+            if pos.get('status') == 'OPEN':
+                return float(pos.get('remaining_size')
+                             or pos.get('position_size') or 0)
+        return 0.0
 
     def _update_trail_stop(self, trading_pair, position, new_stop_price):
         """Обновляет защитный стоп позиции — на любой бирже."""

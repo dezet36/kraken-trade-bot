@@ -122,3 +122,11 @@ Live_Bot/polymarket_data/
 
 # Выгрузки, сохранённые по кнопке: данные, а не код.
 Live_Bot/exports/
+
+# Состояние запущенного приложения и отладочные выгрузки. Пишутся на ходу и в
+# истории кода не нужны: running_app.json меняется при каждом запуске,
+# window.json — при каждом движении окна, а leak_trace.txt был разовой
+# выгрузкой трассировок из разбора «кто пишет в боевой paper_state.json».
+Live_Bot/running_app.json
+Live_Bot/window.json
+Live_Bot/leak_trace.txt
