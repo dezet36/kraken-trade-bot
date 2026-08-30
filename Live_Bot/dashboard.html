@@ -2473,10 +2473,16 @@ function portfolioLimit(writable) {
       ${(p.limits_off && p.limits_off.length) ? `
         <div class="pf-now" style="color:var(--warn)">
           Выключено: ${p.limits_off.join(', ')}.
-          ${p.worst_case_pct ? `Если стратегии займут все слоты, одновременно
-            под риском окажется до <b>${p.worst_case_pct}%</b> депозита` : ''}
-          ${(p.unbounded && p.unbounded.length)
-            ? ` · без предела слотов: ${p.unbounded.join(', ')}` : ''}
+          ${/* ПО СТРАТЕГИЯМ, БЕЗ ОБЩЕЙ СУММЫ. Здесь стояло одно число «до N%
+               депозита», сложенное по всем стратегиям. Но депозит у каждой
+               свой и в деньгах, и сумма их процентов не относится ни к
+               одному — см. risk_gate.exposure_by_strategy. */ ''}
+          ${(p.worst_by_strategy && p.worst_by_strategy.length)
+            ? 'Заняв все слоты, каждая держит под риском своих денег: '
+              + p.worst_by_strategy.map(w => w.pct === null
+                  ? `${esc(NAMES[w.name] || w.name)} — без предела слотов`
+                  : `${esc(NAMES[w.name] || w.name)} до <b>${w.pct}%</b>`).join(', ')
+            : ''}
         </div>` : ''}
       <div class="ctl-row">
         <label for="pf-risk">Максимум под риском</label>
@@ -2484,8 +2490,11 @@ function portfolioLimit(writable) {
         <input type="number" id="pf-risk" min="0" max="100" step="0.5"
                value="${p.limit_pct}" ${writable ? '' : 'disabled'}>
       </div>
-      <div class="ctl-note">Сколько процентов депозита может стоять под риском
-        одновременно, считая все стратегии вместе. <b>0 — предел выключен.</b></div>
+      <div class="ctl-note">Общий предел поверх стратегий: сколько процентов
+        счёта может стоять под риском одновременно. Нужен только на бирже, где
+        книга одна на всех; на фантомных деньгах у каждой стратегии свой
+        депозит, и она уже ограничена своими слотами.
+        <b>0 — предел выключен.</b></div>
       <div class="ctl-row">
         <label for="pf-slots">Максимум позиций</label>
         <span class="unit"></span>

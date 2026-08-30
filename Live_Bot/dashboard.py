@@ -965,14 +965,18 @@ def _portfolio():
         from levels import params as lp
         from rsibb import params as rp
         from smc import params as sp
-        worst, unbounded = risk_gate.max_exposure([
+        # ПО СТРАТЕГИЯМ, БЕЗ СЛОЖЕНИЯ. Проценты считаются от РАЗНЫХ депозитов
+        # ($20 000 у фибо, $4 000 у боллинджера), и сумма их не относится ни к
+        # одному — см. risk_gate.exposure_by_strategy.
+        worst = risk_gate.exposure_by_strategy([
             ('FIBO', st.max_slots('FIBO'), config.RISK_PER_TRADE),
             ('SMC', st.max_slots('SMC'), sp.RISK_PER_TRADE_PCT),
             ('LEVELS', st.max_slots('LEVELS'), lp.RISK_PCT),
             ('RSIBB', st.max_slots('RSIBB'), rp.RISK_PCT),
         ])
+        unbounded = [n for n, pct in worst if pct is None]
     except Exception:                              # noqa: BLE001
-        worst, unbounded = 0.0, []
+        worst, unbounded = [], []
 
     return {
         'risk_usd': round(used, 2), 'risk_pct': round(pct, 2),
@@ -983,7 +987,9 @@ def _portfolio():
         'day_limit': day_limit,
         'day_stopped': bool(day_limit and day_pnl < 0 and -day_pct >= day_limit),
         'limits_off': off,
-        'worst_case_pct': round(worst, 1),
+        'worst_by_strategy': [{'name': n, 'pct': (None if pct is None
+                                                   else round(pct, 1))}
+                              for n, pct in worst],
         'unbounded': unbounded,
     }
 

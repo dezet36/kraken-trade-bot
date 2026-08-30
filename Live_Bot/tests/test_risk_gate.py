@@ -210,22 +210,56 @@ class TestDisabledLimitsAreNamedOutLoud:
         assert off == ['предел риска портфеля']
 
 
-class TestMaxExposureIsComputable:
+class TestExposureIsPerStrategy:
     """
     «Сколько мы можем потерять одновременно» должно быть числом, а не
     рассуждением. Считается по слотам и риску каждой стратегии.
+
+    ЗАМЫСЕЛ ТОТ ЖЕ, СЛОЖЕНИЕ УБРАНО. Прежняя max_exposure возвращала ОДНУ
+    сумму и называла её «процент депозита». Но депозит у каждой стратегии
+    свой и в деньгах:
+
+        FIBO $20 000 · LEVELS $9 200 · SMC $6 800 · RSIBB $4 000
+
+    Полпроцента у фибо — это $100, полпроцента у боллинджера — $20. Сумма
+    таких процентов не относится ни к одному депозиту. Число выглядело
+    убедительно: диагностика показывала «до 40% депозита под риском
+    одновременно», и по нему трижды предлагалось чинить неcломанное.
+
+    Раздельность бюджетов не случайна — config объясняет, что доли общего
+    котла убрали намеренно. Складывающая функция возвращала эту связь через
+    отчётность.
     """
 
-    def test_it_sums_slots_times_risk(self):
-        total, unbounded = risk_gate.max_exposure(
+    def test_each_strategy_answers_for_its_own_money(self):
+        got = risk_gate.exposure_by_strategy(
             [('FIBO', 20, 0.5), ('SMC', 20, 1.0)])
-        assert total == 30.0 and unbounded == []
+        assert got == [('FIBO', 10.0), ('SMC', 20.0)]
 
     def test_a_strategy_without_a_slot_limit_is_unbounded(self):
         """Ноль слотов означает «без предела» — она наберёт сколько найдёт."""
-        total, unbounded = risk_gate.max_exposure(
+        got = risk_gate.exposure_by_strategy(
             [('FIBO', 20, 0.5), ('RSIBB', 0, 0.5)])
-        assert total == 10.0 and unbounded == ['RSIBB']
+        assert got == [('FIBO', 10.0), ('RSIBB', None)]
+
+    def test_nothing_sums_them(self):
+        """
+        Проверка на сам дефект: функция обязана вернуть РАЗДЕЛЬНЫЕ числа, а не
+        одно. Иначе связь между бюджетами вернётся чёрным ходом.
+        """
+        got = risk_gate.exposure_by_strategy([('A', 10, 1.0), ('B', 10, 1.0)])
+        assert len(got) == 2
+        assert not hasattr(risk_gate, 'max_exposure'), (
+            'складывающая функция вернулась — проценты разных депозитов снова '
+            'сложатся в число, которого нет')
+
+    def test_the_panel_and_diagnostics_ask_per_strategy(self):
+        import os
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        for name in ('dashboard.py', 'doctor.py'):
+            src = open(os.path.join(root, name), encoding='utf-8').read()
+            assert 'exposure_by_strategy(' in src, name
+            assert 'max_exposure(' not in src, name
 
 
 class TestSettingsFailureDoesNotDisarmTheLimits:
