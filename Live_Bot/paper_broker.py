@@ -55,6 +55,18 @@ BAR_MS = 5 * 60 * 1000
 FUNDING_INTERVAL_MS = 8 * 60 * 60 * 1000
 
 STATE_FILE   = os.path.join(config.DATA_DIR, 'paper_state.json')
+def _refuse(strategy, signal, gate, detail='', cost_share=''):
+    """
+    Записывает отказ предохранителя. Отдельной обёрткой, чтобы отказ записи
+    не мог свалить торговлю: модуль вспомогательный, и его беды — не наши.
+    """
+    try:
+        import refused
+        refused.record(strategy, signal, gate, detail, cost_share)
+    except Exception:                              # noqa: BLE001
+        pass
+
+
 JOURNAL_CSV  = os.path.join(config.DATA_DIR, 'paper_trades.csv')
 JOURNAL_JSON = os.path.join(config.DATA_DIR, 'paper_trades.jsonl')
 
@@ -83,7 +95,24 @@ COLUMNS = [
     'cost_share_pct',
     'gross_pnl_usd', 'fees_usd', 'funding_usd', 'pnl_usd', 'pnl_r', 'pnl_pct',
     'balance_before', 'balance_after', 'result',
-    'mfe_price', 'mae_price', 'mfe_r', 'mae_r', 'breakeven_set',
+    'mfe_price', 'mae_price', 'mfe_r', 'mae_r',
+    # КОГДА цена дошла до лучшей и худшей точки, в минутах от входа.
+    #
+    # Насколько она уходила, журнал знал и раньше, а когда — нет, и
+    # этого не хватило при разборе 29 августа 2026: 21 сделка доходила
+    # до цели и закрылась в ноль по безубытку, а восстановить порядок
+    # событий — сначала рост или сначала просадка — было нечем.
+    # Вопрос «безубыток спасает или режет» остался без ответа.
+    'mfe_min', 'mae_min',
+    # ОБСТАНОВКА НА МОМЕНТ ВХОДА. Без неё нельзя спросить, в каком рынке
+    # стратегия работает: разбор 29 августа упёрся ровно в это. Лонги дали
+    # +0.20R, шорты -0.33R, и объяснить это удалось только прикидкой, что
+    # биткоин за месяц вырос на 8.3% — точнее сказать было нечем.
+    #
+    # atr_pct — размах свечей в процентах цены, то есть насколько трясёт.
+    # hour_utc — час суток: азиатская сессия и американская живут по-разному.
+    'atr_pct', 'hour_utc',
+    'breakeven_set',
     'why', 'confluence', 'poi_type', 'factors', 'sweep',
     'impulse_pct', 'score', 'proximity', 'htf_strength',
     # Человеческие формулировки — чтобы выгрузку можно было читать в Excel,
@@ -555,6 +584,7 @@ class PaperBroker:
             return False
         if not self.check_cooldown(strategy, pair):
             log(f"   [{strategy}] {pair}: кулдаун активен")
+            _refuse(strategy, signal, 'кулдаун', 'пауза после недавней сделки')
             return False
 
         # Предел на ВЕСЬ портфель — единственная проверка, которая смотрит
@@ -564,6 +594,7 @@ class PaperBroker:
         allowed, why = self._portfolio_room(strategy, params)
         if not allowed:
             log(f"   [{strategy}] {pair}: {why}")
+            _refuse(strategy, signal, 'предел портфеля', why)
             return False
 
         # Направленный кэп берём из сигнала: у стратегий он разный. Считаем
@@ -573,6 +604,8 @@ class PaperBroker:
         if cap > 0 and self._direction_count(strategy, direction) >= cap:
             log(f"   [{strategy}] {pair}: направление {direction} занято "
                 f"{cap}/{cap} — направленный кэп")
+            _refuse(strategy, signal, 'направленный кэп',
+                    f'{direction} занято {cap}/{cap}')
             return False
 
         entry = float(params['entry'])
@@ -604,6 +637,8 @@ class PaperBroker:
             config.MAX_ENTRY_COST_SHARE_PCT)
         if pricey:
             log(f"   [{strategy}] {pair}: {why}")
+            _refuse(strategy, signal, 'предел издержек', why,
+                    round(cost_share, 3))
             return False
 
         balance = self.balance(strategy)
@@ -788,6 +823,13 @@ class PaperBroker:
             for pair, rec in list(self.positions(strategy).items()):
                 pairs[pair] = min(pairs.get(pair, rec['last_ts']), rec['last_ts'])
 
+        # ПАРЫ ПОД НАБЛЮДЕНИЕМ ТОЖЕ НУЖНЫ. Свечи запрашивались только там, где
+        # висит ордер или стоит позиция, а наблюдение за уже ЗАКРЫТОЙ сделкой
+        # ни того ни другого не имеет — и не получало ни одной свечи. Поймано
+        # сквозным прогоном: наблюдение заводилось и не досматривалось никогда.
+        for w in (self.state.get('follow') or []):
+            pairs[w['pair']] = min(pairs.get(w['pair'], w['last_ts']), w['last_ts'])
+
         if not pairs:
             return
 
@@ -881,10 +923,52 @@ class PaperBroker:
         self._funding_cache[pair] = (rate, now)
         return rate
 
+    def _track_volatility(self, pair, ts, high, low, close):
+        """
+        Скользящий ATR по паре, шагом в одну свечу.
+
+        Считается ЗДЕСЬ, а не при входе, по простой причине: при входе под
+        рукой только одна свеча, а размах меряется по многим. Держать же
+        отдельную историю ради этого значит хранить её дважды.
+
+        Одну пару обходят несколько стратегий подряд, поэтому свеча
+        засчитывается один раз — по времени.
+        """
+        book = self.state.setdefault('atr', {})
+        cell = book.get(pair)
+        if cell is None:
+            book[pair] = {'v': high - low, 'prev': close, 'ts': ts, 'n': 1}
+            return
+        if ts <= cell.get('ts', 0):
+            return                                 # эту свечу уже считали
+        prev = cell['prev']
+        tr = max(high - low, abs(high - prev), abs(low - prev))
+        n = min(cell['n'] + 1, 14)                 # Уайлдер, период 14
+        cell['v'] = (cell['v'] * (n - 1) + tr) / n
+        cell['prev'], cell['ts'], cell['n'] = close, ts, n
+
+    def _atr_pct(self, pair, price):
+        """Размах в процентах цены. Пусто, если считать ещё не по чему."""
+        cell = (self.state.get('atr') or {}).get(pair)
+        if not cell or not price or cell.get('n', 0) < 5:
+            return ''
+        return round(cell['v'] / price * 100, 3)
+
     def _advance(self, strategy, pair, candles, funding_rate):
         """Прогоняет свечи через ордер/позицию одной стратегии по одной паре."""
         touched = False
+        finished = []
         for ts, _open, high, low, close, _vol in candles:
+            self._track_volatility(pair, ts, high, low, close)
+
+            # Наблюдения за уже закрытыми сделками по этой паре. Идут по тем
+            # же свечам, что и позиции: отдельный проход означал бы второй
+            # запрос к бирже за теми же данными.
+            watches = self.state.get('follow') or []
+            if watches:
+                import follow_up
+                finished.extend(follow_up.advance(watches, pair, ts, high, low, close))
+
             pending = self.pending(strategy).get(pair)
             if pending and ts > pending['last_ts']:
                 # Открытие свечи нужно входу ПО ХОДУ движения: при разрыве
@@ -923,6 +1007,26 @@ class PaperBroker:
                 touched = True
                 self._apply_funding(position, ts, funding_rate)
                 self._process_position(strategy, pair, position, ts, high, low, close)
+
+        # ЗАБРОШЕННОЕ НАБЛЮДЕНИЕ ЗАКРЫВАЕТСЯ ПО ВРЕМЕНИ. Пара может выпасть
+        # из пула, биржа — перестать отдавать по ней свечи, и тогда
+        # наблюдение висело бы в состоянии вечно. Записываем что успели.
+        watches = self.state.get('follow') or []
+        if watches:
+            import follow_up
+            cutoff = _now_ms() - int(follow_up.HORIZONS[-1] * 4 * 3_600_000)
+            stale = [w for w in watches
+                     if w['closed_ts'] < cutoff and w not in finished]
+            if stale:
+                finished.extend(stale)
+
+        if finished:
+            import follow_up
+            follow_up.write([follow_up.row(w) for w in finished])
+            done = {id(w) for w in finished}
+            self.state['follow'] = [w for w in (self.state.get('follow') or [])
+                                    if id(w) not in done]
+            log(f'   наблюдений после выхода досмотрено: {len(finished)}')
         return touched
 
     @staticmethod
@@ -1082,6 +1186,10 @@ class PaperBroker:
             'breakeven_set': False,
             'mfe_price': price,
             'mae_price': price,
+            'mfe_ts': ts,
+            'mae_ts': ts,
+            'atr_pct': self._atr_pct(pair, price),
+            'hour_utc': datetime.fromtimestamp(ts / 1000, timezone.utc).hour,
             'balance_before': order['balance_before'],
             'zone': order['context'].get('zone', '—'),
             'context': order['context'],
@@ -1124,8 +1232,15 @@ class PaperBroker:
     def _process_position(self, strategy, pair, pos, ts, high, low, close):
         is_long = pos['direction'] == 'LONG'
 
-        pos['mfe_price'] = max(pos['mfe_price'], high) if is_long else min(pos['mfe_price'], low)
-        pos['mae_price'] = min(pos['mae_price'], low) if is_long else max(pos['mae_price'], high)
+        # Момент запоминается ВМЕСТЕ с ценой: иначе порядок событий внутри
+        # сделки восстановить нельзя, а он и отвечает на вопрос, срезал ли
+        # безубыток то, что уже почти дошло до цели.
+        best = max(pos['mfe_price'], high) if is_long else min(pos['mfe_price'], low)
+        if best != pos['mfe_price']:
+            pos['mfe_price'], pos['mfe_ts'] = best, ts
+        worst = min(pos['mae_price'], low) if is_long else max(pos['mae_price'], high)
+        if worst != pos['mae_price']:
+            pos['mae_price'], pos['mae_ts'] = worst, ts
 
         max_hold = getattr(config, 'MAX_POSITION_HOLD_HOURS', 0)
         if max_hold and (ts - pos['opened_ts']) / 3_600_000 > max_hold:
@@ -1231,6 +1346,21 @@ class PaperBroker:
                                 balance_before, balance_after)
         _write_journal(row)
 
+        # НАБЛЮДЕНИЕ ПОСЛЕ ВЫХОДА. Журнал знает, чем сделка кончилась, и
+        # молчит о том, что было дальше — а это и решает вопрос, тесен ли стоп
+        # и близка ли цель. Наблюдение живёт в состоянии, переживает
+        # перезапуск и пишется в отдельный файл, когда досмотрено: журнал
+        # сделок остаётся файлом, который только дописывают.
+        try:
+            import follow_up
+            pos_copy = dict(pos)
+            pos_copy['closed_at'] = row.get('close_time', '')
+            self.state.setdefault('follow', []).append(
+                follow_up.watch(pos_copy, ts, exit_price, reason,
+                                row.get('trade_id', '')))
+        except Exception as exc:                   # noqa: BLE001
+            log(f'⚠️ Наблюдение после выхода не заведено: {exc}')
+
         icon = '🟢' if net > 0 else ('⚪' if net == 0 else '🔴')
         log(f"   👻 [{strategy}] {pair}: {icon} {reason} @ ${_fmt_p(exit_price)} | "
             f"${net:+.2f} ({net / pos['risk_amount']:+.2f}R) | депозит ${balance_after:,.2f}")
@@ -1299,6 +1429,10 @@ class PaperBroker:
             'mae_price': round(pos['mae_price'], 8),
             'mfe_r': round(sign * (pos['mfe_price'] - pos['entry_price']) / sl_dist, 3) if sl_dist else '',
             'mae_r': round(sign * (pos['mae_price'] - pos['entry_price']) / sl_dist, 3) if sl_dist else '',
+            'mfe_min': int((pos.get('mfe_ts', pos['opened_ts']) - pos['opened_ts']) / 60000),
+            'mae_min': int((pos.get('mae_ts', pos['opened_ts']) - pos['opened_ts']) / 60000),
+            'atr_pct': pos.get('atr_pct', ''),
+            'hour_utc': pos.get('hour_utc', ''),
             'breakeven_set': pos['breakeven_set'],
             'why': ctx.get('why', ''),
             'geometry': json.dumps(ctx.get('geometry') or {}, ensure_ascii=False),
