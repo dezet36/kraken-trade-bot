@@ -355,21 +355,6 @@ def trade_closed(pair: str, direction: str, reason: str, pnl: float,
     )
 
 
-def daily_summary(total: int, wins: int, daily_pnl: float, balance: float):
-    wr       = (wins / total * 100) if total > 0 else 0
-    losses   = total - wins
-    pnl_icon = "📈" if daily_pnl >= 0 else "📉"
-    date_str = datetime.now().strftime("%d.%m.%Y")
-    _send(
-        f"{pnl_icon} <b>Итог за {date_str}</b>\n"
-        f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"Сделок:  {total}   ✅ {wins}   ❌ {losses}\n"
-        f"Winrate: {wr:.0f}%\n"
-        f"PnL:     <b>{_pnl_str(daily_pnl)}</b>\n"
-        f"Баланс:  <b>${balance:,.2f}</b>"
-    )
-
-
 # ── Фантомный режим ──────────────────────────────────────────────────────────
 # В фантоме уведомлений не было вовсе: trade_opened и trade_closed зовутся
 # только из боевого пути, и месяц наблюдений шёл в Telegram молча — приходила
@@ -479,10 +464,6 @@ def error_alert(message: str, telegram_id=None):
         f"⏰ {_now()}",
         chat_id=telegram_id,
     )
-
-
-def connection_restored():
-    _send(f"✅ <b>Подключение восстановлено</b> — {_now()}")
 
 
 # ── Подписка (платформа) ───────────────────────────────────────────────────────

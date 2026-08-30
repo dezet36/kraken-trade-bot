@@ -201,10 +201,6 @@ def entry_zone_name(entry_price, zone_a, zone_b):
     return 'Zone_MID'
 
 
-def price_in_zone(price, zone):
-    """Проверяет, находится ли цена в зоне"""
-    return zone['bottom'] <= price <= zone['top']
-
 def find_local_extremes(df, n=2):
     """Находит локальные экстремумы"""
     local_highs = []
