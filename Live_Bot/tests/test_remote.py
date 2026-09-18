@@ -227,3 +227,51 @@ class TestStartupRefusals:
         process, error = remote.open_tunnel({'host': 'srv'})
         assert process is None
         assert 'занят' in error.lower()
+
+
+class TestFindingTheSshClient:
+    """
+    Клиент ищется не только в PATH, и это не запасной путь, а основной случай.
+
+    ОТКУДА ЭТО. На Windows 10 LTSC 2019 встроенного OpenSSH нет вовсе, а тот,
+    что приходит с Git, лежит в Program Files/Git/usr/bin и в системный PATH
+    не добавляется — он виден только внутри Git Bash. Проверка через which
+    находила его при запуске из Git Bash и не находила при обычном запуске
+    программы, то есть ровно там, где её и запускают.
+    """
+
+    def test_the_git_client_is_looked_for(self):
+        if sys.platform != 'win32':
+            pytest.skip('пути Windows')
+        paths = ' '.join(remote.ssh_candidates()).lower()
+        assert 'git' in paths, 'клиент из комплекта Git не ищется'
+        assert 'openssh' in paths, 'встроенный клиент не ищется'
+
+    def test_the_builtin_comes_first(self):
+        """
+        Встроенный предпочтительнее: он обновляется вместе с системой, а
+        Git-овский — когда человек соберётся обновить Git.
+        """
+        if sys.platform != 'win32':
+            pytest.skip('пути Windows')
+        paths = remote.ssh_candidates()
+        assert 'OpenSSH' in paths[0]
+
+    def test_an_existing_candidate_wins_over_path(self, tmp_path, monkeypatch):
+        fake = tmp_path / 'ssh.exe'
+        fake.write_text('', encoding='utf-8')
+        monkeypatch.setattr(remote, 'ssh_candidates', lambda: [str(fake)])
+        assert remote.ssh_exe() == str(fake)
+
+    def test_the_refusal_names_where_it_looked(self, monkeypatch):
+        """
+        «Не найден» без списка отправляет ставить компонент Windows человеку,
+        у которого клиент уже есть в составе Git, просто в другом месте.
+        """
+        monkeypatch.setattr(remote, 'ssh_exe', lambda: None)
+        monkeypatch.setattr(remote, 'ssh_candidates',
+                            lambda: [r'C:\Windows\System32\OpenSSH\ssh.exe',
+                                     r'C:\Program Files\Git\usr\bin\ssh.exe'])
+        _process, error = remote.open_tunnel({'host': 'srv'})
+        assert 'System32' in error and 'Git' in error
+        assert 'PATH' in error

@@ -87,18 +87,37 @@ def save_settings(data):
         json.dump(data, fh, ensure_ascii=False, indent=2)
 
 
-def ssh_exe():
+def ssh_candidates():
     """
-    Путь к клиенту SSH. None, если его нет.
+    Где искать клиент SSH, по порядку предпочтения.
 
-    Сначала системный: на Windows 10 и новее он лежит в System32 и появляется
-    там даже когда PATH испорчен сторонними установщиками.
+    ОДНОГО PATH НЕ ХВАТАЕТ, И ЭТО НЕ РЕДКИЙ СЛУЧАЙ. Клиент из комплекта Git
+    лежит в Program Files\\Git\\usr\\bin и в системный PATH не добавляется: он
+    виден только внутри Git Bash. Проверка через which находила его при запуске
+    из Git Bash и не находила при запуске программы обычным способом — то есть
+    ровно там, где человек её и запускает.
+
+    Так и вышло: на Windows 10 LTSC 2019 встроенного OpenSSH нет вовсе,
+    Git-овский есть, а программа сообщала «клиент не найден» и предлагала
+    поставить компонент, который человеку не нужен.
     """
+    out = []
     if sys.platform == 'win32':
-        builtin = os.path.join(os.environ.get('SystemRoot', r'C:\Windows'),
-                               'System32', 'OpenSSH', 'ssh.exe')
-        if os.path.exists(builtin):
-            return builtin
+        system_root = os.environ.get('SystemRoot', r'C:\Windows')
+        out.append(os.path.join(system_root, 'System32', 'OpenSSH', 'ssh.exe'))
+        for base in (os.environ.get('ProgramFiles', r'C:\Program Files'),
+                     os.environ.get('ProgramFiles(x86)', r'C:\Program Files (x86)'),
+                     os.path.join(os.environ.get('LOCALAPPDATA', ''), 'Programs')):
+            if base:
+                out.append(os.path.join(base, 'Git', 'usr', 'bin', 'ssh.exe'))
+    return out
+
+
+def ssh_exe():
+    """Путь к клиенту SSH. None, если его нет нигде."""
+    for path in ssh_candidates():
+        if os.path.exists(path):
+            return path
     from shutil import which
     return which('ssh')
 
@@ -198,9 +217,15 @@ def open_tunnel(cfg):
     """
     ssh = ssh_exe()
     if not ssh:
-        return None, ('Клиент SSH не найден. На Windows 10 и новее он '
-                      'ставится так: Параметры → Приложения → Дополнительные '
-                      'компоненты → Клиент OpenSSH.')
+        # Перечисляем, ГДЕ искали. Без этого «не найден» отправляет ставить
+        # компонент Windows человеку, у которого клиент уже есть в составе Git,
+        # просто в другом месте.
+        looked = '\n'.join(f'  {path}' for path in ssh_candidates())
+        return None, ('Клиент SSH не найден. Искал здесь:\n' + looked +
+                      '\nи в PATH.\n\n'
+                      'Поставьте любой из двух: Параметры → Приложения → '
+                      'Дополнительные компоненты → Клиент OpenSSH, либо Git '
+                      'for Windows (в его составе клиент уже есть).')
     if not cfg.get('host'):
         return None, 'Не задан адрес сервера.'
     if port_open(LOCAL_PORT):
