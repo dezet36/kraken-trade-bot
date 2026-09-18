@@ -59,6 +59,7 @@ def show(pair, verdict, context):
 
 
 def main(pairs):
+    import config
     import exchange
     import llm_context
     import llm_decide
@@ -69,8 +70,15 @@ def main(pairs):
         print(f'  сейчас: {llm_local.model_path()!r}')
         return 1
 
+    # KEYLESS КЛИЕНТ, А НЕ ОБЩИЙ. Первая версия звала fetch_ohlcv без клиента,
+    # и тот уходил в get_exchange(), который требует ключей биржи. Прогон
+    # падал на сервере с «BYBIT_API_KEY не загружены» — при том что свечи
+    # публичные и ключей не требуют вовсе. Разбору незачем иметь доступ к
+    # счёту: он ничего не отправляет.
+    market = exchange.make_market_client(getattr(config, 'EXCHANGE_NAME', 'bybit'))
+
     for pair in pairs:
-        df = exchange.fetch_ohlcv('1h', limit=500, symbol=pair)
+        df = exchange.fetch_ohlcv('1h', limit=500, symbol=pair, client=market)
         if df is None or len(df) < 100:
             print(f'{pair}: свечей не хватило\n')
             continue
