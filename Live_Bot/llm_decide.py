@@ -1,0 +1,209 @@
+"""
+Решение по сетапу: спросить модель и проверить, что она ответила.
+
+ПОРЯДОК ВАЖЕН. Сначала грамматика не даёт выдумать уровень, потом код
+проверяет всё остальное. Разделение такое: грамматика отвечает за то, ЧТО
+может быть написано, а этот модуль — за то, имеет ли написанное смысл.
+
+ЧЕГО ГРАММАТИКА НЕ ЛОВИТ, И ПОЭТОМУ ЛОВИТСЯ ЗДЕСЬ
+
+    геометрия     у лонга стоп обязан быть НИЖЕ входа, а цель выше. Модель
+                  вольна выбрать L2 стопом и L7 целью для лонга, и грамматика
+                  это пропустит: оба идентификатора законны.
+    издержки      стоп теснее минимального не окупает комиссию
+    отношение     R:R к первой цели
+    ожидание      EV с НАСТОЯЩЕЙ комиссией в R, а не с постоянной 0.002
+    конфлюенс     порог считается по полям, а не со слов модели
+
+ПОЧЕМУ КОНФЛЮЕНС СЧИТАЕТ КОД. Попроси модель саму поставить себе оценку X/5 —
+она натянет её под сетап, который ей понравился. Это не злой умысел, а
+свойство: объяснение подгоняется под уже принятое решение. Поэтому модель
+отмечает пять отдельных признаков, а порог применяется здесь.
+
+КАЖДЫЙ ОТКАЗ ИМЕЕТ ИМЯ. Оно уходит в refused.csv, и по нему потом проверяется,
+правильно ли предохранитель отсекал. Безымянный отказ превращает разбор в
+гадание — так уже вышло с зоной B и развилкой THIN_STOP.
+"""
+
+import json
+
+import config
+import llm_context
+import llm_grammar
+from logger import log
+
+# Порог совпадения факторов. Четыре из пяти — из промта, который проверялся
+# отдельно; число намеренно не пять, иначе сделок не будет вовсе.
+MIN_CONFLUENCE = 4
+
+# Ниже этого отношения сделка не берётся. При винрейте около трети меньшее
+# отношение не окупает даже без комиссий.
+MIN_RR = 2.0
+
+FACTORS = ('poi', 'vp', 'der', 'smc', 'flow')
+
+
+def cost_in_r(entry, stop):
+    """
+    Во сколько R обойдётся круг комиссий при таком стопе.
+
+    Это то самое число, которое готовый промт заменял постоянной 0.002. При
+    стопе 0.3% настоящая величина 0.25R — занижение более чем в сто раз, и
+    ровно на тесных стопах, где издержки и решают.
+    """
+    if not entry or not stop:
+        return 0.0
+    distance = abs(entry - stop) / entry
+    if distance <= 0:
+        return 0.0
+    return config.ENTRY_COST_ROUND_TRIP / distance
+
+
+def expected_value(probability, rr, cost_r):
+    """
+    Ожидание сделки в R.
+
+    Выигрыш даёт rr, проигрыш стоит ровно 1R (стоп на то и стоп), издержки
+    платятся в обоих случаях.
+    """
+    return probability * rr - (1 - probability) * 1.0 - cost_r
+
+
+def _geometry_ok(side, entry, stop, targets):
+    """
+    Стоп с нужной стороны, цели с противоположной.
+
+    Грамматика этого выразить не может: она знает, что L2 и L7 — законные
+    идентификаторы, но не знает, какой из них выше.
+    """
+    if side == 'LONG':
+        return stop < entry and all(t > entry for t in targets)
+    return stop > entry and all(t < entry for t in targets)
+
+
+def _refusal(gate, detail, extra=None):
+    """Отказ с именем. Имя уходит в журнал отказов и там проверяется."""
+    out = {'ok': False, 'gate': gate, 'detail': detail}
+    out.update(extra or {})
+    return out
+
+
+def parse(answer, levels):
+    """
+    Разбирает ответ модели в цены. Возвращает словарь или None при поломке.
+
+    Грамматика гарантирует форму, поэтому ошибок разбора быть не должно. Но
+    вызов может пройти и без грамматики — например, если её отключат ради
+    отладки, — и тогда сюда придёт что угодно.
+    """
+    try:
+        data = json.loads(answer)
+    except (ValueError, TypeError):
+        return None
+    if not isinstance(data, dict) or 'd' not in data:
+        return None
+
+    out = {'decision': data.get('d'), 'why': data.get('why', ''),
+           'risk': data.get('risk', ''),
+           'confluence': {f: bool((data.get('cf') or {}).get(f))
+                          for f in FACTORS}}
+    if data.get('d') != 'enter':
+        return out
+
+    out['side'] = data.get('side')
+    out['p'] = float(data.get('p') or 0)
+    out['entry'] = llm_context.price_of(levels, data.get('entry'))
+    out['stop'] = llm_context.price_of(levels, data.get('stop'))
+    out['inval'] = llm_context.price_of(levels, data.get('inval'))
+    out['targets'] = [llm_context.price_of(levels, t)
+                      for t in (data.get('tp') or [])]
+    out['ids'] = {'entry': data.get('entry'), 'stop': data.get('stop'),
+                  'tp': data.get('tp'), 'inval': data.get('inval')}
+    return out
+
+
+def check(parsed, levels):
+    """
+    Проверяет разобранный ответ. Возвращает решение со всеми числами.
+
+    Ничего не «исправляет»: сомнительный сетап отвергается, а не подгоняется.
+    Подгонка здесь означала бы, что в журнал попадёт сделка, которой модель не
+    предлагала, и разобрать потом будет нечего.
+    """
+    if parsed is None:
+        return _refusal('ответ не разобран', 'модель вернула не JSON')
+
+    votes = sum(1 for f in FACTORS if parsed['confluence'].get(f))
+    base = {'confluence': parsed['confluence'], 'votes': votes,
+            'why': parsed.get('why', ''), 'risk': parsed.get('risk', '')}
+
+    if parsed['decision'] != 'enter':
+        return _refusal('модель пропустила', parsed.get('why', ''), base)
+
+    entry, stop = parsed.get('entry'), parsed.get('stop')
+    targets = [t for t in (parsed.get('targets') or []) if t is not None]
+    if not entry or not stop or not targets:
+        return _refusal('уровень не найден',
+                        'ответ ссылается на то, чего нет в разметке', base)
+
+    if votes < MIN_CONFLUENCE:
+        return _refusal('мало конфлюенса', f'{votes} из {len(FACTORS)}', base)
+
+    side = parsed.get('side')
+    if not _geometry_ok(side, entry, stop, targets):
+        return _refusal('геометрия неверна',
+                        f'{side}: вход {entry:.6g}, стоп {stop:.6g}, '
+                        f'цели {[round(t, 6) for t in targets]}', base)
+
+    stop_pct = abs(entry - stop) / entry * 100
+    floor = llm_context.min_stop_pct()
+    if floor and stop_pct < floor:
+        return _refusal('стоп теснее минимального',
+                        f'{stop_pct:.2f}% при минимуме {floor:.2f}%', base)
+
+    rr = abs(targets[0] - entry) / abs(entry - stop)
+    if rr < MIN_RR:
+        return _refusal('низкое отношение', f'R:R {rr:.2f} при минимуме {MIN_RR}',
+                        base)
+
+    cost_r = cost_in_r(entry, stop)
+    ev = expected_value(parsed['p'], rr, cost_r)
+    numbers = {'side': side, 'entry': entry, 'stop': stop, 'targets': targets,
+               'inval': parsed.get('inval'), 'p': parsed['p'],
+               'rr': round(rr, 2), 'cost_r': round(cost_r, 4),
+               'ev': round(ev, 4), 'stop_pct': round(stop_pct, 2),
+               'ids': parsed.get('ids', {})}
+    if ev <= 0:
+        return _refusal('ожидание не положительно',
+                        f'EV {ev:.3f} при вероятности {parsed["p"]:.2f}, '
+                        f'R:R {rr:.2f}, издержках {cost_r:.3f}R',
+                        {**base, **numbers})
+
+    return {'ok': True, 'gate': '', 'detail': '', **base, **numbers}
+
+
+def decide(pair, df, ask, news=None, at=None, max_tokens=400):
+    """
+    Полный проход: разметка -> грамматика -> модель -> проверка.
+
+    `ask(prompt, grammar, max_tokens)` возвращает текст ответа. Отдельным
+    параметром, а не импортом llama_cpp: так проверки обходятся без модели,
+    а замена модели не трогает эту логику.
+    """
+    context = llm_context.build(pair, df, at=at, news=news)
+    levels = context['levels']
+    if not levels:
+        return _refusal('нет разметки', 'уровней на этом баре не найдено')
+
+    grammar = llm_grammar.build([lv['id'] for lv in levels])
+    try:
+        answer = ask(context['text'], grammar, max_tokens)
+    except Exception as exc:                           # noqa: BLE001
+        log(f'⚠️ {pair}: модель не ответила — {exc}')
+        return _refusal('модель недоступна', str(exc)[:200])
+
+    verdict = check(parse(answer, levels), levels)
+    verdict['pair'] = pair
+    verdict['levels'] = levels
+    verdict['raw'] = answer
+    return verdict

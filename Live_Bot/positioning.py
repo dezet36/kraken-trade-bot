@@ -330,3 +330,70 @@ def summary():
                        'days': ((newest - oldest) / 86_400_000
                                 if oldest and newest else 0)}
     return out
+
+
+def series(source, pair, limit=None, upto=None):
+    """
+    Накопленный ряд одного источника по одной паре, по возрастанию времени.
+
+    ПЕРВЫЙ ЧИТАТЕЛЬ ЭТИХ ДАННЫХ. Сбор идёт с первого дня, а потребителя не
+    было: четыре ряда копились и никем не использовались. Функция появилась
+    вместе со сборщиком контекста для языковой модели — он первым спрашивает
+    не форму цены, а расстановку участников.
+
+    upto — отсечка по времени в миллисекундах, для разбора прошлого: строки
+    позже неё не возвращаются. Без неё разбор «как было тогда» читал бы
+    будущее, и результат замера оказался бы невоспроизводим в бою. Ровно от
+    этой ошибки бережётся find_pools своим параметром at.
+
+    Возвращает список {'ts', 'value', ...} — пустой, если файла нет.
+    """
+    path = path_for(source)
+    if not os.path.exists(path):
+        return []
+    rows = []
+    try:
+        with open(path, encoding='utf-8') as fh:
+            for line in fh:
+                try:
+                    row = json.loads(line)
+                except ValueError:
+                    continue
+                if row.get('pair') != pair or not row.get('ts'):
+                    continue
+                if upto is not None and row['ts'] > upto:
+                    continue
+                rows.append(row)
+    except OSError:
+        return []
+    rows.sort(key=lambda r: r['ts'])
+    return rows[-limit:] if limit else rows
+
+
+def change_pct(source, pair, hours, upto=None):
+    """
+    На сколько процентов изменилось значение за последние `hours` часов.
+
+    None, если данных за такой срок нет. Именно None, а не ноль: «не выросло»
+    и «не знаем» — разные утверждения, и смешивать их в одной колонке значит
+    готовить себе ложный вывод. Тот же принцип, что и с отказом новостных лент.
+    """
+    rows = series(source, pair, upto=upto)
+    if len(rows) < 2:
+        return None
+    newest = rows[-1]
+    edge = newest['ts'] - hours * 3_600_000
+    older = [r for r in rows if r['ts'] <= edge]
+    if not older:
+        return None
+    was = older[-1].get('value')
+    now = newest.get('value')
+    if was in (None, 0) or now is None:
+        return None
+    return round((now - was) / abs(was) * 100, 2)
+
+
+def latest(source, pair, upto=None):
+    """Последнее известное значение источника. None, если ряда нет."""
+    rows = series(source, pair, limit=1, upto=upto)
+    return rows[-1].get('value') if rows else None

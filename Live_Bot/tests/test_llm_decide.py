@@ -1,0 +1,290 @@
+"""
+Что код обязан отвергнуть, даже когда модель уверена и объяснение складное.
+
+ЗДЕСЬ ПРОВЕРЯЕТСЯ ВТОРОЙ РУБЕЖ. Первый — грамматика, она не даёт назвать
+несуществующий уровень. Но законный идентификатор ещё не означает осмысленный
+сетап: для лонга можно выбрать стоп выше входа, и оба уровня будут настоящими.
+
+Поле `why` на любой из этих ошибок будет выглядеть убедительно. Именно поэтому
+решение принимается по числам, а текст идёт в журнал для чтения человеком.
+
+Проверки СЧИТАЮТ, а не сверяются с текстом исходника: ошибка здесь будет в
+формуле, а формулу поиск по строкам не ловит.
+"""
+
+import os
+import sys
+
+import pytest
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+import config
+import llm_decide as dec
+
+
+# Уровни подобраны так, чтобы РАЗУМНЫЙ сетап проходил все пороги. Первая
+# версия этого не обеспечивала: лонг от 100 со стопом 94 к цели 103 давал
+# отношение 0.5, и предохранитель справедливо отвергал его как плохой. Ошибка
+# была в наборе данных, а выглядела как поломка проверяемого кода.
+#
+#   лонг:  вход L3 100, стоп L4 97 (риск 3), цель L2 107 (ход 7) -> R:R 2.33
+#   шорт:  вход L2 107, стоп L1 109 (риск 2), цель L3 100 (ход 7) -> R:R 3.50
+LEVELS = [
+    {'id': 'L1', 'price': 109.0, 'touches': 3, 'kind': 'скопление максимумов'},
+    {'id': 'L2', 'price': 107.0, 'touches': 2, 'kind': 'скопление максимумов'},
+    {'id': 'L3', 'price': 100.0, 'touches': 4, 'kind': 'скопление минимумов'},
+    {'id': 'L4', 'price': 97.0, 'touches': 5, 'kind': 'скопление минимумов'},
+    {'id': 'L5', 'price': 94.0, 'touches': 2, 'kind': 'пивот-минимум'},
+]
+
+ALL_TRUE = {'poi': True, 'vp': True, 'der': True, 'smc': True, 'flow': True}
+
+
+def answer(**over):
+    """Ответ модели: разумный лонг от L3 со стопом L5 к целям L2 и L1."""
+    import json
+    body = {'d': 'enter', 'side': 'LONG', 'entry': 'L3', 'stop': 'L4',
+            'tp': ['L2', 'L1'], 'inval': 'L4', 'cf': dict(ALL_TRUE),
+            'p': 0.6, 'why': 'скопление снизу свежее', 'risk': 'слив OI'}
+    body.update(over)
+    return json.dumps(body, ensure_ascii=False)
+
+
+def verdict(**over):
+    return dec.check(dec.parse(answer(**over), LEVELS), LEVELS)
+
+
+class TestTheGoodSetupPasses:
+
+    def test_a_sound_entry_is_accepted(self):
+        out = verdict()
+        assert out['ok'], out.get('gate')
+        assert out['side'] == 'LONG'
+        assert out['entry'] == 100.0
+        assert out['stop'] == 97.0
+        assert out['targets'] == [107.0, 109.0]
+
+    def test_the_numbers_are_computed_not_taken_from_the_model(self):
+        """
+        R:R и ожидание считает код. Модель их не присылает вовсе — и не должна:
+        на арифметике она ошибается, а порог, проверенный по её же ошибке,
+        не защищает ни от чего.
+        """
+        out = verdict()
+        # Вход 100, стоп 97, первая цель 107: риск 3, ход 7.
+        assert out['rr'] == pytest.approx(7 / 3, abs=0.01)
+        assert out['cost_r'] == pytest.approx(
+            config.ENTRY_COST_ROUND_TRIP / 0.03, rel=1e-6)
+        assert out['ev'] == pytest.approx(
+            0.6 * (7 / 3) - 0.4 - out['cost_r'], abs=0.01)
+
+
+class TestGeometryTheGrammarCannotSee:
+    """
+    Идентификатор законен, а сетап бессмыслен. Грамматика знает список
+    уровней, но не знает, какой из них выше.
+    """
+
+    def test_a_long_with_the_stop_above_entry_is_refused(self):
+        out = verdict(entry='L3', stop='L1', tp=['L2'])
+        assert not out['ok']
+        assert out['gate'] == 'геометрия неверна'
+
+    def test_a_long_with_a_target_below_entry_is_refused(self):
+        out = verdict(entry='L3', stop='L5', tp=['L4'])   # цель 97 ниже входа 100
+        assert not out['ok']
+        assert out['gate'] == 'геометрия неверна'
+
+    def test_a_short_mirrors_the_rule(self):
+        ok = verdict(side='SHORT', entry='L2', stop='L1', tp=['L3', 'L4'])
+        assert ok['ok'], ok.get('gate')
+        bad = verdict(side='SHORT', entry='L3', stop='L5', tp=['L4'])
+        assert not bad['ok']
+        assert bad['gate'] == 'геометрия неверна'
+
+
+class TestCostsDecide:
+    """
+    Издержки зависят от тесноты стопа. Постоянная величина вместо формулы —
+    та самая ошибка готового промта, занижавшая расход в сотню раз.
+    """
+
+    def test_a_tight_stop_costs_more_in_r(self):
+        wide = dec.cost_in_r(100.0, 94.0)     # стоп 6%
+        tight = dec.cost_in_r(100.0, 99.7)    # стоп 0.3%
+        assert tight > wide * 15
+
+    def test_the_formula_matches_the_arithmetic(self):
+        # Стоп 0.3% при ставке туда-обратно 0.075% даёт 0.25R.
+        assert dec.cost_in_r(100.0, 99.7) == pytest.approx(
+            config.ENTRY_COST_ROUND_TRIP / 0.003, rel=1e-6)
+
+    def test_a_stop_tighter_than_the_floor_is_refused(self, monkeypatch):
+        # Лонг со стопом 3% от входа: при минимуме 1.5% проходит.
+        monkeypatch.setattr(dec.llm_context, 'min_stop_pct', lambda: 1.5)
+        assert verdict()['ok']
+
+        # Тот же сетап при минимуме 5% — уже нет.
+        monkeypatch.setattr(dec.llm_context, 'min_stop_pct', lambda: 5.0)
+        tight = verdict()
+        assert not tight['ok']
+        assert tight['gate'] == 'стоп теснее минимального'
+
+
+class TestExpectedValue:
+
+    def test_a_losing_setup_is_refused(self):
+        """
+        Тот же сетап, что проходит при вероятности 0.6, при 0.30 обязан
+        отсеяться: 0.30 x 2.33 - 0.70 - 0.025 = -0.026.
+        """
+        out = verdict(p=0.30)
+        assert not out['ok']
+        assert out['gate'] == 'ожидание не положительно'
+
+    def test_costs_are_subtracted(self):
+        """Ожидание без вычета издержек было бы систематически завышено."""
+        with_costs = dec.expected_value(0.5, 2.0, 0.25)
+        without = dec.expected_value(0.5, 2.0, 0.0)
+        assert without - with_costs == pytest.approx(0.25)
+
+    def test_the_refusal_keeps_the_numbers(self):
+        """
+        Отказ по ожиданию обязан сохранить числа: без них нельзя потом
+        проверить, правильно ли предохранитель отсекал.
+        """
+        out = verdict(p=0.30)
+        assert out['gate'] == 'ожидание не положительно'
+        assert 'ev' in out and 'rr' in out and 'cost_r' in out
+
+
+class TestConfluenceIsCountedByCode:
+    """
+    Оценку X/5 модель себе натянет: объяснение подгоняется под уже принятое
+    решение. Поэтому она отмечает признаки, а считает их код.
+    """
+
+    def test_three_of_five_is_refused(self):
+        out = verdict(cf={'poi': True, 'vp': True, 'der': True,
+                          'smc': False, 'flow': False})
+        assert not out['ok']
+        assert out['gate'] == 'мало конфлюенса'
+        assert out['votes'] == 3
+
+    def test_four_of_five_passes(self):
+        out = verdict(cf={'poi': True, 'vp': True, 'der': True,
+                          'smc': True, 'flow': False})
+        assert out['ok'], out.get('gate')
+        assert out['votes'] == 4
+
+    def test_the_vote_survives_a_refusal(self):
+        """Счёт факторов нужен и у отказа — иначе разбирать нечего."""
+        out = verdict(cf={'poi': False, 'vp': False, 'der': False,
+                          'smc': False, 'flow': False})
+        assert out['votes'] == 0
+        assert out['confluence'] == {f: False for f in dec.FACTORS}
+
+
+class TestRefusalIsAFirstClassAnswer:
+
+    def test_a_skip_is_not_an_error(self):
+        out = dec.check(dec.parse(
+            '{"d":"skip","cf":{"poi":false,"vp":false,"der":false,'
+            '"smc":false,"flow":false},"why":"стоп не окупается"}', LEVELS),
+            LEVELS)
+        assert not out['ok']
+        assert out['gate'] == 'модель пропустила'
+        assert 'стоп не окупается' in out['detail']
+
+    def test_every_refusal_has_a_name(self):
+        """
+        Безымянный отказ превращает разбор в гадание — так уже вышло с зоной B
+        и развилкой THIN_STOP, которые пришлось выбросить неизмеренными.
+        """
+        cases = [
+            verdict(entry='L3', stop='L1', tp=['L2']),
+            verdict(cf={f: False for f in dec.FACTORS}),
+            dec.check(None, LEVELS),
+        ]
+        for out in cases:
+            assert not out['ok']
+            assert out['gate'], 'отказ без имени'
+
+
+class TestBrokenAnswers:
+
+    def test_a_non_json_answer_is_refused_not_raised(self):
+        assert dec.parse('не json', LEVELS) is None
+        out = dec.check(None, LEVELS)
+        assert not out['ok']
+        assert out['gate'] == 'ответ не разобран'
+
+    def test_an_unknown_level_id_is_refused(self):
+        """
+        Грамматика такого не пропустит, но вызов может пройти и без неё —
+        например, при отладке. Второй рубеж обязан устоять сам.
+        """
+        out = verdict(entry='L9')
+        assert not out['ok']
+        assert out['gate'] == 'уровень не найден'
+
+    def test_an_empty_target_list_is_refused(self):
+        out = verdict(tp=[])
+        assert not out['ok']
+        assert out['gate'] == 'уровень не найден'
+
+
+class TestTheWholePass:
+
+    def make_df(self):
+        import numpy as np
+        import pandas as pd
+        idx = np.arange(400)
+        closes = 100 + 4 * np.sin(idx / 23 * 2 * np.pi) + idx * 0.004
+        return pd.DataFrame({
+            'timestamp': pd.to_datetime(idx * 3_600_000 + 1_700_000_000_000,
+                                        unit='ms'),
+            'open': closes, 'high': closes + closes * 0.002,
+            'low': closes - closes * 0.002, 'close': closes,
+            'volume': np.full(400, 100.0),
+        })
+
+    def test_the_model_sees_the_grammar_for_these_levels(self):
+        seen = {}
+
+        def ask(prompt, grammar, max_tokens):
+            seen['prompt'] = prompt
+            seen['grammar'] = grammar
+            return '{"d":"skip","cf":{"poi":false,"vp":false,"der":false,' \
+                   '"smc":false,"flow":false},"why":"нет"}'
+
+        out = dec.decide('BTCUSDT', self.make_df(), ask)
+        assert 'УРОВНИ' in seen['prompt']
+        for level in out['levels']:
+            assert f'"\\"{level["id"]}\\""' in seen['grammar']
+
+    def test_a_failing_model_does_not_raise(self):
+        def boom(prompt, grammar, max_tokens):
+            raise RuntimeError('модель не загружена')
+
+        out = dec.decide('BTCUSDT', self.make_df(), boom)
+        assert not out['ok']
+        assert out['gate'] == 'модель недоступна'
+
+    def test_thin_data_refuses_before_calling_the_model(self):
+        import numpy as np
+        import pandas as pd
+
+        def never(prompt, grammar, max_tokens):
+            raise AssertionError('модель вызвана без разметки')
+
+        flat = pd.DataFrame({
+            'timestamp': pd.to_datetime(np.arange(20) * 3_600_000, unit='ms'),
+            'open': np.full(20, 100.0), 'high': np.full(20, 100.0),
+            'low': np.full(20, 100.0), 'close': np.full(20, 100.0),
+            'volume': np.full(20, 1.0),
+        })
+        out = dec.decide('BTCUSDT', flat, never)
+        assert not out['ok']
+        assert out['gate'] == 'нет разметки'
