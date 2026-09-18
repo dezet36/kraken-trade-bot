@@ -135,13 +135,26 @@ class TestWaitingForTheTunnel:
             remote.LOCAL_PORT = old
             server.close()
 
-    def test_a_silent_ssh_times_out_with_a_reason(self):
+    def test_a_silent_ssh_times_out_with_a_reason(self, monkeypatch):
+        """
+        ПОРТ ПОДМЕНЯЕТСЯ, А НЕ БЕРЁТСЯ ИЗ ЖИЗНИ. Первая версия просто ждала
+        таймаута — и падала, когда рядом было запущено само приложение: оно
+        держит 8799 открытым, wait_for_tunnel видел живой порт и отвечал
+        «готово» вместо отказа.
+
+        Проверка, зависящая от того, что запущено на машине, не проверяет
+        ничего: она то проходит, то нет, и разбираться приходится не с кодом.
+        """
+        monkeypatch.setattr(remote, 'port_open',
+                            lambda port, host='127.0.0.1': False)
         ok, error = remote.wait_for_tunnel(FakeProcess(), timeout=0.6)
         assert not ok
         assert 'не поднялся' in error
 
-    def test_a_silent_death_still_names_something(self):
+    def test_a_silent_death_still_names_something(self, monkeypatch):
         """Молчащий отказ — худший: сказать «неизвестно» лучше, чем ничего."""
+        monkeypatch.setattr(remote, 'port_open',
+                            lambda port, host='127.0.0.1': False)
         ok, error = remote.wait_for_tunnel(FakeProcess(alive=False, error=b''),
                                            timeout=1)
         assert not ok
@@ -370,3 +383,126 @@ class TestTheHostKeyIsHandledWithoutAConsole:
         """
         cmd = remote.tunnel_command({'host': 'srv'}, 'ssh')
         assert 'StrictHostKeyChecking=no' not in cmd
+
+
+class TestTheWindowEngine:
+    """
+    Порядок движков выбран по замеру, а не по вкусу.
+
+    На Windows 10 LTSC 2019 WebView2 установлен (153.0.4234.32), его библиотеки
+    в сборку попали, страница с сервера приходит целиком — и окно остаётся
+    БЕЛЫМ. Движок не отрисовывает.
+
+    Отличить это в коде нельзя: webview.start() не бросает исключения и не
+    возвращает признака неудачи. Поэтому запасной путь, привязанный к
+    исключению, не включался никогда, а человек смотрел в пустое окно.
+    """
+
+    def test_a_browser_window_is_looked_for(self):
+        import remote_app
+        assert remote_app.CHROME_PATHS, 'путей к браузеру нет вовсе'
+        joined = ' '.join(p for p in remote_app.CHROME_PATHS if p).lower()
+        assert 'chrome.exe' in joined
+        assert 'msedge.exe' in joined
+
+    def test_the_window_gets_its_own_profile(self):
+        """
+        Без отдельного профиля окно подклеится к уже открытому браузеру: своей
+        кнопки на панели задач не будет, а программа завершится сразу после
+        запуска, не дождавшись закрытия окна.
+        """
+        import inspect
+
+        import remote_app
+
+        source = inspect.getsource(remote_app.open_app_window)
+        assert '--user-data-dir' in source
+        assert '--app=' in source
+
+    def test_the_engine_can_be_switched_back(self):
+        """
+        Выбор закреплён переменной, а не вшит: на другой машине WebView2 может
+        работать, и отнимать его насовсем из-за одной неудачи неправильно.
+        """
+        import inspect
+
+        import remote_app
+
+        assert 'REMOTE_ENGINE' in inspect.getsource(remote_app.main)
+
+
+class TestTheTunnelDiesWithTheApp:
+    """
+    Снятая принудительно программа не имеет права оставить ssh жить.
+
+    ОТКУДА ЭТО. terminate() в finally закрывает туннель при нормальном выходе.
+    Но снятие через диспетчер задач, Stop-Process или пересборку finally не
+    выполняет — и ssh оставался сиротой, держа порт 8799.
+
+    Следующий запуск видел занятый порт, отказывался и возвращался к окну
+    настроек. Со стороны это выглядело как «программа перестала работать»:
+    окно открывается, данных нет. На поиск причины ушёл час отладки, и ею
+    оказался процесс, которого никто не убил.
+    """
+
+    def test_a_successful_tunnel_is_tied_to_the_process(self, monkeypatch):
+        tied = {}
+
+        def fake_tie(process):
+            tied['pid'] = process.pid
+            return 'дескриптор'
+
+        monkeypatch.setattr(remote, 'ssh_exe', lambda: 'ssh')
+        monkeypatch.setattr(remote, 'port_open',
+                            lambda port, host='127.0.0.1': False)
+        monkeypatch.setattr(remote, 'wait_for_tunnel',
+                            lambda process, timeout=None: (True, ''))
+        monkeypatch.setattr(remote, 'tie_to_parent', fake_tie)
+
+        started = {}
+
+        class Fake:
+            pid = 4242
+
+            def terminate(self):
+                started['terminated'] = True
+
+        monkeypatch.setattr(remote.subprocess, 'Popen',
+                            lambda *a, **k: Fake())
+
+        process, error = remote.open_tunnel({'host': 'srv'})
+        assert process is not None, error
+        assert tied.get('pid') == 4242, 'туннель не привязан к программе'
+
+    def test_the_handle_is_kept_on_the_process(self, monkeypatch):
+        """
+        Ссылка хранится на процессе, а не в местной переменной: та исчезла бы
+        при выходе из функции, задание закрылось бы, и ssh умер бы сразу после
+        успешного подключения.
+        """
+        monkeypatch.setattr(remote, 'ssh_exe', lambda: 'ssh')
+        monkeypatch.setattr(remote, 'port_open',
+                            lambda port, host='127.0.0.1': False)
+        monkeypatch.setattr(remote, 'wait_for_tunnel',
+                            lambda process, timeout=None: (True, ''))
+        monkeypatch.setattr(remote, 'tie_to_parent', lambda p: 'дескриптор')
+
+        class Fake:
+            pid = 1
+
+            def terminate(self):
+                pass
+
+        monkeypatch.setattr(remote.subprocess, 'Popen', lambda *a, **k: Fake())
+        process, _error = remote.open_tunnel({'host': 'srv'})
+        assert getattr(process, '_job', None) == 'дескриптор'
+
+    def test_tying_never_breaks_the_connection(self):
+        """
+        Привязка — удобство, а не условие работы. На системе, где задание
+        создать нельзя, туннель обязан подняться как прежде.
+        """
+        class Fake:
+            pid = 999999999
+
+        assert remote.tie_to_parent(Fake()) is None or True

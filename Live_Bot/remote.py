@@ -163,6 +163,81 @@ def tunnel_command(cfg, ssh):
     return args
 
 
+def tie_to_parent(process):
+    """
+    Привязывает туннель к жизни программы: умрёт она — умрёт и он.
+
+    ЗАЧЕМ. process.terminate() в finally закрывает ssh при НОРМАЛЬНОМ выходе. Но
+    если программу снять принудительно — диспетчером задач, Stop-Process, при
+    пересборке, — finally не выполняется, и ssh остаётся жить сиротой, держа
+    порт 8799.
+
+    Следующий запуск видит занятый порт, отказывается подключаться и
+    возвращается к окну настроек. Со стороны это выглядит как «программа
+    перестала работать»: окно открывается, а данных нет. Ровно так и вышло при
+    отладке — час ушёл на поиск причины, которой был осиротевший процесс.
+
+    Задание Windows (Job Object) с флагом KILL_ON_JOB_CLOSE решает это на
+    уровне системы: ссылка на задание живёт в нашем процессе, и как только он
+    исчезает ЛЮБЫМ способом, система убивает всё, что в задание входит.
+
+    Молча ничего не делает там, где не применимо: это удобство, а не условие
+    работы.
+    """
+    if sys.platform != 'win32':
+        return None
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        class BASIC(ctypes.Structure):
+            _fields_ = [('PerProcessUserTimeLimit', ctypes.c_int64),
+                        ('PerJobUserTimeLimit', ctypes.c_int64),
+                        ('LimitFlags', wintypes.DWORD),
+                        ('MinimumWorkingSetSize', ctypes.c_size_t),
+                        ('MaximumWorkingSetSize', ctypes.c_size_t),
+                        ('ActiveProcessLimit', wintypes.DWORD),
+                        ('Affinity', ctypes.POINTER(ctypes.c_ulong)),
+                        ('PriorityClass', wintypes.DWORD),
+                        ('SchedulingClass', wintypes.DWORD)]
+
+        class COUNTERS(ctypes.Structure):
+            _fields_ = [(name, ctypes.c_uint64) for name in
+                        ('ReadOperationCount', 'WriteOperationCount',
+                         'OtherOperationCount', 'ReadTransferCount',
+                         'WriteTransferCount', 'OtherTransferCount')]
+
+        class EXTENDED(ctypes.Structure):
+            _fields_ = [('BasicLimitInformation', BASIC),
+                        ('IoInfo', COUNTERS),
+                        ('ProcessMemoryLimit', ctypes.c_size_t),
+                        ('JobMemoryLimit', ctypes.c_size_t),
+                        ('PeakProcessMemoryUsed', ctypes.c_size_t),
+                        ('PeakJobMemoryUsed', ctypes.c_size_t)]
+
+        kernel = ctypes.WinDLL('kernel32', use_last_error=True)
+        job = kernel.CreateJobObjectW(None, None)
+        if not job:
+            return None
+
+        info = EXTENDED()
+        info.BasicLimitInformation.LimitFlags = 0x2000   # KILL_ON_JOB_CLOSE
+        if not kernel.SetInformationJobObject(job, 9, ctypes.byref(info),
+                                              ctypes.sizeof(info)):
+            return None
+
+        handle = kernel.OpenProcess(0x1F0FFF, False, process.pid)
+        if not handle:
+            return None
+        kernel.AssignProcessToJobObject(job, handle)
+        kernel.CloseHandle(handle)
+        # Ссылку возвращаем, чтобы вызывающий её сохранил: закроется она —
+        # закроется и задание, и ssh умрёт.
+        return job
+    except Exception:                                  # noqa: BLE001
+        return None
+
+
 def port_open(port, host='127.0.0.1'):
     """Принимает ли кто-то соединения на этом порту."""
     with socket.socket() as sock:
@@ -262,6 +337,11 @@ def open_tunnel(cfg):
         except Exception:                          # noqa: BLE001
             pass
         return None, explain(error)
+
+    # Ссылка на задание хранится ПРЯМО НА ПРОЦЕССЕ, а не в локальной
+    # переменной: местная переменная исчезнет при выходе из функции, задание
+    # закроется, и ssh будет убит сразу после успешного подключения.
+    process._job = tie_to_parent(process)
     return process, ''
 
 

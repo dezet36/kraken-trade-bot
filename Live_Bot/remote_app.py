@@ -21,8 +21,10 @@
 """
 
 import os
+import subprocess
 import sys
 import threading
+import time
 
 import remote
 
@@ -206,13 +208,60 @@ def ask_settings(current, error=''):
 
 # ── Окно панели ──────────────────────────────────────────────────────────────
 
-def open_window(url, on_close):
-    """
-    Окно панели. False — открыть не удалось.
+CHROME_PATHS = (
+    r'C:\Program Files\Google\Chrome\Application\chrome.exe',
+    r'C:\Program Files (x86)\Google\Chrome\Application\chrome.exe',
+    os.path.join(os.environ.get('LOCALAPPDATA', ''),
+                 r'Google\Chrome\Application\chrome.exe'),
+    r'C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe',
+    r'C:\Program Files\Microsoft\Edge\Application\msedge.exe',
+)
 
-    Движок задаётся явно: edgechromium — это WebView2, встроенный в Windows 10
-    и новее. Без явного указания pywebview может выбрать движок Internet
-    Explorer, и панель в нём разъедется: там нет ни grid, ни современного CSS.
+
+def open_app_window(url):
+    """
+    Окно браузера в режиме приложения. None — подходящего браузера нет.
+
+    ПОЧЕМУ ЭТОТ ПУТЬ ПЕРВЫЙ, А НЕ ЗАПАСНОЙ. На Windows 10 LTSC 2019 WebView2
+    установлен, все его библиотеки в сборку попали, страница и данные с сервера
+    приходят (200, 205 КБ) — а окно остаётся БЕЛЫМ. Движок не отрисовывает.
+
+    Отличить это в коде нельзя: webview.start() не бросает исключения и не
+    возвращает признака неудачи. Белое окно от рабочего программа не отличает,
+    поэтому запасной путь, привязанный к исключению, не включался никогда.
+
+    Окно Chrome в режиме приложения выглядит так же: без адресной строки и
+    вкладок, со своей кнопкой на панели задач. Отдельный профиль обязателен —
+    иначе окно подклеится к уже открытому браузеру, а программа
+    завершится сразу после запуска.
+
+    Порядок можно перевернуть переменной REMOTE_ENGINE=webview.
+    """
+    browser = next((path for path in CHROME_PATHS
+                    if path and os.path.exists(path)), None)
+    if not browser:
+        return None
+
+    profile = os.path.join(os.path.dirname(remote.settings_path()),
+                           'window_profile')
+    os.makedirs(profile, exist_ok=True)
+    return subprocess.Popen([
+        browser,
+        f'--app={url}',
+        f'--user-data-dir={profile}',
+        '--window-size=1360,900',
+        '--no-first-run',
+        '--no-default-browser-check',
+    ])
+
+
+def open_native_window(url, on_close):
+    """
+    Своё окно через pywebview. False — открыть не удалось.
+
+    Движок задаётся явно: edgechromium — это WebView2. Без явного указания
+    pywebview может выбрать движок Internet Explorer, и панель в нём
+    разъедется: там нет ни grid, ни современного CSS.
     """
     try:
         import webview
@@ -227,7 +276,7 @@ def open_window(url, on_close):
         webview.start(gui=gui)          # блокирует до закрытия окна
         return True
     except Exception as exc:            # noqa: BLE001
-        print(f'Своё окно не открылось ({exc}) — открою в браузере')
+        print(f'Своё окно не открылось ({exc})')
         return False
 
 
@@ -281,10 +330,27 @@ def main():
 
     threading.Thread(target=watch, daemon=True).start()
 
+    # ПОРЯДОК ВЫБРАН ПО ЗАМЕРУ, А НЕ ПО ВКУСУ. На Windows 10 LTSC 2019
+    # WebView2 установлен, библиотеки в сборке есть, страница с сервера
+    # приходит — а окно остаётся белым. Отличить это в коде нельзя:
+    # webview.start() не бросает исключения и не сообщает о неудаче.
+    # Поэтому первым идёт путь, который проверенно работает.
+    engine = os.getenv('REMOTE_ENGINE', 'chrome').lower()
     try:
-        if not open_window(remote.url(), lambda: shutdown()):
+        window = None
+        if engine != 'webview':
+            window = open_app_window(remote.url())
+        if window is not None:
+            window.wait()               # держим туннель, пока открыто окно
+        elif not open_native_window(remote.url(), lambda: shutdown()):
             open_in_browser(remote.url())
-            input('Окно открыто в браузере. Нажмите Enter, чтобы отключиться…')
+            print('Окно открыто в браузере. Закройте эту программу, '
+                  'чтобы отключиться от сервера.')
+            try:
+                while True:
+                    time.sleep(3600)
+            except KeyboardInterrupt:
+                pass
     finally:
         shutdown()
     return 0

@@ -130,3 +130,9 @@ Live_Bot/exports/
 Live_Bot/running_app.json
 Live_Bot/window.json
 Live_Bot/leak_trace.txt
+
+# Настройки подключения удалённого окна: адрес сервера и путь к ключу.
+# Лежат рядом с программой, а не в коде. В публичный репозиторий им нельзя.
+Live_Bot/remote.json
+dist/remote.json
+Live_Bot/window_profile/
