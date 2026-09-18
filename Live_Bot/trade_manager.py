@@ -1,4 +1,6 @@
 import config
+import live_costs
+import market_regime
 import telegram_notify as tg
 import trade_journal as journal
 from exit_plan import direction_cap, tp_plan, tps_completed, wants_breakeven
@@ -30,6 +32,26 @@ def _fmt_p(p: float) -> str:
     if p >= 0.01:   return f"{p:.6f}"
     if p >= 0.0001: return f"{p:.8f}"
     return f"{p:.10f}"
+
+
+def _refuse(signal, gate, detail='', cost_share=''):
+    """
+    Записывает отказ предохранителя БОЕВОГО пути.
+
+    ЗАЧЕМ. Такой журнал завели 30 августа 2026 на бумаге, а бой снова остался
+    без него — тем же способом, каким боевой журнал отстал на двенадцать
+    колонок: чинили там, куда смотрели. А проверять предел издержек надо
+    именно на боевых отказах: на бумаге он отсекает 17% сетапов у фибо и 80%
+    у SMC, и правильно ли — узнать нечем.
+
+    Отдельной обёрткой, чтобы отказ записи не мог свалить торговлю: модуль
+    вспомогательный, и его беды — не наши.
+    """
+    try:
+        import refused
+        refused.record(signal.get('strategy', ''), signal, gate, detail, cost_share)
+    except Exception:                              # noqa: BLE001
+        pass
 
 
 class LiveTradeManager:
@@ -972,11 +994,23 @@ class LiveTradeManager:
     def execute_trade(self, signal, df_1h=None):
         trading_pair = signal['trading_pair']
 
+        # Обстановка на входе. Кладём в СИГНАЛ, а не в позицию: отложенный лимит
+        # ждёт заполнения часами, и к моменту, когда позиция появится, рынок
+        # будет уже другим. Записать надо тот, при котором принято решение.
+        # Сигнал переживает ожидание целиком — он сохраняется в pending-ордере.
+        if df_1h is not None and signal.get('atr_pct') is None:
+            try:
+                signal['atr_pct'] = market_regime.volatility_pct(
+                    df_1h['high'].values, df_1h['low'].values, df_1h['close'].values)
+            except Exception:                          # noqa: BLE001
+                signal['atr_pct'] = None               # без обстановки, но со сделкой
+
         if not self.check_cooldown(trading_pair):
             hours_left = config.COOLDOWN_HOURS - (
                 datetime.now() - self.last_trade_time[trading_pair]
             ).total_seconds() / 3600
             log(f"⏳ Кулдаун для {trading_pair}. Осталось {hours_left:.1f} ч")
+            _refuse(signal, 'кулдаун', f'осталось {hours_left:.1f} ч')
             return False
 
         # Защита от дублей: на бирже уже есть позиция/ордер по паре ИЛИ наш pending-лимит
@@ -990,6 +1024,7 @@ class LiveTradeManager:
         allowed, why = self._portfolio_room(signal)
         if not allowed:
             log(f"⛔ {trading_pair}: {why}")
+            _refuse(signal, 'предел портфеля', why)
             return False
 
         # Направленный кэп берём из сигнала: у стратегий он разный.
@@ -1004,6 +1039,8 @@ class LiveTradeManager:
             if dcnt.get(sig_dir, 0) >= cap:
                 log(f"⛔ {trading_pair}: направление {sig_dir} занято "
                     f"{dcnt[sig_dir]}/{cap} — направленный кэп")
+                _refuse(signal, 'направленный кэп',
+                        f'{sig_dir} занято {dcnt[sig_dir]}/{cap}')
                 return False
 
         self._reset_daily_pnl_if_needed()
@@ -1041,6 +1078,7 @@ class LiveTradeManager:
             config.MAX_ENTRY_COST_SHARE_PCT)
         if pricey:
             log(f"⛔ {trading_pair}: {why}")
+            _refuse(signal, 'предел издержек', why, round(cost_share, 3))
             return False
 
         # Процент риска — из сигнала: у стратегий он свой и меняется из
@@ -1477,12 +1515,25 @@ class LiveTradeManager:
         n_tp = len(targets)
 
         # ── MFE/MAE: экстремумы цены за жизнь позиции (для анализа сделок) ────
+        #
+        # ЗАПОМИНАЕМ И МОМЕНТ, а не только величину. Насколько цена уходила,
+        # журнал знал и раньше; когда — нет, и на этом встал разбор 29 августа
+        # 2026: 21 сделка доходила до цели и закрылась в ноль по безубытку, а
+        # восстановить порядок событий — сначала рост или сначала просадка —
+        # было нечем. Вопрос «безубыток спасает или режет» остался без ответа.
+        now = datetime.now()
+        prev_mfe = position.get('mfe_price', current_price)
+        prev_mae = position.get('mae_price', current_price)
         if is_long:
-            position['mfe_price'] = max(position.get('mfe_price', current_price), current_price)
-            position['mae_price'] = min(position.get('mae_price', current_price), current_price)
+            position['mfe_price'] = max(prev_mfe, current_price)
+            position['mae_price'] = min(prev_mae, current_price)
         else:
-            position['mfe_price'] = min(position.get('mfe_price', current_price), current_price)
-            position['mae_price'] = max(position.get('mae_price', current_price), current_price)
+            position['mfe_price'] = min(prev_mfe, current_price)
+            position['mae_price'] = max(prev_mae, current_price)
+        if position['mfe_price'] != prev_mfe or 'mfe_ts' not in position:
+            position['mfe_ts'] = now
+        if position['mae_price'] != prev_mae or 'mae_ts' not in position:
+            position['mae_ts'] = now
 
         # ── Тайм-стоп (v3): позиция старше лимита -> рыночное закрытие ────────
         # (широкий стоп v2 без лимита может держать пару заблокированной месяцами)
@@ -1582,13 +1633,29 @@ class LiveTradeManager:
         realized  = position.get('realized_pnl', 0.0)
 
         if position['signal']['setup']['type'] == 'LONG':
-            pnl = realized + (exit_price - entry) * remaining
+            gross = realized + (exit_price - entry) * remaining
         else:
-            pnl = realized + (entry - exit_price) * remaining
+            gross = realized + (entry - exit_price) * remaining
 
-        position['pnl'] = pnl
         position['exit_price'] = exit_price
         position['exit_time'] = datetime.now()
+
+        # ── Издержки: то, ради чего этот бот вообще считает результат ────────
+        # До 30 августа 2026 боевой путь их не знал. Итог сделки был ГРЯЗНЫМ, а
+        # на бумажном двойнике за август именно издержки превратили +$34.94 в
+        # −$616.77. Считать результат без них — значит смотреть на число,
+        # которое всегда лучше действительности, и делать по нему выводы.
+        #
+        # Издержки спрашиваются у биржи, а при отказе оцениваются по тарифу;
+        # что именно вышло, помечено в fees_source и уходит в журнал.
+        costs = live_costs.settle(position, exit_price, self.exchange, trading_pair)
+        fees = costs['fees_usd']
+        funding = costs['funding_usd']
+        pnl = gross - fees - funding
+
+        position['pnl'] = pnl
+        position['gross_pnl'] = gross
+        position['costs'] = costs
 
         self.daily_pnl += pnl
         self.trade_history.append(position)
@@ -1605,12 +1672,25 @@ class LiveTradeManager:
             'mode': config.TRADING_MODE,
         }
         log_trade(trade_data)
-        log(f"📝 Сделка завершена ({reason}). PnL: ${pnl:+.4f} | Дневной PnL: ${self.daily_pnl:+.4f}")
+        log(f"📝 Сделка завершена ({reason}). PnL: ${pnl:+.4f} "
+            f"(грязный ${gross:+.4f} − издержки ${fees + funding:.4f}, "
+            f"{costs['fees_source']}) | Дневной PnL: ${self.daily_pnl:+.4f}")
 
         # Записываем в журнал (БД per-user при мульти-тенант, иначе CSV)
         balance_after = self.get_real_balance()
         journal.close_trade(position, exit_price, reason, pnl, balance_after, config,
-                            telegram_id=self.telegram_id)
+                            telegram_id=self.telegram_id, gross_pnl=gross, costs=costs)
+        # Что было с ценой ПОСЛЕ выхода. Отвечает на вопрос, который по самому
+        # журналу задать нельзя: выход спас или обрезал. На бумаге такое
+        # наблюдение ведётся с 30 августа 2026, бой получил его тогда же.
+        try:
+            import follow_up
+            follow_up.watch_live(position, trading_pair, exit_price, reason,
+                                 (position.get('_journal') or {}).get('trade_id', ''),
+                                 self.get_pair_strategy(trading_pair))
+        except Exception:                              # noqa: BLE001
+            pass
+
         self._remove_position_state(trading_pair)  # W7: удаляем из файла состояния
         self.clear_pair_strategy(trading_pair)     # освобождаем слот стратегии
 

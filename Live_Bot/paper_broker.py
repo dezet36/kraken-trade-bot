@@ -42,6 +42,7 @@ import shutil
 from datetime import datetime, timezone
 
 import config
+import csv_journal
 import glossary
 from exit_plan import cooldown_hours, direction_cap, tp_plan, wants_breakeven
 import settings_store as settings
@@ -1645,57 +1646,10 @@ class PaperBroker:
 
 # ── Журнал ───────────────────────────────────────────────────────────────────
 
-def _migrate_journal_header():
-    """
-    Приводит уже существующий CSV к текущему набору колонок.
-
-    ЗАЧЕМ. Шапка пишется ОДИН РАЗ, при создании файла, а строки — всегда по
-    текущему COLUMNS. Стоит добавить колонку в середину списка, и в новых
-    строках значений становится на одно больше, чем в заголовке: всё, что
-    стоит после новой колонки, съезжает на позицию влево. Файл при этом
-    открывается, читается и выглядит правдоподобно — просто в колонке
-    «комиссия» оказывается длительность, а в «результате» баланс.
-
-    Такую порчу нельзя заметить глазом, и она бьёт по единственному источнику
-    правды о торговле. Поэтому при несовпадении файл переписывается целиком:
-    старые строки получают пустое значение в новых колонках.
-    """
-    if not os.path.exists(JOURNAL_CSV) or os.path.getsize(JOURNAL_CSV) == 0:
-        return
-    try:
-        with open(JOURNAL_CSV, encoding='utf-8-sig', newline='') as fh:
-            reader = csv.DictReader(fh)
-            if reader.fieldnames == COLUMNS:
-                return
-            rows = list(reader)
-    except Exception as exc:                       # noqa: BLE001
-        log(f"⚠️ Журнал сделок не прочитан для переноса шапки: {exc}")
-        return
-
-    # Пишем рядом и подменяем: обрыв на середине не имеет права оставить нас
-    # без журнала.
-    tmp = JOURNAL_CSV + '.new'
-    try:
-        with open(tmp, 'w', encoding='utf-8', newline='') as fh:
-            writer = csv.DictWriter(fh, fieldnames=COLUMNS, extrasaction='ignore')
-            writer.writeheader()
-            for old in rows:
-                writer.writerow({name: old.get(name, '') for name in COLUMNS})
-        os.replace(tmp, JOURNAL_CSV)
-        log(f"   журнал сделок переведён на новый набор колонок "
-            f"({len(rows)} строк сохранено)")
-    except Exception as exc:                       # noqa: BLE001
-        log(f"⚠️ Не удалось перенести шапку журнала: {exc}")
-        try:
-            os.remove(tmp)
-        except OSError:
-            pass
-
-
 def _write_journal(row):
     """Пишет сделку в CSV (для Excel) и в JSONL (полный дамп)."""
     try:
-        _migrate_journal_header()
+        csv_journal.migrate_header(JOURNAL_CSV, COLUMNS, 'журнал сделок')
         fresh = not os.path.exists(JOURNAL_CSV) or os.path.getsize(JOURNAL_CSV) == 0
         with open(JOURNAL_CSV, 'a', encoding='utf-8', newline='') as fh:
             writer = csv.DictWriter(fh, fieldnames=COLUMNS, extrasaction='ignore')

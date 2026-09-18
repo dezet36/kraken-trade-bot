@@ -150,3 +150,41 @@ def describe(regime, er, threshold, multiplier=1.0):
                 else f'режим неизвестен (ER {er:.3f}, мало истории), риск полный')
     tail = '' if multiplier >= 1.0 else f', риск ×{multiplier:.2f}'
     return f'{regime} (ER {er:.3f} при пороге {threshold:.3f}){tail}'
+
+
+def volatility_pct(high, low, close, period=14):
+    """
+    Насколько трясёт: средний истинный диапазон в процентах от цены.
+
+    ПОЧЕМУ ЗДЕСЬ. Это свойство рынка, а не стратегии, — как и направленность
+    выше. Считать его внутри одной стратегии значило бы, что остальные три
+    либо не увидят его вовсе, либо заведут свою копию с другим периодом, и
+    сравнивать замеры между стратегиями станет нельзя.
+
+    ЗАЧЕМ. Без обстановки на входе нельзя спросить, в каком рынке стратегия
+    работает. Разбор 364 сделок 29 августа 2026 упёрся ровно в это: лонги дали
+    +0.20R, шорты −0.33R, и объяснить разницу удалось только прикидкой, что
+    биткоин за месяц вырос на 8.3%. Точнее сказать было нечем.
+
+    Сглаживание Уайлдера, период 14 — то же, чем считают стратегии, чтобы
+    числа в журнале и в их логике означали одно и то же.
+
+    Возвращает None, если баров меньше периода: выдумывать число из десяти
+    свечей хуже, чем признать, что его нет.
+    """
+    high = np.asarray(high, dtype=float)
+    low = np.asarray(low, dtype=float)
+    close = np.asarray(close, dtype=float)
+    if len(close) <= period or len(high) != len(close) or len(low) != len(close):
+        return None
+
+    prev = np.concatenate([[close[0]], close[:-1]])
+    tr = np.maximum(high - low, np.maximum(np.abs(high - prev), np.abs(low - prev)))
+    value = tr[1:period + 1].mean()
+    for i in range(period + 1, len(tr)):
+        value = (value * (period - 1) + tr[i]) / period
+
+    price = close[-1]
+    if not np.isfinite(value) or not np.isfinite(price) or price <= 0:
+        return None
+    return round(float(value) / float(price) * 100, 3)

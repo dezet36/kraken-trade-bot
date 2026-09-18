@@ -32,15 +32,19 @@ scan_report: «словарь в памяти, без диска». Значит
 другая величина.
 """
 
-import csv
-import os
-
+import csv_journal
 import config
+import os
 from logger import log
 
 CSV_PATH = os.path.join(config.DATA_DIR, 'refused.csv')
 
 COLUMNS = [
+    # БУМАГА ИЛИ БОЙ. Файл один на оба пути, и без этой колонки отказы двух
+    # режимов смешиваются без возможности разделить. Смешанная выборка — это
+    # ровно то, чем уже испортили журнал сервера две одновременно работавшие
+    # копии бота: числа выглядят правдоподобно, а означают не то.
+    'mode',
     'at', 'strategy', 'pair', 'direction',
     'entry', 'stop_loss', 'tp1', 'rr',
     # Чем именно отвергнут: предел издержек, предел портфеля, направленный
@@ -64,6 +68,7 @@ def record(strategy, signal, gate, detail='', cost_share=''):
         setup = (signal or {}).get('setup') or {}
         targets = params.get('tp_targets') or []
         row = {
+            'mode': config.TRADING_MODE,
             'at': _now_iso(),
             'strategy': strategy,
             'pair': signal.get('trading_pair', ''),
@@ -76,12 +81,7 @@ def record(strategy, signal, gate, detail='', cost_share=''):
             'detail': str(detail)[:200],
             'cost_share_pct': cost_share,
         }
-        fresh = not os.path.exists(CSV_PATH) or os.path.getsize(CSV_PATH) == 0
-        with open(CSV_PATH, 'a', encoding='utf-8', newline='') as fh:
-            writer = csv.DictWriter(fh, fieldnames=COLUMNS, extrasaction='ignore')
-            if fresh:
-                writer.writeheader()
-            writer.writerow(row)
+        csv_journal.append(CSV_PATH, COLUMNS, [row], 'журнал отказов')
     except Exception as exc:                       # noqa: BLE001
         log(f'⚠️ Отказ не записан: {exc}')
 

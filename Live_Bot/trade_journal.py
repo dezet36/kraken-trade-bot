@@ -18,6 +18,7 @@ import os
 from datetime import datetime, timezone
 
 import config
+import csv_journal
 from logger import log
 
 JOURNAL_FILE  = os.path.join(config.DATA_DIR, 'trades_journal.csv')
@@ -47,6 +48,39 @@ COLUMNS = [
     'result',       # WIN / LOSS / BREAKEVEN
     'setup_notes',  # почему открылась (краткое описание)
     'strategy',     # FIBO / SMC — какая стратегия открыла сделку
+    # ── Издержки и всё, что от них считается (добавлено 30 августа 2026) ─────
+    #
+    # ЗАЧЕМ. До этой даты боевой журнал не знал про комиссии ВООБЩЕ, а pnl_usd
+    # был грязным итогом. Бумажный двойник за август показал, чем всё
+    # решается: грязный +$34.94, комиссии −$661.03, чистый −$616.77. Журнал
+    # без этих колонок не мог ответить на единственный важный вопрос — что
+    # именно съело результат, — и месяц наблюдений пропал бы впустую.
+    #
+    # Колонки идут В КОНЕЦ: старые CSV читаются без изменений, а недостающие
+    # поля в прежних строках останутся пустыми. Так уже добавляли strategy.
+    'gross_pnl_usd',   # до вычета издержек — чтобы видеть их вклад отдельно
+    'fees_usd',        # комиссии за вход, частичные фиксации и выход
+    'funding_usd',     # фандинг за удержание (плюс = заплатили)
+    # ЗАМЕРЕНО ИЛИ ПОСЧИТАНО: 'exchange' — сумма удержаний с биржи, 'estimate' —
+    # оценка по тарифу из config. Смешивать их в одной колонке и делать выводы
+    # нельзя, поэтому источник записывается рядом с числом.
+    'fees_source',
+    'pnl_r',           # итог в риск-единицах: сравнимо между парами и плечами
+    # Какую долю риска съели комиссии. Известна ЗАРАНЕЕ, при входе: зависит
+    # только от тесноты стопа (доля = ставка_туда-обратно / стоп%).
+    'cost_share_pct',
+    # Насколько далеко цена уходила за нас и против нас, в R.
+    # Считались и раньше, но до 30 августа терялись: DictWriter получает
+    # extrasaction='ignore' и молча выбрасывал всё, чего нет в COLUMNS.
+    # В trades_detail.jsonl они были, в CSV — нет, а панель читает CSV.
+    'mfe_r', 'mae_r',
+    # КОГДА цена дошла до этих точек, в минутах от входа. Без порядка событий
+    # нельзя ответить, безубыток спасает или режет: разбор 29 августа упёрся
+    # ровно в это — 21 сделка доходила до цели и закрылась в ноль.
+    'mfe_min', 'mae_min',
+    # Обстановка на входе: размах свечей в процентах цены и час суток UTC.
+    # Без них нельзя спросить, в каком рынке стратегия работает.
+    'atr_pct', 'hour_utc',
 ]
 
 
@@ -138,6 +172,14 @@ def open_trade(position: dict, signal: dict, balance_before: float) -> int:
                              else (signal.get('zone_b') or {}).get('top', '')),
         'be_level':         params.get('be_level', ''),
         'session_hour_utc': datetime.now(timezone.utc).hour,
+        # Тот же час под именем hour_utc — так колонка называется в бумажном
+        # журнале. Имена ОДНОГО И ТОГО ЖЕ должны совпадать в обоих журналах:
+        # разойдясь, они заставляют разбор писать две ветки под одно понятие,
+        # и рано или поздно одну из них забывают.
+        'hour_utc':         datetime.now(timezone.utc).hour,
+        # Размах свечей в процентах цены на момент решения. None, если свечей
+        # не хватило — пустая клетка честнее выдуманного числа.
+        'atr_pct':          signal.get('atr_pct'),
         # контекст скана: score и компоненты (bot.py/platform_manager кладут в signal)
         **{f'scan_{k}': v for k, v in (signal.get('scan') or {}).items()},
     }
@@ -155,12 +197,19 @@ def record_tp_hit(position: dict, tp_num: int, price: float):
 
 
 def close_trade(position: dict, exit_price: float, exit_reason: str,
-                pnl_usd: float, balance_after: float, import_config, telegram_id=None):
+                pnl_usd: float, balance_after: float, import_config, telegram_id=None,
+                gross_pnl=None, costs=None):
     """
     Вызывается при закрытии сделки. Пишет полную строку:
     - telegram_id задан (мульти-тенант) -> в БД (db.record_trade)
     - иначе -> в общий CSV (legacy одно-юзер)
     Возвращает построенную строку (dict) либо None.
+
+    pnl_usd — ЧИСТЫЙ итог, уже за вычетом издержек. gross_pnl и costs приходят
+    оттуда же (live_costs.settle) и записываются рядом, чтобы вклад комиссий
+    был виден отдельно, а не только в разнице. Оба необязательны: без них
+    строка пишется как раньше, а колонки издержек остаются пустыми — так
+    вызовы из старых мест не падают.
     """
     j = position.get('_journal')
     if not j:
@@ -252,6 +301,43 @@ def close_trade(position: dict, exit_price: float, exit_reason: str,
         row['mae_price'] = round(mae, 6)
         row['mfe_r'] = round(sign * (mfe - entry) / sl_dist, 3)   # макс. ход ЗА нас, в R
         row['mae_r'] = round(sign * (mae - entry) / sl_dist, 3)   # макс. ход ПРОТИВ нас, в R
+    # ── Издержки и производные от них ────────────────────────────────────────
+    if costs:
+        row['fees_usd'] = costs.get('fees_usd')
+        row['funding_usd'] = costs.get('funding_usd')
+        row['fees_source'] = costs.get('fees_source')
+    if gross_pnl is not None:
+        row['gross_pnl_usd'] = round(gross_pnl, 4)
+
+    # Итог в риск-единицах. Только так сравнимы сделки по разным парам и с
+    # разным плечом: доллары у BTC и SHIB значат разное, а R — одно и то же.
+    risk_usd = float(j.get('risk_usd') or 0)
+    if risk_usd > 0:
+        row['pnl_r'] = round(pnl_usd / risk_usd, 3)
+
+    # Доля риска, съеденная комиссиями. Зависит только от тесноты стопа и
+    # потому известна ещё при входе — записываем, чтобы можно было проверить
+    # на НОВЫХ данных догадку, что дешёвые входы прибыльнее дорогих.
+    if sl_dist > 0 and entry > 0:
+        import risk_gate
+        share = risk_gate.entry_cost_share(entry, sl_dist,
+                                           import_config.ENTRY_COST_ROUND_TRIP)
+        row['cost_share_pct'] = round(share * 100, 2)
+
+    # Когда цена дошла до лучшей и худшей точки, в минутах от входа.
+    #
+    # ОТСЧЁТ ОТ entry_time ПОЗИЦИИ, А НЕ ОТ open_time ЖУРНАЛА. В бою эти два
+    # момента отличаются на доли секунды — их ставят соседние строки кода, — но
+    # это ДВА РАЗНЫХ ИСТОЧНИКА ВРЕМЕНИ, и отметки экстремумов ставит первый из
+    # них. Смешав их, получаем разность между чужими часами: на проверке это
+    # дало −579 минут, то есть цена «дошла до максимума» за девять часов до
+    # собственного входа. В журнале такое число выглядело бы просто странным.
+    started = position.get('entry_time') or open_dt
+    for key, column in (('mfe_ts', 'mfe_min'), ('mae_ts', 'mae_min')):
+        moment = position.get(key)
+        if moment is not None:
+            row[column] = int((moment - started).total_seconds() / 60)
+
     row['be_time'] = position.get('be_time', '')
     row['breakeven_set'] = bool(position.get('breakeven_set'))
     row['recovered'] = recovered
@@ -271,6 +357,7 @@ def close_trade(position: dict, exit_price: float, exit_reason: str,
         detail_path = os.path.join(config.DATA_DIR, 'state',
                                    str(telegram_id), 'trades_detail.jsonl')
     else:
+        csv_journal.migrate_header(JOURNAL_FILE, COLUMNS, 'боевой журнал')
         write_header = not os.path.exists(JOURNAL_FILE) or os.path.getsize(JOURNAL_FILE) == 0
         with open(JOURNAL_FILE, 'a', encoding='utf-8', newline='') as f:
             writer = csv.DictWriter(f, fieldnames=COLUMNS, extrasaction='ignore')

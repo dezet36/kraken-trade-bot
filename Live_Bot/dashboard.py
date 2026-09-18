@@ -180,8 +180,23 @@ def _read_closed_trades():
             'closed': row.get('close_time', ''),
             'duration_min': _to_float(row.get('duration_min')),
             'why': row.get('setup_notes', ''),
-            'fees': 0.0,
-            'funding': 0.0,
+            # ИЗДЕРЖКИ ЧИТАЮТСЯ, А НЕ ОБНУЛЯЮТСЯ. Здесь стояли два нуля: до
+            # 30 августа 2026 боевой путь комиссий не считал вовсе, и панель
+            # честно показывала их отсутствие. Из-за этого клетка «Издержки»
+            # выводилась только для бумаги — а в бою решают именно они.
+            'fees': _to_float(row.get('fees_usd')),
+            'funding': _to_float(row.get('funding_usd')),
+            'gross': _to_float(row.get('gross_pnl_usd')),
+            # Замерено у биржи или посчитано по тарифу. Панель показывает
+            # пометку рядом с суммой: смешивать факт и модель молча нельзя.
+            'fees_source': row.get('fees_source', ''),
+            'pnl_r': _to_float(row.get('pnl_r')) or None,
+            # Доля риска, уходящая в комиссии. Известна ещё при входе.
+            'cost_share': _to_float(row.get('cost_share_pct')) or None,
+            'mfe_r': _to_float(row.get('mfe_r')) or None,
+            'mae_r': _to_float(row.get('mae_r')) or None,
+            'atr_pct': _to_float(row.get('atr_pct')) or None,
+            'hour_utc': _to_float(row.get('hour_utc')),
         })
     trades.sort(key=lambda t: t['closed'])
     return trades
@@ -251,6 +266,9 @@ def _read_paper_trades():
             'duration_min': _to_float(row.get('duration_min')),
             'fees': _to_float(row.get('fees_usd')),
             'funding': _to_float(row.get('funding_usd')),
+            # Доля риска, уходящая в комиссии: то же имя, что и в боевом
+            # разборе, чтобы панель считала обе выборки одним кодом.
+            'cost_share': _to_float(row.get('cost_share_pct')) or None,
             'mfe_r': _to_float(row.get('mfe_r')),
             'mae_r': _to_float(row.get('mae_r')),
             'why': row.get('why', ''),

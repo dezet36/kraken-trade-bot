@@ -25,6 +25,7 @@ import csv
 import os
 
 import config
+import csv_journal
 from logger import log
 
 CSV_PATH = os.path.join(config.DATA_DIR, 'follow_up.csv')
@@ -35,6 +36,9 @@ HORIZONS = (1, 4, 12)
 _MS_HOUR = 3_600_000
 
 COLUMNS = [
+    # Бумага или бой: файл один на оба пути. Без разделения наблюдения двух
+    # режимов смешиваются, а выводы по смешанной выборке ничего не значат.
+    'mode',
     'trade_id', 'strategy', 'pair', 'direction', 'closed_at', 'exit_reason',
     'entry_price', 'exit_price', 'stop_loss', 'tp1',
     # Куда цена уходила после выхода, в долях первоначального риска и
@@ -149,13 +153,133 @@ def write(rows):
     """Дописывает наблюдения в файл. Отказ записи не имеет права мешать боту."""
     if not rows:
         return
+    stamped = [{'mode': config.TRADING_MODE, **r} for r in rows]
+    csv_journal.append(CSV_PATH, COLUMNS, stamped, 'наблюдение после выхода')
+
+
+# ── Боевой путь ──────────────────────────────────────────────────────────────
+#
+# ПОЧЕМУ ОТДЕЛЬНЫЙ ПРИВОД. Бумажный брокер держит наблюдения в своём состоянии
+# и прогоняет их теми же свечами, что и позиции: у него всё в одном цикле.
+# У боевого пути такого места нет — свечи разбирают стратегии внутри скана, и
+# тянуть наблюдения через четыре сканера значило бы связать их с логикой,
+# которая к наблюдениям отношения не имеет.
+#
+# Поэтому здесь свой шаг: состояние в файле, свечи запрашиваются сами. Пар под
+# наблюдением единицы (только те, где сделка закрылась меньше 12 часов назад),
+# так что это несколько запросов за цикл.
+#
+# СОСТОЯНИЕ В ФАЙЛЕ, А НЕ В ПАМЯТИ. Наблюдение живёт 12 часов, а бот за это
+# время перезапускается: обновлением, падением, руками. Держи мы его в памяти,
+# до записи доживали бы только те наблюдения, которым повезло с простоем, — и
+# выборка оказалась бы смещена в сторону спокойных периодов.
+
+STATE_PATH = os.path.join(config.DATA_DIR, 'follow_up_state.json')
+
+
+def load_state(path=None):
+    """Наблюдения с прошлого запуска. Пустой список, если файла нет."""
+    import json
     try:
-        fresh = not os.path.exists(CSV_PATH) or os.path.getsize(CSV_PATH) == 0
-        with open(CSV_PATH, 'a', encoding='utf-8', newline='') as fh:
-            writer = csv.DictWriter(fh, fieldnames=COLUMNS, extrasaction='ignore')
-            if fresh:
-                writer.writeheader()
-            for r in rows:
-                writer.writerow(r)
+        with open(path or STATE_PATH, encoding='utf-8') as fh:
+            data = json.load(fh)
+        return data if isinstance(data, list) else []
+    except (OSError, ValueError):
+        return []
+
+
+def save_state(watches, path=None):
+    """Сохраняет наблюдения. Молча: это данные для разбора, а не для торговли."""
+    import json
+    try:
+        with open(path or STATE_PATH, 'w', encoding='utf-8') as fh:
+            json.dump(watches, fh, ensure_ascii=False)
+    except OSError as exc:
+        log(f'⚠️ Наблюдения после выхода не сохранены: {exc}')
+
+
+def watch_live(position, pair, exit_price, reason, trade_id, strategy):
+    """
+    Заводит наблюдение по БОЕВОЙ позиции и кладёт его в файл состояния.
+
+    Боевая позиция устроена иначе бумажной, поэтому нужные поля собираются
+    здесь, а не в watch(): общая функция не должна знать про два формата.
+    """
+    from datetime import datetime, timezone
+    try:
+        params = position.get('params') or {}
+        targets, _ = _live_targets(params)
+        shaped = {
+            'entry_price': position['entry_price'],
+            'stop_loss': params['stop_loss'],
+            'targets': targets,
+            'strategy': strategy or '',
+            'pair': pair,
+            'direction': position['signal']['setup']['type'],
+            'closed_at': datetime.now(timezone.utc).isoformat(timespec='seconds'),
+        }
+        ts = int(datetime.now(timezone.utc).timestamp() * 1000)
+        watches = load_state()
+        watches.append(watch(shaped, ts, exit_price, reason, trade_id))
+        save_state(watches)
     except Exception as exc:                       # noqa: BLE001
-        log(f'⚠️ Наблюдение после выхода не записано: {exc}')
+        log(f'⚠️ Наблюдение после выхода не заведено: {exc}')
+
+
+def _live_targets(params):
+    """Цели позиции в том же виде, в каком их отдаёт план выхода."""
+    from exit_plan import tp_plan
+    return tp_plan(params)
+
+
+def advance_live(fetch_candles=None):
+    """
+    Один шаг наблюдений боевого пути: догрузить свечи, продвинуть, дописать.
+
+    fetch_candles(pair, since_ms) -> список свечей [ts, o, h, l, c, v]. По
+    умолчанию берётся биржевой загрузчик; параметр существует ради проверок,
+    которым незачем ходить в сеть.
+
+    Возвращает число ДОСМОТРЕННЫХ наблюдений.
+    """
+    watches = load_state()
+    if not watches:
+        return 0
+
+    if fetch_candles is None:
+        fetch_candles = _default_fetch
+
+    finished = []
+    for pair in {w['pair'] for w in watches if w.get('pair')}:
+        mine = [w for w in watches if w['pair'] == pair]
+        since = min(w['last_ts'] for w in mine)
+        try:
+            candles = fetch_candles(pair, since)
+        except Exception as exc:                   # noqa: BLE001
+            log(f'   {pair}: свечи для наблюдения не получены — {exc}')
+            continue
+        for candle in candles or []:
+            ts, _o, high, low, close = (candle[0], candle[1], candle[2],
+                                        candle[3], candle[4])
+            finished.extend(advance(mine, pair, ts, high, low, close))
+
+    if finished:
+        write([row(w) for w in finished])
+        done = {id(w) for w in finished}
+        watches = [w for w in watches if id(w) not in done]
+
+    save_state(watches)
+    return len(finished)
+
+
+def _default_fetch(pair, since_ms):
+    """Свечи с биржи. Шаг тот же, что у бумажного наблюдения, — 5 минут."""
+    import exchange
+    df = exchange.fetch_ohlcv('5m', limit=200, symbol=pair, since=since_ms)
+    if df is None or df.empty:
+        return []
+    out = []
+    for _, r in df.iterrows():
+        out.append([int(r['timestamp'].timestamp() * 1000), float(r['open']),
+                    float(r['high']), float(r['low']), float(r['close'])])
+    return out

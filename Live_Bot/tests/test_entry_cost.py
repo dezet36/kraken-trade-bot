@@ -29,6 +29,7 @@ p≈0.08. Поэтому предел стоит там, где оправдан
 проверяется отдельно — по колонке cost_share_pct на НОВЫХ данных.
 """
 
+import csv
 import os
 import re
 import sys
@@ -180,19 +181,41 @@ class TestTheNumberReachesTheJournal:
         assert "'cost_share_pct': order.get('cost_share_pct'" in src
         assert "'cost_share_pct': pos.get('cost_share_pct'" in src
 
-    def test_an_added_column_cannot_shift_old_rows(self):
+    def test_an_added_column_cannot_shift_old_rows(self, tmp_path):
         """
         Шапка пишется один раз, строки — всегда по текущему COLUMNS. Новая
-        колонка в середине сдвинула бы все прежние строки влево, и файл
-        читался бы правдоподобно — просто в «комиссии» оказалась бы
-        длительность. Перенос шапки обязан существовать и вызываться перед
-        записью.
+        колонка сдвинула бы все прежние строки влево, и файл читался бы
+        правдоподобно — просто в «комиссии» оказалась бы длительность.
+
+        ПРОВЕРЯЕТСЯ РЕЗУЛЬТАТ, А НЕ ТЕКСТ КОДА. Прежняя версия искала в
+        исходнике вызов переноса рядом с DictWriter. Такая проверка ловит
+        переименование и не ловит поломку: когда перенос вынесли в общий
+        модуль csv_journal, она упала — хотя защита при этом стала лучше и
+        работала. Здесь вместо этого пишется старый файл и проверяется, что
+        значения остались под своими именами.
         """
+        import csv_journal
         import paper_broker
-        assert hasattr(paper_broker, '_migrate_journal_header')
-        src = open(os.path.join(ROOT, 'paper_broker.py'), encoding='utf-8').read()
-        spot = src.index('_migrate_journal_header()\n', src.index('def _migrate') + 10)
-        assert 'DictWriter' in src[spot:spot + 500]
+
+        path = str(tmp_path / 'trades.csv')
+        old_columns = [c for c in paper_broker.COLUMNS if c != 'cost_share_pct']
+        sample = {c: f'знач-{c}' for c in old_columns}
+        with open(path, 'w', encoding='utf-8', newline='') as fh:
+            writer = csv.DictWriter(fh, fieldnames=old_columns)
+            writer.writeheader()
+            writer.writerow(sample)
+
+        csv_journal.append(path, paper_broker.COLUMNS,
+                           [{c: 'новая' for c in paper_broker.COLUMNS}])
+
+        with open(path, encoding='utf-8-sig', newline='') as fh:
+            rows = list(csv.DictReader(fh))
+
+        assert len(rows) == 2
+        for name in old_columns:
+            assert rows[0][name] == sample[name], f'колонка {name} съехала'
+        assert rows[0]['cost_share_pct'] == ''      # старая сделка её не знала
+        assert rows[1]['cost_share_pct'] == 'новая'
 
 
 class TestTheDisabledLimitIsNamed:

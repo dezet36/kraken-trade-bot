@@ -1408,6 +1408,19 @@ function summarise(rows) {
     return a + (t.risk ? c / t.risk : 0);
   }, 0) / n : 0;
 
+  /* ДОЛЯ РИСКА, ИЗВЕСТНАЯ ЗАРАНЕЕ. costR выше — это факт по итогу сделки, а
+     costShare считается при входе из тесноты стопа и потому отвечает на
+     другой вопрос: во что обойдётся вход, ЕЩЁ ДО того как он сделан. Пара
+     чисел рядом показывает, совпал ли расчёт с тем, что вышло. */
+  const shares = rows.map(t => t.cost_share).filter(x => x != null);
+  const costShare = shares.length
+    ? shares.reduce((a, x) => a + x, 0) / shares.length : null;
+
+  /* СКОЛЬКО СДЕЛОК ЗАМЕРЕНО, А НЕ ПОСЧИТАНО. Комиссии берутся у биржи, а при
+     её отказе оцениваются по тарифу. Доля замеренных — это доверие к числу
+     «Издержки»: если она мала, рядом стоит модель, а не факт. */
+  const measured = rows.filter(t => t.fees_source === 'exchange').length;
+
   return {
     trades: n,
     wins: wins.length,
@@ -1416,7 +1429,7 @@ function summarise(rows) {
     pf: gl ? gw / gl : null,
     sumR,
     expectancy, expCI,
-    fees, costR,
+    fees, costR, costShare, measured,
     /* Ожидание, каким оно было бы без издержек. Эта пара чисел отвечает на
        вопрос «стратегия не работает или её съедают комиссии». */
     grossExpectancy: expectancy + costR,
@@ -1511,10 +1524,19 @@ function cards(byStrategy) {
              пустовало: позиций нет — и в четырёх карточках подряд стоял
              прочерк с подписью «позиций нет», хотя шапка уже говорила
              «0 в работе». Показателей осталось шесть — ровно 3×2. */ ''}
-        ${PAPER ? kpi('Издержки', s.stats.costR.toFixed(3) + ' R/сд',
+        ${/* ПОКАЗЫВАЕТСЯ И В БОЮ. Клетка была только для бумаги: боевой путь
+              до 30 августа 2026 комиссий не считал, и показывать было нечего.
+              Между тем именно в бою они и решают — на августовской выборке
+              грязный итог +$34.94 превратился в −$616.77. */ ''}
+        ${s.stats.fees ? kpi('Издержки', s.stats.costR.toFixed(3) + ' R/сд',
               '$' + s.stats.fees.toFixed(2) + ' · без них '
               + (s.stats.grossExpectancy >= 0 ? '+' : '')
-              + s.stats.grossExpectancy.toFixed(3) + ' R') : ''}
+              + s.stats.grossExpectancy.toFixed(3) + ' R'
+              + (s.stats.costShare != null
+                  ? ' · вход стоит ' + s.stats.costShare.toFixed(1) + '% риска' : '')
+              + (s.stats.measured < s.stats.trades
+                  ? ' · замерено ' + s.stats.measured + ' из ' + s.stats.trades
+                  : '')) : ''}
       </div>
     </div>`;
   }).join('');
