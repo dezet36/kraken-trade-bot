@@ -1,0 +1,70 @@
+# Служба systemd для бота на Linux-сервере.
+#
+# ПОЧЕМУ НЕ TMUX. Сессия tmux решает ровно одну задачу: не убить процесс при
+# обрыве связи. Всё остальное она оставляет человеку. Сервер перезагрузился —
+# бот не поднялся. Процесс упал — бот не поднялся. Узнать, работает ли он, можно
+# только подключившись и посмотрев глазами.
+#
+# Это прямо относится к главной беде проекта: непрерывность работы 14%, то есть
+# из 527 часов бот торговал 73. Выборка копится в семь раз медленнее, чем кажется
+# по календарю, и каждая дыра в свечах ещё и портит журнал — числа выглядят
+# рыночными, а за ними простой.
+#
+# systemd поднимает бота при загрузке сервера, перезапускает после падения и
+# отвечает на вопрос «работает ли» одной командой.
+#
+# УСТАНОВКА
+#   cp /opt/kraken/code/Live_Bot/kraken-bot.service /etc/systemd/system/
+#   systemctl daemon-reload
+#   systemctl enable --now kraken-bot
+#
+# ПОЛЬЗОВАНИЕ
+#   systemctl status kraken-bot     работает ли, и что было последним
+#   systemctl restart kraken-bot    перезапустить после обновления кода
+#   systemctl stop kraken-bot       остановить
+#   journalctl -u kraken-bot -f     смотреть журнал живьём (выход: Ctrl+C)
+#   journalctl -u kraken-bot -n 200 последние 200 строк
+#
+# Ctrl+C в journalctl закрывает ПРОСМОТР, а не бота — в отличие от терминала,
+# где та же клавиша его убивала.
+
+[Unit]
+Description=Kraken trading bot
+Documentation=https://github.com/dezet36/kraken-trade-bot
+# Ждём именно сетевой готовности, а не просто поднятого интерфейса: бот на
+# первом же цикле идёт на биржу, и старт до появления маршрута даёт ошибку
+# соединения в журнале при каждой перезагрузке.
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/kraken/code/Live_Bot
+
+# Данные отдельно от кода: папку с кодом перезаписывают при каждом обновлении.
+Environment=BOT_DATA_DIR=/opt/kraken/bot_data
+# Без этого вывод копится в буфере и в journalctl приходит рывками по 4 КБ —
+# смотреть за работой живьём становится нельзя.
+Environment=PYTHONUNBUFFERED=1
+# Путь к модели. Пустое значение выключает стратегию LLM, и это рабочее
+# состояние: остальные четыре стратегии к модели отношения не имеют.
+Environment=LLM_MODEL_PATH=/opt/kraken/bot_data/models/Qwen3-8B-Q4_K_M.gguf
+
+ExecStart=/opt/kraken/venv/bin/python bot.py
+
+# ПЕРЕЗАПУСК ВСЕГДА, А НЕ ТОЛЬКО ПРИ ОШИБКЕ. on-failure не поднимет бота после
+# штатного выхода — а штатным он бывает и по ошибке: необработанное завершение
+# цикла, остановка из панели, завершение по сигналу от обновлятора.
+Restart=always
+RestartSec=10
+
+# Не даём бесконечному циклу падений жечь процессор: пять попыток за десять
+# минут, дальше служба останавливается и это видно в status.
+StartLimitBurst=5
+StartLimitIntervalSec=600
+
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
