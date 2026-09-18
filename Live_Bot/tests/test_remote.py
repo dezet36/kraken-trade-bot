@@ -275,3 +275,98 @@ class TestFindingTheSshClient:
         _process, error = remote.open_tunnel({'host': 'srv'})
         assert 'System32' in error and 'Git' in error
         assert 'PATH' in error
+
+
+class TestPastingWorksOnAnyKeyboardLayout:
+    """
+    Ctrl+V обязан работать при русской раскладке.
+
+    ОТКУДА ЭТО. Tk привязывает вставку к СИМВОЛУ «v». При русской раскладке
+    система сообщает «м», привязки для неё нет, и вставка молча не происходит:
+    человек жмёт Ctrl+V, ничего не видит и не понимает почему.
+
+    Адрес сервера и путь к ключу набирать руками — то ещё удовольствие, а
+    ошибиться в них легко: опечатка в адресе даёт отказ «сервер не найден», и
+    искать причину человек будет где угодно, только не в раскладке.
+    """
+
+    def test_the_binding_uses_key_codes_not_letters(self):
+        """
+        Код физической клавиши от раскладки не зависит: V — это 86 независимо
+        от того, какая буква на ней нарисована.
+        """
+        import remote_app
+        assert remote_app._KEY_V == 86
+        assert remote_app._KEY_C == 67
+        assert remote_app._KEY_X == 88
+        assert remote_app._KEY_A == 65
+
+    def test_ctrl_v_is_recognised_by_key_code(self):
+        """
+        Решение принимается по коду клавиши, поэтому раскладка на него не
+        влияет: физическая V имеет код 86 независимо от буквы на ней.
+        """
+        import remote_app
+        assert remote_app.edit_action(remote_app._KEY_V, 0x4) == 'Paste'
+        assert remote_app.edit_action(remote_app._KEY_C, 0x4) == 'Copy'
+        assert remote_app.edit_action(remote_app._KEY_X, 0x4) == 'Cut'
+        assert remote_app.edit_action(remote_app._KEY_A, 0x4) == 'select'
+
+    def test_a_plain_key_is_left_alone(self):
+        """Без Ctrl это обычный ввод, и перехватывать его нельзя."""
+        import remote_app
+        assert remote_app.edit_action(remote_app._KEY_V, 0) is None
+
+    def test_other_combinations_are_not_intercepted(self):
+        import remote_app
+        assert remote_app.edit_action(70, 0x4) is None      # Ctrl+F
+
+    def test_the_right_click_menu_is_in_russian(self):
+        """
+        Правая кнопка видна и работает даже когда сочетание перехватила другая
+        программа. Пункты на языке остального окна.
+        """
+        import inspect
+
+        import remote_app
+
+        source = inspect.getsource(remote_app.enable_editing)
+        for label in ('Вставить', 'Копировать', 'Выделить всё'):
+            assert label in source
+
+    def test_the_handler_stops_the_default_one(self):
+        """
+        Без 'break' при латинской раскладке сработают обе привязки — наша и
+        родная, — и текст вставится дважды. Такую ошибку замечают не сразу.
+        """
+        import inspect
+
+        import remote_app
+
+        source = inspect.getsource(remote_app.enable_editing)
+        assert "return 'break'" in source
+
+
+class TestTheHostKeyIsHandledWithoutAConsole:
+    """
+    У программы нет терминала, спросить «yes/no» некому.
+
+    По умолчанию ssh при незнакомом сервере ждёт ответа, а не дождавшись —
+    отказывает. Программа честно сообщала «отпечаток не подтверждён» и
+    отправляла человека в консоль делать руками ровно то же самое.
+    """
+
+    def test_the_first_fingerprint_is_accepted(self):
+        cmd = remote.tunnel_command({'host': 'srv'}, 'ssh')
+        assert 'StrictHostKeyChecking=accept-new' in cmd
+
+    def test_checking_is_not_turned_off_entirely(self):
+        """
+        accept-new запоминает отпечаток при первом подключении, но откажет,
+        если он ПОМЕНЯЕТСЯ — а смена и означает подмену сервера.
+
+        StrictHostKeyChecking=no молчал бы и при смене. Разница между этими
+        двумя значениями — и есть вся защита.
+        """
+        cmd = remote.tunnel_command({'host': 'srv'}, 'ssh')
+        assert 'StrictHostKeyChecking=no' not in cmd

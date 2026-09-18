@@ -41,6 +41,79 @@ FIELDS = (
 
 DEFAULTS = {'user': 'root', 'ssh_port': '22', 'remote_port': '8787'}
 
+# Коды клавиш Windows. Привязываемся к НИМ, а не к буквам — см. enable_editing.
+_KEY_A, _KEY_C, _KEY_V, _KEY_X = 65, 67, 86, 88
+
+# Бит модификатора Ctrl в поле state события Tk.
+_CTRL = 0x4
+
+
+def edit_action(keycode, state):
+    """
+    Какое действие означает нажатие. None — обычный ввод, не наше дело.
+
+    ОТДЕЛЬНОЙ ФУНКЦИЕЙ РАДИ ПРОВЕРЯЕМОСТИ. Решение о клавише — это единственное
+    место, где легко ошибиться: перепутать код, забыть модификатор, поймать
+    лишнее. А проверить его внутри привязки нельзя: Tk отказывается
+    синтезировать событие с кириллическим keysym, и попытка изобразить русскую
+    раскладку в проверке упирается в само тестовое окружение.
+
+    Здесь же достаточно передать два числа.
+    """
+    if not state & _CTRL:
+        return None
+    return {_KEY_V: 'Paste', _KEY_C: 'Copy',
+            _KEY_X: 'Cut', _KEY_A: 'select'}.get(keycode)
+
+
+def enable_editing(widget, tk, root):
+    """
+    Возвращает полю вставку и копирование при любой раскладке.
+
+    ЗАЧЕМ. Tk привязывает Ctrl+V к СИМВОЛУ «v». При русской раскладке система
+    сообщает «м», привязки для неё нет, и вставка молча не происходит: человек
+    жмёт Ctrl+V, ничего не видит и не понимает почему. Адрес сервера и путь к
+    ключу набирать руками — то ещё удовольствие, а ошибиться в них легко.
+
+    Привязка по КОДУ клавиши от раскладки не зависит: физическая клавиша V
+    имеет код 86 независимо от того, какая буква на ней нарисована.
+
+    Плюс правая кнопка мыши: её видно, и она работает даже когда сочетание
+    перехватила другая программа.
+    """
+    def keyed(event):
+        action = edit_action(event.keycode, event.state)
+        if action is None:
+            return None
+        if action == 'select':
+            widget.select_range(0, 'end')
+            widget.icursor('end')
+        else:
+            widget.event_generate(f'<<{action}>>')
+        # 'break' обязателен: иначе при латинской раскладке сработает и наша
+        # привязка, и родная, и текст вставится дважды.
+        return 'break'
+
+    widget.bind('<KeyPress>', keyed)
+
+    menu = tk.Menu(root, tearoff=0)
+    menu.add_command(label='Вставить',
+                     command=lambda: widget.event_generate('<<Paste>>'))
+    menu.add_command(label='Копировать',
+                     command=lambda: widget.event_generate('<<Copy>>'))
+    menu.add_command(label='Вырезать',
+                     command=lambda: widget.event_generate('<<Cut>>'))
+    menu.add_separator()
+    menu.add_command(label='Выделить всё',
+                     command=lambda: widget.select_range(0, 'end'))
+
+    def popup(event):
+        widget.focus_set()
+        menu.tk_popup(event.x_root, event.y_root)
+        return 'break'
+
+    widget.bind('<Button-3>', popup)
+
 
 def ask_settings(current, error=''):
     """
@@ -78,6 +151,7 @@ def ask_settings(current, error=''):
         field = ttk.Entry(frame, width=38)
         field.insert(0, str(current.get(name) or DEFAULTS.get(name, '')))
         field.grid(row=index, column=1, sticky='w', pady=4)
+        enable_editing(field, tk, root)
         entries[name] = field
         if name == 'key':
             def pick(entry=field):
