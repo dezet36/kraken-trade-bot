@@ -105,6 +105,13 @@ def parse(answer, levels):
 
     out = {'decision': data.get('d'), 'why': data.get('why', ''),
            'risk': data.get('risk', ''),
+           # Разбор и режим рынка модель пишет ПЕРЕД решением — это её
+           # рассуждение вслух, и оно нужно и при отказе: по нему видно, что
+           # именно она разглядела в данных, а не только чем кончила.
+           'regime': data.get('regime', ''),
+           'analysis': data.get('analysis', ''),
+           'trigger': data.get('trigger', ''),
+           'alt': data.get('alt', ''),
            'confluence': {f: bool((data.get('cf') or {}).get(f))
                           for f in FACTORS}}
     if data.get('d') != 'enter':
@@ -135,7 +142,11 @@ def check(parsed, levels):
 
     votes = sum(1 for f in FACTORS if parsed['confluence'].get(f))
     base = {'confluence': parsed['confluence'], 'votes': votes,
-            'why': parsed.get('why', ''), 'risk': parsed.get('risk', '')}
+            'why': parsed.get('why', ''), 'risk': parsed.get('risk', ''),
+            'regime': parsed.get('regime', ''),
+            'analysis': parsed.get('analysis', ''),
+            'trigger': parsed.get('trigger', ''),
+            'alt': parsed.get('alt', '')}
 
     if parsed['decision'] != 'enter':
         return _refusal('модель пропустила', parsed.get('why', ''), base)

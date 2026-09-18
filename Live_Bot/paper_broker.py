@@ -49,7 +49,7 @@ import settings_store as settings
 import setup_geometry
 from logger import log
 
-STRATEGIES = ('FIBO', 'SMC', 'LEVELS', 'RSIBB')
+STRATEGIES = ('FIBO', 'SMC', 'LEVELS', 'RSIBB', 'LLM')
 
 BAR_TF = '5m'
 BAR_MS = 5 * 60 * 1000
@@ -123,7 +123,46 @@ COLUMNS = [
     # Разметка сетапа (зоны и уровни) — строкой JSON. Колонка нужна графику
     # закрытой сделки: дашборд читает журнал из CSV, а не из JSONL.
     'geometry',
+    # ── Разбор языковой модели (стратегия LLM) ──────────────────────────────
+    #
+    # Пустые у остальных четырёх стратегий, и это нормально: колонка,
+    # осмысленная для одной стратегии, не повод заводить второй журнал.
+    # Разъехавшиеся журналы этот проект уже проходил — боевой отстал от
+    # бумажного на двенадцать колонок именно так.
+    #
+    # llm_analysis — разбор, который модель пишет ДО решения. Он и есть
+    # главная ценность записи: по нему потом видно, на чём именно она
+    # ошиблась, а не только что ошиблась.
+    'llm_donor',        # чей сетап послужил поводом посмотреть на пару
+    'llm_regime', 'llm_analysis', 'llm_trigger', 'llm_risk', 'llm_alt',
+    # Вероятность отработки по мнению модели. Проверяется на калибровку:
+    # выигрывают ли сетапы, названные «0.60», действительно в 60% случаев.
+    'llm_p',
+    'llm_votes',        # сколько факторов из пяти она отметила
+    'llm_model',        # какой моделью получен ответ: сравнивать надо равное
 ]
+
+
+def _llm_columns(llm):
+    """
+    Разбор модели в колонки журнала. Пустые значения, если сделка не её.
+
+    Отдельной функцией, потому что колонки одни и те же в двух журналах:
+    записанные дважды, они разойдутся — так боевой журнал и отстал от
+    бумажного на двенадцать колонок.
+    """
+    llm = llm or {}
+    return {
+        'llm_donor': llm.get('donor', ''),
+        'llm_regime': llm.get('regime', ''),
+        'llm_analysis': llm.get('analysis', ''),
+        'llm_trigger': llm.get('trigger', ''),
+        'llm_risk': llm.get('risk', ''),
+        'llm_alt': llm.get('alt', ''),
+        'llm_p': llm.get('p', ''),
+        'llm_votes': llm.get('votes', ''),
+        'llm_model': llm.get('model', ''),
+    }
 
 
 def _bar_hours(timeframe: str) -> float:
@@ -808,6 +847,14 @@ class PaperBroker:
                      f"импульс {impulse}"]
         ctx['why'] = ' · '.join(parts)
         ctx['geometry'] = PaperBroker._geometry(strategy, signal)
+
+        # Разбор модели, если сделку открыла пятая стратегия. Своё «почему»
+        # она пишет сама и человеческим языком — оно заменяет собранное выше
+        # из кусочков, потому что объясняет решение, а не описывает сетап.
+        llm = signal.get('llm')
+        if llm:
+            ctx['why'] = llm.get('why') or ctx['why']
+            ctx['llm'] = llm
         return ctx
 
     # ── Симуляция ────────────────────────────────────────────────────────────
@@ -1437,6 +1484,7 @@ class PaperBroker:
             'breakeven_set': pos['breakeven_set'],
             'why': ctx.get('why', ''),
             'geometry': json.dumps(ctx.get('geometry') or {}, ensure_ascii=False),
+            **_llm_columns(ctx.get('llm')),
             'exit_reason_ru': glossary.exit_reason(reason),
             'confirmed_ru': '; '.join(ctx.get('confirmed') or []),
             'missing_ru': '; '.join(ctx.get('missing') or []),

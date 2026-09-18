@@ -10,6 +10,7 @@ import dashboard
 import error_log
 import positioning
 import strategy_levels
+import strategy_llm
 import strategy_rsibb
 import strategy_smc
 from strategy import analyze_market
@@ -123,6 +124,29 @@ def _build_signal(candidate, strategy, balance):
         df_for_chart = candidate.get('df_1h')
         log(f"\n[RSIBB] {pair}: полоса {bb.get('band')}, "
             f"RSI {bb.get('rsi', 0):.0f}, RR {candidate.get('rr', 0):.2f}")
+    elif strategy == 'LLM':
+        # Сигнал собран моделью и уже проверен llm_decide: геометрия,
+        # минимальный стоп по издержкам, отношение хода к риску и ожидание с
+        # настоящей комиссией. Пересобирать нечего.
+        signal = candidate.get('signal')
+        if not signal:
+            log(f"   LLM {pair}: кандидат без сигнала — пропускаю")
+            return None, None
+        llm = signal.get('llm') or {}
+        signal['scan'] = {
+            'score': candidate.get('score'),
+            'rr_est': candidate.get('rr'),
+            # Донор попадает в разбор вкладов: по нему потом видно, сетапы
+            # какой стратегии модель берёт чаще и чьи отрабатывают лучше.
+            'donor': llm.get('donor'),
+            'p': llm.get('p'),
+            'ev': llm.get('ev'),
+            'poi_type': 'LLM',
+        }
+        df_for_chart = candidate.get('df_1h')
+        log(f"\n[LLM] {pair}: {signal['setup'].get('type')}, "
+            f"вероятность {llm.get('p')}, конфлюенс {llm.get('votes')}/5, "
+            f"сетап от {llm.get('donor')}")
     elif strategy == 'FIBO':
         signal = analyze_market(candidate['df_1h'], None, pair, balance)
         if not signal:
@@ -280,6 +304,10 @@ def _paper_cycle():
 
     hour_utc = datetime.now(timezone.utc).hour
     total_opened = 0
+    # Кандидаты этого цикла по стратегиям: их разбирает модель, когда доходит
+    # очередь до пятой стратегии. Сканировать пул заново ради неё значило бы
+    # повторить всю сетевую работу второй раз за цикл.
+    found = {}
 
     for strategy in broker.strategies:
         if not settings.enabled(strategy):
@@ -324,6 +352,22 @@ def _paper_cycle():
             elif strategy == 'RSIBB':
                 candidates = strategy_rsibb.scan_for_setups(
                     liquid_pairs, gate, client=client, balance=balance)
+            elif strategy == 'LLM':
+                # ЕДИНСТВЕННАЯ СТРАТЕГИЯ, КОТОРОЙ ОТДАЮТ ЧУЖИХ КАНДИДАТОВ, И
+                # ДЕЛАЕТСЯ ЭТО ЯВНО. Правило выше запрещает молчаливую
+                # подмену: уровни однажды месяц торговали сетапы фибо через
+                # ветку else, и разбор оказался недостоверным.
+                #
+                # Здесь заимствование — сам замысел, оно названо в имени
+                # модуля и записано в журнал каждой сделки. И решение всё
+                # равно своё: модель заново выбирает направление и уровни, а
+                # чужой сетап лишь повод посмотреть на эту пару сейчас.
+                #
+                # Работает потому, что LLM стоит ПОСЛЕДНЕЙ в STRATEGIES: к её
+                # очереди остальные уже отсканировали. Проверка на порядок —
+                # в test_strategy_llm.
+                candidates = strategy_llm.scan_for_setups(
+                    found, gate, client=client, balance=balance)
             else:
                 log(f"   {strategy}: нет сканера — пропускаем. Отдать пул "
                     f"чужому сканеру нельзя: он найдёт свои сетапы и они "
@@ -333,6 +377,7 @@ def _paper_cycle():
             log(f"   {strategy}: ошибка сканирования — {exc}")
             continue
 
+        found[strategy] = candidates
         log(f"   {strategy}: сетапов найдено {len(candidates)}")
         opened = 0
         for candidate in candidates:

@@ -31,7 +31,7 @@ class TestCapitalSplit:
         поддавалась настройке.
         """
         assert set(config.PAPER_START_BALANCES) == {'FIBO', 'SMC', 'LEVELS',
-                                                    'RSIBB'}
+                                                    'RSIBB', 'LLM'}
 
     def test_one_strategy_budget_does_not_move_the_others(self, monkeypatch):
         """
@@ -83,8 +83,19 @@ class TestCapitalSplit:
         чтобы разделение бюджетов не переписало на ходу результаты идущего
         замера. Дальше каждая сумма живёт своей жизнью и меняется отдельно.
         """
-        total = sum(config.PAPER_START_BALANCES.values())
-        share = {k: v / total for k, v in config.PAPER_START_BALANCES.items()}
+        # ДОЛИ СЧИТАЮТСЯ СРЕДИ ЗАМЕРЕННЫХ, А НЕ СРЕДИ ВСЕХ. Пропорция —
+        # это история четырёх стратегий, полученная скользящей проверкой. У
+        # пятой (LLM) замера нет вовсе: её депозит назначен оператором, и
+        # включать его в измеренную пропорцию значило бы размыть её числом,
+        # которое ничего не измеряет.
+        #
+        # Раньше здесь стояла сумма ВСЕХ депозитов, и добавление пятой
+        # стратегии уронило долю фибо с 0.50 до 0.40 — проверка упала,
+        # сообщив о поломке там, где её не было.
+        measured = ('FIBO', 'LEVELS', 'SMC', 'RSIBB')
+        total = sum(config.PAPER_START_BALANCES[name] for name in measured)
+        share = {name: config.PAPER_START_BALANCES[name] / total
+                 for name in measured}
         assert abs(share['FIBO'] - 0.50) < 0.005
         assert abs(share['LEVELS'] - 0.23) < 0.005
         assert abs(share['SMC'] - 0.17) < 0.005
