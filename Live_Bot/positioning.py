@@ -382,6 +382,13 @@ def change_pct(source, pair, hours, upto=None):
     if len(rows) < 2:
         return None
     newest = rows[-1]
+    # Тот же запрет, что и в latest: изменение по протухшему ряду описывает
+    # прошлое, а читается как настоящее.
+    if MAX_AGE_HOURS > 0:
+        import time
+        now = upto if upto is not None else int(time.time() * 1000)
+        if now - newest['ts'] > MAX_AGE_HOURS * 3_600_000:
+            return None
     edge = newest['ts'] - hours * 3_600_000
     older = [r for r in rows if r['ts'] <= edge]
     if not older:
@@ -393,7 +400,30 @@ def change_pct(source, pair, hours, upto=None):
     return round((now - was) / abs(was) * 100, 2)
 
 
-def latest(source, pair, upto=None):
-    """Последнее известное значение источника. None, если ряда нет."""
+# Насколько старым может быть последнее значение, чтобы считаться текущим.
+# Открытый интерес и лонг/шорт собираются раз в час, фандинг раз в восемь.
+MAX_AGE_HOURS = float(os.getenv('POSITIONING_MAX_AGE_HOURS', 12))
+
+
+def latest(source, pair, upto=None, max_age_hours=None):
+    """
+    Последнее известное значение источника. None, если ряда нет ИЛИ он протух.
+
+    ПРОВЕРКА СВЕЖЕСТИ ЗДЕСЬ НЕ ПЕДАНТИЗМ. Без неё функция отдаёт последнюю
+    строку файла независимо от её возраста, и трёхнедельный открытый интерес
+    попадает в разбор как сегодняшний. Число выглядит рыночным, а описывает
+    другой месяц — ровно тот способ испортить вывод, каким простой бота уже
+    портил журнал сделок.
+
+    Прочерк честнее: «не измерено» и «не изменилось» — разные утверждения.
+    """
     rows = series(source, pair, limit=1, upto=upto)
-    return rows[-1].get('value') if rows else None
+    if not rows:
+        return None
+    limit = MAX_AGE_HOURS if max_age_hours is None else max_age_hours
+    if limit > 0:
+        import time
+        now = upto if upto is not None else int(time.time() * 1000)
+        if now - rows[-1]['ts'] > limit * 3_600_000:
+            return None
+    return rows[-1].get('value')

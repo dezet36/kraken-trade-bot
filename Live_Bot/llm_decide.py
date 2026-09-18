@@ -196,8 +196,12 @@ def decide(pair, df, ask, news=None, at=None, max_tokens=400):
         return _refusal('нет разметки', 'уровней на этом баре не найдено')
 
     grammar = llm_grammar.build([lv['id'] for lv in levels])
+    # Разметка без задачи — таблица без вопроса. Первый прогон по живому рынку
+    # отдавал модели только context['text'], и она отвечала «no news, no
+    # comment»: её просто не спросили.
+    import llm_prompt
     try:
-        answer = ask(context['text'], grammar, max_tokens)
+        answer = ask(llm_prompt.build(context['text']), grammar, max_tokens)
     except Exception as exc:                           # noqa: BLE001
         log(f'⚠️ {pair}: модель не ответила — {exc}')
         return _refusal('модель недоступна', str(exc)[:200])

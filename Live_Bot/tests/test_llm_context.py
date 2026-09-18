@@ -254,3 +254,128 @@ class TestItDoesNotCrashOnThinData:
         out = llm_context.build('BTCUSDT', make_df(np.full(300, 100.0),
                                                    spread=np.zeros(300)))
         assert out['levels'] == []
+
+
+class TestStaleDataIsNotPassedOffAsCurrent:
+    """
+    Протухший ряд обязан читаться как «не измерено», а не как «сейчас».
+
+    ОТКУДА ЭТО. Первый прогон по живому рынку 18 сентября 2026 шёл на сервере,
+    где рядов не было вовсе. Возник соблазн скопировать туда локальные — но им
+    было три недели, и latest() отдал бы августовский открытый интерес как
+    текущий. Число выглядит рыночным, а описывает другой месяц.
+
+    Это тот же способ ошибиться, каким простой бота уже портил журнал сделок.
+    """
+
+    def test_an_old_row_reads_as_unknown(self, tmp_path, monkeypatch):
+        import json
+        import time
+
+        import positioning
+
+        path = tmp_path / 'open_interest.jsonl'
+        old_ts = int(time.time() * 1000) - 20 * 3_600_000      # 20 часов назад
+        path.write_text(json.dumps({'pair': 'BTCUSDT', 'ts': old_ts,
+                                    'value': 55000.0}) + '\n', encoding='utf-8')
+        monkeypatch.setattr(positioning, 'path_for', lambda source: str(path))
+        monkeypatch.setattr(positioning, 'MAX_AGE_HOURS', 12)
+
+        assert positioning.latest('open_interest', 'BTCUSDT') is None
+        # Без проверки возраста значение по-прежнему достаётся — но это
+        # осознанный вызов, а не умолчание.
+        assert positioning.latest('open_interest', 'BTCUSDT',
+                                  max_age_hours=0) == 55000.0
+
+    def test_a_fresh_row_is_returned(self, tmp_path, monkeypatch):
+        import json
+        import time
+
+        import positioning
+
+        path = tmp_path / 'open_interest.jsonl'
+        fresh = int(time.time() * 1000) - 3_600_000            # час назад
+        path.write_text(json.dumps({'pair': 'BTCUSDT', 'ts': fresh,
+                                    'value': 55000.0}) + '\n', encoding='utf-8')
+        monkeypatch.setattr(positioning, 'path_for', lambda source: str(path))
+        monkeypatch.setattr(positioning, 'MAX_AGE_HOURS', 12)
+
+        assert positioning.latest('open_interest', 'BTCUSDT') == 55000.0
+
+    def test_a_stale_series_gives_no_change(self, tmp_path, monkeypatch):
+        """Изменение по протухшему ряду описывает прошлое, а читается как сейчас."""
+        import json
+        import time
+
+        import positioning
+
+        path = tmp_path / 'open_interest.jsonl'
+        base = int(time.time() * 1000) - 30 * 24 * 3_600_000   # месяц назад
+        rows = [{'pair': 'BTCUSDT', 'ts': base + i * 3_600_000, 'value': 100 + i}
+                for i in range(48)]
+        path.write_text('\n'.join(json.dumps(r) for r in rows) + '\n',
+                        encoding='utf-8')
+        monkeypatch.setattr(positioning, 'path_for', lambda source: str(path))
+        monkeypatch.setattr(positioning, 'MAX_AGE_HOURS', 12)
+
+        assert positioning.change_pct('open_interest', 'BTCUSDT', 24) is None
+
+
+class TestTheModelIsActuallyAsked:
+    """
+    Разметка без задачи — таблица без вопроса.
+
+    ОТКУДА ЭТО. Первый прогон отдавал модели только собранный контекст: ни
+    задачи, ни правил, ни требования отвечать по-русски. Модель ответила
+    `{"d":"skip","why":"no news, no comment"}` — и это выглядело как отказ
+    судить рынок, хотя её просто не спросили.
+    """
+
+    def test_the_prompt_carries_the_task_and_the_data(self):
+        import llm_prompt
+
+        text = llm_prompt.build('ДАННЫЕ СЕТАПА ЗДЕСЬ')
+        assert 'ДАННЫЕ СЕТАПА ЗДЕСЬ' in text
+        assert len(text) > len('ДАННЫЕ СЕТАПА ЗДЕСЬ') * 10
+
+    def test_the_limits_come_from_the_same_place_as_the_checks(self):
+        """
+        Предел, переписанный в промт руками, разойдётся с проверкой. В этом
+        проекте так уже вышло с дневным стоп-краном.
+        """
+        import llm_decide
+        import llm_prompt
+
+        text = llm_prompt.limits()
+        assert str(llm_decide.MIN_CONFLUENCE) in text
+        assert str(llm_decide.MIN_RR) in text
+        assert f'{llm_context.min_stop_pct():.2f}' in text
+
+    def test_the_model_receives_the_task_not_just_data(self, monkeypatch):
+        """Сквозная проверка: в вызов уходит промт, а не голая разметка."""
+        import numpy as np
+        import pandas as pd
+
+        import llm_decide
+
+        seen = {}
+
+        def ask(prompt, grammar, max_tokens):
+            seen['prompt'] = prompt
+            return ('{"d":"skip","cf":{"poi":false,"vp":false,"der":false,'
+                    '"smc":false,"flow":false},"why":"нет оснований"}')
+
+        idx = np.arange(400)
+        closes = 100 + 4 * np.sin(idx / 23 * 2 * np.pi) + idx * 0.004
+        df = pd.DataFrame({
+            'timestamp': pd.to_datetime(idx * 3_600_000 + 1_700_000_000_000,
+                                        unit='ms'),
+            'open': closes, 'high': closes + closes * 0.002,
+            'low': closes - closes * 0.002, 'close': closes,
+            'volume': np.full(400, 100.0),
+        })
+        llm_decide.decide('BTCUSDT', df, ask)
+
+        assert 'УРОВНИ' in seen['prompt'], 'данные не дошли'
+        assert 'ОТВЕЧАЙ ПО-РУССКИ' in seen['prompt'], 'язык не потребован'
+        assert 'ПРЕДЕЛЫ' in seen['prompt'], 'пределы не названы'
