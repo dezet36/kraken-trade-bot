@@ -272,12 +272,17 @@ class TestCosts:
 
 
 class TestParallelStrategies:
-    def test_both_strategies_hold_same_pair(self, broker_env):
+    def test_both_strategies_hold_same_pair(self, broker_env, monkeypatch):
         """
         Ради этого фантомный режим и делался: на бирже позиция по инструменту
         одна, и более частая стратегия отбирала бы сетапы у второй.
+
+        С 19.09.2026 это РЕЖИМ ЗАМЕРА, а не умолчание: по умолчанию фантом
+        повторяет биржу (одна пара — одна позиция), потому что иначе его
+        результаты завышены. Замер по отдельности включается ключом.
         """
-        broker, client, pb, _cfg = broker_env
+        broker, client, pb, cfg = broker_env
+        monkeypatch.setattr(cfg, 'PAPER_EXCLUSIVE_PAIRS', False)
         pb._now_ms = lambda: 1_700_000_000_000
 
         assert broker.open('FIBO', signal(strategy='FIBO'))
@@ -377,7 +382,15 @@ class TestExitPlan:
 
         position = broker.positions('FIBO')['BTCUSDT']
         assert position['breakeven_set']
-        assert position['stop_loss'] == 100.0
+        # НЕ на цену входа: стоп ровно на входе терял комиссии круга и
+        # записывался как «ноль». Он стоит выше входа на издержки и буфер.
+        import config
+        import exit_plan
+        expected = 100.0 * (1 + config.BREAKEVEN_OFFSET_PCT / 100)
+        assert position['stop_loss'] == pytest.approx(expected)
+        assert position['stop_loss'] > 100.0
+        assert exit_plan.breakeven_price(100.0, False) < 100.0
+        assert config.BREAKEVEN_OFFSET_PCT >= config.ENTRY_COST_ROUND_TRIP * 100
 
     def test_breakeven_and_stop_in_one_candle_closes_position(self, broker_env):
         """
@@ -824,3 +837,72 @@ class TestDailyStop:
         broker.update()
 
         assert broker.positions('SMC'), 'открытая позиция должна остаться'
+
+
+class TestOneInstrumentOnePosition:
+    """
+    На бирже позиция по инструменту одна. Фантом, разрешавший обеим стратегиям
+    одну пару, завышал результаты: каждая торговала, будто соседей нет.
+    """
+
+    def test_the_second_strategy_is_refused_on_a_taken_pair(self, broker_env):
+        broker, client, pb, cfg = broker_env
+        pb._now_ms = lambda: 1_700_000_000_000
+        assert broker.open('FIBO', signal(entry=100.0))
+        assert not broker.open('SMC', signal(entry=100.0))
+        assert broker.pair_taken_by('BTCUSDT') == 'FIBO'
+        assert broker.pair_taken_by('BTCUSDT', except_strategy='FIBO') is None
+        assert broker.open('SMC', signal(pair='ETHUSDT', entry=100.0))
+
+    def test_the_old_behaviour_is_a_switch(self, broker_env, monkeypatch):
+        broker, client, pb, cfg = broker_env
+        monkeypatch.setattr(cfg, 'PAPER_EXCLUSIVE_PAIRS', False)
+        pb._now_ms = lambda: 1_700_000_000_000
+        assert broker.open('FIBO', signal(entry=100.0))
+        assert broker.open('SMC', signal(entry=100.0))
+
+
+class TestTheThermostat:
+    """
+    День, в который просело всё, — не день, чтобы набирать ещё. Просадка
+    считается от капитала на начало суток UTC, точка отсчёта живёт в
+    состоянии и рестартом не сбрасывается.
+    """
+
+    def test_new_entries_stop_after_the_daily_drawdown(self, broker_env, monkeypatch):
+        broker, client, pb, cfg = broker_env
+        # Порог 0.3%: одна позиция с риском 1% на стратегию — это 0.5% от
+        # общего капитала двух стратегий, а плавающий минус ниже стопа не
+        # бывает. Проверяется механика, не величина порога.
+        monkeypatch.setattr(cfg, 'PORTFOLIO_DAILY_DD_PAUSE_PCT', 0.3)
+        pb._now_ms = lambda: 1_700_000_000_000
+        start = broker.total_equity()
+        assert broker.thermostat()[1] is True
+
+        assert broker.open('FIBO', signal(entry=100.0, stop=50.0))
+        feed(broker, client, 'BTCUSDT', [(100, 100, 100), (100, 60, 60)])
+        drawdown, allowed, limit = broker.thermostat()
+        assert broker.total_equity() < start
+        assert drawdown > 0.3 and allowed is False and limit == 0.3
+
+        assert not broker.open('SMC', signal(pair='ETHUSDT', entry=100.0))
+        # Одно предупреждение в день — отмечено в состоянии.
+        assert broker.state['day_mark']['paused_alerted'] is True
+
+    def test_zero_switches_it_off(self, broker_env, monkeypatch):
+        broker, client, pb, cfg = broker_env
+        monkeypatch.setattr(cfg, 'PORTFOLIO_DAILY_DD_PAUSE_PCT', 0.0)
+        pb._now_ms = lambda: 1_700_000_000_000
+        assert broker.open('FIBO', signal(entry=100.0, stop=50.0))
+        feed(broker, client, 'BTCUSDT', [(100, 100, 100), (100, 60, 60)])
+        assert broker.thermostat()[1] is True
+        assert broker.open('SMC', signal(pair='ETHUSDT', entry=100.0))
+
+    def test_the_mark_survives_a_restart(self, broker_env, monkeypatch):
+        broker, client, pb, cfg = broker_env
+        monkeypatch.setattr(cfg, 'PORTFOLIO_DAILY_DD_PAUSE_PCT', 3.0)
+        mark = broker._day_mark()
+        reloaded = pb.PaperBroker(client) if hasattr(pb, 'PaperBroker') else None
+        if reloaded is None:
+            pytest.skip('брокер создаётся иначе')
+        assert reloaded._day_mark()['equity'] == mark['equity']

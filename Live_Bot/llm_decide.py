@@ -189,7 +189,88 @@ def truncated(answer):
     return bool(text) and not text.endswith('}')
 
 
-def check(parsed, levels, answer=None):
+# Ближе этой доли цены стоп считается «под скоплением»: свип чужих стопов
+# обычно проходит 0.05-0.3% за уровень (см. smc SWEEP_MIN_PENETRATION_PCT).
+STOP_HUNT_PCT = 0.25
+
+
+def _pools(market):
+    """Скопления чужих стопов из снимка: нетронутые пулы и равные экстремумы."""
+    smc = (market or {}).get('smc') or {}
+    out = []
+    for row in (smc.get('untapped') or []):
+        if row.get('price'):
+            out.append((float(row['price']), row.get('side'), row.get('source') or 'пул'))
+    for row in (smc.get('equal_levels') or []):
+        if row.get('price'):
+            out.append((float(row['price']), row.get('side'), row.get('source') or 'EQ'))
+    return out
+
+
+def stop_in_liquidity(side, stop, market):
+    """
+    Стоп вплотную за скоплением чужих стопов. Возвращает описание или ''.
+
+    Для лонга опасен пул стопов лонгов (SSL) ЧУТЬ ВЫШЕ нашего стопа: цену
+    повезут снимать его, и наш стоп в 0.1% ниже снимут тем же ходом. Для
+    шорта зеркально — BSL чуть ниже стопа. Стоп ЗА пулом с запасом — как
+    раз правильное место, и он не трогается.
+    """
+    if not market or not stop:
+        return ''
+    for price, pool_side, source in _pools(market):
+        if side == 'LONG' and pool_side == 'SSL' and price > stop:
+            gap = (price - stop) / price * 100
+            if gap <= STOP_HUNT_PCT:
+                return (f'стоп {stop:.6g} на {gap:.2f}% ниже скопления стопов '
+                        f'лонгов {price:.6g} ({source}) — снимут вместе с ними')
+        if side == 'SHORT' and pool_side == 'BSL' and price < stop:
+            gap = (stop - price) / price * 100
+            if gap <= STOP_HUNT_PCT:
+                return (f'стоп {stop:.6g} на {gap:.2f}% выше скопления стопов '
+                        f'шортов {price:.6g} ({source}) — снимут вместе с ними')
+    return ''
+
+
+def obstacles_to_target(side, entry, target, market):
+    """
+    Что стоит между входом и первой целью: плиты, встречные зоны, пулы.
+
+    Не отказ, а список для критика и журнала: плита в стакане может быть
+    снята, зона — пробита. Но план, который об этом не знает, хуже плана,
+    который знает.
+    """
+    if not market or not entry or not target:
+        return []
+    lo, hi = min(entry, target), max(entry, target)
+
+    def between(price):
+        return price is not None and lo < float(price) < hi
+
+    out = []
+    book = market.get('book') or {}
+    walls = book.get('walls_above' if side == 'LONG' else 'walls_below') or []
+    for wall in walls:
+        if between(wall.get('price')):
+            out.append(f"плита {wall['price']:.6g} (×{wall.get('volume_x')})")
+    for zone in (market.get('pois') or []):
+        against = 'BEARISH' if side == 'LONG' else 'BULLISH'
+        if zone.get('direction') == against and zone.get('bottom') is not None:
+            if between(zone['bottom']) or between(zone['top']):
+                out.append(f"{zone.get('type', 'зона').lower()} "
+                           f"{zone['bottom']:.6g}..{zone['top']:.6g} против")
+    for price, pool_side, source in _pools(market):
+        if between(price):
+            out.append(f"скопление {price:.6g} ({source})")
+    liq = market.get('liquidations') or {}
+    for cluster in (liq.get('above' if side == 'LONG' else 'below') or []):
+        if between(cluster.get('from')) or between(cluster.get('to')):
+            out.append(f"ликвидации {cluster['from']:.6g}..{cluster['to']:.6g} "
+                       f"(оценка, {cluster.get('share_pct', 0):.0f}%)")
+    return out[:6]
+
+
+def check(parsed, levels, answer=None, market=None):
     """
     Проверяет разобранный ответ. Возвращает решение со всеми числами.
 
@@ -255,6 +336,16 @@ def check(parsed, levels, answer=None):
         return _refusal('низкое отношение', f'R:R {rr:.2f} при минимуме {MIN_RR}',
                         base)
 
+    # ГЕОМЕТРИЯ ПРОТИВ ЛИКВИДНОСТИ — КОДОМ, А НЕ ТОЛЬКО КРИТИКОМ. Стоп,
+    # стоящий вплотную под скоплением стопов, снимут вместе с ними; это
+    # проверяется арифметикой, и отдавать её модели значило бы платить пять
+    # минут за то, что считается за микросекунду. Препятствия на пути к цели
+    # не запрещают вход — они уходят критику и в журнал.
+    hunted = stop_in_liquidity(side, stop, market)
+    if hunted:
+        return _refusal('стоп в скоплении стопов', hunted, base)
+    base['obstacles'] = obstacles_to_target(side, entry, targets[0], market)
+
     cost_r = cost_in_r(entry, stop)
     ev = expected_value(parsed['p'], rr, cost_r)
     numbers = {'side': side, 'entry': entry, 'stop': stop, 'targets': targets,
@@ -319,7 +410,8 @@ def decide(pair, df, ask, news=None, at=None, max_tokens=None, market=None,
         return _refusal(getattr(exc, 'llm_gate', 'модель недоступна'),
                         str(exc)[:300])
 
-    verdict = check(parse(answer, levels), levels, answer)
+    verdict = check(parse(answer, levels), levels, answer,
+                    market=context['facts'].get('market'))
     verdict['pair'] = pair
     verdict['levels'] = levels
     verdict['raw'] = answer
@@ -346,6 +438,9 @@ def plan_text(verdict):
         f"Условие входа: {verdict.get('trigger') or 'сейчас'}",
         f"Вероятность по аналитику: {verdict.get('p')}   R:R {verdict.get('rr')}   "
         f"EV {verdict.get('ev')}R   факторы {verdict.get('votes')}/5",
+        ('Между входом и первой целью (посчитано кодом): '
+         + '; '.join(verdict['obstacles'])) if verdict.get('obstacles') else
+        'Между входом и первой целью код препятствий не нашёл',
         f"Режим: {verdict.get('regime', '')}",
         f"Разбор: {verdict.get('analysis', '')}",
         f"Почему: {verdict.get('why', '')}",

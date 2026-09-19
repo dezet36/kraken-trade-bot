@@ -1418,9 +1418,12 @@ class LiveTradeManager:
         """Переносит стоп в безубыток — на любой бирже."""
         entry = position['entry_price']
         is_long = position['signal']['setup']['type'] == 'LONG'
-        # Bybit требует SL строго по ту сторону entry: LONG — ниже, SHORT — выше
-        offset = entry * 0.0002
-        be_sl = (entry - offset) if is_long else (entry + offset)
+        # За издержки и буфер, а не на вход и не «чуть хуже входа», как было:
+        # стоп на входе терял комиссии круга. Момент переноса — пробой уровня
+        # B, цена к этому времени далеко от входа, и стоп в плюсе законен для
+        # биржи (он по-прежнему ниже рынка у лонга и выше у шорта).
+        from exit_plan import breakeven_price
+        be_sl = breakeven_price(entry, is_long)
         if self._set_position_stop(trading_pair, round(be_sl, 8)):
             log(f"🔄 Стоп перенесён в безубыток @ ${be_sl:.6f}")
         position['breakeven_set'] = True

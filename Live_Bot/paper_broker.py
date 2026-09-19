@@ -348,6 +348,49 @@ class PaperBroker:
         key = _norm(pair)
         return key in self.positions(strategy) or key in self.pending(strategy)
 
+    def pair_taken_by(self, pair, except_strategy=None):
+        """Какая стратегия держит пару (позицию или ордер). None — никакая."""
+        key = _norm(pair)
+        for name in self.strategies:
+            if name == except_strategy:
+                continue
+            if key in self.positions(name) or key in self.pending(name):
+                return name
+        return None
+
+    def total_equity(self):
+        """Капитал всех стратегий вместе."""
+        return sum(self.equity(name) for name in self.strategies)
+
+    def _day_mark(self):
+        """
+        Капитал на начало суток UTC. Запоминается при первом обращении в
+        новых сутках и живёт в состоянии — перезапуск бота не сбрасывает
+        точку отсчёта, иначе просадку можно было бы «обнулить» рестартом.
+        """
+        today = datetime.now(timezone.utc).strftime('%Y-%m-%d')
+        mark = self.state.get('day_mark') or {}
+        if mark.get('date') != today:
+            mark = {'date': today, 'equity': self.total_equity(), 'paused_alerted': False}
+            self.state['day_mark'] = mark
+            self._save_state()
+        return mark
+
+    def thermostat(self):
+        """
+        Просадка портфеля за день и разрешены ли новые входы.
+
+        Возвращает (просадка_%, разрешено, порог). Порог 0 — термостат выключен.
+        """
+        limit = float(getattr(config, 'PORTFOLIO_DAILY_DD_PAUSE_PCT', 0) or 0)
+        mark = self._day_mark()
+        start = float(mark.get('equity') or 0)
+        if start <= 0:
+            return 0.0, True, limit
+        drawdown = (1 - self.total_equity() / start) * 100
+        allowed = limit <= 0 or drawdown < limit
+        return round(drawdown, 3), allowed, limit
+
     def check_cooldown(self, strategy, pair):
         last = self.state['cooldown'].get(strategy, {}).get(_norm(pair))
         if not last:
@@ -541,6 +584,21 @@ class PaperBroker:
     def gate(self, strategy):
         return StrategyGate(self, strategy)
 
+    def _alert_thermostat(self, drawdown, limit):
+        """Одно сообщение в день: термостат сработал. Молча, если Telegram нет."""
+        mark = self.state.get('day_mark') or {}
+        if mark.get('paused_alerted'):
+            return
+        mark['paused_alerted'] = True
+        self._save_state()
+        try:
+            import telegram_notify as tg
+            tg.error_alert(f'Термостат: просадка портфеля за день {drawdown:.2f}% '
+                           f'при пределе {limit:.2f}% — новые входы остановлены '
+                           f'до следующих суток UTC. Позиции ведутся как обычно.')
+        except Exception:                          # noqa: BLE001
+            pass
+
     def reset_at(self, strategy):
         """Момент последнего перезапуска стратегии (или None)."""
         return (self.state.get('reset_at') or {}).get(strategy)
@@ -621,6 +679,26 @@ class PaperBroker:
 
         if self.has_position_or_order(strategy, pair):
             log(f"   [{strategy}] {pair}: уже есть фантомная позиция/ордер")
+            return False
+
+        # Один инструмент — одна позиция, как на бирже. Кто первый — того и
+        # пара; вторая стратегия записывает отказ, чтобы масштаб перекоса
+        # был виден при разборе итогов.
+        if getattr(config, 'PAPER_EXCLUSIVE_PAIRS', True):
+            holder = self.pair_taken_by(pair, except_strategy=strategy)
+            if holder:
+                log(f"   [{strategy}] {pair}: пара занята стратегией {holder}, пропуск")
+                _refuse(strategy, signal, 'пара занята', f'держит {holder}')
+                return False
+
+        # Термостат: день, в который просело всё, — не день, чтобы набирать.
+        drawdown, allowed, limit = self.thermostat()
+        if not allowed:
+            log(f"   [{strategy}] {pair}: термостат — просадка портфеля за день "
+                f"{drawdown:.2f}% при пределе {limit:.2f}%, новых входов нет")
+            _refuse(strategy, signal, 'термостат',
+                    f'просадка за день {drawdown:.2f}% ≥ {limit:.2f}%')
+            self._alert_thermostat(drawdown, limit)
             return False
         if not self.check_cooldown(strategy, pair):
             log(f"   [{strategy}] {pair}: кулдаун активен")
@@ -1317,7 +1395,9 @@ class PaperBroker:
             if be:
                 crossed = (high >= be) if is_long else (low <= be)
                 if crossed:
-                    pos['stop_loss'] = pos['entry_price']
+                    # Не на вход, а за издержки: см. config.BREAKEVEN_OFFSET_PCT.
+                    from exit_plan import breakeven_price
+                    pos['stop_loss'] = breakeven_price(pos['entry_price'], is_long)
                     pos['breakeven_set'] = True
 
         # Стоп проверяем РАНЬШЕ тейка: порядок событий внутри свечи по OHLC

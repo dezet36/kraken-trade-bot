@@ -55,6 +55,18 @@ def wants_breakeven(params):
                            getattr(config, 'BREAKEVEN_AT_B', True)))
 
 
+def breakeven_price(entry, is_long):
+    """
+    Цена стопа «в безубыток»: вход плюс издержки круга и буфер, по ходу сделки.
+
+    Для лонга — выше входа, для шорта — ниже. Считается в одном месте для
+    фантома и боя: два определения безубытка разошлись бы, и журналы двух
+    путей стали бы несравнимы.
+    """
+    offset = float(getattr(config, 'BREAKEVEN_OFFSET_PCT', 0.0) or 0.0) / 100
+    return entry * (1 + offset) if is_long else entry * (1 - offset)
+
+
 def direction_cap(params):
     """
     Максимум позиций стратегии в одну сторону (0 = без ограничения).

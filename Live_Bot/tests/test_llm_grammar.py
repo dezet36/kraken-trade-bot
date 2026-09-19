@@ -361,3 +361,22 @@ class TestTheTemplateDoesNotEatBraces:
         # внутри кавычек.
         for m in re.finditer(r'(?<=[\]A-Za-z0-9])\{[^}"]*\}', text):
             assert re.fullmatch(r'\{\d+,\d+\}', m.group()), m.group()
+
+
+class TestTheRealParserAcceptsIt:
+    """
+    Единственная настоящая проверка грамматики — парсер llama.cpp. На машине
+    разработки его нет, и проверка пропускается; на сервере она обязана
+    проходить перед выкаткой: 19 сентября 2026 форма `(0, 2)` вместо `{0,2}`
+    прошла все текстовые проверки и роняла процесс на каждом разборе.
+    """
+
+    @pytest.mark.parametrize('count', [0, 1, 2, 3, 5, 8, 12])
+    def test_every_level_count_parses(self, count):
+        llama = pytest.importorskip('llama_cpp')
+        text = gr.build([f'L{i}' for i in range(1, count + 1)])
+        llama.LlamaGrammar.from_string(text, verbose=False)
+
+    def test_the_critic_grammar_parses(self):
+        llama = pytest.importorskip('llama_cpp')
+        llama.LlamaGrammar.from_string(gr.critic(), verbose=False)

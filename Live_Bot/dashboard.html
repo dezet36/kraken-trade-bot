@@ -1243,6 +1243,11 @@ const PERIODS = [
   { id: 'today', label: 'Сегодня', days: 0 },
   { id: '7d',    label: '7 дней',  days: 7 },
   { id: '30d',   label: '30 дней', days: 30 },
+  /* Проверка вперёд: с момента, когда бот стал службой и геометрия
+     заморожена. Всё раньше — исследование с дырами непрерывности; смешивать
+     его с этим периодом значит выдавать подгонку за результат. Дату отдаёт
+     сервер (forward_since). */
+  { id: 'forward', label: 'Проверка вперёд', days: 'forward' },
   { id: 'all',   label: 'Всё время', days: null },
 ];
 
@@ -1422,6 +1427,10 @@ const dist  = (level, now) => (!level || !now) ? ''
 function periodStart() {
   const def = PERIODS.find(p => p.id === period);
   if (!def || def.days === null) return 0;
+  if (def.days === 'forward') {
+    const since = DATA && DATA.forward_since ? Date.parse(DATA.forward_since) : NaN;
+    return isNaN(since) ? 0 : since;
+  }
   const d = new Date();
   d.setHours(0, 0, 0, 0);
   return d.getTime() - def.days * 86400000;

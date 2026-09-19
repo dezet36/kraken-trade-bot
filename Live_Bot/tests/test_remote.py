@@ -767,10 +767,14 @@ class TestOnlyOneCopyRuns:
         assert remote_app.main() == 0
         assert focused == [1]
 
-    def test_the_mutex_is_claimed_once_per_process(self):
+    def test_the_mutex_is_claimed_once_per_process(self, monkeypatch):
         import remote_app
         if not remote_app.sys.platform.startswith('win'):
             pytest.skip('мьютекс Windows')
+        # Своё имя: на машине разработки настоящая программа может быть
+        # запущена и держать боевой мьютекс — тогда проверка меряла бы её.
+        monkeypatch.setattr(remote_app, 'SINGLE_INSTANCE_NAME',
+                            f'Local\KrakenRemote-test-{os.getpid()}')
         assert remote_app.claim_single_instance() is True
         # Тот же процесс держит мьютекс: повторный захват видит «уже есть».
         assert remote_app.claim_single_instance() is False

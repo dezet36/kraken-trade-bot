@@ -603,6 +603,8 @@ def _paper_payload():
         'generated': datetime.now().isoformat(timespec='seconds'),
         'mode': config.TRADING_MODE,
         'exchange': config.EXCHANGE_NAME,
+        # Начало проверки вперёд: сделки до него — исследование, после — выборка.
+        'forward_since': getattr(config, 'FORWARD_TEST_SINCE', ''),
         # Можно ли менять что-либо с этой страницы. Панель ключей без
         # этого флага рисовалась бы и на открытом наружу дашборде.
         'writable': _controls_allowed(),

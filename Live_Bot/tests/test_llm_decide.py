@@ -422,7 +422,7 @@ class TestTheCriticSecondOpinion:
         # Проверки кода подменяем готовым «прошёл»: на синтетических свечах
         # уровни не те, что в LEVELS, а здесь проверяется вызов критика.
         ready = verdict()
-        monkeypatch.setattr(dec, 'check', lambda parsed, levels, answer=None: ready)
+        monkeypatch.setattr(dec, 'check', lambda parsed, levels, answer=None, market=None: ready)
         ask, calls = self._ask_pair(
             answer(),
             '{"verdict":"confirm","issues":"возражений нет","worst":"—"}')
@@ -435,7 +435,7 @@ class TestTheCriticSecondOpinion:
     def test_the_critic_can_be_switched_off(self, monkeypatch):
         monkeypatch.setattr(config, 'LLM_CRITIC', False)
         ready = verdict()
-        monkeypatch.setattr(dec, 'check', lambda parsed, levels, answer=None: ready)
+        monkeypatch.setattr(dec, 'check', lambda parsed, levels, answer=None, market=None: ready)
         ask, calls = self._ask_pair(answer(), 'не должно быть вызвано')
         out = dec.decide('BTCUSDT', TestTheWholePass().make_df(), ask)
         assert len(calls) == 1 and out['ok'] and 'critic' not in out
@@ -482,3 +482,53 @@ class TestTheCriticSecondOpinion:
         assert 'Вход: L3 100' in text and 'Стоп: L4 97' in text
         assert 'close_above L2' in text
         assert 'Разбор:' in text
+
+
+class TestGeometryAgainstLiquidityIsCode:
+    """
+    Стоп вплотную под скоплением чужих стопов снимут вместе с ними — это
+    арифметика, и платить за неё пять минут модели незачем. Препятствия на
+    пути к цели входа не запрещают, но уходят критику и в журнал.
+    """
+
+    MARKET = {
+        'smc': {'untapped': [{'price': 97.15, 'side': 'SSL', 'source': 'SWING'},
+                             {'price': 110.0, 'side': 'BSL', 'source': 'SWING'}],
+                'equal_levels': [{'price': 104.0, 'source': 'EQH', 'side': 'BSL'}]},
+        'book': {'walls_above': [{'price': 103.0, 'volume_x': 8.0, 'dist_pct': 3.0}],
+                 'walls_below': []},
+        'pois': [{'type': 'ORDER_BLOCK', 'direction': 'BEARISH', 'top': 105.5,
+                  'bottom': 105.0, 'touches': 0, 'bars_ago': 3, 'inside': False}],
+        'liquidations': {'above': [{'from': 106.0, 'to': 106.4, 'share_pct': 40.0,
+                                    'dist_pct': 6.2, 'side': 'шорты'}], 'below': []},
+    }
+
+    def test_a_stop_just_under_a_pool_is_refused(self):
+        # Вход L3 100, стоп L4 97 — пул стопов лонгов на 97.15, в 0.15% выше.
+        out = dec.check(dec.parse(answer(), LEVELS), LEVELS, market=self.MARKET)
+        assert out['ok'] is False
+        assert out['gate'] == 'стоп в скоплении стопов'
+        assert '97.15' in out['detail']
+
+    def test_a_stop_safely_below_the_pool_passes(self):
+        market = {'smc': {'untapped': [{'price': 98.5, 'side': 'SSL', 'source': 'SWING'}]}}
+        out = dec.check(dec.parse(answer(), LEVELS), LEVELS, market=market)
+        assert out['ok'] is True
+
+    def test_obstacles_between_entry_and_target_are_listed_not_refused(self):
+        market = dict(self.MARKET)
+        market['smc'] = {'untapped': [{'price': 110.0, 'side': 'BSL', 'source': 'SWING'}],
+                         'equal_levels': [{'price': 104.0, 'source': 'EQH', 'side': 'BSL'}]}
+        out = dec.check(dec.parse(answer(), LEVELS), LEVELS, market=market)
+        assert out['ok'] is True
+        joined = '; '.join(out['obstacles'])
+        assert 'плита 103' in joined
+        assert 'order_block 105..105.5 против' in joined
+        assert 'скопление 104 (EQH)' in joined
+        assert 'ликвидации 106..106.4' in joined
+        assert '110' not in joined, 'за целью — не препятствие'
+        assert 'Между входом и первой целью' in dec.plan_text(out)
+
+    def test_no_snapshot_no_checks(self):
+        out = dec.check(dec.parse(answer(), LEVELS), LEVELS, market=None)
+        assert out['ok'] is True and out['obstacles'] == []

@@ -434,6 +434,23 @@ def scan_for_setups(pairs, gate, client=None, balance=None, candles=None,
     return out
 
 
+_alerted = {}      # имя поломки -> когда сообщали. Не чаще раза в час на имя.
+
+
+def _alert_broken(pair, verdict, now=None):
+    """Сообщение в Telegram о поломке разбора, не чаще раза в час на имя."""
+    now = now if now is not None else time.time()
+    gate = verdict.get('gate', '')
+    if now - _alerted.get(gate, 0) < 3600:
+        return
+    _alerted[gate] = now
+    try:
+        import telegram_notify as tg
+        tg.error_alert(f'ИИ {pair}: {gate} — {str(verdict.get("detail", ""))[:200]}')
+    except Exception:                              # noqa: BLE001
+        pass
+
+
 def _observe(pair, df, verdict):
     """Заводит наблюдение за исходом: куда пошла цена после вердикта."""
     try:
@@ -464,9 +481,11 @@ def _collect(finished):
         _observe(pair, df, verdict)
 
         # Поломка ответом не является: по такой паре спросить надо снова,
-        # а не через час. Метку снимаем.
+        # а не через час. Метку снимаем — и говорим вслух: сто девятнадцать
+        # одинаковых поломок подряд однажды девять часов никто не видел.
         if verdict.get('gate') in llm_decide.BROKEN_GATES:
             _asked.pop(pair, None)
+            _alert_broken(pair, verdict)
 
         if not verdict.get('ok'):
             log(f'   {NAME} {pair}: отказ — {verdict["gate"]}'

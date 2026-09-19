@@ -36,6 +36,17 @@ Documentation=https://github.com/dezet36/kraken-trade-bot
 # соединения в журнале при каждой перезагрузке.
 After=network-online.target
 Wants=network-online.target
+# Не даём бесконечному циклу падений жечь процессор: пять попыток за десять
+# минут, дальше служба останавливается и это видно в status.
+#
+# ИМЕННО В [Unit]. Эти два ключа стояли в [Service], и systemd отвечал в
+# журнале «Unknown key name 'StartLimitIntervalSec' in section 'Service',
+# ignoring» — предел не действовал вовсе, а с ним и защита от цикла падений.
+# 19 сентября 2026 бот падал на каждом разборе модели (ошибка в грамматике)
+# и перезапускался без счёта — status показывал «active», как будто всё
+# хорошо. Найдено сторонним разбором, проверено по журналу.
+StartLimitBurst=5
+StartLimitIntervalSec=600
 
 [Service]
 Type=simple
@@ -70,11 +81,6 @@ ExecStart=/opt/kraken/venv/bin/python bot.py
 # цикла, остановка из панели, завершение по сигналу от обновлятора.
 Restart=always
 RestartSec=10
-
-# Не даём бесконечному циклу падений жечь процессор: пять попыток за десять
-# минут, дальше служба останавливается и это видно в status.
-StartLimitBurst=5
-StartLimitIntervalSec=600
 
 StandardOutput=journal
 StandardError=journal

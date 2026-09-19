@@ -1,4 +1,6 @@
+import os
 import sys
+import time
 from datetime import datetime, date, timedelta, timezone
 from apscheduler.schedulers.blocking import BlockingScheduler
 
@@ -393,9 +395,46 @@ def _paper_cycle():
     log(f"\nИтог цикла: новых фантомных ордеров — {total_opened}")
 
 
+_CYCLE_STAMP = os.path.join(config.DATA_DIR, 'last_cycle.json')
+
+# Простой длиннее этого — событие, о котором надо сказать вслух: главная
+# беда проекта — непрерывность 14%, и каждая дыра портит журнал молча.
+CONTINUITY_ALERT_MIN = int(os.getenv('CONTINUITY_ALERT_MIN', 30))
+
+
+def note_cycle():
+    """
+    Отмечает цикл и сообщает о простое, если прошлый был давно.
+
+    Метка живёт в файле, а не в памяти: простой — это как раз то время, когда
+    процесса не было, и знать о нём может только диск. Сообщение одно на
+    простой, при первом цикле после него.
+    """
+    import json
+    now = time.time()
+    try:
+        with open(_CYCLE_STAMP, encoding='utf-8') as fh:
+            previous = float(json.load(fh).get('ts') or 0)
+    except (OSError, ValueError):
+        previous = 0.0
+    try:
+        with open(_CYCLE_STAMP, 'w', encoding='utf-8') as fh:
+            json.dump({'ts': now}, fh)
+    except OSError:
+        pass
+    if previous and now - previous > CONTINUITY_ALERT_MIN * 60:
+        minutes = int((now - previous) / 60)
+        log(f"⚠️ Простой {minutes} мин: свечи за это время в журнал не попали, "
+            f"сделки, растянувшиеся через дыру, помечены data_gap_min")
+        tg.error_alert(f"Бот не работал {minutes} мин (с "
+                       f"{datetime.fromtimestamp(previous).strftime('%d.%m %H:%M')}). "
+                       f"Непрерывность нарушена — сделки через дыру помечены в журнале.")
+
+
 def trading_cycle():
     global _last_summary_date
 
+    note_cycle()
     if config.PAPER_MODE:
         log("\n" + "=" * 60)
         log(f"ФАНТОМНЫЙ ЦИКЛ: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
@@ -644,7 +683,13 @@ def _start_paper():
         f"тейкер {config.PAPER_FEE_TAKER * 100:.3f}%  |  "
         f"проскальзывание {config.PAPER_SLIPPAGE_PCT * 100:.3f}%")
     log(f"   Фандинг: {'учитывается' if config.PAPER_FUNDING else 'выключен'}")
-    log("   Одна пара может быть открыта обеими стратегиями одновременно")
+    if getattr(config, 'PAPER_EXCLUSIVE_PAIRS', True):
+        log("   Одна пара — одна позиция на все стратегии, как на бирже")
+    else:
+        log("   Одна пара может быть открыта несколькими стратегиями (замер по отдельности)")
+    if getattr(config, 'PORTFOLIO_DAILY_DD_PAUSE_PCT', 0):
+        log(f"   Термостат: новые входы стоят при просадке портфеля за день "
+            f"≥ {config.PORTFOLIO_DAILY_DD_PAUSE_PCT:.1f}%")
 
     dashboard.start_dashboard(broker=broker)
     tg.bot_started(broker.get_real_balance())
