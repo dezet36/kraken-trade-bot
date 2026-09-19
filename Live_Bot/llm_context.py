@@ -50,7 +50,14 @@ from logger import log
 
 # Сколько уровней максимум уходит в модель. Больше — не лучше: список на сорок
 # позиций модель разбирает хуже, чем на десять, а грамматика вырастает линейно.
-MAX_LEVELS = 12
+MAX_LEVELS = 16
+
+# Больше 16 стало 19.09.2026: к пивотам добавились точки ликвидности из
+# снимка (экстремумы дня и недели, Азия, равные экстремумы, нетронутые пулы,
+# границы зон). Стоп и цель выбираются ТОЛЬКО из этого списка, и когда между
+# входом и следующим уровнем 4.7% (ETH, 19.09), модель ставит стоп туда — и
+# план умирает на R:R. Реальные точки, за которые цепляется стоп, в списке
+# быть обязаны.
 
 # Ближе этого к текущей цене уровни не показываем: вход вплотную к цене даёт
 # стоп, который не проходит предел издержек, и модель будет исправно предлагать
@@ -113,12 +120,51 @@ def _lone_pivots(pivot_list, at, pools, span):
     return out
 
 
-def levels(df, at=None):
+def extra_levels(market):
+    """
+    Точки ликвидности из снимка как кандидаты в уровни: цена, имя, вес.
+
+    Вес — сколько «касаний» они стоят при отборе: экстремум недели и равные
+    экстремумы — как скопление из трёх, дневные и зоны — из двух, Азия — как
+    одиночный пивот. Это не замер, а порядок предпочтения при нехватке мест.
+    """
+    if not market:
+        return []
+    out = []
+    s = market.get('sessions') or {}
+    for key, name, weight in (('pwh', 'максимум недели', 3), ('pwl', 'минимум недели', 3),
+                              ('pdh', 'максимум вчера', 2), ('pdl', 'минимум вчера', 2),
+                              ('asia_high', 'максимум Азии', 1), ('asia_low', 'минимум Азии', 1)):
+        if s.get(key):
+            out.append({'price': float(s[key]), 'kind': name, 'touches': weight, 'last': 0})
+    smc = market.get('smc') or {}
+    for row in (smc.get('equal_levels') or []):
+        if row.get('price'):
+            out.append({'price': float(row['price']),
+                        'kind': f"равные экстремумы {row.get('source', '')}".strip(),
+                        'touches': 3, 'last': 0})
+    for row in (smc.get('untapped') or []):
+        if row.get('price'):
+            out.append({'price': float(row['price']), 'kind': 'нетронутое скопление',
+                        'touches': 2, 'last': 0})
+    for z in (market.get('pois') or []):
+        if z.get('top') and z.get('bottom'):
+            kind = {'ORDER_BLOCK': 'ордер-блок', 'BREAKER': 'брейкер',
+                    'MITIGATION': 'mitigation'}.get(z.get('type'), 'зона')
+            out.append({'price': float(z['top']), 'kind': f'верх зоны {kind}', 'touches': 2, 'last': 0})
+            out.append({'price': float(z['bottom']), 'kind': f'низ зоны {kind}', 'touches': 2, 'last': 0})
+    return out
+
+
+def levels(df, at=None, extra=None):
     """
     Пронумерованный список уровней: сверху вниз, L1 — самый высокий.
 
     Нумерация ПО ЦЕНЕ, а не по силе. Так модель видит карту рынка в привычном
     порядке и не путает «первый по списку» с «главный».
+
+    extra — дополнительные кандидаты (extra_levels): вливаются в общий отбор,
+    дубли в пределах допуска скопления отбрасываются в пользу уже найденного.
     """
     high = df['high'].values
     low = df['low'].values
@@ -134,6 +180,10 @@ def levels(df, at=None):
     pools = _pools(pivot_list, at, atr_now)
     span = liq.params.POOL_TOLERANCE_ATR * atr_now
     found = pools + _lone_pivots(pivot_list, at, pools, span)
+    for cand in (extra or []):
+        if any(abs(cand['price'] - lv['price']) <= span for lv in found):
+            continue
+        found.append(dict(cand))
 
     price_now = float(close[at])
     near = [lv for lv in found
@@ -236,7 +286,7 @@ def build(pair, df, at=None, news=None, market=None, history=None):
 
     history — прошлые строки журнала разборов (llm_journal.last) или None.
     """
-    found, atr_now = levels(df, at)
+    found, atr_now = levels(df, at, extra=extra_levels(market))
     if not found:
         return {'levels': [], 'text': '', 'facts': {}}
 

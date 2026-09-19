@@ -549,17 +549,19 @@ class TestDistancesAreInTheGrammar:
         ids = ['L1', 'L2', 'L3', 'L4']
         prices = [110.0, 103.0, 100.0, 99.5]          # L4 в 0.5% под L3
         text = llm_grammar.build(ids, prices=prices, min_stop_pct=1.5, min_rr=2.0)
-        line = next(l for l in text.splitlines() if l.startswith('s-long-l2'))
-        assert 'L3' in line and 'L4' in line      # от L2 оба стопа дальше 1.5%
+        names = [l.split(' ')[0] for l in text.splitlines() if l.startswith('long-l2-')]
+        assert sorted(names) == ['long-l2-l3', 'long-l2-l4']   # оба стопа дальше 1.5%
         # Лонг от L3: единственный стоп L4 слишком близко — ветки нет вовсе.
-        assert not any(l.startswith('long-l3 ') for l in text.splitlines())
+        assert not any(l.startswith('long-l3-') for l in text.splitlines())
 
     def test_a_target_closer_than_rr_times_minimum_is_not_offered(self):
         import llm_grammar
         ids = ['L1', 'L2', 'L3', 'L4']
-        prices = [104.0, 102.0, 100.0, 97.0]          # L2 в 2% над L3 < 2×1.5%
+        prices = [115.0, 104.0, 100.0, 97.0]          # стоп L4 3%: цель нужна ≥ 6%
         text = llm_grammar.build(ids, prices=prices, min_stop_pct=1.5, min_rr=2.0)
-        line = next(l for l in text.splitlines() if l.startswith('t-long-l3'))
+        # Лонг от L3 (100) со стопом L4 (97, 3%): цель должна быть дальше 6% —
+        # L2 (102) не годится, L1 (104) годится.
+        line = next(l for l in text.splitlines() if l.startswith('t-long-l3-l4'))
         assert 'L2' not in line and 'L1' in line
 
     def test_without_prices_nothing_is_restricted(self):

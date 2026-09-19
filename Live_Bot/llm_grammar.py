@@ -212,6 +212,11 @@ def _plans(level_ids, prices=None, min_stop_pct=0.0, min_rr=0.0):
             return True
         return abs(price_of[a] - price_of[b]) / price_of[a] * 100 >= pct
 
+    def distance(a, b):
+        if a not in price_of or b not in price_of or not price_of[a]:
+            return None
+        return abs(price_of[a] - price_of[b]) / price_of[a] * 100
+
     plans, rules = [], []
     for side in ('LONG', 'SHORT'):
         for index, entry in enumerate(level_ids):
@@ -219,30 +224,43 @@ def _plans(level_ids, prices=None, min_stop_pct=0.0, min_rr=0.0):
             lower = list(level_ids[index + 1:])
             stops, targets = (lower, higher) if side == 'LONG' else (higher, lower)
             stops = [s for s in stops if far_enough(entry, s, min_stop_pct)]
-            targets = [t for t in targets
-                       if far_enough(entry, t, min_rr * min_stop_pct)]
-            if not stops or not targets:
+            # R:R ЦЕЛИКОМ В ГРАММАТИКЕ: ветка на каждую пару «вход + стоп», и
+            # цели в ней — только те, что дальше min_rr × дистанции ЭТОГО
+            # стопа. 19 сентября 2026 ETH: 5 факторов из 5, план в тексте, и
+            # отказ кода «R:R 0.86» — стоп стоял на 4.7%, цель на 4%.
+            # Необходимого условия «цель дальше min_rr × минимум» для этого
+            # мало: оно не знает, какой стоп выбран.
+            branches = []
+            for stop in stops:
+                d_stop = distance(entry, stop)
+                if d_stop is None or not min_rr:
+                    ok_targets = [t for t in targets
+                                  if far_enough(entry, t, min_rr * min_stop_pct)]
+                else:
+                    ok_targets = [t for t in targets
+                                  if (distance(entry, t) or 0) >= min_rr * d_stop]
+                if ok_targets:
+                    branches.append((stop, ok_targets))
+            if not branches:
                 continue
             # ИМЯ ПРАВИЛА — ТОЛЬКО БУКВЫ, ЦИФРЫ И ДЕФИС. Подчёркивание
             # llama.cpp в именах не принимает: её разборщик читает имя до
             # первого недопустимого знака и падает с «expecting newline or
-            # end at _l2». Проверки этого не ловили — они читают текст
-            # грамматики сами, — и поломка вышла наружу только на сервере, в
-            # журнале службы. Строчные буквы нужны referenced(): имя с
-            # заглавной она прочитает наполовину.
-            name = f'{side.lower()}-{entry.lower()}'
-            rules.append(
-                f'{name} ::= "\\"side\\":" ws {_alt([side])} ws "," ws '
-                f'"\\"entry\\":" ws {_alt([entry])} ws "," ws '
-                f'"\\"stop\\":" ws s-{name} ws "," ws '
-                f'"\\"tp\\":" ws tp-{name} ws "," ws '
-                f'"\\"inval\\":" ws s-{name}')
-            # Уровень инвалидации — из того же набора, что и стоп: идея лонга
-            # умирает ПОД входом, а не над ним.
-            rules.append(f's-{name} ::= {_alt(stops)}')
-            rules.append(f'tp-{name} ::= {_targets_rule(f"t-{name}")}')
-            rules.append(f't-{name} ::= {_alt(targets)}')
-            plans.append(name)
+            # end at _l2». Строчные буквы нужны referenced(): имя с заглавной
+            # она прочитает наполовину.
+            for stop, ok_targets in branches:
+                name = f'{side.lower()}-{entry.lower()}-{stop.lower()}'
+                rules.append(
+                    f'{name} ::= "\\"side\\":" ws {_alt([side])} ws "," ws '
+                    f'"\\"entry\\":" ws {_alt([entry])} ws "," ws '
+                    f'"\\"stop\\":" ws {_alt([stop])} ws "," ws '
+                    f'"\\"tp\\":" ws tp-{name} ws "," ws '
+                    # Уровень инвалидации — тот же стоп: идея лонга умирает
+                    # ПОД входом, а не над ним.
+                    f'"\\"inval\\":" ws {_alt([stop])}')
+                rules.append(f'tp-{name} ::= {_targets_rule(f"t-{name}")}')
+                rules.append(f't-{name} ::= {_alt(ok_targets)}')
+                plans.append(name)
     return plans, rules
 
 

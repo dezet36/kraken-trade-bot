@@ -252,37 +252,39 @@ class TestWrongGeometryIsUnsayable:
     def rule(self, text, name):
         return [l for l in text.splitlines() if l.startswith(name + ' ')][0]
 
+    def branches(self, text, prefix):
+        return [l for l in text.splitlines() if l.startswith(prefix)]
+
     def test_a_long_can_only_target_levels_above_the_entry(self):
         text = gr.build(self.LEVELS)
-        targets = self.rule(text, 't-long-l3')
-        for above in ('L1', 'L2'):
-            assert f'\\"{above}\\"' in targets, above
-        for below in ('L4', 'L5'):
-            assert f'\\"{below}\\"' not in targets, below
+        # Ветки лонга от L3: стопы L4, L5; цели в каждой — только L1, L2.
+        for stop in ('l4', 'l5'):
+            targets = self.rule(text, f't-long-l3-{stop}')
+            for above in ('L1', 'L2'):
+                assert f'\\"{above}\\"' in targets, (stop, above)
+            for below in ('L4', 'L5'):
+                assert f'\\"{below}\\"' not in targets, (stop, below)
 
     def test_a_long_can_only_stop_below_the_entry(self):
         text = gr.build(self.LEVELS)
-        stops = self.rule(text, 's-long-l3')
-        for below in ('L4', 'L5'):
-            assert f'\\"{below}\\"' in stops, below
-        for above in ('L1', 'L2'):
-            assert f'\\"{above}\\"' not in stops, above
+        names = [l.split(' ')[0] for l in self.branches(text, 'long-l3-')]
+        assert sorted(names) == ['long-l3-l4', 'long-l3-l5']
 
     def test_a_short_is_the_mirror(self):
         text = gr.build(self.LEVELS)
-        stops = self.rule(text, 's-short-l3')
-        targets = self.rule(text, 't-short-l3')
-        assert '\\"L2\\"' in stops and '\\"L4\\"' not in stops
+        names = [l.split(' ')[0] for l in self.branches(text, 'short-l3-')]
+        assert sorted(names) == ['short-l3-l1', 'short-l3-l2']
+        targets = self.rule(text, 't-short-l3-l2')
         assert '\\"L4\\"' in targets and '\\"L2\\"' not in targets
 
     def test_the_invalidation_sits_with_the_stop(self):
         """
-        Идея лонга умирает ПОД входом, а не над ним. Уровень инвалидации
-        берётся из того же набора, что и стоп.
+        Идея лонга умирает ПОД входом, а не над ним. Уровень инвалидации —
+        тот же стоп, что и в ветке.
         """
         text = gr.build(self.LEVELS)
-        plan = self.rule(text, 'long-l3')
-        assert plan.count('s-long-l3') == 2, plan
+        plan = self.rule(text, 'long-l3-l4')
+        assert plan.count('\\"L4\\"') == 2, plan
 
     def test_the_topmost_level_has_no_long_branch(self):
         """
@@ -290,8 +292,8 @@ class TestWrongGeometryIsUnsayable:
         — иначе грамматика разрешит вход без единой цели.
         """
         text = gr.build(self.LEVELS)
-        assert 'long-l1 ::=' not in text
-        assert 'short-l5 ::=' not in text
+        assert 'long-l1-' not in text
+        assert 'short-l5-' not in text
 
     def test_two_levels_leave_only_a_refusal(self):
         """
@@ -303,11 +305,13 @@ class TestWrongGeometryIsUnsayable:
         assert '\\"skip\\"' in text
 
     def test_all_branches_of_a_full_setup_resolve(self):
-        """Двенадцать уровней — это сорок веток; висячая ссылка убьёт вызов."""
+        """Двенадцать уровней — 110 веток «вход+стоп»; висячая ссылка убьёт вызов."""
         text = gr.build([f'L{i}' for i in range(1, 13)])
         assert not (gr.referenced(text) - set(gr.rules_of(text)))
         plans = self.rule(text, 'plan')
-        assert plans.count('|') == 19, plans   # 10 лонгов + 10 шортов
+        # Лонг от L_i со стопом на любом из уровней ниже и целью выше: сумма
+        # по i от 2 до 11 числа стопов (12-i) = 55; шортов столько же.
+        assert plans.count('|') == 109, plans
 
 
 class TestRuleNamesAreParsable:

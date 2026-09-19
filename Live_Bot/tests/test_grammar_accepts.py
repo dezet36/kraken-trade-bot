@@ -89,19 +89,24 @@ class TestValidAnswersAreAccepted:
         prices = PRICES[n]
         levels = ids(n)
         accepted = 0
-        for _ in range(60):
+        for _ in range(240):
             side = RNG.choice(['LONG', 'SHORT'])
             e = RNG.randrange(n)
             pe = prices[e]
             if side == 'LONG':
                 stops = [i for i in range(e + 1, n) if (pe - prices[i]) / pe * 100 >= 1.5]
-                tps = [i for i in range(0, e) if (prices[i] - pe) / pe * 100 >= 3.0]
             else:
                 stops = [i for i in range(0, e) if (prices[i] - pe) / pe * 100 >= 1.5]
-                tps = [i for i in range(e + 1, n) if (pe - prices[i]) / pe * 100 >= 3.0]
-            if not stops or not tps:
+            if not stops:
                 continue
             s = RNG.choice(stops)
+            need = 2.0 * abs(pe - prices[s]) / pe * 100        # R:R от ЭТОГО стопа
+            if side == 'LONG':
+                tps = [i for i in range(0, e) if (prices[i] - pe) / pe * 100 >= need]
+            else:
+                tps = [i for i in range(e + 1, n) if (pe - prices[i]) / pe * 100 >= need]
+            if not tps:
+                continue
             targets = RNG.sample(tps, k=min(len(tps), RNG.randint(1, 3)))
             when = RNG.choice(['now', 'close_above', 'close_below'])
             level = RNG.choice(levels)
@@ -111,7 +116,7 @@ class TestValidAnswersAreAccepted:
             assert g.accepts(text), text[:200]
             accepted += 1
         # У четырёх уровней сочетаний мало — часть выборки пуста законно.
-        assert accepted >= (25 if n == 4 else 40), f'принято всего {accepted}'
+        assert accepted >= (10 if n == 4 else 25), f'принято всего {accepted}'
 
     def test_fields_at_their_length_limits(self):
         g, _ = grammar(6)
@@ -150,11 +155,13 @@ class TestInvalidAnswersAreRejected:
         assert g.accepts(enter_answer(6, 'LONG', 'L3', 'L4', ('L1',)))
         assert not strict.accepts(enter_answer(6, 'LONG', 'L3', 'L4', ('L1',)))
 
-    def test_target_closer_than_rr_times_minimum(self):
-        # L4 100 → L3 106: 6% ≥ 2×1.5, но при min_rr 5 нужно 7.5%.
-        strict, _ = grammar(6, min_rr=5.0)
-        assert not strict.accepts(enter_answer(6, 'LONG', 'L4', 'L5', ('L3',)))
-        assert strict.accepts(enter_answer(6, 'LONG', 'L4', 'L5', ('L2',)))
+    def test_target_closer_than_rr_times_the_stop(self):
+        # Лонг L4 100, стоп L5 95 (5%): при R:R 2 цель должна быть дальше 10% —
+        # L3 106 (6%) не годится, L1 120 (20%) годится. Это и был случай ETH
+        # 19.09: стоп 4.7%, цель 4%, «R:R 0.86».
+        g, _ = grammar(6)
+        assert not g.accepts(enter_answer(6, 'LONG', 'L4', 'L5', ('L3',)))
+        assert g.accepts(enter_answer(6, 'LONG', 'L4', 'L5', ('L1',)))
 
     def test_unknown_trigger_and_bias(self):
         g, _ = grammar(6)
