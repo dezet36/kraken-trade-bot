@@ -358,7 +358,13 @@ def _delta_lines(delta):
         win = delta.get(name)
         if not win or win.get('share_pct') is None:
             return '—'
-        return f"{win['share_pct']:+.1f}%"
+        # ПОКРЫТИЕ ПЕЧАТАЕТСЯ РЯДОМ С ЧИСЛОМ. Лента берётся опросом раз в
+        # четыре минуты по тысяче сделок: у BTC это одна-две минуты из
+        # четырёх, и «−18% за час» может стоять на пятнадцати минутах из
+        # шестидесяти. Без покрытия модель читала его как факт и отказывала.
+        minutes = {'h1': 60, 'h4': 240, 'h24': 1440}[name]
+        rows = int(win.get('rows') or 0)
+        return f"{win['share_pct']:+.1f}% ({min(rows, minutes)}/{minutes} мин)"
 
     fresh = delta.get('fresh_min')
     lines = [f"  Перевес агрессора от оборота:  1ч {cell('h1')}   "

@@ -348,8 +348,8 @@ class TestMarkup:
             'absorption': [{'price': 98.0, 'side': 'снизу', 'volume_x': 3.2,
                             'bars_ago': 4}],
             'delta': {'fresh_min': 3,
-                      'h1': {'delta': 5.0, 'share_pct': 12.5, 'minutes': 60},
-                      'h4': {'delta': -5.0, 'share_pct': -8.0, 'minutes': 240},
+                      'h1': {'delta': 5.0, 'share_pct': 12.5, 'rows': 60},
+                      'h4': {'delta': -5.0, 'share_pct': -8.0, 'rows': 60},
                       'h24': None,
                       'divergence': 'цена растёт на продажах'},
             'book': {'mid': 100.0, 'bid_volume': 10, 'ask_volume': 5,
@@ -387,7 +387,7 @@ class TestMarkup:
 
         assert 'Пик объёма (POC) 101' in text
         assert 'снизу 98   объём ×3.2   4 св. назад' in text
-        assert '1ч +12.5%   4ч -8.0%   24ч —' in text
+        assert '1ч +12.5% (60/60 мин)   4ч -8.0% (60/240 мин)   24ч —' in text
         assert 'РАСХОЖДЕНИЕ: цена растёт на продажах' in text
         assert 'Перекос bid/ask 2.00' in text
         assert 'Плиты ниже: 99 (×7.0, -1.000%)' in text

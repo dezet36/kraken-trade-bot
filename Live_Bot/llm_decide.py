@@ -207,6 +207,21 @@ def _pools(market):
     return out
 
 
+def trigger_against_idea(side, entry, parsed):
+    """Условие входа, ждущее хода ПРОТИВ сделки. Описание или ''."""
+    when = parsed.get('trigger_when') or 'now'
+    level = parsed.get('trigger_level')
+    if when == 'now' or not level or not entry:
+        return ''
+    if side == 'LONG' and when == 'close_below' and level >= entry:
+        return (f'лонг от {entry:.6g} после закрытия ниже {level:.6g} — '
+                f'это ожидание слома идеи, а не подтверждения')
+    if side == 'SHORT' and when == 'close_above' and level <= entry:
+        return (f'шорт от {entry:.6g} после закрытия выше {level:.6g} — '
+                f'это ожидание слома идеи, а не подтверждения')
+    return ''
+
+
 def stop_in_liquidity(side, stop, market):
     """
     Стоп вплотную за скоплением чужих стопов. Возвращает описание или ''.
@@ -344,6 +359,13 @@ def check(parsed, levels, answer=None, market=None):
     hunted = stop_in_liquidity(side, stop, market)
     if hunted:
         return _refusal('стоп в скоплении стопов', hunted, base)
+
+    # Условие входа, которое противоречит идее: лонг «после закрытия НИЖЕ»
+    # уровня не ниже входа — это ожидание инвалидации, а не подтверждения.
+    # 19 сентября 2026 DOGE: лонг от L5 с условием close_below L5.
+    against = trigger_against_idea(side, entry, parsed)
+    if against:
+        return _refusal('условие противоречит входу', against, base)
     base['obstacles'] = obstacles_to_target(side, entry, targets[0], market)
 
     cost_r = cost_in_r(entry, stop)
@@ -390,7 +412,10 @@ def decide(pair, df, ask, news=None, at=None, max_tokens=None, market=None,
     if not levels:
         return _refusal('нет разметки', 'уровней на этом баре не найдено')
 
-    grammar = llm_grammar.build([lv['id'] for lv in levels])
+    grammar = llm_grammar.build([lv['id'] for lv in levels],
+                                prices=[lv['price'] for lv in levels],
+                                min_stop_pct=llm_context.min_stop_pct(),
+                                min_rr=MIN_RR)
     # Разметка без задачи — таблица без вопроса. Первый прогон по живому рынку
     # отдавал модели только context['text'], и она отвечала «no news, no
     # comment»: её просто не спросили.

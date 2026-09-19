@@ -66,7 +66,7 @@ MAX_TARGETS = 3
 # На этом процессоре каждый токен ответа — две трети секунды, и просторные
 # поля стоят минут, а не байтов. Лучшие живые разборы укладывались в 400-670
 # знаков, ужатие их не задевает.
-REGIME_CHARS = 120
+REGIME_CHARS = 160
 ANALYSIS_CHARS = 800
 TRIGGER_CHARS = 160
 WHY_CHARS = 240
@@ -88,7 +88,7 @@ def _text(limit):
     return f'"\\"" ch{{1,{limit}}} "\\""'
 
 
-def build(level_ids):
+def build(level_ids, prices=None, min_stop_pct=0.0, min_rr=0.0):
     """
     Грамматика под КОНКРЕТНЫЙ список уровней.
 
@@ -106,7 +106,7 @@ def build(level_ids):
     if not level_ids:
         return _skip_only()
 
-    plans, rules = _plans(level_ids)
+    plans, rules = _plans(level_ids, prices, min_stop_pct, min_rr)
     if not plans:
         # Меньше трёх уровней — сделки не выразить: вход, стоп и цель обязаны
         # быть разными уровнями. Разрешить вход здесь значило бы разрешить
@@ -161,7 +161,7 @@ ws       ::= [ \\n]{{0,2}}
 '''
 
 
-def _plans(level_ids):
+def _plans(level_ids, prices=None, min_stop_pct=0.0, min_rr=0.0):
     """
     По одному правилу на каждую пару «направление + уровень входа».
 
@@ -185,12 +185,32 @@ def _plans(level_ids):
     заодно закрывает случай, когда вся разметка оказалась по одну сторону от
     цены — тогда останется только отказ, и он будет честным.
     """
+    # РАССТОЯНИЯ — ТОЖЕ ГРАММАТИКОЙ. 19 сентября 2026 два первых плана
+    # «войти» умерли на предохранителях: шорт XRP со стопом в 0.39% при
+    # минимуме 1.5% и лонг DOGE с целью в 1.5% при стопе 1.7% (R:R 0.9).
+    # Текст задания называет оба предела, модель их не держит — как раньше
+    # не держала геометрию. Уровни с ценами известны, значит стоп ближе
+    # минимума и цель ближе min_rr × минимум можно просто не разрешать:
+    # неверный ответ становится невыразимым, а не отвергаемым.
+    #
+    # Цель проверяется по НЕОБХОДИМОМУ условию (расстояние ≥ min_rr × минимум
+    # стопа): точный R:R зависит от выбранного стопа и остаётся за кодом.
+    price_of = dict(zip(level_ids, prices)) if prices else {}
+
+    def far_enough(a, b, pct):
+        if not pct or a not in price_of or b not in price_of or not price_of[a]:
+            return True
+        return abs(price_of[a] - price_of[b]) / price_of[a] * 100 >= pct
+
     plans, rules = [], []
     for side in ('LONG', 'SHORT'):
         for index, entry in enumerate(level_ids):
             higher = list(level_ids[:index])
             lower = list(level_ids[index + 1:])
             stops, targets = (lower, higher) if side == 'LONG' else (higher, lower)
+            stops = [s for s in stops if far_enough(entry, s, min_stop_pct)]
+            targets = [t for t in targets
+                       if far_enough(entry, t, min_rr * min_stop_pct)]
             if not stops or not targets:
                 continue
             # ИМЯ ПРАВИЛА — ТОЛЬКО БУКВЫ, ЦИФРЫ И ДЕФИС. Подчёркивание

@@ -250,7 +250,10 @@ class TestTheWholePass:
             'volume': np.full(400, 100.0),
         })
 
-    def test_the_model_sees_the_grammar_for_these_levels(self):
+    def test_the_model_sees_the_grammar_for_these_levels(self, monkeypatch):
+        # Без предела стопа: на синтетике уровни стоят теснее 1.5%, и
+        # грамматика с расстояниями честно оставила бы один отказ.
+        monkeypatch.setattr(dec.llm_context, 'min_stop_pct', lambda: 0.0)
         seen = {}
 
         def ask(prompt, grammar, max_tokens):
@@ -532,3 +535,51 @@ class TestGeometryAgainstLiquidityIsCode:
     def test_no_snapshot_no_checks(self):
         out = dec.check(dec.parse(answer(), LEVELS), LEVELS, market=None)
         assert out['ok'] is True and out['obstacles'] == []
+
+
+class TestDistancesAreInTheGrammar:
+    """
+    Стоп ближе минимума и цель ближе min_rr × минимум невыразимы, а не
+    отвергаемы: 19.09.2026 два первых плана «войти» умерли на этих
+    предохранителях.
+    """
+
+    def test_a_stop_closer_than_the_minimum_is_not_offered(self):
+        import llm_grammar
+        ids = ['L1', 'L2', 'L3', 'L4']
+        prices = [110.0, 103.0, 100.0, 99.5]          # L4 в 0.5% под L3
+        text = llm_grammar.build(ids, prices=prices, min_stop_pct=1.5, min_rr=2.0)
+        line = next(l for l in text.splitlines() if l.startswith('s-long-l2'))
+        assert 'L3' in line and 'L4' in line      # от L2 оба стопа дальше 1.5%
+        # Лонг от L3: единственный стоп L4 слишком близко — ветки нет вовсе.
+        assert not any(l.startswith('long-l3 ') for l in text.splitlines())
+
+    def test_a_target_closer_than_rr_times_minimum_is_not_offered(self):
+        import llm_grammar
+        ids = ['L1', 'L2', 'L3', 'L4']
+        prices = [104.0, 102.0, 100.0, 97.0]          # L2 в 2% над L3 < 2×1.5%
+        text = llm_grammar.build(ids, prices=prices, min_stop_pct=1.5, min_rr=2.0)
+        line = next(l for l in text.splitlines() if l.startswith('t-long-l3'))
+        assert 'L2' not in line and 'L1' in line
+
+    def test_without_prices_nothing_is_restricted(self):
+        import llm_grammar
+        a = llm_grammar.build(['L1', 'L2', 'L3'])
+        b = llm_grammar.build(['L1', 'L2', 'L3'], prices=[100, 99, 98], min_stop_pct=0)
+        assert a == b
+
+
+class TestATriggerAgainstTheIdeaIsRefused:
+
+    def test_long_after_close_below_the_entry_is_refused(self):
+        out = verdict(trigger={'when': 'close_below', 'level': 'L3', 'note': 'x'})
+        assert out['ok'] is False and out['gate'] == 'условие противоречит входу'
+
+    def test_long_after_close_above_a_higher_level_is_fine(self):
+        out = verdict(trigger={'when': 'close_above', 'level': 'L2', 'note': 'x'})
+        assert out['ok'] is True
+
+    def test_short_after_close_above_the_entry_is_refused(self):
+        out = verdict(d='enter', side='SHORT', entry='L2', stop='L1', tp=['L3'], inval='L1',
+                      trigger={'when': 'close_above', 'level': 'L2', 'note': 'x'})
+        assert out['ok'] is False and out['gate'] == 'условие противоречит входу'
