@@ -370,7 +370,7 @@ def _allowed(event: str) -> bool:
         return True                                # настройка недоступна — не молчим
 
 
-def llm_setup_found(signal: dict, df_1h=None, telegram_id=None):
+def llm_setup_found(signal: dict, df_1h=None, telegram_id=None, frames=None):
     """
     План модели принят (прошёл проверки кода и критика): монета, вход, стоп,
     цели, условие и почему — с графиком, где это нарисовано.
@@ -379,6 +379,10 @@ def llm_setup_found(signal: dict, df_1h=None, telegram_id=None):
     ждать цену трое суток, а условие — двенадцать часов, и человеку важно
     увидеть план тогда, когда он появился. О заполнении сообщит обычное
     «вход в сделку».
+
+    frames(pair, tf, limit) -> df — откуда взять свечи другого таймфрейма.
+    Какой таймфрейм показать, решает chart_frame по геометрии плана; без
+    frames или при отказе биржи рисуются часовые, что на руках.
     """
     if not _allowed('llm_setup'):
         return False
@@ -425,8 +429,20 @@ def llm_setup_found(signal: dict, df_1h=None, telegram_id=None):
 
     if df_1h is not None:
         try:
+            import chart_frame
             from chart_generator import generate_trade_chart
-            chart_path = generate_trade_chart(signal, df_1h)
+            price = float(df_1h['close'].iloc[-1]) if len(df_1h) else None
+            tf, bars = chart_frame.pick(signal, price)
+            df, shown = df_1h, '1h'
+            if frames is not None and tf != '1h':
+                try:
+                    got = frames(pair, tf, bars)
+                    if got is not None and len(got) >= 20:
+                        df, shown = got, tf
+                except Exception as exc:               # noqa: BLE001
+                    log(f"Telegram: свечи {tf} для графика не пришли — {exc}; рисую часовые")
+            text += f"\nГрафик: {chart_frame.SPAN_TEXT.get(shown, shown)}"
+            chart_path = generate_trade_chart(signal, df, timeframe=shown)
             if chart_path and _send_photo(chart_path, caption=text, chat_id=telegram_id):
                 return True
         except Exception as exc:                       # noqa: BLE001

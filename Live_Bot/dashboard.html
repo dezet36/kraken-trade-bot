@@ -2865,6 +2865,7 @@ const FIELD_NAMES = {
   'enabled': 'торгует', 'risk_pct': 'риск на сделку',
   'min_stop_pct': 'минимальный стоп', 'deposit': 'стартовый депозит',
   'max_slots': 'одновременных позиций',
+  'critic': 'критик ИИ',
   'portfolio_risk_pct': 'предел портфеля, %',
   'portfolio_max_positions': 'предел позиций',
   'daily_loss_pct': 'дневной предел убытка, %',
@@ -4202,6 +4203,28 @@ function renderControls() {
         лонги дают ровно ноль, а без них R на сделку втрое выше при потере 11%
         сделок. У остальных стратегий такой проверки нет.</div>`;
 
+    // Критик — только у модели: второй вызов того же движка в роли
+    // проверяющего. Выключается на панели, когда нужно замерить аналитика
+    // без него; с ним — каждый план «войти» стоит ещё 4-5 минут.
+    let criticRow = '';
+    if (key === 'LLM') {
+      const on = s.critic !== false;
+      criticRow = `<div class="ctl-row side-row">
+        <label>Критик</label>
+        <span class="unit"></span>
+        <span class="seg small" id="critic-${key}">
+          <button type="button" class="seg-btn${on ? ' on' : ''}" data-critic="${key}" data-val="on"
+            ${WRITABLE ? '' : 'disabled'}>включён</button>
+          <button type="button" class="seg-btn${on ? '' : ' on'}" data-critic="${key}" data-val="off"
+            ${WRITABLE ? '' : 'disabled'}>выключен</button>
+        </span>
+      </div>
+      <div class="ctl-note">Второе мнение о каждом плане «войти»: та же модель в
+        роли проверяющего ищет, почему план не сработает, и может его
+        отклонить. Выключенный критик — планы аналитика идут в сделку сразу
+        после проверок кода; так меряют самого аналитика.</div>`;
+    }
+
     return `<div class="panel">
       <div class="ctl-head">
         <span class="key" style="background:${COLOR[key] || 'var(--muted)'}"></span>
@@ -4217,6 +4240,7 @@ function renderControls() {
       </div>
       ${rows}
       ${sideRow}
+      ${criticRow}
     </div>`;
   }).join('');
 
@@ -4240,6 +4264,12 @@ function renderControls() {
   box.querySelectorAll('button[data-side]').forEach(btn => {
     btn.onclick = () => {
       box.querySelectorAll(`button[data-side="${btn.dataset.side}"]`)
+        .forEach(other => other.classList.toggle('on', other === btn));
+    };
+  });
+  box.querySelectorAll('button[data-critic]').forEach(btn => {
+    btn.onclick = () => {
+      box.querySelectorAll(`button[data-critic="${btn.dataset.critic}"]`)
         .forEach(other => other.classList.toggle('on', other === btn));
     };
   });
@@ -4373,6 +4403,10 @@ async function saveSettings() {
   document.querySelectorAll('#controls button[data-side].on').forEach(btn => {
     (payload[btn.dataset.side] = payload[btn.dataset.side] || {}).sides =
       btn.dataset.val;
+  });
+  document.querySelectorAll('#controls button[data-critic].on').forEach(btn => {
+    (payload[btn.dataset.critic] = payload[btn.dataset.critic] || {}).critic =
+      btn.dataset.val === 'on';
   });
 
   const msg = document.getElementById('ctl-msg');
@@ -4613,6 +4647,7 @@ function renderLlmState(d) {
     + (d.avg_seconds ? `<span>в среднем <b>${d.avg_seconds} с</b></span>` : '')
     + `<span>вердикт годен <b>${d.stale_min} мин</b></span>`
     + `<span>повтор не чаще <b>${d.reask_min} мин</b></span>`
+    + `<span>критик <b style="color:${d.critic === false ? 'var(--warn)' : 'var(--good)'}">${d.critic === false ? 'выключен' : 'включён'}</b></span>`
     + '</div><div class="ai-state" style="margin-top:6px">' + fit + cut + '</div>'
     + '<div class="ai-state" style="margin-top:6px">'
     + streamLine('лента сделок', streams.trades) + streamLine('ликвидации', streams.liquidations)

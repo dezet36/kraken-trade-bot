@@ -358,11 +358,18 @@ def _check_armed(candles):
     return out
 
 
+# Свечи других таймфреймов для графика в сообщении: frames(pair, tf, limit).
+# Ставится сканером на каждом цикле; в проверках остаётся пустым, и график
+# рисуется по часовым, что на руках.
+_frames = None
+
+
 def _notify_setup(signal, df):
     """План принят — сообщение с графиком. Отказ отправки торговле не мешает."""
     try:
         import telegram_notify as tg
-        tg.llm_setup_found(signal, df if hasattr(df, 'columns') else None)
+        tg.llm_setup_found(signal, df if hasattr(df, 'columns') else None,
+                           frames=_frames)
     except Exception as exc:                       # noqa: BLE001
         log(f'   {NAME}: уведомление о сетапе не отправлено — {exc}')
 
@@ -463,7 +470,7 @@ def _refuse(pair, verdict):
 
 
 def scan_for_setups(pairs, gate, client=None, balance=None, candles=None,
-                    market=None):
+                    market=None, frames=None):
     """
     Забирает готовые вердикты и отдаёт модели следующую пару. Не ждёт.
 
@@ -481,7 +488,7 @@ def scan_for_setups(pairs, gate, client=None, balance=None, candles=None,
     получает готовый словарь. Без снимка разбор законен — в разметке будут
     прочерки, — но без него модель отмечает профиль и поток вслепую.
     """
-    global _cursor
+    global _cursor, _frames
 
     if not llm_local.available():
         log(f'   {NAME}: модель недоступна — стратегия простаивает')
@@ -493,6 +500,12 @@ def scan_for_setups(pairs, gate, client=None, balance=None, candles=None,
         def candles(pair):
             return exchange.fetch_ohlcv('1h', limit=500, symbol=pair,
                                         client=client)
+
+        if frames is None:
+            def frames(pair, tf, limit):
+                return exchange.fetch_ohlcv(tf, limit=limit, symbol=pair,
+                                            client=client)
+    _frames = frames
 
     out = _collect(_harvest())
     out += _check_armed(candles)

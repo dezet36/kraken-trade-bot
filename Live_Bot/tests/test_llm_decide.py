@@ -443,6 +443,17 @@ class TestTheCriticSecondOpinion:
         out = dec.decide('BTCUSDT', TestTheWholePass().make_df(), ask)
         assert len(calls) == 1 and out['ok'] and 'critic' not in out
 
+    def test_the_panel_toggle_silences_the_critic(self, monkeypatch):
+        """.env разрешает, оператор выключил с панели — критика нет."""
+        import settings_store
+        monkeypatch.setattr(config, 'LLM_CRITIC', True)
+        monkeypatch.setattr(settings_store, 'critic_enabled', lambda: False)
+        ready = verdict()
+        monkeypatch.setattr(dec, 'check', lambda parsed, levels, answer=None, market=None, min_stop=None, atr_pct=None: ready)
+        ask, calls = self._ask_pair(answer(), 'не должно быть вызвано')
+        out = dec.decide('BTCUSDT', TestTheWholePass().make_df(), ask)
+        assert len(calls) == 1 and out['ok'] and 'critic' not in out
+
     def test_a_rejected_plan_is_a_named_refusal(self):
         v = verdict()
         assert v['ok']

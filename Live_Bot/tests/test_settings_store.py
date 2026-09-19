@@ -101,3 +101,29 @@ class TestAccessors:
         store.save({'FIBO': {'min_stop_pct': 1.5}})
 
         assert store.min_stop_pct('FIBO') == pytest.approx(0.015)
+
+
+class TestCriticToggle:
+    """
+    Критик выключается с панели, а не из .env: замер аналитика без второго
+    мнения — решение на неделю, и перезапуск бота ради него — лишний.
+    """
+
+    def test_critic_is_on_by_default(self, store):
+        assert store.critic_enabled() is True
+
+    def test_switched_off_survives_reload(self, store):
+        store.save({'LLM': {'critic': False}})
+        store._cache = None
+        store._mtime = None
+
+        assert store.load(force=True)['LLM']['critic'] is False
+        assert store.critic_enabled() is False
+
+    def test_other_fields_untouched_by_the_toggle(self, store):
+        store.save({'LLM': {'risk_pct': 0.4}})
+        store.save({'LLM': {'critic': False}})
+
+        data = store.load(force=True)
+        assert data['LLM']['risk_pct'] == 0.4
+        assert data['LLM']['enabled'] is True

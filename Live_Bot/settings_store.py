@@ -146,6 +146,9 @@ def _defaults():
             # это сделки, которых человек не досчитается, не понимая почему.
             # Переключатель есть, решение за оператором.
             'sides': 'both',
+            # Второе мнение о плане модели. Осмысленно только у LLM, но поле
+            # есть у всех: схема одна, лишний ключ безвреден.
+            'critic': True,
         }
         for name in STRATEGIES
     }
@@ -224,6 +227,8 @@ def load(force=False):
                                                        data[name][field])
                     data[name]['sides'] = _clean_sides(item.get('sides'),
                                                        data[name]['sides'])
+                    if 'critic' in item:
+                        data[name]['critic'] = bool(item['critic'])
             except Exception as exc:
                 log(f"⚠️ runtime_settings.json нечитаем ({exc}) — берём значения из .env")
 
@@ -265,6 +270,8 @@ def save(changes):
                 data[name][field] = _clamp(field, item[field], data[name][field])
         if 'sides' in item:
             data[name]['sides'] = _clean_sides(item['sides'], data[name]['sides'])
+        if 'critic' in item:
+            data[name]['critic'] = bool(item['critic'])
 
     with _lock:
         try:
@@ -353,6 +360,20 @@ def history(limit=100):
 
 def enabled(strategy):
     return bool(load().get(strategy, {}).get('enabled', True))
+
+
+def critic_enabled():
+    """
+    Второе мнение о плане модели: включено оператором с панели?
+
+    Тумблер живёт в настройках, а не в .env: выключить критика на неделю
+    ради замера аналитика без него — решение оператора, а не перезапуск.
+    Настройка недоступна — берётся config.LLM_CRITIC.
+    """
+    try:
+        return bool(load().get('LLM', {}).get('critic', True))
+    except Exception:                              # noqa: BLE001
+        return bool(getattr(config, 'LLM_CRITIC', True))
 
 
 def risk_pct(strategy):

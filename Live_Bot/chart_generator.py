@@ -54,8 +54,13 @@ def _strategy_of(signal: dict) -> str:
     return ''
 
 
-def generate_trade_chart(signal: dict, df_1h) -> str:
-    """Чистый 1H-график с уровнями Entry/SL/TP и панелью RSI. Возвращает путь к PNG или None."""
+def generate_trade_chart(signal: dict, df_1h, timeframe: str = '1h') -> str:
+    """
+    График с уровнями Entry/SL/TP и панелью RSI. Возвращает путь к PNG или None.
+
+    timeframe — чьи это свечи: подпись в заголовке и размер окна. Свечи
+    приходят готовыми; для плана модели их таймфрейм выбирает chart_frame.
+    """
     try:
         import matplotlib
         matplotlib.use('Agg')
@@ -101,10 +106,16 @@ def generate_trade_chart(signal: dict, df_1h) -> str:
                 df = df.iloc[start:].copy()
         except Exception:
             pass
-        # У плана модели импульса нет — окно последних пяти суток: на трёх
+        # У плана модели импульса нет — окно по таймфрейму (chart_frame), и
+        # оно ещё подрезается, пока размах свечей соразмерен плану: на трёх
         # неделях уровни плана сжимались в полоску у края.
-        if signal.get('llm') and len(df) > 120:
-            df = df.iloc[-120:].copy()
+        if signal.get('llm'):
+            import chart_frame
+            window = chart_frame.FRAMES.get(timeframe, 120)
+            if len(df) > window:
+                df = df.iloc[-window:]
+            df = chart_frame.fit_window(
+                df, chart_frame.plan_points(signal, float(df['Close'].iloc[-1]))).copy()
 
         rsi = _rsi(df['Close'])
 
@@ -146,7 +157,8 @@ def generate_trade_chart(signal: dict, df_1h) -> str:
 
         dir_icon = "▲ LONG" if is_long else "▼ SHORT"
         htf_str  = f"  HTF: {htf}" if htf not in ('—', 'NEUTRAL', None) else ""
-        title    = f"{pair} · 1H  {dir_icon}{htf_str}"
+        tf_label = timeframe.upper() if timeframe else '1H'
+        title    = f"{pair} · {tf_label}  {dir_icon}{htf_str}"
         llm = signal.get('llm') or {}
         if llm:
             when = llm.get('trigger_when') or 'now'
@@ -156,9 +168,14 @@ def generate_trade_chart(signal: dict, df_1h) -> str:
         # RSI-панель (с уровнями 70/30)
         n = len(df)
         addplots = [
-            mpf.make_addplot(rsi, panel=1, color='#B2B5BE', width=1.1, ylabel='RSI', ylim=(0, 100)),
-            mpf.make_addplot([70] * n, panel=1, color='#555A66', width=0.7, linestyle='--'),
-            mpf.make_addplot([30] * n, panel=1, color='#555A66', width=0.7, linestyle='--'),
+            mpf.make_addplot(rsi, panel=1, color='#B2B5BE', width=1.1, ylabel='RSI', ylim=(0, 100),
+                             secondary_y=False),
+            # secondary_y=False явно: без него mplfinance отдавал константам
+            # 70/30 свою правую ось 68-72, и пунктир рисовался не там.
+            mpf.make_addplot([70] * n, panel=1, color='#555A66', width=0.7, linestyle='--',
+                             secondary_y=False),
+            mpf.make_addplot([30] * n, panel=1, color='#555A66', width=0.7, linestyle='--',
+                             secondary_y=False),
         ]
 
         fig, axes = mpf.plot(
@@ -240,6 +257,18 @@ def generate_trade_chart(signal: dict, df_1h) -> str:
             ax.axhline(y=price, color=color, linestyle=ls, linewidth=1.5, alpha=0.95, zorder=5)
             ax.text(xlim[0] + x_rng * 0.01, price, label,
                     color=color, fontsize=9, va='bottom', ha='left',
+                    fontweight='bold', zorder=12,
+                    bbox=dict(boxstyle='round,pad=0.2', facecolor='#131722',
+                              alpha=0.7, edgecolor='none'))
+
+        # У плана модели вход часто далеко от цены — отметка «сейчас»
+        # показывает, откуда цене идти к входу.
+        if llm:
+            now_price = float(df['Close'].iloc[-1])
+            ax.axhline(y=now_price, color='#FFD54F', linestyle=(0, (2, 3)),
+                       linewidth=1.0, alpha=0.9, zorder=6)
+            ax.text(xlim[1] - x_rng * 0.012, now_price, f"сейчас  ${_fp(now_price)}",
+                    color='#FFD54F', fontsize=8.5, va='bottom', ha='right',
                     fontweight='bold', zorder=12,
                     bbox=dict(boxstyle='round,pad=0.2', facecolor='#131722',
                               alpha=0.7, edgecolor='none'))

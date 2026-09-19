@@ -1287,10 +1287,18 @@ def llm_payload(limit=40):
     except Exception:                                  # noqa: BLE001
         pass
 
+    critic = True
+    try:
+        import llm_decide
+        critic = bool(llm_decide.critic_enabled())
+    except Exception:                                  # noqa: BLE001
+        pass
+
     return {
         'configured': bool(path),
         'streams': streams,
         'armed': armed,
+        'critic': critic,
         'model': os.path.basename(path) if path else '',
         'exists': bool(path) and os.path.exists(path),
         'ctx': getattr(config, 'LLM_CTX', 0),
