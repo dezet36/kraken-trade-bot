@@ -202,11 +202,27 @@ def levels(df, at=None, extra=None):
     #    там и стояли. Список без верхней стороны бесполезен — у лонга нет ни
     #    цели, ни стопа у шорта, и модель вынуждена выбирать из невозможного.
     #    Рынок бывает односторонним, но меню решений — не должно.
+    #
+    # 3. Ближайшие — всегда. Отбор по силе на живом ETH 19.09.2026 отдал все
+    #    восемь мест снизу скоплениям на −4…−7%, а равные экстремумы в 0.3%,
+    #    открытие дня и минимум Азии в 1-1.3% от цены выпали: стоп ставить
+    #    было не на что, кроме уровня в 4.7%, и план умер на R:R. Три
+    #    ближайших уровня с каждой стороны входят вне конкурса, остальные
+    #    места — по силе.
     half = max(1, MAX_LEVELS // 2)
-    above = sorted((lv for lv in near if lv['price'] > price_now),
-                   key=lambda lv: (-lv['touches'], lv['price'] - price_now))[:half]
-    below = sorted((lv for lv in near if lv['price'] <= price_now),
-                   key=lambda lv: (-lv['touches'], price_now - lv['price']))[:half]
+    nearest_keep = 3
+
+    def pick(candidates, distance):
+        by_distance = sorted(candidates, key=distance)
+        kept = by_distance[:nearest_keep]
+        rest = sorted((lv for lv in candidates if lv not in kept),
+                      key=lambda lv: (-lv['touches'], distance(lv)))
+        return kept + rest[:max(0, half - len(kept))]
+
+    above = pick([lv for lv in near if lv['price'] > price_now],
+                 lambda lv: lv['price'] - price_now)
+    below = pick([lv for lv in near if lv['price'] <= price_now],
+                 lambda lv: price_now - lv['price'])
     near = sorted(above + below, key=lambda lv: -lv['price'])
 
     # ОБЪЁМ У УРОВНЯ. Уровень, у которого торговали втрое больше обычного, и

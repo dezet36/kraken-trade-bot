@@ -383,3 +383,38 @@ class TestTheModelIsActuallyAsked:
         assert 'УРОВНИ' in seen['prompt'], 'данные не дошли'
         assert 'ОТВЕЧАЙ ПО-РУССКИ' in seen['prompt'], 'язык не потребован'
         assert 'ПРЕДЕЛЫ' in seen['prompt'], 'пределы не названы'
+
+
+class TestTheNearestLevelsAlwaysMakeTheList:
+    """
+    Живой ETH 19.09.2026: восемь мест снизу заняли скопления на −4…−7%, а
+    равные экстремумы в 0.3% и открытие дня выпали — стопу было не на что
+    встать ближе 4.7%. Три ближайших с каждой стороны входят вне конкурса.
+    """
+
+    def test_a_weak_nearby_point_beats_a_strong_far_cluster(self):
+        # Пилу с частыми пивотами сменяет ровный подъём: у цены пивотов нет,
+        # ближайшие скопления далеко внизу — как у ETH в тот день.
+        closes = np.concatenate([wavy(300), np.linspace(101.2, 110.0, 100)])
+        df = make_df(closes)
+        price = float(df['close'].iloc[-1])
+        extra = [{'price': price * 1.012, 'kind': 'максимум Азии', 'touches': 1, 'last': 0},
+                 {'price': price * 0.994, 'kind': 'равные экстремумы EQL', 'touches': 1, 'last': 0}]
+        found, _ = llm_context.levels(df, extra=extra)
+        kinds = [lv['kind'] for lv in found]
+        assert 'максимум Азии' in kinds and 'равные экстремумы EQL' in kinds
+        # И они стоят вплотную к цене: |dist| < 0.5%.
+        for lv in found:
+            if lv['kind'] in ('максимум Азии', 'равные экстремумы EQL'):
+                assert abs(lv['dist_pct']) < 1.5
+
+    def test_extra_levels_come_from_the_snapshot(self):
+        market = {'sessions': {'pdh': 103.0, 'pwl': 92.0, 'asia_low': 99.5},
+                  'smc': {'equal_levels': [{'price': 104.0, 'source': 'EQH', 'side': 'BSL'}],
+                          'untapped': [{'price': 96.0, 'side': 'SSL'}]},
+                  'pois': [{'type': 'ORDER_BLOCK', 'top': 101.0, 'bottom': 100.5}]}
+        extra = llm_context.extra_levels(market)
+        prices = sorted(e['price'] for e in extra)
+        assert prices == [92.0, 96.0, 99.5, 100.5, 101.0, 103.0, 104.0]
+        assert any(e['kind'].startswith('равные экстремумы') for e in extra)
+        assert llm_context.extra_levels(None) == []
