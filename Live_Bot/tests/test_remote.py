@@ -687,3 +687,61 @@ class TestTheDashboardCountsItsViewers:
         finally:
             server.shutdown()
             server.server_close()
+
+
+class TestTheTunnelComesBackByItself:
+    """
+    19 сентября 2026 окно жило без связи: ssh умер, программа напечатала об
+    этом в консоль, которой у окна нет, и раздел, открытый после обрыва,
+    оказался пустым. Сторож обязан переподключаться, а не сообщать.
+    """
+
+    class _Proc:
+        def __init__(self, dies=True):
+            self.dies = dies
+            self.terminated = False
+
+        def wait(self):
+            if not self.dies:
+                import time as real_time
+                real_time.sleep(0.05)
+
+        def terminate(self):
+            self.terminated = True
+
+    def test_a_dead_tunnel_is_reopened(self, monkeypatch):
+        import remote
+        import remote_app
+
+        calls = []
+        replacement = self._Proc(dies=False)
+
+        def open_tunnel(cfg):
+            calls.append(cfg)
+            if len(calls) < 3:
+                return None, 'сеть пропала'
+            return replacement, ''
+        monkeypatch.setattr(remote, 'open_tunnel', open_tunnel)
+
+        link = {'process': self._Proc(dies=True), 'closed': False}
+        slept, logged = [], []
+
+        def sleep(seconds):
+            slept.append(seconds)
+            if len(calls) >= 3:
+                link['closed'] = True          # окно закрыли — сторож уходит
+
+        remote_app.keep_alive({'host': 'x'}, link, sleep=sleep, log=logged.append)
+        assert len(calls) == 3, 'переподключение не повторялось до успеха'
+        assert link['process'] is replacement
+        assert slept[:3] == [3, 6, 12], 'пауза обязана расти'
+        assert any('восстановлено' in m for m in logged)
+
+    def test_it_stops_when_the_window_closes(self, monkeypatch):
+        import remote
+        import remote_app
+
+        monkeypatch.setattr(remote, 'open_tunnel',
+                            lambda cfg: (_ for _ in ()).throw(AssertionError('не должно звать')))
+        link = {'process': self._Proc(dies=True), 'closed': True}
+        remote_app.keep_alive({'host': 'x'}, link, sleep=lambda s: None, log=lambda m: None)

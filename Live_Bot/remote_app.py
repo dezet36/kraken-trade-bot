@@ -414,6 +414,34 @@ def fail(message):
         pass
 
 
+def keep_alive(cfg, link, sleep=time.sleep, log=print):
+    """
+    Держит туннель живым, пока окно открыто.
+
+    Ждёт смерти ssh, потом поднимает его заново с нарастающей паузой
+    (3 с → 60 с): сервер мог перезагружаться, сеть — пропасть на минуту.
+    Останавливается, когда программа закрывается (link['closed']).
+    """
+    delay = 3
+    while not link['closed']:
+        link['process'].wait()
+        if link['closed']:
+            return
+        log('Соединение с сервером разорвано — переподключаюсь.')
+        while not link['closed']:
+            sleep(delay)
+            if link['closed']:
+                return
+            process, error = remote.open_tunnel(cfg)
+            if process:
+                link['process'] = process
+                log('Соединение восстановлено.')
+                delay = 3
+                break
+            log(f'Не удалось: {error}')
+            delay = min(delay * 2, 60)
+
+
 def main():
     cfg = remote.load_settings()
     error = ''
@@ -429,20 +457,24 @@ def main():
         if process:
             break
 
+    link = {'process': process, 'closed': False}
+
     def shutdown():
         # Туннель НЕ демон и переживёт окно, заняв порт до перезагрузки.
+        link['closed'] = True
         try:
-            process.terminate()
+            link['process'].terminate()
         except Exception:                          # noqa: BLE001
             pass
 
-    # Сторож на случай, если соединение оборвётся при открытом окне. Без него
-    # панель показывала бы последние удачно загруженные числа как текущие.
-    def watch():
-        process.wait()
-        print('Соединение с сервером разорвано.')
-
-    threading.Thread(target=watch, daemon=True).start()
+    # СТОРОЖ ПЕРЕПОДКЛЮЧАЕТ, А НЕ ТОЛЬКО СООБЩАЕТ. Первая версия печатала
+    # «соединение разорвано» в консоль, которой у окна нет, и окно жило
+    # дальше без связи: вкладки показывали последние удачные числа, а вкладка,
+    # открытая после обрыва, — пустоту. 19 сентября 2026 так и выглядел
+    # «пустой раздел ИИ»: ssh давно умер, а страница не знала об этом.
+    # Пока туннель лежит, страница честно пишет «нет связи»; как только он
+    # поднят, её опросы раз в несколько секунд оживают сами.
+    threading.Thread(target=keep_alive, args=(cfg, link), daemon=True).start()
 
     # ПОРЯДОК ВЫБРАН ПО ЗАМЕРУ, А НЕ ПО ВКУСУ. На Windows 10 LTSC 2019
     # WebView2 установлен, библиотеки в сборке есть, страница с сервера
