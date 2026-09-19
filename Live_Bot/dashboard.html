@@ -4661,7 +4661,9 @@ function renderLlmState(d) {
    на разборы модели на этой вкладке, и вопрос «а критик сейчас работает?»
    возникает именно тут. В настройках (карточка LLM) тот же переключатель. */
 function criticChip(on) {
-  const writable = !!(DATA && DATA.writable !== false);
+  // Пока общий опрос не пришёл, права неизвестны — кнопку показываем: при
+  // запрете сервер ответит отказом, и он будет виден на самой кнопке.
+  const writable = !(DATA && DATA.writable === false);
   const state = `<b style="color:${on ? 'var(--good)' : 'var(--warn)'}">${on ? 'включён' : 'выключен'}</b>`;
   if (!writable) return `<span>критик ${state}</span>`;
   return `<span>критик ${state}
