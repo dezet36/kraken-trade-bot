@@ -30,9 +30,12 @@
 торговый цикл ждать не должен.
 """
 
+import time
+
 import config
 import llm_context
 import llm_decide
+import llm_journal
 import llm_local
 from logger import log
 
@@ -41,6 +44,15 @@ NAME = 'LLM'
 # Сколько сетапов за цикл отдаём модели. Четыре по три минуты — это двенадцать
 # минут счёта; больше цикл терпеть не станет.
 MAX_PER_CYCLE = int(config.__dict__.get('LLM_MAX_PER_CYCLE', 0) or 4)
+
+# Предел не по числу, а по времени. Число сетапов ничего не обещает: один
+# разбор занял 165 секунд, а на модели покрупнее займёт вдвое больше, и четыре
+# «недолгих» разбора растянут пятиминутный цикл на двадцать минут.
+BUDGET_SEC = int(config.__dict__.get('LLM_CYCLE_BUDGET_SEC', 0) or 300)
+
+# Когда модель уже отвечала об ЭТОМ сетапе — когда именно. Ключ описан в
+# _fingerprint. Живёт в процессе: перезапуск бота законно спрашивает заново.
+_asked = {}
 
 
 def _fresh(pool):
@@ -64,6 +76,51 @@ def _fresh(pool):
                 best[pair] = candidate
     return sorted(best.values(),
                   key=lambda c: (-(c.get('score') or 0), -(c.get('rr') or 0)))
+
+
+def _fingerprint(candidate):
+    """
+    Метка сетапа: пара и цены, ради которых модель и зовётся.
+
+    Своего номера у кандидата нет, и быть не может: сканер находит его заново
+    каждый цикл. А заявка висит часами — 19 сентября один и тот же
+    SHIB1000USDT LONG с одними и теми же ценами разбирался 119 раз подряд по
+    165 секунд. Данные те же, ответ тот же, процессор занят.
+
+    Цены округляются до значащих цифр, а не до копеек: у SHIB и у BTC разный
+    порядок, и общего числа знаков после запятой для них не существует.
+    """
+    params = (candidate.get('signal') or {}).get('params') or {}
+
+    def mark(value):
+        try:
+            return f'{float(value):.6g}'
+        except (TypeError, ValueError):
+            return '—'
+
+    return (f"{candidate.get('pair')}|{mark(params.get('entry'))}"
+            f"|{mark(params.get('stop_loss'))}")
+
+
+def _asked_recently(mark, now=None):
+    """Спрашивали ли об этом сетапе недавно. Окно — LLM_REASK_AFTER_MIN."""
+    minutes = int(config.__dict__.get('LLM_REASK_AFTER_MIN', 0) or 0)
+    if minutes <= 0:
+        return False
+    now = now if now is not None else time.time()
+    at = _asked.get(mark)
+    return at is not None and (now - at) < minutes * 60
+
+
+def _remember(mark, now=None):
+    """Отмечает разбор и выбрасывает протухшие метки, чтобы не копить их."""
+    minutes = int(config.__dict__.get('LLM_REASK_AFTER_MIN', 0) or 0)
+    now = now if now is not None else time.time()
+    _asked[mark] = now
+    if minutes > 0:
+        for key, at in list(_asked.items()):
+            if now - at >= minutes * 60:
+                _asked.pop(key, None)
 
 
 def _reshape(candidate, verdict):
@@ -178,8 +235,34 @@ def scan_for_setups(pool, gate, client=None, balance=None, candles=None):
                                         client=client)
 
     out = []
-    for candidate in ready[:MAX_PER_CYCLE]:
+    started = time.time()
+    longest = 0.0
+    for number, candidate in enumerate(ready[:MAX_PER_CYCLE]):
         pair = candidate['pair']
+
+        mark = _fingerprint(candidate)
+        if _asked_recently(mark):
+            log(f'   {NAME} {pair}: тот же сетап уже разобран, '
+                f'спрошу не раньше чем через '
+                f'{config.__dict__.get("LLM_REASK_AFTER_MIN", 60)} мин')
+            continue
+
+        # ВРЕМЯ ПРОВЕРЯЕТСЯ ПЕРЕД РАЗБОРОМ, А НЕ ПОСЛЕ. Остановиться на
+        # полпути нельзя: модель отвечает целиком или никак. Поэтому решение
+        # начинать принимается по самому долгому разбору этого цикла — если
+        # следующий окажется таким же, уложимся ли мы в бюджет.
+        spent = time.time() - started
+        if number and spent + longest > BUDGET_SEC:
+            left = ready[:MAX_PER_CYCLE][number:]
+            log(f'   {NAME}: бюджет цикла {BUDGET_SEC} с исчерпан за '
+                f'{spent:.0f} с — {len(left)} сетапов остались без разбора')
+            for skipped in left:
+                _refuse(skipped.get('signal') or {'trading_pair': skipped['pair']},
+                        {'gate': 'не хватило времени цикла',
+                         'detail': f'разбор занимает {longest:.0f} с, '
+                                   f'бюджет {BUDGET_SEC} с'})
+            break
+
         try:
             df = candles(pair)
         except Exception as exc:                   # noqa: BLE001
@@ -188,7 +271,13 @@ def scan_for_setups(pool, gate, client=None, balance=None, candles=None):
         if df is None or len(df) < 100:
             continue
 
+        at = time.time()
         verdict = llm_decide.decide(pair, df, llm_local.ask)
+        longest = max(longest, time.time() - at)
+        _remember(mark)
+        llm_journal.record(pair, candidate.get('donor', ''), verdict,
+                           llm_local.last_stats())
+
         if not verdict['ok']:
             log(f'   {NAME} {pair}: отказ — {verdict["gate"]}'
                 + (f' ({verdict["detail"]})' if verdict.get('detail') else ''))

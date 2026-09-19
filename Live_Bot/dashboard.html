@@ -394,6 +394,34 @@
     font-size: 11.5px; line-height: 1.45; white-space: pre;
   }
 
+  /* ── Разборы ИИ ──────────────────────────────────────────────────── */
+  /* Разбор — это текст на полстраницы, и главное в нём читается, только
+     когда его видно целиком. Поэтому карточка, а не строка таблицы: в
+     таблице такой текст пришлось бы обрезать до бессмысленного огрызка. */
+  .ai-state { display: flex; flex-wrap: wrap; gap: 8px 18px; font-size: 12.5px;
+              color: var(--ink-3); }
+  .ai-state b { color: var(--ink-1); font-weight: 600; }
+  .ai-card { border: 1px solid var(--hairline); border-radius: var(--r-md);
+             padding: 12px 14px; margin-bottom: 10px; background: var(--surface); }
+  .ai-card.enter { border-left: 3px solid var(--good); }
+  .ai-card.skip  { border-left: 3px solid var(--hairline); }
+  .ai-card.broke { border-left: 3px solid var(--bad); }
+  .ai-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap;
+             font-size: 13px; }
+  .ai-pair { font-weight: 650; color: var(--ink-1); }
+  .ai-gate { color: var(--ink-2); }
+  .ai-when { margin-left: auto; color: var(--ink-4); font-size: 12px; }
+  .ai-donor { color: var(--ink-4); font-size: 12px; }
+  .ai-text { margin-top: 8px; font-size: 13px; line-height: 1.5;
+             color: var(--ink-2); }
+  .ai-line { margin-top: 6px; font-size: 12.5px; color: var(--ink-3); }
+  .ai-line b { color: var(--ink-2); font-weight: 600; }
+  .ai-nums { margin-top: 8px; display: flex; flex-wrap: wrap; gap: 4px 14px;
+             font-size: 12.5px; color: var(--ink-2);
+             font-variant-numeric: tabular-nums; }
+  .ai-nums span i { color: var(--ink-4); font-style: normal; margin-right: 4px; }
+  .ai-cost { margin-top: 8px; font-size: 11.5px; color: var(--ink-4); }
+
 /* ── Сравнение стратегий ─────────────────────────────────────────── */
   .pos-chart { margin-top: 10px; }
   .pos-chart[hidden] { display: none; }
@@ -984,6 +1012,25 @@
             <span class="hint">воронка отсева за последний цикл</span></div>
           <div class="panel-body"><div id="funnel"></div></div>
         </div>
+      </section>
+
+      <!-- ── Разбор ИИ ────────────────────────────────────────────────── -->
+      <!-- Отдельная страница, а не строка в сравнении стратегий. У четырёх
+           остальных вся работа видна в сделках: сетап либо взят, либо нет.
+           У модели работа — это сам разбор, и его на двадцать отказов
+           приходится одна сделка. Не показать его значит не показать ничего:
+           19 сентября 2026 модель сделала 123 вызова и ни одной сделки, и по
+           панели её не существовало вовсе. -->
+      <section class="page" data-page="ai" hidden>
+        <div class="panel card-pad">
+          <div class="panel-head bare"><h2>Модель</h2>
+            <span class="hint" id="ai-hint"></span></div>
+          <div id="ai-state"></div>
+        </div>
+        <div class="panel-head bare" style="margin-top:22px">
+          <h2>Разборы</h2><span class="hint" id="ai-count"></span></div>
+        <div id="ai-gates" class="err-chips"></div>
+        <div id="ai-calls"></div>
       </section>
 
       <!-- ── Управление ───────────────────────────────────────────────── -->
@@ -2158,6 +2205,10 @@ const PAGES = [
   { id: 'positions', ic: '▤', title: 'Позиции',   dir: 'exchange' },
   { id: 'history',   ic: '≡', title: 'История',   dir: 'exchange' },
   { id: 'analytics', ic: '◨', title: 'Аналитика', dir: 'exchange' },
+  /* Без dir намеренно: фильтры периода и стратегии относятся к СДЕЛКАМ, а
+     здесь сделок нет — на двадцать разборов приходится одна. Показанный тут
+     переключатель «7 дней / Фибоначчи» обещал бы управление, которого нет. */
+  { id: 'ai',        ic: '◈', title: 'Разбор ИИ' },
 
 
   { group: 'Приложение' },
@@ -2210,6 +2261,7 @@ function buildNav() {
     // Настройки и журнал грузятся по требованию: держать их в общем опросе
     // значило бы затирать поле, которое оператор прямо сейчас правит.
     if (page === 'control') loadSettings();
+    if (page === 'ai') loadLlm();
     if (page === 'diag' && currentSub('diag') === 'log') refreshLog();
   };
 }
@@ -2267,6 +2319,8 @@ function showPage() {
   // Ошибки в общий опрос не входят: список нужен, только когда его смотрят.
   // Тянем при открытии подвкладки.
   if (page === 'diag' && currentSub('diag') === 'errors') loadErrors();
+  // Разборы ИИ — так же: и по прямой ссылке ?page=ai, а не только по клику.
+  if (page === 'ai' && !AI) loadLlm();
   // Настройки могли отрисоваться раньше, чем пришли данные бота: тогда в
   // карточках не было полей, зависящих от режима (депозит есть только в
   // фантоме) и от истории стратегии. Перерисовываем ровно один раз —
@@ -4437,6 +4491,163 @@ function render() {
   showPage();
 }
 
+/* ── Разбор ИИ ──────────────────────────────────────────────────────────── */
+/* Работа модели видна ТОЛЬКО здесь. У четырёх остальных стратегий вся работа
+   кончается сделкой, и её видно в истории. У пятой на двадцать разборов
+   приходится одна сделка, а остальные девятнадцать — это и есть работа:
+   19 сентября 2026 модель сделала 123 вызова и ни одной сделки, и по панели
+   её не существовало вовсе.
+
+   Грузится по открытию страницы, а не общим опросом: разборы весят килобайты
+   текста, и платить за них каждые пятнадцать секунд всем открытым окнам не за
+   что. */
+let AI = null;
+
+async function loadLlm() {
+  if (page !== 'ai') return;
+  try {
+    AI = await (await fetch('/api/llm', { cache: 'no-store' })).json();
+  } catch (e) {
+    AI = null;
+  }
+  renderLlm();
+}
+
+function aiLine(label, text) {
+  return text ? `<div class="ai-line"><b>${esc(label)}:</b> ${esc(text)}</div>` : '';
+}
+
+function aiNum(label, value, suffix) {
+  if (value === '' || value === null || value === undefined) return '';
+  const num = Number(value);
+  const shown = isNaN(num) ? esc(value) : (+num.toPrecision(6));
+  return `<span><i>${esc(label)}</i>${shown}${suffix || ''}</span>`;
+}
+
+/* Состояние отдаётся и тогда, когда модели нет: «не настроена», «настроена, но
+   файла нет» и «работает, но молчит» — три разных положения, а пустая страница
+   не отличает их друг от друга. На машине разработки модели нет законно, и
+   сказать надо именно это. */
+function renderLlmState(d) {
+  const box = el('ai-state');
+  if (!box) return;
+  if (!d) {
+    box.innerHTML = '<div class="empty">Нет связи с ботом.</div>';
+    return;
+  }
+  if (!d.configured) {
+    box.innerHTML = '<div class="empty">Модель не задана: настройка '
+      + '<code>LLM_MODEL_PATH</code> пуста, и пятая стратегия простаивает. '
+      + 'Остальные четыре работают как прежде — файл модели весит гигабайты '
+      + 'и лежит только на сервере.</div>';
+    return;
+  }
+  if (!d.exists) {
+    box.innerHTML = '<div class="empty">Файл модели <b>' + esc(d.model)
+      + '</b> не найден по заданному пути. Стратегия простаивает, торговля '
+      + 'остальных не затронута.</div>';
+    return;
+  }
+
+  const last = d.last || {};
+  /* Токены рядом с окном — не для красоты. Именно их сопоставление и не было
+     сделано 19 сентября: вопрос занимал 1703 токена при окне 2048, ответу
+     оставалось 345, он обрывался на полуслове, и 119 раз подряд разбор
+     сообщал «модель вернула не JSON». */
+  const fit = last.prompt_tokens
+    ? `<span>вопрос <b>${last.prompt_tokens}</b> из <b>${d.ctx}</b> токенов, `
+      + `ответ <b>${last.answer_tokens || 0}</b> при пределе `
+      + `<b>${last.limit || d.limit_tokens}</b></span>`
+    : '<span>ещё ни одного вызова в этом запуске</span>';
+  const cut = last.finish === 'length'
+    ? ' <b style="color:var(--bad)">упёрлось в предел</b>' : '';
+
+  box.innerHTML = '<div class="ai-state">'
+    + `<span>модель <b>${esc(d.model)}</b></span>`
+    + `<span>потоков <b>${d.threads}</b></span>`
+    + `<span>окно <b>${d.ctx}</b></span>`
+    + (last.seconds ? `<span>последний разбор <b>${last.seconds} с</b></span>` : '')
+    + (d.avg_seconds ? `<span>в среднем <b>${d.avg_seconds} с</b></span>` : '')
+    + `<span>бюджет цикла <b>${d.budget_sec} с</b></span>`
+    + `<span>повтор не чаще <b>${d.reask_min} мин</b></span>`
+    + '</div><div class="ai-state" style="margin-top:6px">' + fit + cut + '</div>';
+}
+
+function renderLlm() {
+  if (page !== 'ai') return;
+  const d = AI;
+  renderLlmState(d);
+
+  const chips = el('ai-gates');
+  const box = el('ai-calls');
+  if (!box) return;
+  const calls = (d && d.calls) || [];
+
+  /* Отказы по именам. Сто девятнадцать одинаковых подряд — это не свойство
+     рынка, а неисправность, и здесь она читается с одного взгляда. */
+  if (chips) {
+    chips.innerHTML = Object.entries((d && d.gates) || {})
+      .sort((a, b) => b[1] - a[1])
+      .map(([name, n]) => `<span class="err-chip">${esc(name)} <b>${n}</b></span>`)
+      .join('');
+  }
+  setText('ai-count', calls.length
+    ? `последние ${calls.length} · свежие сверху`
+    : '');
+
+  if (!calls.length) {
+    box.innerHTML = '<div class="panel card-pad"><div class="empty">'
+      + 'Разборов пока нет. Модель зовут, когда сканеры четырёх остальных '
+      + 'стратегий находят за цикл хотя бы один сетап: своих идей она не '
+      + 'ищет — её дело судить чужие.</div></div>';
+    return;
+  }
+
+  box.innerHTML = calls.map(row => {
+    const entered = row.decision === 'enter';
+    /* Поломка разбора и отказ модели — разные вещи, и цветом они разделены:
+       «мало конфлюенса» это работа, а «ответ обрезан» это неисправность. */
+    const broken = !entered && ['ответ обрезан', 'ответ не разобран',
+                                'ответ пуст', 'окно контекста мало',
+                                'модель недоступна'].includes(row.gate);
+    const cls = entered ? 'enter' : (broken ? 'broke' : 'skip');
+    const head = entered
+      ? `<span class="ai-gate">взяла сделку ${esc(row.side || '')}</span>`
+      : `<span class="ai-gate">${esc(row.gate || 'отказ')}</span>`;
+
+    const nums = [
+      aiNum('вход ', row.entry), aiNum('стоп ', row.stop),
+      aiNum('цель ', row.tp1), aiNum('инвалидация ', row.inval),
+      aiNum('R:R ', row.rr), aiNum('EV ', row.ev, ' R'),
+      aiNum('вероятность ', row.p), aiNum('издержки ', row.cost_r, ' R'),
+      row.votes ? `<span><i>конфлюенс </i>${esc(row.votes)}/5</span>` : '',
+    ].filter(Boolean).join('');
+
+    return `<div class="ai-card ${cls}">`
+      + '<div class="ai-head">'
+      + `<span class="ai-pair">${esc(row.pair)}</span>${head}`
+      + (row.donor ? `<span class="ai-donor">сетап от ${esc(row.donor)}</span>` : '')
+      + `<span class="ai-when">${fmtWhen(row.at)}</span></div>`
+      + (row.regime ? `<div class="ai-text"><b>${esc(row.regime)}</b></div>` : '')
+      + (row.analysis ? `<div class="ai-text">${esc(row.analysis)}</div>` : '')
+      + aiLine('Условие входа', row.trigger)
+      + aiLine('Против', row.alt)
+      + aiLine('Почему', row.why)
+      + aiLine('Чем рискуем', row.risk)
+      + aiLine('Совпало', row.confluence)
+      + (row.detail && !entered ? aiLine('Подробность', row.detail) : '')
+      + (nums ? `<div class="ai-nums">${nums}</div>` : '')
+      + (row.seconds
+          ? `<div class="ai-cost">${esc(row.seconds)} с · вопрос `
+            + `${esc(row.prompt_tokens || '—')} токенов, ответ `
+            + `${esc(row.answer_tokens || '—')}`
+            + (row.finish === 'length' ? ' · упёрлось в предел' : '')
+            + `</div>`
+          : '')
+      + '</div>';
+  }).join('');
+}
+
 async function refresh() {
   const body = document.getElementById('body');
   body.classList.add('stale');
@@ -4467,6 +4678,9 @@ setInterval(refresh, 15000);
 // Журнал обновляем чаще самой панели: в окне приложения он заменяет консоль,
 // и по нему видно, что бот жив, даже когда сделок нет неделю.
 setInterval(refreshLog, 5000);
+// Разборы обновляются вместе с панелью, но только когда страница открыта:
+// модель отвечает раз в несколько минут, и чаще смотреть незачем.
+setInterval(() => { if (page === 'ai') loadLlm(); }, 15000);
 </script>
 </body>
 </html>

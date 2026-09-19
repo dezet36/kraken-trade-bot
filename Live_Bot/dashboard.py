@@ -72,6 +72,12 @@ LOG_FILE = os.path.join(config.DATA_DIR, 'bot_log.txt')
 _trade_manager = None   # боевой режим: ставится ботом, чтобы показать баланс
 _broker = None          # фантомный режим: живое состояние счетов
 _status = {'state': 'starting', 'detail': '', 'since': None}
+# Сколько раз страница забирала данные. Единственное доказательство того, что
+# окно не просто открылось, а ПОКАЗАЛО панель: страницу рисует JS, и пока он
+# не запросил данные, окно белое — как оно и простояло десять минут 19 сентября
+# 2026. Счётчик, а не отметка времени: сравнивать «было/стало» надёжнее, чем
+# гадать, чей именно опрос мы застали.
+_views = {'n': 0}
 
 
 def set_status(state, detail=''):
@@ -1218,6 +1224,54 @@ def _run_action(request):
     return False, f'Неизвестное действие: {action}'
 
 
+def llm_payload(limit=40):
+    """
+    Работа модели: чем она занята, что разобрала и чего стоил каждый разбор.
+
+    ПОЧЕМУ ЭТО ОТДЕЛЬНЫЙ ОТВЕТ, А НЕ ЧАСТЬ ОБЩЕГО ОПРОСА. Разборы читаются с
+    диска и весят килобайты текста, а общий опрос идёт каждые несколько секунд
+    у всех открытых окон. Страница ИИ открывается изредка — пусть и платит за
+    себя только тогда, когда открыта.
+
+    СОСТОЯНИЕ ОТДАЁТСЯ ДАЖЕ КОГДА МОДЕЛИ НЕТ. «Не настроена», «настроена, но
+    файла нет» и «работает, но молчит» — три разных положения, и пустая
+    страница не отличает их друг от друга. На машине разработки модели нет
+    законно, и страница обязана сказать именно это, а не показать пустоту.
+    """
+    import llm_journal
+    import llm_local
+
+    path = getattr(config, 'LLM_MODEL_PATH', '') or ''
+    rows = llm_journal.last(limit, mode=config.TRADING_MODE)
+
+    # Отказы по именам: по ним сразу видно, во что упирается модель. Сто
+    # девятнадцать одинаковых «ответ обрезан» подряд — это не свойство рынка,
+    # а неисправность, и здесь она читается с одного взгляда.
+    gates = {}
+    for row in rows:
+        name = row.get('gate') or ('сделка' if row.get('decision') == 'enter'
+                                   else 'без имени')
+        gates[name] = gates.get(name, 0) + 1
+
+    seconds = [float(row['seconds']) for row in rows
+               if (row.get('seconds') or '').replace('.', '', 1).isdigit()]
+
+    return {
+        'configured': bool(path),
+        'model': os.path.basename(path) if path else '',
+        'exists': bool(path) and os.path.exists(path),
+        'ctx': getattr(config, 'LLM_CTX', 0),
+        'threads': getattr(config, 'LLM_THREADS', 0),
+        'limit_tokens': getattr(config, 'LLM_MAX_TOKENS', 0),
+        'budget_sec': getattr(config, 'LLM_CYCLE_BUDGET_SEC', 0),
+        'reask_min': getattr(config, 'LLM_REASK_AFTER_MIN', 0),
+        'last': llm_local.last_stats(),
+        'gates': gates,
+        'avg_seconds': round(sum(seconds) / len(seconds), 1) if seconds else 0,
+        'calls': rows,
+    }
+
+
 def export_paths():
     """(csv, jsonl) — файлы истории сделок текущего режима."""
     if config.PAPER_MODE or _broker is not None:
@@ -1231,9 +1285,21 @@ class _Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         path = self.path.split('?')[0]
         if path.startswith('/api/data'):
+            # СЧЁТЧИК ПОКАЗОВ. По нему окно приложения узнаёт, что страница не
+            # просто пришла, а ОТРИСОВАЛАСЬ: данные забирает JS, и пока их
+            # никто не забрал, окно пустое, чем бы ни ответил сервер.
+            #
+            # 19 сентября 2026 окно десять минут стояло белым. Страница с
+            # сервера приходила (200, 256 КБ), туннель работал, движок был на
+            # месте — навигация оборвалась на стороне браузера, и узнать об
+            # этом было нечем: Chrome в режиме --app не показывает ошибок, а
+            # запуск возвращает успех в любом случае.
+            _views['n'] += 1
             self._send_json(build_payload())
         elif path == '/api/log':
             self._send_json({'lines': read_log(), 'status': dict(_status)})
+        elif path == '/api/llm':
+            self._send_json(llm_payload())
         elif path == '/api/export.csv':
             self._send_file(export_paths()[0], 'text/csv; charset=utf-8')
         elif path == '/api/export.jsonl':
@@ -1253,7 +1319,10 @@ class _Handler(BaseHTTPRequestHandler):
             import os as _os
             self._send_json({'app': 'kraken-trade-bot',
                              'pid': _os.getpid(),
-                             'version': _app_version()})
+                             'version': _app_version(),
+                             # Сколько раз страница забирала данные с запуска.
+                             # Растёт — значит её кто-то видит; см. /api/data.
+                             'views': _views['n']})
         elif path.startswith('/api/report.txt'):
             # Отчёт собирается на лету, а не лежит файлом: он должен отражать
             # состояние на момент нажатия, иначе присланное описывает не ту

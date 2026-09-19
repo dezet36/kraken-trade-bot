@@ -136,3 +136,108 @@ class TestTheSettingsAreReadable:
         """
         import config
         assert config.LLM_THINK_TAG == '/no_think'
+
+
+class FakeModel:
+    """
+    Модель, у которой можно задать окно и длину вопроса.
+
+    Настоящую сюда не привести: файл весит пять гигабайт и лежит на сервере.
+    А проверять надо именно арифметику места — ту, которой не было.
+    """
+
+    def __init__(self, ctx=2048, prompt_tokens=1703):
+        self._ctx = ctx
+        self._prompt_tokens = prompt_tokens
+        self.asked_limit = None
+
+    def n_ctx(self):
+        return self._ctx
+
+    def tokenize(self, data):
+        return [0] * self._prompt_tokens
+
+    def create_chat_completion(self, messages, grammar, max_tokens,
+                               temperature):
+        self.asked_limit = max_tokens
+        return {'choices': [{'message': {'content': '{"d":"skip"}'},
+                             'finish_reason': 'stop'}],
+                'usage': {'prompt_tokens': self._prompt_tokens,
+                          'completion_tokens': 12}}
+
+
+class TestTheAnswerMustFitTheWindow:
+    """
+    Пределов у ответа два, и меньший из них решает молча.
+
+    19 сентября 2026 окно было 2048, вопрос занимал 1703 токена, и ответу
+    оставалось 345. Генерация останавливалась на этой границе, JSON не
+    закрывался, разбор сообщал «модель вернула не JSON» — 119 раз за девять
+    часов, при исправных модели, промте и грамматике.
+
+    Считать место надо ДО вызова: три минуты процессора ради заведомо
+    обрезанного ответа — это худшая из возможных трат, потому что торговый
+    цикл всё это время ждёт.
+    """
+
+    def test_a_tight_window_is_refused_before_the_model_runs(self, monkeypatch):
+        fake = FakeModel(ctx=2048, prompt_tokens=1703)
+        monkeypatch.setattr(llm_local, '_model', fake)
+        with pytest.raises(RuntimeError) as failure:
+            llm_local.ask('вопрос')
+        assert fake.asked_limit is None, 'модель всё-таки считала впустую'
+        assert '2048' in str(failure.value), 'в отказе нет чисел'
+
+    def test_the_refusal_carries_its_own_name(self, monkeypatch):
+        """
+        Имя едет с исключением: llm_decide запишет в журнал «окно контекста
+        мало», а не общее «модель недоступна». Разные поломки — разные имена,
+        иначе чинить отправляет не туда.
+        """
+        monkeypatch.setattr(llm_local, '_model', FakeModel(ctx=2048))
+        with pytest.raises(RuntimeError) as failure:
+            llm_local.ask('вопрос')
+        assert getattr(failure.value, 'llm_gate', '') == 'окно контекста мало'
+
+    def test_a_roomy_window_lets_the_full_limit_through(self, monkeypatch):
+        fake = FakeModel(ctx=4096, prompt_tokens=1703)
+        monkeypatch.setattr(llm_local, '_model', fake)
+        monkeypatch.setattr(llm_local.config, 'LLM_MAX_TOKENS', 1200)
+        llm_local.ask('вопрос')
+        assert fake.asked_limit == 1200
+
+    def test_a_middling_window_lowers_the_limit_instead_of_lying(self,
+                                                                monkeypatch):
+        """
+        Места меньше, чем предел, но ответу хватит: тогда предел опускается до
+        остатка. Оставить его выше значило бы обещать длину, которой нет.
+        """
+        fake = FakeModel(ctx=2600, prompt_tokens=1703)
+        monkeypatch.setattr(llm_local, '_model', fake)
+        monkeypatch.setattr(llm_local.config, 'LLM_MAX_TOKENS', 1200)
+        llm_local.ask('вопрос')
+        assert fake.asked_limit == 2600 - 1703 - llm_local.CHAT_OVERHEAD_TOKENS
+
+    def test_what_the_call_cost_is_remembered(self, monkeypatch):
+        """
+        Токены, секунды и причина остановки нужны журналу разборов и панели.
+        Без них поломку 19 сентября пришлось бы снова выводить из двух разных
+        файлов, и она снова осталась бы незамеченной на девять часов.
+        """
+        monkeypatch.setattr(llm_local, '_model', FakeModel(ctx=4096))
+        llm_local.ask('вопрос')
+        stats = llm_local.last_stats()
+        assert stats['prompt_tokens'] == 1703
+        assert stats['ctx'] == 4096
+        assert stats['finish'] == 'stop'
+
+
+class TestTheWindowFitsTheQuestion:
+
+    def test_the_setting_leaves_room_for_a_full_answer(self):
+        """
+        Замерено на сервере: вопрос занимает около 1700 токенов. Окно обязано
+        вмещать его вместе с полным ответом, иначе предел ответа — обман.
+        """
+        import config
+        assert config.LLM_CTX >= 1700 + config.LLM_MAX_TOKENS

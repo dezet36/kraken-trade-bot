@@ -33,6 +33,37 @@ from logger import log
 _model = None
 _lock = threading.Lock()
 _failed = False          # уже пробовали и не смогли — второй раз не пытаемся
+_last = {}               # чем кончился последний вызов — для панели и журнала
+
+# Короче этого ответу не закрыться: одна только разметка режима и разбора
+# занимает три-четыре сотни токенов, а после них идёт само решение.
+MIN_ANSWER_TOKENS = 400
+
+# Разметка чата (роли, служебные метки) добавляется поверх нашего текста уже
+# внутри llama_cpp. Считать её точно незачем — достаточно не забыть о ней.
+CHAT_OVERHEAD_TOKENS = 64
+
+
+def _ctx_size(llm):
+    """Окно контекста загруженной модели. Настройка — запасной ответ."""
+    try:
+        return int(llm.n_ctx())
+    except Exception:                              # noqa: BLE001
+        return int(config.LLM_CTX)
+
+
+def _answer_room(llm, text):
+    """
+    Сколько токенов останется ответу. None — посчитать нечем, не гадаем.
+
+    Токенайзер берётся у самой модели: считать символы и делить на три — это
+    та же оценка «700-800 токенов», из-за которой окно и оказалось мало.
+    """
+    try:
+        used = len(llm.tokenize(text.encode('utf-8')))
+    except Exception:                              # noqa: BLE001
+        return None
+    return _ctx_size(llm) - used - CHAT_OVERHEAD_TOKENS
 
 
 def model_path():
@@ -109,6 +140,33 @@ def ask(prompt, grammar=None, max_tokens=None):
     # окупается хуже, чем время, которое она отнимает у торгового цикла.
     text = prompt + ('\n' + config.LLM_THINK_TAG if config.LLM_THINK_TAG else '')
 
+    # СКОЛЬКО МЕСТА ОСТАЁТСЯ ОТВЕТУ — СЧИТАЕМ ДО ВЫЗОВА, А НЕ ПОСЛЕ.
+    #
+    # Пределов у ответа два, и они не знают друг о друге: max_tokens и остаток
+    # окна контекста. Меньший из них и есть настоящий, а сработал он молча:
+    # генерация останавливалась на границе окна, JSON не закрывался, и разбор
+    # сообщал «модель вернула не JSON». Девять часов, 119 раз, ноль сделок —
+    # при том что и модель, и промт, и грамматика были исправны.
+    #
+    # Три минуты счёта ради заведомо обрезанного ответа — худшая из возможных
+    # трат: процессор занят, торговый цикл ждёт, результат в мусор. Поэтому
+    # отказ выдаётся сразу и числами: видно, что не влезло и на сколько.
+    room = _answer_room(llm, text)
+    if room is not None:
+        if room < MIN_ANSWER_TOKENS:
+            error = RuntimeError(
+                f'окно контекста {_ctx_size(llm)} мало: вопрос занимает '
+                f'{_ctx_size(llm) - room}, на ответ остаётся {room} токенов, '
+                f'а нужно хотя бы {MIN_ANSWER_TOKENS}. Поднимите LLM_CTX.')
+            # Имя отказа едет вместе с исключением: llm_decide запишет в
+            # журнал именно эту причину, а не общее «модель недоступна».
+            error.llm_gate = 'окно контекста мало'
+            raise error
+        if room < limit:
+            log(f'   ⚠️ окно контекста: на ответ остаётся {room} токенов '
+                f'вместо {limit} — ответ может оборваться')
+            limit = room
+
     with _lock:
         started = time.time()
         out = llm.create_chat_completion(
@@ -119,16 +177,39 @@ def ask(prompt, grammar=None, max_tokens=None):
         )
         spent = time.time() - started
 
-    answer = (out.get('choices') or [{}])[0].get('message', {}).get('content', '')
+    choice = (out.get('choices') or [{}])[0]
+    answer = (choice.get('message') or {}).get('content', '')
     usage = out.get('usage') or {}
+    # finish_reason == 'length' означает «упёрлось в предел», а не «модель
+    # закончила». Различать обязательно: в первом случае чинить надо окно, а
+    # не промт, и по одному лишь неразобранному JSON этого не видно.
+    _last.update({
+        'model': os.path.basename(model_path()) if model_path() else '',
+        'prompt_tokens': usage.get('prompt_tokens', 0),
+        'answer_tokens': usage.get('completion_tokens', 0),
+        'limit': limit,
+        'ctx': _ctx_size(llm),
+        'seconds': round(spent, 1),
+        'finish': choice.get('finish_reason', ''),
+        'at': time.time(),
+    })
     log(f'   модель: {usage.get("prompt_tokens", 0)} вход, '
-        f'{usage.get("completion_tokens", 0)} выход за {spent:.1f} с')
+        f'{usage.get("completion_tokens", 0)} выход за {spent:.1f} с'
+        + (' — упёрлось в предел' if choice.get('finish_reason') == 'length'
+           else ''))
     return answer
 
 
 def last_stats():
-    """Заглушка для будущего: счётчики вызовов уходят в журнал сделки."""
-    return {'model': os.path.basename(model_path()) if model_path() else ''}
+    """
+    Чем кончился последний вызов: токены, время, причина остановки.
+
+    Имя модели отдаётся и до первого вызова — оно нужно журналу сделки и
+    панели, а они спрашивают раньше, чем модель успевает ответить.
+    """
+    out = {'model': os.path.basename(model_path()) if model_path() else ''}
+    out.update(_last)
+    return out
 
 
 def unload():

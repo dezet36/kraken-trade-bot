@@ -288,3 +288,72 @@ class TestTheWholePass:
         out = dec.decide('BTCUSDT', flat, never)
         assert not out['ok']
         assert out['gate'] == 'нет разметки'
+
+
+class TestATruncatedAnswerIsNamedApart:
+    """
+    Обрубок и мусор — разные поломки, и чинятся они в разных местах.
+
+    С 18 на 19 сентября 2026 журнал сервера 119 раз подряд написал «модель
+    вернула не JSON». Имя было честным и бесполезным: по нему выходило, что
+    модель отвечает чепухой, и чинить полезли бы промт. На деле окно контекста
+    было 2048 при вопросе в 1703 токена, ответ обрывался на 345-м, и JSON не
+    закрывался. Модель отвечала правильно — ей не давали договорить.
+
+    Отличить можно по одному признаку: грамматика заканчивает ответ скобкой.
+    """
+
+    def test_an_unfinished_json_is_called_truncated(self):
+        cut = '{"regime":"боковик","analysis":"уровень 82300 держал цену три'
+        assert dec.parse(cut, LEVELS) is None
+        out = dec.check(None, LEVELS, cut)
+        assert out['gate'] == 'ответ обрезан'
+        assert 'окно контекста' in out['detail']
+
+    def test_the_tail_is_kept_so_the_break_point_is_visible(self):
+        cut = '{"regime":"тренд вверх","analysis":"скопление минимумов сви'
+        out = dec.check(None, LEVELS, cut)
+        assert 'сви' in out['detail'], 'по детали не видно, где оборвалось'
+
+    def test_real_rubbish_keeps_its_own_name(self):
+        out = dec.check(None, LEVELS, 'извините, я не могу помочь}')
+        assert out['gate'] == 'ответ не разобран'
+
+    def test_an_empty_answer_is_neither(self):
+        """
+        Пустота — это не обрубок: модель не вернула ни одного токена, и
+        причина другая. Сваливать их в одно имя значит снова чинить не там.
+        """
+        out = dec.check(None, LEVELS, '   ')
+        assert out['gate'] == 'ответ пуст'
+
+    def test_silence_about_the_raw_text_stays_unnamed(self):
+        """
+        Не сказали, что ответила модель, — не выдумываем. Пустая строка и
+        несказанное это разные вещи.
+        """
+        out = dec.check(None, LEVELS)
+        assert out['gate'] == 'ответ не разобран'
+
+
+class TestTheAnswerLimitComesFromTheSettings:
+    """
+    Предел длины ответа обязан быть ОДИН и лежать в одном месте.
+
+    Здесь стояло своё число — 400, — и strategy_llm звал decide без этого
+    параметра. Боевой путь получал 400 всегда, чем бы ни был LLM_MAX_TOKENS:
+    поднятый до 1200 предел не доходил до модели вовсе. Поднимали его дважды,
+    глядя на обрезанные ответы, и дважды без толку.
+    """
+
+    def test_decide_does_not_impose_a_limit_of_its_own(self):
+        seen = {}
+
+        def ask(prompt, grammar, max_tokens):
+            seen['max_tokens'] = max_tokens
+            return '{"d":"skip","cf":{"poi":false,"vp":false,"der":false,' \
+                   '"smc":false,"flow":false},"why":"нет"}'
+
+        dec.decide('BTCUSDT', TestTheWholePass().make_df(), ask)
+        assert seen['max_tokens'] is None, (
+            'decide навязывает свой предел — настройка снова не дойдёт')

@@ -255,6 +255,84 @@ def open_app_window(url):
     ])
 
 
+# Сколько ждём доказательства, что страница отрисовалась. Щедро намеренно: 19
+# сентября 2026 после перезагрузки машины Chrome шёл к первой навигации 14
+# секунд — диск в это время читает всё сразу, и нетерпеливый сторож убивал бы
+# исправное окно.
+PAINT_TIMEOUT = float(os.getenv('REMOTE_PAINT_TIMEOUT', 45))
+
+
+def views(url, timeout=3.0):
+    """
+    Сколько раз панель отдавала данные странице. None — спросить не вышло.
+
+    Это единственный доступный признак того, что окно ПОКАЗЫВАЕТ панель, а не
+    просто открылось. Страницу рисует JS: пока он не запросил данные, окно
+    белое, что бы ни ответил сервер на саму страницу.
+    """
+    import json
+    import urllib.request
+
+    try:
+        with urllib.request.urlopen(url + 'api/whoami', timeout=timeout) as answer:
+            return json.loads(answer.read().decode('utf-8')).get('views')
+    except Exception:                              # noqa: BLE001
+        return None
+
+
+def painted(url, before, timeout=PAINT_TIMEOUT):
+    """
+    Ждёт, пока счётчик показов сдвинется. False — окно так ничего и не нарисовало.
+
+    Сдвиг в ЛЮБУЮ сторону считается показом: если бот на сервере
+    перезапустился, счётчик пойдёт с нуля, и требование «стало больше» соврало
+    бы про исправное окно.
+
+    Неизвестность (None) показом не считается: не дозвонились до панели —
+    значит и страница не дозвонилась.
+    """
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        now = views(url)
+        if now is not None and now != before:
+            return True
+        time.sleep(1.0)
+    return False
+
+
+def close_windows():
+    """
+    Закрывает браузеры, работающие С НАШИМ профилем. Возвращает, сколько нашёл.
+
+    Нужен для повтора: второй запуск chrome с тем же профилем открыл бы ВТОРОЕ
+    окно рядом с белым, а не перерисовал первое. Обычные окна человека не
+    трогаются — отбор идёт по пути профиля, который заводим мы сами.
+    """
+    profile = os.path.join(os.path.dirname(remote.settings_path()),
+                           'window_profile')
+    killed = 0
+    try:
+        flags = getattr(subprocess, 'CREATE_NO_WINDOW', 0)
+        found = subprocess.run(
+            ['wmic', 'process', 'where',
+             "name='chrome.exe' or name='msedge.exe'",
+             'get', 'ProcessId,CommandLine', '/format:csv'],
+            capture_output=True, timeout=20, creationflags=flags)
+        for line in found.stdout.decode('utf-8', 'replace').splitlines():
+            if profile.lower() not in line.lower():
+                continue
+            pid = line.rstrip().rsplit(',', 1)[-1].strip()
+            if not pid.isdigit():
+                continue
+            subprocess.run(['taskkill', '/F', '/PID', pid],
+                           capture_output=True, timeout=20,
+                           creationflags=flags)
+            killed += 1
+    except Exception:                              # noqa: BLE001
+        return killed
+    return killed
+
+
 def open_native_window(url, on_close):
     """
     Своё окно через pywebview. False — открыть не удалось.
@@ -284,6 +362,42 @@ def open_in_browser(url):
     """Запасной путь: обычный браузер. Хуже видом, но человек увидит данные."""
     import webbrowser
     webbrowser.open(url)
+
+
+def show_dashboard(url, attempts=2):
+    """
+    Открывает окно и УБЕЖДАЕТСЯ, что в нём видна панель. None — не вышло.
+
+    ПОЧЕМУ ПРОВЕРКА ВООБЩЕ НУЖНА. Запуск окна успехом не является. 19 сентября
+    2026 человек включил машину, запустил программу и десять минут смотрел на
+    белый прямоугольник. Всё, что можно было проверить изнутри, было в
+    порядке: туннель поднят, страница с сервера приходит целиком, браузер
+    запущен и живёт. Сам Chrome записал причину в свой журнал событий —
+    `FinishNav3 ERR_ABORTED`: навигация оборвалась. В режиме --app страницы
+    ошибок нет, поэтому окно осталось просто белым.
+
+    Изнутри такое видно ровно одним способом: спросить у панели, забирал ли
+    кто-нибудь данные. Страницу рисует JS, и пока он не сходил за данными,
+    окно пустое, чем бы ни ответил сервер на саму страницу.
+
+    ПОВТОР ЗАКРЫВАЕТ ПРЕЖНЕЕ ОКНО. Второй запуск с тем же профилем открыл бы
+    второе окно рядом с белым: у Chrome один профиль — один процесс, и новый
+    запуск лишь просит его показать ещё одно окно.
+    """
+    for attempt in range(1, attempts + 1):
+        before = views(url)
+        window = open_app_window(url)
+        if window is None:
+            return None                  # браузера нет — пусть решает вызвавший
+        if painted(url, before):
+            return window
+        print(f'Окно не показало панель (попытка {attempt} из {attempts}).')
+        close_windows()
+        try:
+            window.terminate()
+        except Exception:                          # noqa: BLE001
+            pass
+    return None
 
 
 def fail(message):
@@ -339,13 +453,19 @@ def main():
     try:
         window = None
         if engine != 'webview':
-            window = open_app_window(remote.url())
+            window = show_dashboard(remote.url())
         if window is not None:
             window.wait()               # держим туннель, пока открыто окно
         elif not open_native_window(remote.url(), lambda: shutdown()):
             open_in_browser(remote.url())
-            print('Окно открыто в браузере. Закройте эту программу, '
-                  'чтобы отключиться от сервера.')
+            # ОТКАЗ ГОВОРИТСЯ ВСЛУХ. Прежде запасной путь срабатывал молча, и
+            # человек оставался с белым окном, не зная ни что оно не своё, ни
+            # что данные открылись в соседней вкладке. Молчаливый запасной
+            # путь неотличим от поломки.
+            fail('Своё окно не показало панель, поэтому она открыта в вашем '
+                 'браузере.\n\nСоединение с сервером держит эта программа — '
+                 'закройте её, когда закончите. Вкладка с панелью при этом '
+                 'перестанет обновляться.')
             try:
                 while True:
                     time.sleep(3600)

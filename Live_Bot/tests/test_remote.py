@@ -506,3 +506,184 @@ class TestTheTunnelDiesWithTheApp:
             pid = 999999999
 
         assert remote.tie_to_parent(Fake()) is None or True
+
+
+class FakeWindow:
+    """Окно браузера, которое открылось. Открылось — ещё не значит показало."""
+
+    def __init__(self):
+        self.terminated = False
+
+    def wait(self):
+        return 0
+
+    def terminate(self):
+        self.terminated = True
+
+
+class TestAnOpenedWindowIsNotYetAShownOne:
+    """
+    ЗАПУСК ОКНА УСПЕХОМ НЕ ЯВЛЯЕТСЯ, и это стоило человеку десяти минут перед
+    белым прямоугольником.
+
+    19 сентября 2026: машина включена, программа запущена, окно открыто — и
+    пустое. Всё, что можно было проверить изнутри, было в порядке: туннель
+    поднят, страница с сервера приходит целиком (200, 256 КБ), браузер
+    запущен и живёт. Причину записал сам Chrome в свой журнал событий:
+    `FinishNav3 ERR_ABORTED` — навигация оборвалась. В режиме --app страницы
+    ошибок нет, поэтому окно осталось просто белым.
+
+    Изнутри это видно ровно одним способом: спросить у панели, забирал ли
+    кто-нибудь данные. Страницу рисует JS, и пока он не сходил за ними, окно
+    пустое, чем бы ни ответил сервер на саму страницу.
+    """
+
+    def test_a_moved_counter_means_the_page_is_alive(self, monkeypatch):
+        import remote_app
+
+        answers = iter([7, 7, 8])
+        monkeypatch.setattr(remote_app, 'views',
+                            lambda url, timeout=3.0: next(answers))
+        monkeypatch.setattr(remote_app.time, 'sleep', lambda _s: None)
+        assert remote_app.painted('http://127.0.0.1:8799/', 7, timeout=5)
+
+    def test_a_frozen_counter_means_a_blank_window(self, monkeypatch):
+        import remote_app
+
+        monkeypatch.setattr(remote_app, 'views', lambda url, timeout=3.0: 7)
+        monkeypatch.setattr(remote_app.time, 'sleep', lambda _s: None)
+        assert not remote_app.painted('http://127.0.0.1:8799/', 7, timeout=2)
+
+    def test_a_restarted_bot_counts_as_shown(self, monkeypatch):
+        """
+        Счётчик сбрасывается вместе с ботом. Требование «стало больше»
+        соврало бы про исправное окно — считается любой сдвиг.
+        """
+        import remote_app
+
+        monkeypatch.setattr(remote_app, 'views', lambda url, timeout=3.0: 1)
+        monkeypatch.setattr(remote_app.time, 'sleep', lambda _s: None)
+        assert remote_app.painted('http://127.0.0.1:8799/', 340, timeout=5)
+
+    def test_silence_is_not_taken_for_success(self, monkeypatch):
+        """
+        Не дозвонились до панели — значит и страница не дозвонилась.
+        Неизвестность за показ выдавать нельзя: ровно так белое окно и
+        считалось рабочим.
+        """
+        import remote_app
+
+        monkeypatch.setattr(remote_app, 'views', lambda url, timeout=3.0: None)
+        monkeypatch.setattr(remote_app.time, 'sleep', lambda _s: None)
+        assert not remote_app.painted('http://127.0.0.1:8799/', 3, timeout=2)
+
+
+class TestABlankWindowIsOpenedAgain:
+
+    def test_the_first_good_window_is_kept_as_is(self, monkeypatch):
+        import remote_app
+
+        opened = []
+        killed = []
+        monkeypatch.setattr(remote_app, 'views', lambda url, timeout=3.0: 0)
+        monkeypatch.setattr(remote_app, 'painted',
+                            lambda url, before, timeout=None: True)
+        monkeypatch.setattr(remote_app, 'open_app_window',
+                            lambda url: opened.append(url) or FakeWindow())
+        monkeypatch.setattr(remote_app, 'close_windows',
+                            lambda: killed.append(1))
+
+        assert remote_app.show_dashboard('http://127.0.0.1:8799/') is not None
+        assert len(opened) == 1
+        assert not killed, 'исправное окно закрыли'
+
+    def test_a_blank_window_is_closed_before_the_retry(self, monkeypatch):
+        """
+        Второй запуск с тем же профилем открыл бы ВТОРОЕ окно рядом с белым: у
+        Chrome один профиль — один процесс, и новый запуск лишь просит его
+        показать ещё одно окно. Поэтому прежнее закрывается.
+        """
+        import remote_app
+
+        order = []
+        monkeypatch.setattr(remote_app, 'views', lambda url, timeout=3.0: 0)
+        monkeypatch.setattr(remote_app, 'painted',
+                            lambda url, before, timeout=None: False)
+        monkeypatch.setattr(remote_app, 'open_app_window',
+                            lambda url: order.append('открыл') or FakeWindow())
+        monkeypatch.setattr(remote_app, 'close_windows',
+                            lambda: order.append('закрыл'))
+
+        assert remote_app.show_dashboard('http://127.0.0.1:8799/') is None
+        assert order == ['открыл', 'закрыл', 'открыл', 'закрыл'], order
+
+    def test_a_missing_browser_is_not_retried(self, monkeypatch):
+        """
+        Браузера нет — повторять нечего, и решать должен вызвавший: у него
+        остаются своё окно и запасной путь через браузер по умолчанию.
+        """
+        import remote_app
+
+        tries = []
+        monkeypatch.setattr(remote_app, 'views', lambda url, timeout=3.0: 0)
+        monkeypatch.setattr(remote_app, 'open_app_window',
+                            lambda url: tries.append(url))
+
+        assert remote_app.show_dashboard('http://127.0.0.1:8799/') is None
+        assert len(tries) == 1
+
+
+class TestOnlyOurOwnWindowsAreClosed:
+
+    def test_the_profile_path_is_what_is_matched(self):
+        """
+        Закрывать браузер человека нельзя ни при каких обстоятельствах. Отбор
+        идёт по пути профиля, который заводим мы сами, — ни по имени процесса,
+        ни по заголовку окна.
+        """
+        import inspect
+
+        import remote_app
+
+        source = inspect.getsource(remote_app.close_windows)
+        assert 'window_profile' in source
+        assert 'profile.lower() not in line.lower()' in source
+
+
+class TestTheDashboardCountsItsViewers:
+    """
+    Признак, по которому окно узнаёт об отрисовке, живёт на стороне панели.
+
+    Без него «страница пришла» и «страница показана» неразличимы — а между
+    ними и лежал белый экран: страница приходила целиком, а рисовать её было
+    некому.
+    """
+
+    PORT = 8934
+
+    def test_taking_the_data_moves_the_counter(self):
+        import json
+        import urllib.request
+
+        import dashboard
+
+        server = dashboard.start_dashboard(port=self.PORT)
+        assert server, 'дашборд не поднялся'
+        try:
+            base = f'http://127.0.0.1:{self.PORT}/api/'
+
+            def whoami():
+                with urllib.request.urlopen(base + 'whoami', timeout=5) as answer:
+                    return json.loads(answer.read().decode('utf-8'))
+
+            before = whoami()['views']
+            # Сам опрос «кто там» показом не считается: его делает программа,
+            # а не страница. Иначе сторож засчитал бы собственный стук.
+            assert whoami()['views'] == before
+
+            with urllib.request.urlopen(base + 'data', timeout=15):
+                pass
+            assert whoami()['views'] == before + 1
+        finally:
+            server.shutdown()
+            server.server_close()

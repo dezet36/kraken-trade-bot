@@ -279,3 +279,207 @@ class TestTheJournalsStayInStep:
         assert set(empty) == {c for c in paper_broker.COLUMNS
                               if c.startswith('llm_')}
         assert all(value == '' for value in empty.values())
+
+
+class FakeClock:
+    """Часы, которые идут, только когда их двигают: время здесь — предмет проверки."""
+
+    def __init__(self, start=1000.0):
+        self.now = start
+
+    def time(self):
+        return self.now
+
+
+@pytest.fixture(autouse=True)
+def _forget_previous_setups():
+    """
+    Память о разобранных сетапах живёт в модуле — чистим между проверками.
+
+    Иначе вторая проверка получила бы ответ первой и прошла бы по ошибке.
+    """
+    strategy_llm._asked.clear()
+    yield
+    strategy_llm._asked.clear()
+
+
+def refusing_decide(recorder=None):
+    """Модель, которая всегда отказывается, и запоминает, о чём её спросили."""
+    def decide(pair, *args, **kwargs):
+        if recorder is not None:
+            recorder.append(pair)
+        return {'ok': False, 'gate': 'модель пропустила', 'detail': ''}
+    return decide
+
+
+class TestTheSameSetupIsNotReExaminedEveryCycle:
+    """
+    Заявка висит часами, сканер находит её каждый цикл, ответ при тех же
+    данных тот же.
+
+    19 сентября 2026 один и тот же SHIB1000USDT LONG с одними и теми же
+    ценами разбирался 119 раз подряд по 165 секунд: за девять часов на
+    повторные ответы ушло больше двух часов счёта, и всё это время торговый
+    цикл ждал.
+    """
+
+    def test_the_second_cycle_does_not_ask_again(self, monkeypatch):
+        asked = []
+        monkeypatch.setattr(strategy_llm.llm_local, 'available', lambda: True)
+        monkeypatch.setattr(strategy_llm.llm_decide, 'decide',
+                            refusing_decide(asked))
+
+        for _ in range(3):
+            strategy_llm.scan_for_setups({'FIBO': [donor_candidate()]},
+                                         gate=None,
+                                         candles=lambda pair: [0] * 500)
+        assert asked == ['BTCUSDT'], f'модель спросили {len(asked)} раза'
+
+    def test_a_changed_price_is_a_new_setup(self, monkeypatch):
+        """
+        Тот же инструмент с другим входом — другая идея, и её надо разобрать.
+        Иначе память превратилась бы в запрет на пару, а не на сетап.
+        """
+        asked = []
+        monkeypatch.setattr(strategy_llm.llm_local, 'available', lambda: True)
+        monkeypatch.setattr(strategy_llm.llm_decide, 'decide',
+                            refusing_decide(asked))
+
+        strategy_llm.scan_for_setups({'FIBO': [donor_candidate()]}, gate=None,
+                                     candles=lambda pair: [0] * 500)
+
+        moved = donor_candidate()
+        moved['signal']['params']['entry'] = 111.0
+        strategy_llm.scan_for_setups({'FIBO': [moved]}, gate=None,
+                                     candles=lambda pair: [0] * 500)
+        assert len(asked) == 2, 'сдвинутый вход не признан новым сетапом'
+
+    def test_after_the_window_it_is_asked_again(self, monkeypatch):
+        """
+        Рынок вокруг сетапа меняется: через час те же цены стоят в другой
+        обстановке, и ответ может стать другим. Запрет навсегда был бы враньём.
+        """
+        asked = []
+        monkeypatch.setattr(strategy_llm.llm_local, 'available', lambda: True)
+        monkeypatch.setattr(strategy_llm.llm_decide, 'decide',
+                            refusing_decide(asked))
+
+        strategy_llm.scan_for_setups({'FIBO': [donor_candidate()]}, gate=None,
+                                     candles=lambda pair: [0] * 500)
+        minutes = strategy_llm.config.LLM_REASK_AFTER_MIN
+        for key in list(strategy_llm._asked):
+            strategy_llm._asked[key] -= minutes * 60 + 1
+
+        strategy_llm.scan_for_setups({'FIBO': [donor_candidate()]}, gate=None,
+                                     candles=lambda pair: [0] * 500)
+        assert len(asked) == 2
+
+
+class TestTheCycleBudgetIsTime:
+    """
+    Предел по числу сетапов ничего не обещает: разбор занимает от двух минут
+    на восьмимиллиардной модели и вдвое больше на крупной. Четыре «недолгих»
+    разбора растягивают пятиминутный цикл на двадцать минут.
+    """
+
+    def test_the_rest_are_left_unanalysed_when_time_runs_out(self, monkeypatch):
+        clock = FakeClock()
+        asked = []
+
+        def slow_decide(pair, *args, **kwargs):
+            asked.append(pair)
+            clock.now += 200                      # разбор длиной в 200 секунд
+            return {'ok': False, 'gate': 'модель пропустила', 'detail': ''}
+
+        monkeypatch.setattr(strategy_llm, 'time', clock)
+        monkeypatch.setattr(strategy_llm, 'BUDGET_SEC', 300)
+        monkeypatch.setattr(strategy_llm.llm_local, 'available', lambda: True)
+        monkeypatch.setattr(strategy_llm.llm_decide, 'decide', slow_decide)
+
+        many = [donor_candidate(f'P{i}USDT', score=20 - i) for i in range(4)]
+        strategy_llm.scan_for_setups({'FIBO': many}, gate=None,
+                                     candles=lambda pair: [0] * 500)
+        assert len(asked) == 1, f'разобрано {len(asked)} при бюджете 300 с'
+
+    def test_the_skipped_ones_get_a_name(self, monkeypatch):
+        """
+        Молча пропущенный сетап неотличим от посмотренного и отвергнутого.
+        Безымянный отказ превращает разбор в гадание — так уже вышло с зоной B.
+        """
+        clock = FakeClock()
+
+        def slow_decide(pair, *args, **kwargs):
+            clock.now += 400
+            return {'ok': False, 'gate': 'модель пропустила', 'detail': ''}
+
+        written = []
+        monkeypatch.setattr(strategy_llm, 'time', clock)
+        monkeypatch.setattr(strategy_llm, 'BUDGET_SEC', 300)
+        monkeypatch.setattr(strategy_llm.llm_local, 'available', lambda: True)
+        monkeypatch.setattr(strategy_llm.llm_decide, 'decide', slow_decide)
+
+        import refused
+        monkeypatch.setattr(refused, 'record',
+                            lambda *args, **kwargs: written.append(args))
+
+        many = [donor_candidate(f'P{i}USDT', score=20 - i) for i in range(3)]
+        strategy_llm.scan_for_setups({'FIBO': many}, gate=None,
+                                     candles=lambda pair: [0] * 500)
+
+        names = [row[2] for row in written]
+        assert any('не хватило времени' in name for name in names), names
+
+
+class TestEveryAnswerIsWrittenDown:
+    """
+    Разбор — единственный продукт двух-четырёх минут процессора, и до этого
+    журнала он никуда не попадал: журнал сделок хранит только одобренные
+    сетапы, журнал отказов — имя правила и двести знаков.
+
+    19 сентября 2026 модель сделала 123 вызова и ни одной сделки. По журналу
+    сделок её не существовало вовсе.
+    """
+
+    def test_a_refusal_is_recorded_too(self, monkeypatch):
+        import llm_journal
+
+        monkeypatch.setattr(strategy_llm.llm_local, 'available', lambda: True)
+        monkeypatch.setattr(strategy_llm.llm_decide, 'decide',
+                            lambda *args, **kwargs: {
+                                'ok': False, 'gate': 'мало конфлюенса',
+                                'detail': '2 из 5', 'regime': 'боковик',
+                                'analysis': 'уровень держал цену',
+                                'confluence': {'poi': True}})
+
+        strategy_llm.scan_for_setups({'FIBO': [donor_candidate()]}, gate=None,
+                                     candles=lambda pair: [0] * 500)
+
+        rows = llm_journal.last()
+        assert rows, 'разбор не записан'
+        assert rows[0]['gate'] == 'мало конфлюенса'
+        assert rows[0]['analysis'] == 'уровень держал цену'
+        assert rows[0]['donor'] == 'FIBO', 'не видно, чей сетап разбирали'
+
+    def test_the_price_of_the_call_is_recorded(self, monkeypatch):
+        """
+        Токены и окно рядом с разбором. Без них поломку 19 сентября пришлось
+        бы снова выводить сопоставлением двух файлов — что за девять часов
+        так и не было сделано.
+        """
+        import llm_journal
+
+        monkeypatch.setattr(strategy_llm.llm_local, 'available', lambda: True)
+        monkeypatch.setattr(strategy_llm.llm_local, 'last_stats',
+                            lambda: {'model': 'Qwen3-8B-Q4_K_M.gguf',
+                                     'ctx': 4096, 'prompt_tokens': 1703,
+                                     'answer_tokens': 512, 'limit': 1200,
+                                     'finish': 'stop', 'seconds': 165.0})
+        monkeypatch.setattr(strategy_llm.llm_decide, 'decide',
+                            refusing_decide())
+
+        strategy_llm.scan_for_setups({'FIBO': [donor_candidate()]}, gate=None,
+                                     candles=lambda pair: [0] * 500)
+        row = llm_journal.last()[0]
+        assert row['prompt_tokens'] == '1703'
+        assert row['ctx'] == '4096'
+        assert row['finish'] == 'stop'
