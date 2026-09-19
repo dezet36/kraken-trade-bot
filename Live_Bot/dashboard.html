@@ -4576,7 +4576,7 @@ function renderLlmState(d) {
     + `<span>окно <b>${d.ctx}</b></span>`
     + (last.seconds ? `<span>последний разбор <b>${last.seconds} с</b></span>` : '')
     + (d.avg_seconds ? `<span>в среднем <b>${d.avg_seconds} с</b></span>` : '')
-    + `<span>бюджет цикла <b>${d.budget_sec} с</b></span>`
+    + `<span>вердикт годен <b>${d.stale_min} мин</b></span>`
     + `<span>повтор не чаще <b>${d.reask_min} мин</b></span>`
     + '</div><div class="ai-state" style="margin-top:6px">' + fit + cut + '</div>';
 }

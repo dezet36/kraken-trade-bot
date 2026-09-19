@@ -1273,7 +1273,7 @@ def llm_payload(limit=40):
         'ctx': getattr(config, 'LLM_CTX', 0),
         'threads': getattr(config, 'LLM_THREADS', 0),
         'limit_tokens': getattr(config, 'LLM_MAX_TOKENS', 0),
-        'budget_sec': getattr(config, 'LLM_CYCLE_BUDGET_SEC', 0),
+        'stale_min': getattr(config, 'LLM_VERDICT_MAX_AGE_MIN', 0),
         'reask_min': getattr(config, 'LLM_REASK_AFTER_MIN', 0),
         'last': llm_local.last_stats(),
         'busy': busy,
