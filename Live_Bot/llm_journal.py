@@ -39,7 +39,7 @@ COLUMNS = [
     # 'skip' — отказ. Имя отказа в gate, его числа в detail.
     'decision', 'gate', 'detail',
     # Что модель разглядела. Эти четыре колонки и есть смысл файла.
-    'regime', 'analysis', 'trigger', 'alt',
+    'regime', 'analysis', 'bias', 'trigger', 'alt',
     'why', 'risk',
     # Решение в числах. Пусто, когда модель отказалась: числа появляются
     # только у сетапа, дошедшего до проверок.
@@ -93,6 +93,7 @@ def record(pair, donor, verdict, stats=None):
             'detail': str(verdict.get('detail', ''))[:300],
             'regime': verdict.get('regime', ''),
             'analysis': verdict.get('analysis', ''),
+            'bias': verdict.get('bias', ''),
             'trigger': verdict.get('trigger', ''),
             'alt': verdict.get('alt', ''),
             'why': verdict.get('why', ''),

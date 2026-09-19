@@ -335,9 +335,9 @@ class TestMarkup:
         for head in ('ПРОФИЛЬ ОБЪЁМА', 'ПОГЛОЩЕНИЕ', 'ДЕЛЬТА АГРЕССОРА',
                      'СТАКАН', 'СТРУКТУРА', 'ЗОНЫ ИНТЕРЕСА', 'СТАРШИЕ ТАЙМФРЕЙМЫ',
                      'ОТКРЫТЫЙ ИНТЕРЕС ПО СВЕЧАМ', 'КАРТА ЛИКВИДАЦИЙ',
-                     'ЛИКВИДАЦИИ ПО ФАКТУ'):
+                     'ЛИКВИДАЦИИ ПО ФАКТУ', 'ЭКСТРЕМУМЫ ДНЯ', 'НЕЗАКРЫТЫЕ ИМБАЛАНСЫ'):
             assert head in text, head
-        assert text.count('\n  —') == 10, 'каждый блок обязан стоять с прочерком'
+        assert text.count('\n  —') == 12, 'каждый блок обязан стоять с прочерком'
         # Без свечей BTC блока про BTC нет вовсе: для самого BTC он бессмыслен.
         assert 'BTC КАК ОРИЕНТИР' not in text
 
@@ -380,6 +380,14 @@ class TestMarkup:
                                         'dist_pct': -3.8, 'side': 'лонги'}],
                              'above': [], 'bars': 72},
             'benchmark': {'btc_4h': 1.0, 'btc_24h': 2.0, 'relative_24h': -0.5},
+            'sessions': {'pdh': 103.0, 'pdl': 97.0, 'day_open': 100.5, 'pwh': 108.0,
+                         'pwl': 92.0, 'asia_high': 101.0, 'asia_low': 99.5},
+            'fvgs': [{'top': 101.5, 'bottom': 101.0, 'direction': 'BULLISH',
+                      'bars_ago': 3, 'inside': False}],
+            'activity': {'last_x': 2.1, 'last4_x': 1.4, 'day_x': 0.9},
+            'delta_hours': [{'share_pct': 5.0, 'rows': 60}, {'share_pct': -12.0, 'rows': 20}],
+            'funding_trend': [0.0001, 0.00012, 0.00015],
+            'oi_week': 3.4,
             'liq_fact': {'young_min': 20, 'events': 0},
         }
         text = llm_context.build('BTCUSDT', make_df(wavy(400)),
@@ -402,6 +410,12 @@ class TestMarkup:
         assert 'набор лонгов → закрытие шортов' in text
         assert 'Лонги ликвидируются ниже: 96..96.5 (-3.8%, 70% объёма стороны)' in text
         assert 'BTC за 4ч +1.00%' in text and 'слабее' in text
+        assert 'вчера макс 103 (' in text and 'неделя мин 92' in text and 'Азия макс 101' in text
+        assert '101..101.5 вверх' in text
+        assert 'Активность: последняя свеча ×2.1' in text
+        assert '+5% → -12%?' in text
+        assert 'последние выплаты: 0.000100 → 0.000120 → 0.000150' in text
+        assert 'за 7д 3.40%' in text
         assert '\n  —' not in text, 'снимок полный — прочерков быть не должно'
 
     def test_the_markup_still_fits_the_context_window(self):
@@ -468,6 +482,14 @@ def _full_market():
                                     'dist_pct': 3.8 + i, 'side': 'шорты'} for i in range(3)],
                          'bars': 72},
         'benchmark': {'btc_4h': 1.0, 'btc_24h': 2.0, 'relative_24h': -0.5},
+        'sessions': {'pdh': 103.0, 'pdl': 97.0, 'day_open': 100.5, 'pwh': 108.0,
+                     'pwl': 92.0, 'asia_high': 101.0, 'asia_low': 99.5},
+        'fvgs': [{'top': 101.5 + i, 'bottom': 101.0 + i, 'direction': 'BULLISH',
+                  'bars_ago': 3, 'inside': False} for i in range(4)],
+        'activity': {'last_x': 2.1, 'last4_x': 1.4, 'day_x': 0.9},
+        'delta_hours': [{'share_pct': 5.0, 'rows': 60}] * 6,
+        'funding_trend': [0.0001, 0.00012, 0.00015],
+        'oi_week': 3.4,
         'liq_fact': {'hours': 24,
                      'h24': {'long_n': 12, 'long_size': 3.5, 'short_n': 8, 'short_size': 2.1},
                      'h4': {'long_n': 2, 'long_size': 0.5, 'short_n': 1, 'short_size': 0.1},

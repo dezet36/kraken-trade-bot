@@ -308,6 +308,12 @@ def _paper_cycle():
         liquidations.ensure_running(liquid_pairs, client)
     except Exception as exc:                           # noqa: BLE001
         log(f'   ликвидации: сборщик не запущен — {exc}')
+    # Лента сделок — тоже потоком: опрос покрывал у BTC 28% минут.
+    try:
+        import trades_ws
+        trades_ws.ensure_running(liquid_pairs, client)
+    except Exception as exc:                           # noqa: BLE001
+        log(f'   лента сделок: сборщик не запущен — {exc}')
 
     hour_utc = datetime.now(timezone.utc).hour
     total_opened = 0

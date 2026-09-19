@@ -114,7 +114,8 @@ def build(level_ids, prices=None, min_stop_pct=0.0, min_rr=0.0):
         return _skip_only()
 
     head = ('"{" ws "\\"regime\\":" ws regime ws ","'
-            ' ws "\\"analysis\\":" ws analysis ws ","')
+            ' ws "\\"analysis\\":" ws analysis ws ","'
+            ' ws "\\"bias\\":" ws bias ws ","')
     body = '\n'.join(rules)
     # УСЛОВИЕ ВХОДА — ОБЪЕКТ, А НЕ ТЕКСТ. Пока оно было строкой, модель
     # писала «дождаться закрытия выше L3», а код ставил лимит немедленно:
@@ -130,6 +131,7 @@ plan     ::= {' | '.join(plans)}
 {body}
 cf       ::= "{{" ws "\\"poi\\":" ws bool ws "," ws "\\"vp\\":" ws bool ws "," ws "\\"der\\":" ws bool ws "," ws "\\"smc\\":" ws bool ws "," ws "\\"flow\\":" ws bool ws "}}"
 bool     ::= "true" | "false"
+bias     ::= "\\"up\\"" | "\\"down\\"" | "\\"flat\\""
 prob     ::= "0." [0-9] [1-9] | "0." [1-9] [0-9]
 regime   ::= {_text(REGIME_CHARS)}
 analysis ::= {_text(ANALYSIS_CHARS)}
@@ -261,7 +263,8 @@ def _skip_only():
     Так бывает на ровном рынке и на короткой истории. Позволить в этом случае
     вход значило бы позволить сослаться на уровень, которого не существует.
     """
-    return f'''root     ::= "{{" ws "\\"regime\\":" ws regime ws "," ws "\\"analysis\\":" ws analysis ws "," ws "\\"d\\":\\"skip\\"," ws "\\"cf\\":" ws cf ws "," ws "\\"why\\":" ws why ws "}}"
+    return f'''root     ::= "{{" ws "\\"regime\\":" ws regime ws "," ws "\\"analysis\\":" ws analysis ws "," ws "\\"bias\\":" ws bias ws "," ws "\\"d\\":\\"skip\\"," ws "\\"cf\\":" ws cf ws "," ws "\\"why\\":" ws why ws "}}"
+bias     ::= "\\"up\\"" | "\\"down\\"" | "\\"flat\\""
 cf       ::= "{{" ws "\\"poi\\":" ws bool ws "," ws "\\"vp\\":" ws bool ws "," ws "\\"der\\":" ws bool ws "," ws "\\"smc\\":" ws bool ws "," ws "\\"flow\\":" ws bool ws "}}"
 bool     ::= "true" | "false"
 regime   ::= {_text(REGIME_CHARS)}

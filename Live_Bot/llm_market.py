@@ -513,7 +513,7 @@ def _smc_from_context(context, price):
 
 # ── Зоны интереса: ордер-блоки, брейкеры, mitigation ────────────────────────
 
-def poi_facts(context, price, index, limit=3):
+def poi_facts(context, price, index, limit=4):
     """
     Ближайшие к цене живые зоны интереса из пакета smc.
 
@@ -823,6 +823,140 @@ def liquidation_facts(pair, price, upto=None, hours=24):
             'clusters': top, 'events': len(rows)}
 
 
+
+
+# ── Дневные, недельные и сессионные экстремумы ──────────────────────────────
+
+def session_levels(df, index):
+    """
+    Максимум и минимум прошлого дня, прошлой недели и азиатской сессии
+    сегодня, открытие дня. Классические пулы ликвидности: за ними стоят
+    стопы тех, кто торгует «от вчерашнего максимума», и туда цену ходят
+    снимать. Всё по закрытым часовым свечам в UTC.
+    """
+    import pandas as pd
+    ts = pd.to_datetime(df['timestamp'])
+    if getattr(ts.dt, 'tz', None) is not None:
+        ts = ts.dt.tz_convert('UTC').dt.tz_localize(None)
+    part = df.iloc[:index + 1].copy()
+    part['t'] = ts.iloc[:index + 1].values
+    now = part['t'].iloc[-1]
+    day = now.normalize()
+    out = {}
+
+    prev_day = part[(part['t'] >= day - pd.Timedelta(days=1)) & (part['t'] < day)]
+    if len(prev_day) >= 12:
+        out['pdh'], out['pdl'] = float(prev_day['high'].max()), float(prev_day['low'].min())
+
+    week_start = day - pd.Timedelta(days=day.weekday())
+    prev_week = part[(part['t'] >= week_start - pd.Timedelta(days=7)) & (part['t'] < week_start)]
+    if len(prev_week) >= 5 * 24:
+        out['pwh'], out['pwl'] = float(prev_week['high'].max()), float(prev_week['low'].min())
+
+    today = part[part['t'] >= day]
+    if len(today):
+        out['day_open'] = float(today['open'].iloc[0])
+        asia = today[today['t'].dt.hour < 5]
+        if len(asia) >= 3:
+            out['asia_high'], out['asia_low'] = float(asia['high'].max()), float(asia['low'].min())
+    return out or None
+
+
+# ── Активность: объём сейчас против обычного ────────────────────────────────
+
+def activity(df, index):
+    """
+    Объём последних свечей и суток против обычного. Всплеск объёма у уровня
+    — след участника, ради которого уровень и смотрят; сутки без объёма —
+    рынок, в котором любой сигнал слабее.
+    """
+    vol = np.asarray(df['volume'].values, dtype=float)[:index + 1]
+    if len(vol) < 48:
+        return None
+    median = float(np.median(vol[-168:] if len(vol) >= 168 else vol))
+    if median <= 0:
+        return None
+    last = float(vol[-1])
+    last_bars = vol[-4:]
+    day = float(np.sum(vol[-24:]))
+    week_days = [float(np.sum(vol[-24 * (k + 1):-24 * k or None])) for k in range(1, 8)
+                 if len(vol) >= 24 * (k + 1)]
+    return {
+        'last_x': last / median,
+        'last4_x': float(np.mean(last_bars)) / median,
+        'day_x': day / float(np.mean(week_days)) if week_days else None,
+    }
+
+
+# ── Все живые имбалансы, а не только ближайший ──────────────────────────────
+
+def fvg_list(context, price, index, limit=4):
+    """До двух незакрытых имбалансов над ценой и до двух под ней."""
+    from smc import imbalance
+    df = context.frames.get('poi')
+    if df is None or not len(df):
+        return None
+    active = imbalance.active_fvgs(df, context.fvgs, index) or []
+    above = sorted((g for g in active if float(g['bottom']) > price), key=lambda g: g['bottom'])
+    below = sorted((g for g in active if float(g['top']) < price), key=lambda g: -g['top'])
+    inside = [g for g in active if float(g['bottom']) <= price <= float(g['top'])]
+    picked = inside[:1] + above[:2] + below[:2]
+    if not picked:
+        return None
+    return [{'top': _number(g.get('top')), 'bottom': _number(g.get('bottom')),
+             'direction': g.get('direction'),
+             'bars_ago': int(index - int(g.get('index', index))),
+             'inside': g in inside}
+            for g in picked[:limit]]
+
+
+# ── Ряды вместо точек: дельта по часам, фандинг, ОИ за неделю ───────────────
+
+def delta_hours(pair, upto=None, hours=6):
+    """Перевес агрессора по каждому из последних часов, старые → новые."""
+    rows = positioning.series('delta', pair, upto=upto)
+    if not rows:
+        return None
+    newest = max(int(r['ts']) for r in rows)
+    out = []
+    for h in range(hours, 0, -1):
+        lo, hi = newest - h * 3_600_000, newest - (h - 1) * 3_600_000
+        part = [r for r in rows if lo < int(r['ts']) <= hi]
+        buy = sum(float(r.get('buy') or 0) for r in part)
+        sell = sum(float(r.get('sell') or 0) for r in part)
+        total = buy + sell
+        out.append({'share_pct': (buy - sell) / total * 100 if total else None,
+                    'rows': len(part)})
+    return out
+
+
+def funding_trend(pair, upto=None, count=3):
+    """Последние выплаты фандинга, старые → новые."""
+    rows = positioning.series('funding', pair, upto=upto)
+    if not rows:
+        return None
+    seen, out = set(), []
+    for r in sorted(rows, key=lambda r: int(r['ts'])):
+        if r.get('value') is None or int(r['ts']) in seen:
+            continue
+        seen.add(int(r['ts']))
+        out.append(float(r['value']))
+    return out[-count:] or None
+
+
+def oi_week(pair, upto=None):
+    """Изменение открытого интереса за 7 дней, %."""
+    rows = positioning.series('open_interest', pair, upto=upto)
+    if len(rows) < 2:
+        return None
+    newest = max(int(r['ts']) for r in rows)
+    edge = newest - 7 * 24 * 3_600_000
+    older = [r for r in rows if int(r['ts']) <= edge]
+    base = float(older[-1]['value']) if older else float(rows[0]['value'])
+    last = float(sorted(rows, key=lambda r: int(r['ts']))[-1]['value'])
+    return (last / base - 1) * 100 if base > 0 else None
+
+
 # ── BTC как ориентир для альткоинов ─────────────────────────────────────────
 
 def benchmark_facts(df_pair, df_btc, index):
@@ -916,4 +1050,12 @@ def snapshot(pair, df, at=None, client=None, benchmark=None):
                           pair, price, upto),
         'benchmark': (_safe('BTC', benchmark_facts, df, benchmark, index)
                       if benchmark is not None else None),
+        'sessions': _safe('экстремумы дня и недели', session_levels, df, index),
+        'activity': _safe('активность', activity, df, index),
+        'fvgs': (_safe('имбалансы', fvg_list, context, price,
+                       len(context.frames['poi']) - 1)
+                 if context is not None else None),
+        'delta_hours': _safe('дельта по часам', delta_hours, pair, upto),
+        'funding_trend': _safe('фандинг', funding_trend, pair, upto),
+        'oi_week': _safe('ОИ за неделю', oi_week, pair, upto),
     }

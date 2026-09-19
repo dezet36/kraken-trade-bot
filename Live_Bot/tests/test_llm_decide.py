@@ -583,3 +583,22 @@ class TestATriggerAgainstTheIdeaIsRefused:
         out = verdict(d='enter', side='SHORT', entry='L2', stop='L1', tp=['L3'], inval='L1',
                       trigger={'when': 'close_above', 'level': 'L2', 'note': 'x'})
         assert out['ok'] is False and out['gate'] == 'условие противоречит входу'
+
+
+class TestBiasIsAlwaysThere:
+    """Куда рынок — и при отказе: так отказ становится проверяемым."""
+
+    def test_bias_is_parsed_on_enter_and_skip(self):
+        out = dec.parse(answer(bias='up'), LEVELS)
+        assert out['bias'] == 'up'
+        out = dec.parse(answer(d='skip', bias='down'), LEVELS)
+        assert out['bias'] == 'down'
+        assert dec.check(out, LEVELS)['bias'] == 'down'
+
+    def test_an_unknown_bias_is_empty_not_wrong(self):
+        assert dec.parse(answer(bias='sideways'), LEVELS)['bias'] == ''
+
+    def test_the_grammar_demands_bias_in_both_answers(self):
+        import llm_grammar
+        for text in (llm_grammar.build(['L1', 'L2', 'L3']), llm_grammar.build([])):
+            assert 'bias' in text and 'flat' in text

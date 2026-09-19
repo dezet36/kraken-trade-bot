@@ -281,6 +281,16 @@ def collect_if_due(client, pairs=None):
     now = time.time()
     due = [name for name in SOURCES
            if now - _last_run.get(name, 0) >= _interval(name)]
+    # Пока лента идёт по веб-сокету, опрос дельты молчит: одна минута
+    # считалась бы дважды. Упал поток — опрос возвращается сам.
+    if 'delta' in due:
+        try:
+            import trades_ws
+            if trades_ws.healthy():
+                due.remove('delta')
+                _last_run['delta'] = now
+        except Exception:                          # noqa: BLE001
+            pass
     if not due:
         return None
     for name in due:

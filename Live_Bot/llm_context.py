@@ -39,6 +39,8 @@ find_pools, и в чтение позиционирования. Проверк�
 шапке каждого блока сказано, факт это или прокси.
 """
 
+import numpy as np
+
 import config
 import market_regime
 import positioning
@@ -148,9 +150,23 @@ def levels(df, at=None):
                    key=lambda lv: (-lv['touches'], price_now - lv['price']))[:half]
     near = sorted(above + below, key=lambda lv: -lv['price'])
 
+    # ОБЪЁМ У УРОВНЯ. Уровень, у которого торговали втрое больше обычного, и
+    # уровень, который цена проскочила на пустом объёме, в списке выглядели
+    # одинаково. Отношение среднего объёма свечей, касавшихся уровня за 200
+    # свечей, к медианному объёму свечи: ×3 — узел, ×0.5 — пустота.
+    volume = df['volume'].values
+    start = max(0, at - 199)
+    window_h, window_l, window_v = high[start:at + 1], low[start:at + 1], volume[start:at + 1]
+    median_v = float(np.median(window_v)) if len(window_v) else 0.0
     for number, level in enumerate(near, start=1):
         level['id'] = f'L{number}'
         level['dist_pct'] = round((level['price'] - price_now) / price_now * 100, 2)
+        if median_v > 0:
+            tol = level['price'] * 0.0025
+            touched = window_v[(window_l <= level['price'] + tol) & (window_h >= level['price'] - tol)]
+            level['volume_x'] = round(float(np.mean(touched)) / median_v, 1) if len(touched) else None
+        else:
+            level['volume_x'] = None
     return near, atr_now
 
 
@@ -225,28 +241,39 @@ def build(pair, df, at=None, news=None, market=None, history=None):
         return (price_now / float(close[at - bars]) - 1) * 100
     facts['change_4h'] = change(4)
     facts['change_24h'] = change(24)
+    facts['change_7d'] = change(24 * 7)
+    lo30 = float(np.min(df['low'].values[max(0, at - 24 * 30):at + 1]))
+    hi30 = float(np.max(df['high'].values[max(0, at - 24 * 30):at + 1]))
+    facts['range_30d_pos'] = ((price_now - lo30) / (hi30 - lo30) * 100
+                              if hi30 > lo30 else None)
 
     lines = [
         f'Пара: {pair}   Цена: {price_now:.6g}   '
         f'Размах (ATR): {_fmt(atr_pct, 2, "%")}   {_when(df, at)}',
         f'Ход цены: за 4ч {_signed(facts["change_4h"])}   '
-        f'за 24ч {_signed(facts["change_24h"])}',
+        f'за 24ч {_signed(facts["change_24h"])}   за 7д {_signed(facts["change_7d"])}   '
+        f'в диапазоне 30д: {_fmt(facts["range_30d_pos"], 0, "%")} от низа',
+        _activity_line((market or {}).get('activity')),
         f'Минимальный стоп по издержкам: {facts["min_stop_pct"]:.2f}%',
         '',
-        'УРОВНИ (сверху вниз, расстояние от текущей цены)',
+        'УРОВНИ (сверху вниз, расстояние от цены; объём у уровня — к медианной свече, '
+        '×3 узел, ×0.5 пустота)',
     ]
     for level in found:
         touches = (f", касаний {level['touches']}" if level['touches'] > 1 else '')
+        vol = (f"   объём у уровня ×{level['volume_x']}" if level.get('volume_x') else '')
         lines.append(f"  {level['id']:<4}{level['price']:>14.6g}   "
-                     f"{level['dist_pct']:+6.2f}%   {level['kind']}{touches}")
+                     f"{level['dist_pct']:+6.2f}%   {level['kind']}{touches}{vol}")
 
     lines += [
         '',
         'РАССТАНОВКА УЧАСТНИКОВ',
         f"  Открытый интерес: {_fmt(facts['oi'], 0)}   "
-        f"за 4ч {_fmt(facts['oi_4h'], 2, '%')}   за 24ч {_fmt(facts['oi_24h'], 2, '%')}",
+        f"за 4ч {_fmt(facts['oi_4h'], 2, '%')}   за 24ч {_fmt(facts['oi_24h'], 2, '%')}"
+        f"   за 7д {_fmt((market or {}).get('oi_week'), 2, '%')}",
         f"  Фандинг: {_fmt(facts['funding'], 6)}"
-        f"   (плюс — платят лонги)",
+        f"   (плюс — платят лонги)"
+        + _funding_trend((market or {}).get('funding_trend')),
         f"  Лонг/шорт: {_fmt(facts['long_short'], 3)}   "
         f"за 24ч {_fmt(facts['long_short_24h'], 2, '%')}",
         f"  Премия перпа: {_fmt(facts['premium'], 6)}",
@@ -545,6 +572,59 @@ def _benchmark_lines(bench):
     return [line]
 
 
+def _activity_line(act):
+    if not act:
+        return 'Активность: —'
+    day = f"   сутки к средним за неделю ×{act['day_x']:.2f}" if act.get('day_x') else ''
+    return (f"Активность: последняя свеча ×{act['last_x']:.1f} к медиане, "
+            f"последние 4 св. ×{act['last4_x']:.1f}{day}")
+
+
+def _funding_trend(values):
+    if not values or len(values) < 2:
+        return ''
+    return '   последние выплаты: ' + ' → '.join(f'{v:.6f}' for v in values)
+
+
+def _session_lines(s, price_now):
+    if not s:
+        return [_NONE]
+    out = []
+
+    def item(label, key):
+        if s.get(key) is not None:
+            return f"{label} {_p(s[key])} ({_pct(s[key], price_now)})"
+        return None
+    row1 = [x for x in (item('вчера макс', 'pdh'), item('вчера мин', 'pdl'),
+                        item('открытие дня', 'day_open')) if x]
+    row2 = [x for x in (item('неделя макс', 'pwh'), item('неделя мин', 'pwl')) if x]
+    row3 = [x for x in (item('Азия макс', 'asia_high'), item('Азия мин', 'asia_low')) if x]
+    for row in (row1, row2, row3):
+        if row:
+            out.append('  ' + '   '.join(row))
+    return out or [_NONE]
+
+
+def _fvg_lines(gaps):
+    if not gaps:
+        return [_NONE]
+    return [f"  {_p(g['bottom'])}..{_p(g['top'])} {_DIRECTION.get(g.get('direction'), '')}"
+            f"   {'цена внутри' if g.get('inside') else ''}   {g.get('bars_ago')} св. назад"
+            for g in gaps]
+
+
+def _delta_hours_line(hours):
+    if not hours:
+        return None
+    cells = []
+    for h in hours:
+        if h.get('share_pct') is None:
+            cells.append('—')
+        else:
+            cells.append(f"{h['share_pct']:+.0f}%" + ('' if h.get('rows', 60) >= 30 else '?'))
+    return '  По часам (старые → новые, ? — покрытие меньше половины): ' + ' → '.join(cells)
+
+
 def market_lines(market, price_now):
     """
     Снимок рынка пятью блоками. Прочерк — «не измерено», не «нет».
@@ -564,11 +644,18 @@ def market_lines(market, price_now):
     out += _absorption_lines(market.get('absorption'))
     out += ['', 'ДЕЛЬТА АГРЕССОРА (по ленте сделок — факт)']
     out += _delta_lines(market.get('delta'))
+    hourly = _delta_hours_line(market.get('delta_hours'))
+    if hourly:
+        out.append(hourly)
     out += ['', f'СТАКАН (факт, но снимок момента: заявку снимают за секунды; '
                 f'{reach})']
     out += _book_lines(market.get('book'))
+    out += ['', 'ЭКСТРЕМУМЫ ДНЯ, НЕДЕЛИ И АЗИИ (пулы стопов, UTC)']
+    out += _session_lines(market.get('sessions'), price_now)
     out += ['', 'СТРУКТУРА (SMC по рабочему ТФ)']
     out += _smc_lines(market.get('smc'), price_now)
+    out += ['', 'НЕЗАКРЫТЫЕ ИМБАЛАНСЫ (1ч, живые)']
+    out += _fvg_lines(market.get('fvgs'))
     out += ['', 'ЗОНЫ ИНТЕРЕСА (ордер-блоки и брейкеры по 1ч, только живые)']
     out += _poi_lines(market.get('pois'), price_now)
     out += ['', 'СТАРШИЕ ТАЙМФРЕЙМЫ (закрытые свечи)']

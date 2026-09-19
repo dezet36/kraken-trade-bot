@@ -125,6 +125,9 @@ def parse(answer, levels):
            # именно она разглядела в данных, а не только чем кончила.
            'regime': data.get('regime', ''),
            'analysis': data.get('analysis', ''),
+           # Куда рынок — обязательно и при отказе: по нему отказ становится
+           # проверяемым (сказала up, цена ушла вниз — ошибка направления).
+           'bias': data.get('bias') if data.get('bias') in ('up', 'down', 'flat') else '',
            'alt': data.get('alt', ''),
            'confluence': {f: bool((data.get('cf') or {}).get(f))
                           for f in FACTORS}}
@@ -316,6 +319,7 @@ def check(parsed, levels, answer=None, market=None):
             'why': parsed.get('why', ''), 'risk': parsed.get('risk', ''),
             'regime': parsed.get('regime', ''),
             'analysis': parsed.get('analysis', ''),
+            'bias': parsed.get('bias', ''),
             'trigger': parsed.get('trigger', ''),
             'trigger_when': parsed.get('trigger_when', 'now'),
             'trigger_level': parsed.get('trigger_level'),
