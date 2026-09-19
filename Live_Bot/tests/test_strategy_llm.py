@@ -184,25 +184,60 @@ class TestOneSetupPerPairPerCycle:
 
 class TestTheCycleIsNotHeldUp:
     """
-    Одно решение занимает две-четыре минуты. Разбирать всё подряд — значит
-    растянуть цикл бота на полчаса, а торговый цикл ждать не должен.
+    ЦИКЛ НЕ ЖДЁТ МОДЕЛЬ — ЭТО ГЛАВНОЕ СВОЙСТВО ПЯТОЙ СТРАТЕГИИ.
+
+    Один разбор занимает на сервере четыре-пять минут, и быстрой модели там
+    нет: замер 19 сентября 2026 дал 1.8 токена в секунду у восьмимиллиардной и
+    1.6 у тридцатипятимиллиардной MoE. При цикле в пять минут ожидание
+    означало бы, что бот половину времени стоит.
+
+    Опасность не в упущенных входах — заявки висят часами. Стопы, цели и
+    перевод в безубыток проверяются РАЗ В ЦИКЛ: растянув цикл вдвое, мы вдвое
+    огрубляем ведение сделок ОСТАЛЬНЫХ четырёх стратегий.
     """
 
-    def test_only_the_best_few_are_analysed(self, monkeypatch):
-        asked = []
+    def test_the_cycle_returns_while_the_model_is_still_thinking(self,
+                                                                 monkeypatch):
+        import time as real_time
 
-        def fake_decide(pair, df, ask, **kwargs):
-            asked.append(pair)
+        started = real_time.time()
+
+        def slow_decide(pair, df, ask, **kwargs):
+            real_time.sleep(1.5)
             return {'ok': False, 'gate': 'модель пропустила', 'detail': ''}
 
         monkeypatch.setattr(strategy_llm.llm_local, 'available', lambda: True)
-        monkeypatch.setattr(strategy_llm.llm_decide, 'decide', fake_decide)
+        monkeypatch.setattr(strategy_llm.llm_decide, 'decide', slow_decide)
 
-        many = [donor_candidate(f'P{i}USDT', score=i) for i in range(20)]
-        strategy_llm.scan_for_setups({'FIBO': many}, gate=None,
+        strategy_llm.scan_for_setups({'FIBO': [donor_candidate()]}, gate=None,
                                      candles=lambda pair: [0] * 500)
+        assert real_time.time() - started < 0.7, 'цикл дождался модель'
+        strategy_llm.join(5)
 
-        assert len(asked) == strategy_llm.MAX_PER_CYCLE
+    def test_one_setup_at_a_time(self, monkeypatch):
+        """
+        Вторая модель в памяти — это ещё пять гигабайт и вдвое меньше ядер
+        каждой: оба разбора вдвое медленнее вместо выигрыша. И llama_cpp на
+        параллельные вызовы одного контекста не рассчитан.
+        """
+        import time as real_time
+
+        asked = []
+
+        def slow_decide(pair, df, ask, **kwargs):
+            asked.append(pair)
+            real_time.sleep(1.0)
+            return {'ok': False, 'gate': 'модель пропустила', 'detail': ''}
+
+        monkeypatch.setattr(strategy_llm.llm_local, 'available', lambda: True)
+        monkeypatch.setattr(strategy_llm.llm_decide, 'decide', slow_decide)
+
+        many = [donor_candidate(f'P{i}USDT', score=20 - i) for i in range(20)]
+        for _ in range(3):                       # три цикла подряд
+            strategy_llm.scan_for_setups({'FIBO': many}, gate=None,
+                                         candles=lambda pair: [0] * 500)
+        assert asked == ['P0USDT'], asked
+        strategy_llm.join(5)
 
 
 class TestRefusalsAreRecorded:
@@ -223,8 +258,8 @@ class TestRefusalsAreRecorded:
         monkeypatch.setattr(refused, 'record',
                             lambda *a, **k: written.append(a))
 
-        strategy_llm.scan_for_setups({'FIBO': [donor_candidate()]}, gate=None,
-                                     candles=lambda pair: [0] * 500)
+        # Разбор идёт сбоку, поэтому отказ попадает в журнал следующим циклом.
+        cycle({'FIBO': [donor_candidate()]})
         assert written, 'отказ модели не записан'
         assert written[0][0] == 'LLM'
 
@@ -294,13 +329,32 @@ class FakeClock:
 @pytest.fixture(autouse=True)
 def _forget_previous_setups():
     """
-    Память о разобранных сетапах живёт в модуле — чистим между проверками.
+    Состояние модуля глобальное: память о сетапах, очередь и занятость потока.
 
-    Иначе вторая проверка получила бы ответ первой и прошла бы по ошибке.
+    Не почистив, вторая проверка получила бы ответ первой и прошла бы по
+    ошибке — или, хуже, заняла бы «модель» потоком, который уже не нужен.
     """
+    strategy_llm.join(10)
     strategy_llm._asked.clear()
+    strategy_llm._done.clear()
+    strategy_llm._busy = None
     yield
+    strategy_llm.join(10)
     strategy_llm._asked.clear()
+    strategy_llm._done.clear()
+    strategy_llm._busy = None
+
+
+def cycle(pool, candles=lambda pair: [0] * 500):
+    """
+    Один оборот бота: отдать сетап, дождаться модель, забрать вердикт.
+
+    Ожидание здесь — свойство ПРОВЕРКИ, а не бота: в жизни вердикт забирает
+    следующий цикл через несколько минут, и ждать его никто не будет.
+    """
+    strategy_llm.scan_for_setups(pool, gate=None, candles=candles)
+    strategy_llm.join(15)
+    return strategy_llm.scan_for_setups(pool, gate=None, candles=candles)
 
 
 def refusing_decide(recorder=None):
@@ -333,6 +387,7 @@ class TestTheSameSetupIsNotReExaminedEveryCycle:
             strategy_llm.scan_for_setups({'FIBO': [donor_candidate()]},
                                          gate=None,
                                          candles=lambda pair: [0] * 500)
+            strategy_llm.join(15)
         assert asked == ['BTCUSDT'], f'модель спросили {len(asked)} раза'
 
     def test_a_changed_price_is_a_new_setup(self, monkeypatch):
@@ -347,6 +402,7 @@ class TestTheSameSetupIsNotReExaminedEveryCycle:
 
         strategy_llm.scan_for_setups({'FIBO': [donor_candidate()]}, gate=None,
                                      candles=lambda pair: [0] * 500)
+        strategy_llm.join(15)           # дожидаемся: модель разбирает по одному
 
         moved = donor_candidate()
         moved['signal']['params']['entry'] = 111.0
@@ -366,6 +422,7 @@ class TestTheSameSetupIsNotReExaminedEveryCycle:
 
         strategy_llm.scan_for_setups({'FIBO': [donor_candidate()]}, gate=None,
                                      candles=lambda pair: [0] * 500)
+        strategy_llm.join(15)           # модель разбирает по одному
         minutes = strategy_llm.config.LLM_REASK_AFTER_MIN
         for key in list(strategy_llm._asked):
             strategy_llm._asked[key] -= minutes * 60 + 1
@@ -375,59 +432,82 @@ class TestTheSameSetupIsNotReExaminedEveryCycle:
         assert len(asked) == 2
 
 
-class TestTheCycleBudgetIsTime:
+class TestTheVerdictComesBackNextCycle:
     """
-    Предел по числу сетапов ничего не обещает: разбор занимает от двух минут
-    на восьмимиллиардной модели и вдвое больше на крупной. Четыре «недолгих»
-    разбора растягивают пятиминутный цикл на двадцать минут.
+    Разбор идёт сбоку: цикл отдал сетап и ушёл, вердикт забирает следующий.
+
+    Задержка в пять минут для сетапа, живущего часами, ничего не меняет.
+    Остановка бота на пять минут меняет всё — см. TestTheCycleIsNotHeldUp.
     """
 
-    def test_the_rest_are_left_unanalysed_when_time_runs_out(self, monkeypatch):
-        clock = FakeClock()
-        asked = []
-
-        def slow_decide(pair, *args, **kwargs):
-            asked.append(pair)
-            clock.now += 200                      # разбор длиной в 200 секунд
-            return {'ok': False, 'gate': 'модель пропустила', 'detail': ''}
-
-        monkeypatch.setattr(strategy_llm, 'time', clock)
-        monkeypatch.setattr(strategy_llm, 'BUDGET_SEC', 300)
+    def test_the_signal_appears_on_the_following_cycle(self, monkeypatch):
         monkeypatch.setattr(strategy_llm.llm_local, 'available', lambda: True)
-        monkeypatch.setattr(strategy_llm.llm_decide, 'decide', slow_decide)
+        monkeypatch.setattr(strategy_llm.llm_decide, 'decide',
+                            lambda *args, **kwargs: approving_verdict())
 
-        many = [donor_candidate(f'P{i}USDT', score=20 - i) for i in range(4)]
-        strategy_llm.scan_for_setups({'FIBO': many}, gate=None,
-                                     candles=lambda pair: [0] * 500)
-        assert len(asked) == 1, f'разобрано {len(asked)} при бюджете 300 с'
+        pool = {'FIBO': [donor_candidate()]}
+        first = strategy_llm.scan_for_setups(pool, gate=None,
+                                             candles=lambda pair: [0] * 500)
+        assert first == [], 'вердикт пришёл в тот же цикл — значит ждали'
 
-    def test_the_skipped_ones_get_a_name(self, monkeypatch):
+        strategy_llm.join(15)
+        second = strategy_llm.scan_for_setups(pool, gate=None,
+                                              candles=lambda pair: [0] * 500)
+        assert len(second) == 1
+        assert second[0]['signal']['strategy'] == 'LLM'
+
+    def test_an_answer_about_a_setup_that_is_gone_is_still_collected(self,
+                                                                     monkeypatch):
         """
-        Молча пропущенный сетап неотличим от посмотренного и отвергнутого.
-        Безымянный отказ превращает разбор в гадание — так уже вышло с зоной B.
+        Пул следующего цикла может оказаться пустым — сетап отработал или
+        протух. Вердикт о нём всё равно надо забрать: он уже оплачен пятью
+        минутами счёта, и отказ модели должен попасть в журнал.
         """
-        clock = FakeClock()
-
-        def slow_decide(pair, *args, **kwargs):
-            clock.now += 400
-            return {'ok': False, 'gate': 'модель пропустила', 'detail': ''}
-
         written = []
-        monkeypatch.setattr(strategy_llm, 'time', clock)
-        monkeypatch.setattr(strategy_llm, 'BUDGET_SEC', 300)
         monkeypatch.setattr(strategy_llm.llm_local, 'available', lambda: True)
-        monkeypatch.setattr(strategy_llm.llm_decide, 'decide', slow_decide)
+        monkeypatch.setattr(strategy_llm.llm_decide, 'decide',
+                            lambda *args, **kwargs: {
+                                'ok': False, 'gate': 'мало конфлюенса',
+                                'detail': '2 из 5'})
 
         import refused
         monkeypatch.setattr(refused, 'record',
                             lambda *args, **kwargs: written.append(args))
 
-        many = [donor_candidate(f'P{i}USDT', score=20 - i) for i in range(3)]
-        strategy_llm.scan_for_setups({'FIBO': many}, gate=None,
+        strategy_llm.scan_for_setups({'FIBO': [donor_candidate()]}, gate=None,
                                      candles=lambda pair: [0] * 500)
+        strategy_llm.join(15)
+        strategy_llm.scan_for_setups({}, gate=None,
+                                     candles=lambda pair: [0] * 500)
+        assert written, 'отказ потерялся вместе с сетапом'
 
-        names = [row[2] for row in written]
-        assert any('не хватило времени' in name for name in names), names
+    def test_a_stale_verdict_is_refused_by_name(self, monkeypatch):
+        """
+        Вердикт приходит к разметке пятиминутной давности — это нормально. Но
+        застрявший поток может принести его через полчаса, к разметке, которой
+        больше нет: торговать по ней значит торговать вчерашним днём, а
+        выглядеть это будет как свежее решение модели.
+        """
+        written = []
+        monkeypatch.setattr(strategy_llm.llm_local, 'available', lambda: True)
+        monkeypatch.setattr(strategy_llm.llm_decide, 'decide',
+                            lambda *args, **kwargs: approving_verdict())
+
+        import refused
+        monkeypatch.setattr(refused, 'record',
+                            lambda *args, **kwargs: written.append(args))
+
+        strategy_llm.scan_for_setups({'FIBO': [donor_candidate()]}, gate=None,
+                                     candles=lambda pair: [0] * 500)
+        strategy_llm.join(15)
+        # Отматываем отметку отправки на час назад.
+        with strategy_llm._work_lock:
+            strategy_llm._done[:] = [(c, v, at - 3600)
+                                     for c, v, at in strategy_llm._done]
+        out = strategy_llm.scan_for_setups({}, gate=None,
+                                           candles=lambda pair: [0] * 500)
+        assert out == [], 'устаревший вердикт взяли в работу'
+        assert any('устарел' in row[2] for row in written), written
 
 
 class TestEveryAnswerIsWrittenDown:
@@ -453,6 +533,7 @@ class TestEveryAnswerIsWrittenDown:
 
         strategy_llm.scan_for_setups({'FIBO': [donor_candidate()]}, gate=None,
                                      candles=lambda pair: [0] * 500)
+        strategy_llm.join(15)          # запись делает поток разбора
 
         rows = llm_journal.last()
         assert rows, 'разбор не записан'
@@ -479,7 +560,43 @@ class TestEveryAnswerIsWrittenDown:
 
         strategy_llm.scan_for_setups({'FIBO': [donor_candidate()]}, gate=None,
                                      candles=lambda pair: [0] * 500)
+        strategy_llm.join(15)          # запись делает поток разбора
         row = llm_journal.last()[0]
         assert row['prompt_tokens'] == '1703'
         assert row['ctx'] == '4096'
         assert row['finish'] == 'stop'
+
+
+class TestABrokenAnswerIsNotTakenForAJudgement:
+    """
+    Неисправность ответом не является.
+
+    Запомнив её как разбор, бот на час перестал бы спрашивать о сетапе,
+    которого модель не видела, — а в журнале это выглядело бы как «разобран».
+    Уверенное враньё хуже отсутствия ответа.
+    """
+
+    def test_a_truncated_answer_is_asked_about_again(self, monkeypatch):
+        asked = []
+        monkeypatch.setattr(strategy_llm.llm_local, 'available', lambda: True)
+        monkeypatch.setattr(strategy_llm.llm_decide, 'decide',
+                            lambda pair, *a, **k: asked.append(pair) or
+                            {'ok': False, 'gate': 'ответ обрезан',
+                             'detail': 'окно контекста кончилось раньше ответа'})
+
+        for _ in range(2):
+            strategy_llm.scan_for_setups({'FIBO': [donor_candidate()]},
+                                         gate=None,
+                                         candles=lambda pair: [0] * 500)
+            strategy_llm.join(15)
+        assert len(asked) == 2, 'поломку запомнили как ответ модели'
+
+    def test_the_list_of_broken_names_lives_in_one_place(self):
+        """
+        Имена поломок нужны в трёх местах: стратегии, панели и странице.
+        Записанные трижды, они разойдутся — и поломка однажды покрасится в
+        цвет обычного отказа.
+        """
+        import llm_decide
+        assert 'ответ обрезан' in llm_decide.BROKEN_GATES
+        assert 'мало конфлюенса' not in llm_decide.BROKEN_GATES

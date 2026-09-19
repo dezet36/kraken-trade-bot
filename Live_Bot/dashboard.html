@@ -4562,7 +4562,15 @@ function renderLlmState(d) {
   const cut = last.finish === 'length'
     ? ' <b style="color:var(--bad)">упёрлось в предел</b>' : '';
 
+  /* «Считает прямо сейчас» — не украшение. Разбор идёт сбоку от цикла и
+     длится минутами: без этой строки пауза между разборами неотличима от
+     модели, которая молчит, потому что сломалась. */
+  const now = d.busy
+    ? `<span style="color:var(--good)">◉ считает: <b>${esc(String(d.busy).split('|')[0])}</b></span>`
+    : '<span>сейчас свободна</span>';
+
   box.innerHTML = '<div class="ai-state">'
+    + now
     + `<span>модель <b>${esc(d.model)}</b></span>`
     + `<span>потоков <b>${d.threads}</b></span>`
     + `<span>окно <b>${d.ctx}</b></span>`
@@ -4606,10 +4614,10 @@ function renderLlm() {
   box.innerHTML = calls.map(row => {
     const entered = row.decision === 'enter';
     /* Поломка разбора и отказ модели — разные вещи, и цветом они разделены:
-       «мало конфлюенса» это работа, а «ответ обрезан» это неисправность. */
-    const broken = !entered && ['ответ обрезан', 'ответ не разобран',
-                                'ответ пуст', 'окно контекста мало',
-                                'модель недоступна'].includes(row.gate);
+       «мало конфлюенса» это работа, а «ответ обрезан» это неисправность.
+       Список имён приходит с сервера из llm_decide: повтори его здесь, и он
+       однажды разойдётся, покрасив поломку в цвет обычного отказа. */
+    const broken = !entered && ((d && d.broken_gates) || []).includes(row.gate);
     const cls = entered ? 'enter' : (broken ? 'broke' : 'skip');
     const head = entered
       ? `<span class="ai-gate">взяла сделку ${esc(row.side || '')}</span>`

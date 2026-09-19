@@ -24,12 +24,25 @@
 и без неё — это почти парный замер, а не сравнение двух разных выборок. У
 самостоятельного поиска такого преимущества не будет.
 
-ЦЕНА ВРЕМЕНИ. Одно решение занимает две-четыре минуты на процессоре сервера.
-Поэтому разбирается не всё подряд: берутся лучшие кандидаты по оценке сканера,
-не больше MAX_PER_CYCLE за цикл. Иначе цикл бота растянется на полчаса, а
-торговый цикл ждать не должен.
+ЦЕНА ВРЕМЕНИ, И ПОЧЕМУ РАЗБОР УШЁЛ В СВОЙ ПОТОК. Один разбор занимает на этом
+процессоре четыре-пять минут, и быстрой модели тут нет: замер 19 сентября 2026
+дал 1.8 токена в секунду у восьмимиллиардной и 1.6 у тридцатипятимиллиардной
+MoE — второй умнее, но не быстрее. При цикле в пять минут это означало бы, что
+бот половину времени стоит и ждёт пятую стратегию.
+
+Ждать нельзя не из-за упущенных входов — заявки висят часами. Дело в ведении
+позиций: стопы, цели и перевод в безубыток проверяются РАЗ В ЦИКЛ, и растянув
+цикл вдвое, мы вдвое огрубляем управление сделками остальных четырёх
+стратегий. В этом проекте такое уже кончилось испорченным журналом: дыра в
+свечах выглядела рыночным движением, и разбор двадцати трёх сделок дал вывод,
+который оказался следом простоя.
+
+Поэтому модель работает СБОКУ: цикл отдаёт ей один сетап и идёт дальше, а
+готовый вердикт забирает следующим циклом. Задержка в пять минут для сетапа,
+живущего часами, ничего не меняет; остановка бота на пять минут меняет всё.
 """
 
+import threading
 import time
 
 import config
@@ -41,18 +54,80 @@ from logger import log
 
 NAME = 'LLM'
 
-# Сколько сетапов за цикл отдаём модели. Четыре по три минуты — это двенадцать
-# минут счёта; больше цикл терпеть не станет.
+# Сколько кандидатов за цикл вообще рассматриваем. Разбирается из них один:
+# поток занят минутами, и очередь длиннее единицы означала бы вердикты о
+# сетапах, которых к их приходу уже не будет.
 MAX_PER_CYCLE = int(config.__dict__.get('LLM_MAX_PER_CYCLE', 0) or 4)
-
-# Предел не по числу, а по времени. Число сетапов ничего не обещает: один
-# разбор занял 165 секунд, а на модели покрупнее займёт вдвое больше, и четыре
-# «недолгих» разбора растянут пятиминутный цикл на двадцать минут.
-BUDGET_SEC = int(config.__dict__.get('LLM_CYCLE_BUDGET_SEC', 0) or 300)
 
 # Когда модель уже отвечала об ЭТОМ сетапе — когда именно. Ключ описан в
 # _fingerprint. Живёт в процессе: перезапуск бота законно спрашивает заново.
 _asked = {}
+
+# ── Разбор идёт сбоку от цикла ───────────────────────────────────────────────
+# Поток один и на всех: вторая модель в памяти — это ещё пять гигабайт и
+# вдвое меньше ядер каждому, то есть оба разбора вдвое медленнее вместо
+# выигрыша. llama_cpp к тому же не рассчитан на параллельные вызовы.
+_work_lock = threading.Lock()
+_busy = None            # метка сетапа, который разбирается прямо сейчас
+_done = []              # готовые вердикты, ждут ближайшего цикла
+_thread = None
+
+
+def busy():
+    """Занята ли модель прямо сейчас. Для панели и проверок."""
+    with _work_lock:
+        return _busy
+
+
+def join(timeout=None):
+    """
+    Дождаться текущего разбора. Нужен проверкам и остановке бота.
+
+    В торговом цикле не зовётся никогда: он на то и не ждёт.
+    """
+    thread = _thread
+    if thread is not None:
+        thread.join(timeout)
+
+
+def _run(candidate, df, submitted):
+    """Разбор одного сетапа. Идёт в своём потоке, минутами."""
+    global _busy
+    pair = candidate['pair']
+    try:
+        verdict = llm_decide.decide(pair, df, llm_local.ask)
+        llm_journal.record(pair, candidate.get('donor', ''), verdict,
+                           llm_local.last_stats())
+    except Exception as exc:                       # noqa: BLE001
+        # Поток не имеет права унести с собой причину: без этой строки
+        # стратегия молча перестала бы отвечать, и выглядело бы это как
+        # «модель ничего не находит».
+        log(f'⚠️ {NAME} {pair}: разбор оборвался — {exc}')
+        verdict = {'ok': False, 'gate': 'разбор оборвался', 'detail': str(exc)[:200]}
+    with _work_lock:
+        _done.append((candidate, verdict, submitted))
+        _busy = None
+
+
+def _submit(candidate, df):
+    """Отдаёт сетап модели. False — она занята предыдущим."""
+    global _busy, _thread
+    with _work_lock:
+        if _busy is not None:
+            return False
+        _busy = _fingerprint(candidate)
+    _thread = threading.Thread(target=_run, args=(candidate, df, time.time()),
+                               name='llm-decide', daemon=True)
+    _thread.start()
+    return True
+
+
+def _harvest():
+    """Забирает готовые вердикты и очищает очередь."""
+    with _work_lock:
+        out = list(_done)
+        _done.clear()
+    return out
 
 
 def _fresh(pool):
@@ -209,23 +284,28 @@ def _refuse(signal_like, verdict):
 
 def scan_for_setups(pool, gate, client=None, balance=None, candles=None):
     """
-    Разбирает чужие сетапы моделью и возвращает СВОИ.
+    Забирает готовые вердикты и отдаёт модели следующий сетап. Не ждёт.
 
     pool — словарь «стратегия -> кандидаты», собранный за этот цикл. Пустой
-    словарь означает, что разбирать нечего: модель не выдумывает сетапы на
-    пустом месте, и это правильно.
+    словарь означает, что отдавать нечего: модель не выдумывает сетапы на
+    пустом месте, и это правильно. Но забрать готовое надо и тогда — вердикт
+    про ПРОШЛЫЙ сетап приходит независимо от того, нашлось ли что-то сейчас.
 
     candles(pair) -> df — откуда брать свечи. Отдельным параметром, чтобы
-    проверки обходились без сети.
+    проверки обходились без сети. Свечи берутся ЗДЕСЬ, в цикле, и передаются
+    потоку готовыми: клиент биржи на параллельные обращения не рассчитан.
     """
     if not llm_local.available():
         log(f'   {NAME}: модель недоступна — стратегия простаивает')
         return []
 
+    out = _collect(_harvest())
+
     ready = _fresh(pool)
     if not ready:
-        log(f'   {NAME}: чужих сетапов за цикл не нашлось, разбирать нечего')
-        return []
+        if not out:
+            log(f'   {NAME}: чужих сетапов за цикл не нашлось, разбирать нечего')
+        return out
 
     if candles is None:
         import exchange
@@ -234,34 +314,15 @@ def scan_for_setups(pool, gate, client=None, balance=None, candles=None):
             return exchange.fetch_ohlcv('1h', limit=500, symbol=pair,
                                         client=client)
 
-    out = []
-    started = time.time()
-    longest = 0.0
-    for number, candidate in enumerate(ready[:MAX_PER_CYCLE]):
-        pair = candidate['pair']
+    if busy():
+        log(f'   {NAME}: модель занята прошлым сетапом, жду её')
+        return out
 
+    for candidate in ready[:MAX_PER_CYCLE]:
+        pair = candidate['pair']
         mark = _fingerprint(candidate)
         if _asked_recently(mark):
-            log(f'   {NAME} {pair}: тот же сетап уже разобран, '
-                f'спрошу не раньше чем через '
-                f'{config.__dict__.get("LLM_REASK_AFTER_MIN", 60)} мин')
             continue
-
-        # ВРЕМЯ ПРОВЕРЯЕТСЯ ПЕРЕД РАЗБОРОМ, А НЕ ПОСЛЕ. Остановиться на
-        # полпути нельзя: модель отвечает целиком или никак. Поэтому решение
-        # начинать принимается по самому долгому разбору этого цикла — если
-        # следующий окажется таким же, уложимся ли мы в бюджет.
-        spent = time.time() - started
-        if number and spent + longest > BUDGET_SEC:
-            left = ready[:MAX_PER_CYCLE][number:]
-            log(f'   {NAME}: бюджет цикла {BUDGET_SEC} с исчерпан за '
-                f'{spent:.0f} с — {len(left)} сетапов остались без разбора')
-            for skipped in left:
-                _refuse(skipped.get('signal') or {'trading_pair': skipped['pair']},
-                        {'gate': 'не хватило времени цикла',
-                         'detail': f'разбор занимает {longest:.0f} с, '
-                                   f'бюджет {BUDGET_SEC} с'})
-            break
 
         try:
             df = candles(pair)
@@ -271,22 +332,61 @@ def scan_for_setups(pool, gate, client=None, balance=None, candles=None):
         if df is None or len(df) < 100:
             continue
 
-        at = time.time()
-        verdict = llm_decide.decide(pair, df, llm_local.ask)
-        longest = max(longest, time.time() - at)
-        _remember(mark)
-        llm_journal.record(pair, candidate.get('donor', ''), verdict,
-                           llm_local.last_stats())
+        # Метка ставится ПРИ ОТПРАВКЕ, а не по ответу: иначе следующий цикл
+        # отдал бы тот же сетап второй раз, пока первый ещё разбирается. И
+        # только если отправка удалась — запомнив неотправленный сетап, мы на
+        # час перестали бы спрашивать о том, чего модель не видела.
+        if _submit(candidate, df):
+            _remember(mark)
+            log(f'   {NAME} {pair}: отдал модели сетап от '
+                f'{candidate.get("donor", "?")}, вердикт будет через '
+                f'несколько минут')
+        break
+    else:
+        log(f'   {NAME}: все сетапы цикла уже разобраны')
+    return out
 
-        if not verdict['ok']:
+
+def _collect(finished):
+    """
+    Превращает готовые вердикты в сигналы. Отказы пишет в журнал отказов.
+
+    ВОЗРАСТ ПРОВЕРЯЕТСЯ ЗДЕСЬ. Вердикт приходит к разметке пятиминутной
+    давности — это нормально. Но если поток застрял или машина была занята,
+    он может прийти через полчаса, к разметке, которой больше нет. Торговать
+    по ней значит торговать вчерашним днём, а выглядеть это будет как свежее
+    решение модели.
+    """
+    out = []
+    limit = int(config.__dict__.get('LLM_VERDICT_MAX_AGE_MIN', 0) or 20) * 60
+    for candidate, verdict, submitted in finished:
+        pair = candidate['pair']
+        age = time.time() - submitted
+
+        # Поломка ответом не является: по такому сетапу спросить надо снова,
+        # а не через час. Метку снимаем.
+        if verdict.get('gate') in llm_decide.BROKEN_GATES:
+            _asked.pop(_fingerprint(candidate), None)
+
+        if not verdict.get('ok'):
             log(f'   {NAME} {pair}: отказ — {verdict["gate"]}'
                 + (f' ({verdict["detail"]})' if verdict.get('detail') else ''))
             _refuse(candidate.get('signal') or {'trading_pair': pair}, verdict)
             continue
 
+        if age > limit:
+            log(f'   {NAME} {pair}: вердикт устарел на {age / 60:.0f} мин — '
+                f'не беру')
+            _refuse(candidate.get('signal') or {'trading_pair': pair},
+                    {'gate': 'вердикт устарел',
+                     'detail': f'ответ пришёл через {age / 60:.0f} мин при '
+                               f'пределе {limit // 60}'})
+            continue
+
         log(f'   {NAME} {pair}: {verdict["side"]} от {verdict["entry"]:.6g}, '
             f'R:R {verdict["rr"]}, EV {verdict["ev"]}, '
-            f'конфлюенс {verdict["votes"]}/5 (сетап от {candidate["donor"]})')
+            f'конфлюенс {verdict["votes"]}/5 (сетап от {candidate["donor"]}, '
+            f'разбор занял {age:.0f} с)')
         out.append({
             'pair': pair,
             'signal': _reshape(candidate, verdict),

@@ -1238,6 +1238,7 @@ def llm_payload(limit=40):
     страница не отличает их друг от друга. На машине разработки модели нет
     законно, и страница обязана сказать именно это, а не показать пустоту.
     """
+    import llm_decide
     import llm_journal
     import llm_local
 
@@ -1256,6 +1257,15 @@ def llm_payload(limit=40):
     seconds = [float(row['seconds']) for row in rows
                if (row.get('seconds') or '').replace('.', '', 1).isdigit()]
 
+    # ЧЕМ МОДЕЛЬ ЗАНЯТА ПРЯМО СЕЙЧАС. Разбор идёт сбоку от цикла и длится
+    # минутами: без этой строки страница между разборами неотличима от
+    # страницы, на которой модель молчит, потому что сломалась.
+    try:
+        import strategy_llm
+        busy = strategy_llm.busy()
+    except Exception:                              # noqa: BLE001
+        busy = None
+
     return {
         'configured': bool(path),
         'model': os.path.basename(path) if path else '',
@@ -1266,7 +1276,12 @@ def llm_payload(limit=40):
         'budget_sec': getattr(config, 'LLM_CYCLE_BUDGET_SEC', 0),
         'reask_min': getattr(config, 'LLM_REASK_AFTER_MIN', 0),
         'last': llm_local.last_stats(),
+        'busy': busy,
         'gates': gates,
+        # Какие отказы означают неисправность. Список приходит из llm_decide,
+        # а не повторяется в разметке: расходясь, он покрасил бы поломку в
+        # цвет обычного отказа, и она потерялась бы среди работы.
+        'broken_gates': list(llm_decide.BROKEN_GATES),
         'avg_seconds': round(sum(seconds) / len(seconds), 1) if seconds else 0,
         'calls': rows,
     }

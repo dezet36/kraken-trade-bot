@@ -175,3 +175,46 @@ class TestItMatchesTheContextBuilder:
         for level_id in ids:
             assert f'"\\"{level_id}\\""' in text
         assert not (gr.referenced(text) - set(gr.rules_of(text)))
+
+
+class TestTheLongestAnswerStillFits:
+    """
+    Пределы полей, предел ответа и окно контекста — три числа про одно.
+
+    Разойдясь, они режут ответ на полуслове, и по обрубку не видно, что
+    виновато. 19 сентября 2026 так и вышло: окно 2048 при вопросе 1703, и 119
+    ответов подряд оборвались, не закрыв JSON.
+
+    Здесь эта связь записана как правило, а не как совпадение настроек.
+    """
+
+    # Русский текст в токенайзере Qwen — около 2.5 знаков на токен. Замерено
+    # на настоящем ответе: 1400 знаков ушли в 528 токенов.
+    CHARS_PER_TOKEN = 2.5
+
+    def worst_answer_tokens(self):
+        import llm_grammar as gr
+        chars = (gr.REGIME_CHARS + gr.ANALYSIS_CHARS + gr.TRIGGER_CHARS
+                 + gr.WHY_CHARS + gr.RISK_CHARS + gr.ALT_CHARS)
+        # Плюс сама разметка JSON: имена полей, скобки, идентификаторы целей.
+        return chars / self.CHARS_PER_TOKEN + 120
+
+    def test_it_fits_the_answer_limit(self):
+        import config
+        assert self.worst_answer_tokens() < config.LLM_MAX_TOKENS
+
+    def test_it_fits_the_context_window(self):
+        """Вопрос замерен на сервере: около 1700 токенов вместе с разметкой."""
+        import config
+        assert 1700 + self.worst_answer_tokens() < config.LLM_CTX
+
+    def test_the_short_fields_cannot_ramble_for_minutes(self):
+        """
+        Поле why на 800 знаков выродилось в двадцать повторов одной мысли и
+        стоило двух минут счёта. Каждое поле, кроме разбора, отвечает на один
+        вопрос — предложения-двух ему хватает.
+        """
+        import llm_grammar as gr
+        for name in ('REGIME_CHARS', 'TRIGGER_CHARS', 'WHY_CHARS',
+                     'RISK_CHARS', 'ALT_CHARS'):
+            assert getattr(gr, name) <= 400, name

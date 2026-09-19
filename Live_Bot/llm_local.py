@@ -151,23 +151,28 @@ def ask(prompt, grammar=None, max_tokens=None):
     # Три минуты счёта ради заведомо обрезанного ответа — худшая из возможных
     # трат: процессор занят, торговый цикл ждёт, результат в мусор. Поэтому
     # отказ выдаётся сразу и числами: видно, что не влезло и на сколько.
-    room = _answer_room(llm, text)
-    if room is not None:
-        if room < MIN_ANSWER_TOKENS:
-            error = RuntimeError(
-                f'окно контекста {_ctx_size(llm)} мало: вопрос занимает '
-                f'{_ctx_size(llm) - room}, на ответ остаётся {room} токенов, '
-                f'а нужно хотя бы {MIN_ANSWER_TOKENS}. Поднимите LLM_CTX.')
-            # Имя отказа едет вместе с исключением: llm_decide запишет в
-            # журнал именно эту причину, а не общее «модель недоступна».
-            error.llm_gate = 'окно контекста мало'
-            raise error
-        if room < limit:
-            log(f'   ⚠️ окно контекста: на ответ остаётся {room} токенов '
-                f'вместо {limit} — ответ может оборваться')
-            limit = room
-
+    # СЧЁТ ТОКЕНОВ — ПОД ТЕМ ЖЕ ЗАМКОМ, что и сам вызов. Токенайзер живёт в
+    # модели, а llama_cpp на параллельные обращения к одному контексту не
+    # рассчитан: наблюдение после выхода ходит в своём потоке и однажды уже
+    # ломало общий код неожиданным вторым входом.
     with _lock:
+        room = _answer_room(llm, text)
+        if room is not None:
+            if room < MIN_ANSWER_TOKENS:
+                error = RuntimeError(
+                    f'окно контекста {_ctx_size(llm)} мало: вопрос занимает '
+                    f'{_ctx_size(llm) - room}, на ответ остаётся {room} '
+                    f'токенов, а нужно хотя бы {MIN_ANSWER_TOKENS}. '
+                    f'Поднимите LLM_CTX.')
+                # Имя отказа едет вместе с исключением: llm_decide запишет в
+                # журнал именно эту причину, а не общее «модель недоступна».
+                error.llm_gate = 'окно контекста мало'
+                raise error
+            if room < limit:
+                log(f'   ⚠️ окно контекста: на ответ остаётся {room} токенов '
+                    f'вместо {limit} — ответ может оборваться')
+                limit = room
+
         started = time.time()
         out = llm.create_chat_completion(
             messages=[{'role': 'user', 'content': text}],
