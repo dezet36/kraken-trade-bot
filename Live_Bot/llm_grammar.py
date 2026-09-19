@@ -156,20 +156,25 @@ def _plans(level_ids):
             stops, targets = (lower, higher) if side == 'LONG' else (higher, lower)
             if not stops or not targets:
                 continue
-            # Имена правил строчными: referenced() ищет ссылки по [a-z...],
-            # и имя с заглавной буквой оно прочитает наполовину.
-            name = f'{side.lower()}_{entry.lower()}'
+            # ИМЯ ПРАВИЛА — ТОЛЬКО БУКВЫ, ЦИФРЫ И ДЕФИС. Подчёркивание
+            # llama.cpp в именах не принимает: её разборщик читает имя до
+            # первого недопустимого знака и падает с «expecting newline or
+            # end at _l2». Проверки этого не ловили — они читают текст
+            # грамматики сами, — и поломка вышла наружу только на сервере, в
+            # журнале службы. Строчные буквы нужны referenced(): имя с
+            # заглавной она прочитает наполовину.
+            name = f'{side.lower()}-{entry.lower()}'
             rules.append(
                 f'{name} ::= "\\"side\\":" ws {_alt([side])} ws "," ws '
                 f'"\\"entry\\":" ws {_alt([entry])} ws "," ws '
-                f'"\\"stop\\":" ws s_{name} ws "," ws '
-                f'"\\"tp\\":" ws tp_{name} ws "," ws '
-                f'"\\"inval\\":" ws s_{name}')
+                f'"\\"stop\\":" ws s-{name} ws "," ws '
+                f'"\\"tp\\":" ws tp-{name} ws "," ws '
+                f'"\\"inval\\":" ws s-{name}')
             # Уровень инвалидации — из того же набора, что и стоп: идея лонга
             # умирает ПОД входом, а не над ним.
-            rules.append(f's_{name} ::= {_alt(stops)}')
-            rules.append(f'tp_{name} ::= {_targets_rule(f"t_{name}")}')
-            rules.append(f't_{name} ::= {_alt(targets)}')
+            rules.append(f's-{name} ::= {_alt(stops)}')
+            rules.append(f'tp-{name} ::= {_targets_rule(f"t-{name}")}')
+            rules.append(f't-{name} ::= {_alt(targets)}')
             plans.append(name)
     return plans, rules
 
@@ -239,6 +244,9 @@ def referenced(grammar):
         # Без этой строки проверка сообщала о «неопределённых правилах» x00 и
         # x1f — то есть отправляла искать ошибку, которой нет.
         body = re.sub(r'\[[^\]]*\]', ' ', body)
-        for word in re.findall(r'[a-z][a-z0-9_]*', body):
+        # Дефис входит в имя: llama.cpp допускает в именах буквы, цифры и
+        # дефис, и правило tp-long-l2 без него читалось бы как три ссылки на
+        # несуществующие tp, long и l2.
+        for word in re.findall(r'[a-z][a-z0-9-]*[a-z0-9]|[a-z]', body):
             out.add(word)
     return out

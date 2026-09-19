@@ -109,7 +109,7 @@ class TestTheExitPlanIsAlwaysComplete:
         целей грамматика была бы короче, но разрешила бы именно это.
         """
         text = gr.build(['L1', 'L2', 'L3'])
-        lists = [l for l in text.splitlines() if l.startswith('tp_')]
+        lists = [l for l in text.splitlines() if l.startswith('tp-')]
         assert lists, 'правил списка целей нет вовсе'
         for rule in lists:
             assert '"[" ws "]"' not in rule
@@ -117,9 +117,9 @@ class TestTheExitPlanIsAlwaysComplete:
 
     def test_targets_are_capped(self):
         text = gr.build(['L1', 'L2', 'L3', 'L4'])
-        for rule in [l for l in text.splitlines() if l.startswith('tp_')]:
-            item = rule.split('::=')[0].strip()[3:]     # tp_long_l2 -> long_l2
-            longest = max(part.count(f't_{item}') for part in rule.split('|'))
+        for rule in [l for l in text.splitlines() if l.startswith('tp-')]:
+            item = rule.split('::=')[0].strip()[3:]     # tp-long-l2 -> long-l2
+            longest = max(part.count(f't-{item}') for part in rule.split('|'))
             assert longest == gr.MAX_TARGETS, rule
 
     def test_an_entry_carries_stop_and_invalidation(self):
@@ -127,7 +127,7 @@ class TestTheExitPlanIsAlwaysComplete:
         # Поля входа переехали в ветки плана: у каждой пары «направление +
         # уровень входа» свой набор допустимых стопов и целей.
         plans = [l for l in text.splitlines()
-                 if l.startswith('long_') or l.startswith('short_')]
+                 if l.startswith('long-') or l.startswith('short-')]
         assert plans, 'веток плана нет'
         for rule in plans:
             for field in ('side', 'entry', 'stop', 'tp', 'inval'):
@@ -254,7 +254,7 @@ class TestWrongGeometryIsUnsayable:
 
     def test_a_long_can_only_target_levels_above_the_entry(self):
         text = gr.build(self.LEVELS)
-        targets = self.rule(text, 't_long_l3')
+        targets = self.rule(text, 't-long-l3')
         for above in ('L1', 'L2'):
             assert f'\\"{above}\\"' in targets, above
         for below in ('L4', 'L5'):
@@ -262,7 +262,7 @@ class TestWrongGeometryIsUnsayable:
 
     def test_a_long_can_only_stop_below_the_entry(self):
         text = gr.build(self.LEVELS)
-        stops = self.rule(text, 's_long_l3')
+        stops = self.rule(text, 's-long-l3')
         for below in ('L4', 'L5'):
             assert f'\\"{below}\\"' in stops, below
         for above in ('L1', 'L2'):
@@ -270,8 +270,8 @@ class TestWrongGeometryIsUnsayable:
 
     def test_a_short_is_the_mirror(self):
         text = gr.build(self.LEVELS)
-        stops = self.rule(text, 's_short_l3')
-        targets = self.rule(text, 't_short_l3')
+        stops = self.rule(text, 's-short-l3')
+        targets = self.rule(text, 't-short-l3')
         assert '\\"L2\\"' in stops and '\\"L4\\"' not in stops
         assert '\\"L4\\"' in targets and '\\"L2\\"' not in targets
 
@@ -281,8 +281,8 @@ class TestWrongGeometryIsUnsayable:
         берётся из того же набора, что и стоп.
         """
         text = gr.build(self.LEVELS)
-        plan = self.rule(text, 'long_l3')
-        assert plan.count('s_long_l3') == 2, plan
+        plan = self.rule(text, 'long-l3')
+        assert plan.count('s-long-l3') == 2, plan
 
     def test_the_topmost_level_has_no_long_branch(self):
         """
@@ -290,8 +290,8 @@ class TestWrongGeometryIsUnsayable:
         — иначе грамматика разрешит вход без единой цели.
         """
         text = gr.build(self.LEVELS)
-        assert 'long_l1 ::=' not in text
-        assert 'short_l5 ::=' not in text
+        assert 'long-l1 ::=' not in text
+        assert 'short-l5 ::=' not in text
 
     def test_two_levels_leave_only_a_refusal(self):
         """
@@ -308,3 +308,33 @@ class TestWrongGeometryIsUnsayable:
         assert not (gr.referenced(text) - set(gr.rules_of(text)))
         plans = self.rule(text, 'plan')
         assert plans.count('|') == 19, plans   # 10 лонгов + 10 шортов
+
+
+class TestRuleNamesAreParsable:
+    """
+    ИМЕНА ПРАВИЛ — ТОЛЬКО БУКВЫ, ЦИФРЫ И ДЕФИС, и узналось это дорого.
+
+    Первая версия геометрических веток называла правила через подчёркивание —
+    long_l2, s_long_l2. Все проверки прошли: они читают текст грамматики сами
+    и о разборщике llama.cpp ничего не знают. На сервере же он читает имя до
+    первого недопустимого знака и падает: «parse: error parsing grammar:
+    expecting newline or end at _l2 | long_l3 | ...».
+
+    Поймалось только в журнале службы, на живом боте. Поэтому набор знаков
+    теперь проверяется здесь — это единственное, что можно проверить без самой
+    llama.cpp, которой на машине разработки нет.
+    """
+
+    def test_no_rule_name_has_an_underscore(self):
+        import re
+        for count in (0, 3, 5, 12):
+            text = gr.build([f'L{i}' for i in range(1, count + 1)])
+            for name in gr.rules_of(text):
+                assert re.fullmatch(r'[A-Za-z0-9-]+', name), name
+
+    def test_references_match_the_same_charset(self):
+        """Ссылка читается тем же разборщиком, что и определение."""
+        import re
+        text = gr.build([f'L{i}' for i in range(1, 8)])
+        for name in gr.referenced(text):
+            assert re.fullmatch(r'[A-Za-z0-9-]+', name), name
