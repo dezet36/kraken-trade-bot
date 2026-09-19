@@ -76,7 +76,9 @@ class TestRefusalIsAlwaysAvailable:
     """
 
     def test_skip_exists_alongside_entry(self):
-        text = gr.build(['L1', 'L2'])
+        # Три уровня, а не два: вход, стоп и цель обязаны быть разными, и на
+        # двух грамматика честно оставляет только отказ.
+        text = gr.build(['L1', 'L2', 'L3'])
         assert 'skip' in gr.rules_of(text)
         assert 'enter' in gr.rules_of(text)
 
@@ -106,22 +108,30 @@ class TestTheExitPlanIsAlwaysComplete:
         Пустой список целей — это вход без единого выхода. Через повторение
         целей грамматика была бы короче, но разрешила бы именно это.
         """
-        text = gr.build(['L1', 'L2'])
-        tps = [l for l in text.splitlines() if l.startswith('tps')][0]
-        assert '"[" "]"' not in tps
-        assert tps.count('lv') >= 1
+        text = gr.build(['L1', 'L2', 'L3'])
+        lists = [l for l in text.splitlines() if l.startswith('tp_')]
+        assert lists, 'правил списка целей нет вовсе'
+        for rule in lists:
+            assert '"[" ws "]"' not in rule
+            assert '"[" "]"' not in rule
 
     def test_targets_are_capped(self):
         text = gr.build(['L1', 'L2', 'L3', 'L4'])
-        tps = [l for l in text.splitlines() if l.startswith('tps')][0]
-        longest = max(part.count('lv') for part in tps.split('|'))
-        assert longest == gr.MAX_TARGETS
+        for rule in [l for l in text.splitlines() if l.startswith('tp_')]:
+            item = rule.split('::=')[0].strip()[3:]     # tp_long_l2 -> long_l2
+            longest = max(part.count(f't_{item}') for part in rule.split('|'))
+            assert longest == gr.MAX_TARGETS, rule
 
     def test_an_entry_carries_stop_and_invalidation(self):
-        text = gr.build(['L1', 'L2'])
-        enter = [l for l in text.splitlines() if l.startswith('enter')][0]
-        for field in ('entry', 'stop', 'tp', 'inval'):
-            assert f'\\"{field}\\"' in enter
+        text = gr.build(['L1', 'L2', 'L3'])
+        # Поля входа переехали в ветки плана: у каждой пары «направление +
+        # уровень входа» свой набор допустимых стопов и целей.
+        plans = [l for l in text.splitlines()
+                 if l.startswith('long_') or l.startswith('short_')]
+        assert plans, 'веток плана нет'
+        for rule in plans:
+            for field in ('side', 'entry', 'stop', 'tp', 'inval'):
+                assert f'\\"{field}\\"' in rule, (field, rule)
 
 
 class TestTheNumbersAreBounded:
@@ -131,7 +141,7 @@ class TestTheNumbersAreBounded:
         Вероятность ограничена 0.00-0.99 намеренно. Единица говорит не о
         сетапе, а о том, что модель себя не откалибровала.
         """
-        text = gr.build(['L1'])
+        text = gr.build(['L1', 'L2', 'L3'])
         prob = [l for l in text.splitlines() if l.startswith('prob')][0]
         assert '"1.' not in prob
         assert '"0."' in prob
@@ -141,7 +151,7 @@ class TestTheNumbersAreBounded:
         Без предела модель на медленном процессоре уходит в рассуждение на
         сотни токенов — это минуты счёта ради текста, который не дочитают.
         """
-        text = gr.build(['L1'])
+        text = gr.build(['L1', 'L2', 'L3'])
         why = [l for l in text.splitlines() if l.startswith('why')][0]
         assert f'{{1,{gr.WHY_CHARS}}}' in why
 
@@ -218,3 +228,83 @@ class TestTheLongestAnswerStillFits:
         for name in ('REGIME_CHARS', 'TRIGGER_CHARS', 'WHY_CHARS',
                      'RISK_CHARS', 'ALT_CHARS'):
             assert getattr(gr, name) <= 400, name
+
+
+class TestWrongGeometryIsUnsayable:
+    """
+    Для лонга цель НИЖЕ входа должна быть невозможна, а не отвергнута.
+
+    ОТКУДА ЭТО. 19 сентября 2026, в первый же день, когда модель стала
+    отвечать целиком, два вердикта из трёх умерли на предохранителе геометрии:
+    для лонга она выбирала цели ниже входа. Текст задачи прямо требует
+    обратного — восьмимиллиардная модель этого не держит. Со стороны выходило
+    «стратегия работает, но никогда не торгует».
+
+    Приём тот же, которым закрыты выдуманные цены: не просьба в промте, а
+    вычёркивание недопустимых вариантов до выбора. Проверка в llm_decide
+    остаётся вторым рубежом — на случай вызова без грамматики.
+
+    ПОРЯДОК СПИСКА — ЭТО ЦЕНА: уровни приходят сверху вниз.
+    """
+
+    LEVELS = ['L1', 'L2', 'L3', 'L4', 'L5']
+
+    def rule(self, text, name):
+        return [l for l in text.splitlines() if l.startswith(name + ' ')][0]
+
+    def test_a_long_can_only_target_levels_above_the_entry(self):
+        text = gr.build(self.LEVELS)
+        targets = self.rule(text, 't_long_l3')
+        for above in ('L1', 'L2'):
+            assert f'\\"{above}\\"' in targets, above
+        for below in ('L4', 'L5'):
+            assert f'\\"{below}\\"' not in targets, below
+
+    def test_a_long_can_only_stop_below_the_entry(self):
+        text = gr.build(self.LEVELS)
+        stops = self.rule(text, 's_long_l3')
+        for below in ('L4', 'L5'):
+            assert f'\\"{below}\\"' in stops, below
+        for above in ('L1', 'L2'):
+            assert f'\\"{above}\\"' not in stops, above
+
+    def test_a_short_is_the_mirror(self):
+        text = gr.build(self.LEVELS)
+        stops = self.rule(text, 's_short_l3')
+        targets = self.rule(text, 't_short_l3')
+        assert '\\"L2\\"' in stops and '\\"L4\\"' not in stops
+        assert '\\"L4\\"' in targets and '\\"L2\\"' not in targets
+
+    def test_the_invalidation_sits_with_the_stop(self):
+        """
+        Идея лонга умирает ПОД входом, а не над ним. Уровень инвалидации
+        берётся из того же набора, что и стоп.
+        """
+        text = gr.build(self.LEVELS)
+        plan = self.rule(text, 'long_l3')
+        assert plan.count('s_long_l3') == 2, plan
+
+    def test_the_topmost_level_has_no_long_branch(self):
+        """
+        Лонгу от самого верхнего уровня целиться некуда. Ветки быть не должно
+        — иначе грамматика разрешит вход без единой цели.
+        """
+        text = gr.build(self.LEVELS)
+        assert 'long_l1 ::=' not in text
+        assert 'short_l5 ::=' not in text
+
+    def test_two_levels_leave_only_a_refusal(self):
+        """
+        Вход, стоп и цель обязаны быть РАЗНЫМИ уровнями. На двух сделка не
+        выражается, и грамматика честно оставляет только отказ.
+        """
+        text = gr.build(['L1', 'L2'])
+        assert '\\"enter\\"' not in text
+        assert '\\"skip\\"' in text
+
+    def test_all_branches_of_a_full_setup_resolve(self):
+        """Двенадцать уровней — это сорок веток; висячая ссылка убьёт вызов."""
+        text = gr.build([f'L{i}' for i in range(1, 13)])
+        assert not (gr.referenced(text) - set(gr.rules_of(text)))
+        plans = self.rule(text, 'plan')
+        assert plans.count('|') == 19, plans   # 10 лонгов + 10 шортов

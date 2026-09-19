@@ -95,14 +95,21 @@ def build(level_ids):
     if not level_ids:
         return _skip_only()
 
+    plans, rules = _plans(level_ids)
+    if not plans:
+        # Меньше трёх уровней — сделки не выразить: вход, стоп и цель обязаны
+        # быть разными уровнями. Разрешить вход здесь значило бы разрешить
+        # стоп на цене входа.
+        return _skip_only()
+
     head = ('"{" ws "\\"regime\\":" ws regime ws ","'
             ' ws "\\"analysis\\":" ws analysis ws ","')
+    body = '\n'.join(rules)
     return f'''root     ::= enter | skip
-enter    ::= {head} ws "\\"d\\":\\"enter\\"," ws "\\"side\\":" ws side ws "," ws "\\"entry\\":" ws lv ws "," ws "\\"stop\\":" ws lv ws "," ws "\\"tp\\":" ws tps ws "," ws "\\"inval\\":" ws lv ws "," ws "\\"trigger\\":" ws trigger ws "," ws "\\"cf\\":" ws cf ws "," ws "\\"p\\":" ws prob ws "," ws "\\"why\\":" ws why ws "," ws "\\"risk\\":" ws risk ws "," ws "\\"alt\\":" ws alt ws "}}"
+enter    ::= {head} ws "\\"d\\":\\"enter\\"," ws plan ws "," ws "\\"trigger\\":" ws trigger ws "," ws "\\"cf\\":" ws cf ws "," ws "\\"p\\":" ws prob ws "," ws "\\"why\\":" ws why ws "," ws "\\"risk\\":" ws risk ws "," ws "\\"alt\\":" ws alt ws "}}"
 skip     ::= {head} ws "\\"d\\":\\"skip\\"," ws "\\"cf\\":" ws cf ws "," ws "\\"why\\":" ws why ws "}}"
-side     ::= {_alt(['LONG', 'SHORT'])}
-lv       ::= {_alt(level_ids)}
-tps      ::= {_targets_rule()}
+plan     ::= {' | '.join(plans)}
+{body}
 cf       ::= "{{" ws "\\"poi\\":" ws bool ws "," ws "\\"vp\\":" ws bool ws "," ws "\\"der\\":" ws bool ws "," ws "\\"smc\\":" ws bool ws "," ws "\\"flow\\":" ws bool ws "}}"
 bool     ::= "true" | "false"
 prob     ::= "0." [0-9] [1-9] | "0." [1-9] [0-9]
@@ -117,17 +124,70 @@ ws       ::= [ \\n]*
 '''
 
 
-def _targets_rule():
+def _plans(level_ids):
+    """
+    По одному правилу на каждую пару «направление + уровень входа».
+
+    ЗАЧЕМ ЭТО, КОГДА ГЕОМЕТРИЮ УЖЕ ПРОВЕРЯЕТ КОД. Проверка отвергает готовый
+    ответ, а здесь неверный ответ становится НЕВОЗМОЖНЫМ — как уже сделано с
+    ценами: модель не придумывает число, потому что ей разрешены только
+    идентификаторы из списка.
+
+    Разница не теоретическая. 19 сентября 2026, в первый же день, когда модель
+    начала отвечать целиком, два вердикта из трёх умерли на предохранителе
+    геометрии: для лонга она выбирала цели НИЖЕ входа. Текст задачи прямо
+    требует обратного — восьмимиллиардная модель этого не держит. Со стороны
+    получалось «стратегия работает, но никогда не торгует».
+
+    ПОРЯДОК СПИСКА — ЭТО ЦЕНА. Уровни приходят сверху вниз: llm_context
+    сортирует их по убыванию цены и только потом нумерует. Значит «выше» — это
+    раньше в списке, «ниже» — позже, и самих цен грамматике знать не нужно.
+
+    Уровни входа, для которых нет ни одного стопа или ни одной цели, ветки не
+    получают вовсе: лонг от самого верхнего уровня целиться некуда. Это
+    заодно закрывает случай, когда вся разметка оказалась по одну сторону от
+    цены — тогда останется только отказ, и он будет честным.
+    """
+    plans, rules = [], []
+    for side in ('LONG', 'SHORT'):
+        for index, entry in enumerate(level_ids):
+            higher = list(level_ids[:index])
+            lower = list(level_ids[index + 1:])
+            stops, targets = (lower, higher) if side == 'LONG' else (higher, lower)
+            if not stops or not targets:
+                continue
+            # Имена правил строчными: referenced() ищет ссылки по [a-z...],
+            # и имя с заглавной буквой оно прочитает наполовину.
+            name = f'{side.lower()}_{entry.lower()}'
+            rules.append(
+                f'{name} ::= "\\"side\\":" ws {_alt([side])} ws "," ws '
+                f'"\\"entry\\":" ws {_alt([entry])} ws "," ws '
+                f'"\\"stop\\":" ws s_{name} ws "," ws '
+                f'"\\"tp\\":" ws tp_{name} ws "," ws '
+                f'"\\"inval\\":" ws s_{name}')
+            # Уровень инвалидации — из того же набора, что и стоп: идея лонга
+            # умирает ПОД входом, а не над ним.
+            rules.append(f's_{name} ::= {_alt(stops)}')
+            rules.append(f'tp_{name} ::= {_targets_rule(f"t_{name}")}')
+            rules.append(f't_{name} ::= {_alt(targets)}')
+            plans.append(name)
+    return plans, rules
+
+
+def _targets_rule(item='lv'):
     """
     От одной до MAX_TARGETS целей списком.
 
-    Длины перечисляются явно: "[" lv "]" | "[" lv "," lv "]" | ...
-    Через повторение lv* было бы короче, но тогда грамматика разрешила бы и
+    Длины перечисляются явно: "[" t "]" | "[" t "," t "]" | ...
+    Через повторение t* было бы короче, но тогда грамматика разрешила бы и
     пустой список целей — то есть вход без единого выхода.
+
+    `item` — имя правила одной цели. У каждой пары «направление + вход» свой
+    набор допустимых целей, поэтому общего правила на всех больше нет.
     """
     out = []
     for count in range(1, MAX_TARGETS + 1):
-        body = ' ws "," ws '.join(['lv'] * count)
+        body = ' ws "," ws '.join([item] * count)
         out.append(f'"[" ws {body} ws "]"')
     return ' | '.join(out)
 

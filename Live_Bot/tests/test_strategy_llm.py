@@ -657,9 +657,11 @@ class TestTheRiskIsItsOwn:
     """
 
     def test_the_donor_risk_does_not_travel(self, monkeypatch):
-        import settings_store
-
-        monkeypatch.setattr(settings_store, 'risk_pct', lambda name: 0.7)
+        # Подменяем В ТОМ объекте, которым пользуется стратегия. Проверки
+        # выгружают settings_store и импортируют заново, поэтому «свежий»
+        # settings_store и strategy_llm.settings бывают РАЗНЫМИ модулями с
+        # одним именем — патч одного мимо другого проходит молча.
+        monkeypatch.setattr(strategy_llm.settings, 'risk_pct', lambda name: 0.7)
         candidate = donor_candidate()
         candidate['signal']['params']['risk_pct'] = 0.5
         signal = strategy_llm._reshape(candidate, approving_verdict())
@@ -682,9 +684,7 @@ class TestTheRiskIsItsOwn:
         Донор без готового сигнала — обычный случай, а не край. Сделка из него
         обязана собираться: пара, направление, вход, стоп, цели и доля риска.
         """
-        import settings_store
-
-        monkeypatch.setattr(settings_store, 'risk_pct', lambda name: 0.5)
+        monkeypatch.setattr(strategy_llm.settings, 'risk_pct', lambda name: 0.5)
         signal = strategy_llm._reshape(fibo_candidate(), approving_verdict())
         params = signal['params']
         assert signal['trading_pair'] == 'SUIUSDT'
