@@ -50,6 +50,7 @@ import llm_context
 import llm_decide
 import llm_journal
 import llm_local
+import settings_store as settings
 from logger import log
 
 NAME = 'LLM'
@@ -164,17 +165,28 @@ def _fingerprint(candidate):
 
     Цены округляются до значащих цифр, а не до копеек: у SHIB и у BTC разный
     порядок, и общего числа знаков после запятой для них не существует.
+
+    У ФИБО ГОТОВОГО СИГНАЛА НЕТ, и это не оплошность сканера: там сигнал
+    достраивается позже, из свечей. Взять цены только из signal значило бы
+    получить для всех его кандидатов одну метку «пара|—|—» — и пятая
+    стратегия на час переставала бы смотреть на пару после ПЕРВОГО же сетапа
+    на ней, считая следующий тем же самым. Поэтому запасной источник —
+    разметка самого сетапа.
     """
     params = (candidate.get('signal') or {}).get('params') or {}
+    setup = candidate.get('setup') or {}
 
-    def mark(value):
-        try:
-            return f'{float(value):.6g}'
-        except (TypeError, ValueError):
-            return '—'
+    def mark(*values):
+        for value in values:
+            try:
+                return f'{float(value):.6g}'
+            except (TypeError, ValueError):
+                continue
+        return '—'
 
-    return (f"{candidate.get('pair')}|{mark(params.get('entry'))}"
-            f"|{mark(params.get('stop_loss'))}")
+    return (f"{candidate.get('pair')}"
+            f"|{mark(params.get('entry'), setup.get('end_price'))}"
+            f"|{mark(params.get('stop_loss'), setup.get('start_price'))}")
 
 
 def _asked_recently(mark, now=None):
@@ -213,7 +225,19 @@ def _reshape(candidate, verdict):
 
     params = dict(donor.get('params') or {})
     targets = list(verdict['targets'])
+
+    # РИСК У СТРАТЕГИИ СВОЙ, А НЕ ДОНОРСКИЙ. Доля риска приезжала вместе с
+    # чужими параметрами, и сделка на депозите пятой стратегии шла с
+    # настройкой четвёртой. У сетапов фибо её не было вовсе — там готового
+    # сигнала нет, — и тогда бралась общая настройка бота.
+    #
+    # Размер позиции пересчитывает брокер по этой доле, текущему депозиту и
+    # ДИСТАНЦИИ СТОПА, а стоп у модели свой: копировать донорский размер
+    # значило бы рисковать не тем, что заявлено.
+    params.pop('position_size', None)
+    params.pop('risk_amount', None)
     params.update({
+        'risk_pct': settings.risk_pct(NAME),
         'entry': verdict['entry'],
         'stop_loss': verdict['stop'],
         'take_profit_1': targets[0],

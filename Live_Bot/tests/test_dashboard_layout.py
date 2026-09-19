@@ -229,3 +229,29 @@ class TestActionsArePostAndGuarded:
         """Чтение состояния ничего не меняет и остаётся доступным на чтение."""
         get = self.PY[self.PY.index('def do_GET'):self.PY.index('def do_POST')]
         assert "'/api/data'" in get
+
+
+class TestHiddenMeansHidden:
+    """
+    Атрибут hidden слабее правила по классу, и на этом уже один раз погорели.
+
+    `.filters { display: flex }` перебивало браузерное `[hidden]{display:none}`,
+    и панель фильтров периода оставалась видимой на ВСЕХ страницах — включая
+    настройки и подключения, где она не фильтрует ничего. Код при этом честно
+    ставил hidden, и по коду всё выглядело правильно.
+    """
+
+    def test_every_display_class_that_is_hidden_has_an_override(self):
+        import os
+        import re
+
+        path = os.path.join(os.path.dirname(os.path.dirname(
+            os.path.abspath(__file__))), 'dashboard.html')
+        html = open(path, encoding='utf-8').read()
+
+        # Классы, которым код где-то ставит hidden через свойство .hidden
+        hidden_by_code = set(re.findall(r"querySelector\('\.([a-z-]+)'\)[^\n]*\n?[^\n]*\.hidden", html))
+        for name in hidden_by_code:
+            assert re.search(rf"\.{name}\[hidden\]", html), (
+                f'.{name} прячут из кода, но правила .{name}[hidden] нет — '
+                f'display по классу перебьёт атрибут')

@@ -600,3 +600,96 @@ class TestABrokenAnswerIsNotTakenForAJudgement:
         import llm_decide
         assert 'ответ обрезан' in llm_decide.BROKEN_GATES
         assert 'мало конфлюенса' not in llm_decide.BROKEN_GATES
+
+
+def fibo_candidate(pair='SUIUSDT', end_price=0.8, start_price=0.76, score=5):
+    """
+    Кандидат в том виде, в каком его отдаёт сканер ФИБО, — без готового
+    сигнала.
+
+    Так и задумано: у фибо сигнал достраивается позже, из свечей
+    (bot._build_signal, ветка FIBO). Проверки, написанные по образцу уровней,
+    этой формы не видели вовсе — а именно она и приходит чаще всех.
+    """
+    return {
+        'pair': pair,
+        'score': score,
+        'df_1h': 'свечи',
+        'zone': 'Zone_A',
+        'htf_trend': 'BULLISH',
+        'setup': {'type': 'LONG', 'start_price': start_price,
+                  'end_price': end_price, 'size': abs(end_price - start_price)},
+    }
+
+
+class TestTheFiboShapeIsUnderstood:
+    """
+    У кандидатов фибо нет ключа signal, и это не оплошность сканера.
+
+    19 сентября 2026 панель показала метку занятости «SUIUSDT|—|—»: цены не
+    прочитались, потому что искали их только в signal. Для ВСЕХ сетапов фибо
+    на одной паре метка выходила одинаковой, и после первого же разбора пара
+    выпадала из поля зрения на час — следующий сетап считался тем же самым.
+    """
+
+    def test_two_setups_on_one_pair_differ(self):
+        first = strategy_llm._fingerprint(fibo_candidate(end_price=0.80))
+        second = strategy_llm._fingerprint(fibo_candidate(end_price=0.91))
+        assert first != second, f'обе метки {first}'
+        assert '—' not in first, first
+
+    def test_the_levels_shape_still_works(self):
+        """У уровней, SMC и боллинджера готовый сигнал есть — берём оттуда."""
+        mark = strategy_llm._fingerprint(donor_candidate())
+        assert '—' not in mark, mark
+        assert '100' in mark
+
+
+class TestTheRiskIsItsOwn:
+    """
+    Доля риска приезжала вместе с чужими параметрами: сделка на депозите пятой
+    стратегии шла с настройкой четвёртой. У сетапов фибо её не было вовсе — и
+    бралась общая настройка бота.
+
+    Размер позиции брокер считает сам, по этой доле, текущему депозиту и
+    ДИСТАНЦИИ СТОПА. Стоп у модели свой, поэтому донорский размер — это риск
+    не тот, что заявлен.
+    """
+
+    def test_the_donor_risk_does_not_travel(self, monkeypatch):
+        import settings_store
+
+        monkeypatch.setattr(settings_store, 'risk_pct', lambda name: 0.7)
+        candidate = donor_candidate()
+        candidate['signal']['params']['risk_pct'] = 0.5
+        signal = strategy_llm._reshape(candidate, approving_verdict())
+        assert signal['params']['risk_pct'] == 0.7
+
+    def test_the_donor_size_is_dropped(self):
+        """
+        Размер донора посчитан под ЕГО стоп. Оставить его значило бы рискнуть
+        суммой, которой никто не назначал.
+        """
+        candidate = donor_candidate()
+        candidate['signal']['params']['position_size'] = 10.0
+        candidate['signal']['params']['risk_amount'] = 50.0
+        signal = strategy_llm._reshape(candidate, approving_verdict())
+        assert 'position_size' not in signal['params']
+        assert 'risk_amount' not in signal['params']
+
+    def test_a_fibo_donor_still_gets_a_workable_signal(self, monkeypatch):
+        """
+        Донор без готового сигнала — обычный случай, а не край. Сделка из него
+        обязана собираться: пара, направление, вход, стоп, цели и доля риска.
+        """
+        import settings_store
+
+        monkeypatch.setattr(settings_store, 'risk_pct', lambda name: 0.5)
+        signal = strategy_llm._reshape(fibo_candidate(), approving_verdict())
+        params = signal['params']
+        assert signal['trading_pair'] == 'SUIUSDT'
+        assert signal['strategy'] == 'LLM'
+        assert signal['setup']['type'] == 'LONG'
+        assert params['entry'] == 100.0 and params['stop_loss'] == 97.0
+        assert params['tp_targets'] == [107.0, 109.0]
+        assert params['risk_pct'] == 0.5

@@ -146,6 +146,12 @@
 
   /* ── Управляющие элементы ────────────────────────────────────────── */
   .filters { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-left: auto; }
+  /* БЕЗ ЭТОЙ СТРОКИ ПРЯТАНЬЕ НЕ РАБОТАЛО ВОВСЕ. Атрибут hidden держится на
+     правиле браузера [hidden]{display:none}, а оно слабее любого правила по
+     классу: display:flex выше него по весу, и панель фильтров оставалась
+     видимой на всех страницах, сколько бы код ни ставил hidden. Со стороны
+     это выглядело как работающий фильтр периода на странице настроек. */
+  .filters[hidden] { display: none; }
   .seg {
     display: inline-flex; padding: 2px; gap: 2px; background: var(--hairline-2);
     border-radius: var(--r-sm);
