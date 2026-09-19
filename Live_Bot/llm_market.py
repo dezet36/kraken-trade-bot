@@ -309,7 +309,9 @@ def delta_facts(pair, upto=None, price_change_pct=None):
             'rows': len(window),
         }
 
-    if price_change_pct is not None and out.get('h4'):
+    # Расхождение называется только при покрытии окна хотя бы наполовину:
+    # на восьми минутах из шестидесяти это не расхождение, а шум выборки.
+    if price_change_pct is not None and out.get('h4') and out['h4'].get('rows', 0) >= 120:
         share = out['h4'].get('share_pct')
         if share is not None:
             out['divergence'] = (
