@@ -4647,12 +4647,46 @@ function renderLlmState(d) {
     + (d.avg_seconds ? `<span>в среднем <b>${d.avg_seconds} с</b></span>` : '')
     + `<span>вердикт годен <b>${d.stale_min} мин</b></span>`
     + `<span>повтор не чаще <b>${d.reask_min} мин</b></span>`
-    + `<span>критик <b style="color:${d.critic === false ? 'var(--warn)' : 'var(--good)'}">${d.critic === false ? 'выключен' : 'включён'}</b></span>`
+    + criticChip(d.critic !== false)
     + '</div><div class="ai-state" style="margin-top:6px">' + fit + cut + '</div>'
     + '<div class="ai-state" style="margin-top:6px">'
     + streamLine('лента сделок', streams.trades) + streamLine('ликвидации', streams.liquidations)
     + '</div>'
     + (armed ? '<div class="ai-state" style="margin-top:6px"><span>взведённые планы:</span>' + armed + '</div>' : '');
+  const criticBtn = document.getElementById('ai-critic');
+  if (criticBtn) criticBtn.onclick = () => toggleCritic(criticBtn);
+}
+
+/* Тумблер критика прямо здесь, а не только в настройках: человек смотрит
+   на разборы модели на этой вкладке, и вопрос «а критик сейчас работает?»
+   возникает именно тут. В настройках (карточка LLM) тот же переключатель. */
+function criticChip(on) {
+  const writable = !!(DATA && DATA.writable !== false);
+  const state = `<b style="color:${on ? 'var(--good)' : 'var(--warn)'}">${on ? 'включён' : 'выключен'}</b>`;
+  if (!writable) return `<span>критик ${state}</span>`;
+  return `<span>критик ${state}
+    <button type="button" class="btn ghost" id="ai-critic" data-on="${on ? '1' : ''}"
+      style="padding:2px 10px;font-size:11px;margin-left:6px"
+      title="${on ? 'Оставить только аналитика: планы пойдут в сделку сразу после проверок кода'
+                  : 'Вернуть второе мнение о каждом плане «войти»'}">${on ? 'выключить' : 'включить'}</button></span>`;
+}
+
+async function toggleCritic(btn) {
+  const on = btn.dataset.on !== '1';
+  btn.disabled = true;
+  btn.textContent = '…';
+  try {
+    const resp = await fetch('/api/settings', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ LLM: { critic: on } }),
+    });
+    if (!resp.ok) throw new Error(await resp.text() || resp.status);
+    SETTINGS = null;                       // карточка LLM перечитает состояние
+    await loadLlm();
+  } catch (e) {
+    btn.disabled = false;
+    btn.textContent = 'не вышло: ' + e.message;
+  }
 }
 
 function renderLlm() {
