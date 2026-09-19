@@ -338,3 +338,26 @@ class TestRuleNamesAreParsable:
         text = gr.build([f'L{i}' for i in range(1, 8)])
         for name in gr.referenced(text):
             assert re.fullmatch(r'[A-Za-z0-9-]+', name), name
+
+
+class TestTheTemplateDoesNotEatBraces:
+    """
+    Шаблон грамматики — f-строка, и одинарные фигурные скобки в ней —
+    подстановка, а не текст. 19 сентября 2026 ограничение пробелов
+    `{0,2}` ушло к llama.cpp как `(0, 2)`: парсер падал с «expecting ')'»,
+    падение роняло процесс, и бот перезапускался на каждом разборе — с
+    панели это выглядело как «нет связи с ботом».
+    """
+
+    @pytest.mark.parametrize('text', [
+        gr.build(['L1', 'L2', 'L3', 'L4']), gr.build([]), gr.critic()])
+    def test_repetitions_survive_formatting(self, text):
+        import re
+        assert '(0, 2)' not in text and '(1, ' not in text
+        ws = [l for l in text.splitlines() if l.startswith('ws')]
+        assert ws and ws[0].endswith('[ ' + chr(92) + 'n]{0,2}'), ws
+        # Каждое повторение (после `]` или имени правила) — вида {m,n} с
+        # числами. Фигурные скобки самого JSON здесь ни при чём: они стоят
+        # внутри кавычек.
+        for m in re.finditer(r'(?<=[\]A-Za-z0-9])\{[^}"]*\}', text):
+            assert re.fullmatch(r'\{\d+,\d+\}', m.group()), m.group()

@@ -141,7 +141,7 @@ why      ::= {_text(WHY_CHARS)}
 risk     ::= {_text(RISK_CHARS)}
 alt      ::= {_text(ALT_CHARS)}
 ch       ::= [^"\\\\\\x00-\\x1f]
-ws       ::= [ \\n]{0,2}
+ws       ::= [ \\n]{{0,2}}
 '''
 
 
@@ -157,7 +157,7 @@ verdict  ::= "\\"confirm\\"" | "\\"reject\\""
 issues   ::= {_text(CRITIC_ISSUES_CHARS)}
 worst    ::= {_text(CRITIC_WORST_CHARS)}
 ch       ::= [^"\\\\\\x00-\\x1f]
-ws       ::= [ \\n]{0,2}
+ws       ::= [ \\n]{{0,2}}
 '''
 
 
@@ -248,7 +248,7 @@ regime   ::= {_text(REGIME_CHARS)}
 analysis ::= {_text(ANALYSIS_CHARS)}
 why      ::= {_text(WHY_CHARS)}
 ch       ::= [^"\\\\\\x00-\\x1f]
-ws       ::= [ \\n]{0,2}
+ws       ::= [ \\n]{{0,2}}
 '''
 
 
