@@ -298,6 +298,31 @@ def reset_exchange():
     _exchange_instance = None
 
 
+# Пауза перед повторами после «Too many visits» (retCode 10006). В начале
+# каждого часа биржа на несколько секунд режет запросы — 19 сентября 2026
+# так пропали свечи по 21 паре за три часа, все в первые 30 секунд часа.
+# Отказ без повтора — это пара, которую сканер в этот цикл не увидел.
+RATE_LIMIT_RETRIES = (2.0, 4.0, 8.0)
+
+
+def _fetch_with_backoff(ex, native, timeframe, since, limit):
+    """Свечи с повтором после предела запросов; прочие ошибки — наверх."""
+    import time
+    for pause in RATE_LIMIT_RETRIES + (None,):
+        try:
+            return ex.fetch_ohlcv(native, timeframe, since=since, limit=limit)
+        except ccxt.RateLimitExceeded:
+            if pause is None:
+                raise
+            time.sleep(pause)
+        except ccxt.NetworkError as exc:
+            # У Bybit предел иногда приходит обычной ошибкой обмена, а не
+            # RateLimitExceeded: узнаём его по коду.
+            if pause is None or '10006' not in str(exc):
+                raise
+            time.sleep(pause)
+
+
 def fetch_ohlcv(timeframe, limit=500, symbol=None, client=None, since=None):
     """
     Загружает свечи. client=None -> legacy get_exchange() (одно-юзер).
@@ -319,7 +344,7 @@ def fetch_ohlcv(timeframe, limit=500, symbol=None, client=None, since=None):
         if native is None:
             log(f'⚠️ {symbol}: нет такого рынка на {getattr(ex, "id", "бирже")}')
             return None
-        ohlcv = ex.fetch_ohlcv(native, timeframe, since=since, limit=limit)
+        ohlcv = _fetch_with_backoff(ex, native, timeframe, since, limit)
         if not ohlcv or len(ohlcv) < 10:
             log(f"⚠️ Мало данных для {symbol} {timeframe}: {len(ohlcv) if ohlcv else 0} свечей")
             return None

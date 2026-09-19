@@ -2326,6 +2326,7 @@ function showPage() {
   document.querySelectorAll('.page').forEach(s => {
     s.hidden = s.dataset.page !== page;
   });
+  reloadIfSafe();
   // Ленивые разделы грузятся и при открытии по прямой ссылке, а не только по
   // клику в меню. Без этого «Управление» и «Журнал» открывались пустыми:
   // обработчик клика не срабатывал, а данные для них в общий опрос не входят.
@@ -4766,6 +4767,28 @@ function renderLlm() {
   }).join('');
 }
 
+/* САМОПЕРЕЗАГРУЗКА ПОСЛЕ ВЫКАТКИ. Окно приложения на ПК открыто днями;
+   сервер обновили — а в окне старые кнопки, и «тумблера нет» — до ручного
+   F5, о котором никто не знает. Отпечаток страницы приходит с каждым
+   опросом; сменился — страница перезагружает себя. На вкладке настроек
+   не перезагружаемся посреди правки: дожидаемся ухода с неё. */
+let PAGE_STAMP = null;
+let PAGE_RELOAD_PENDING = false;
+
+function pageChanged(stamp) {
+  if (!stamp) return;
+  if (PAGE_STAMP === null) { PAGE_STAMP = stamp; return; }
+  if (stamp === PAGE_STAMP) return;
+  PAGE_RELOAD_PENDING = true;
+  reloadIfSafe();
+}
+
+function reloadIfSafe() {
+  if (!PAGE_RELOAD_PENDING || page === 'control') return;
+  PAGE_RELOAD_PENDING = false;
+  location.reload();
+}
+
 async function refresh() {
   const body = document.getElementById('body');
   body.classList.add('stale');
@@ -4774,6 +4797,7 @@ async function refresh() {
     DATA = d;
     PAPER = !!d.paper;
     showState(d.status);
+    pageChanged(d.page);
 
     setText('mode', PAPER ? '👻 фантом' : (d.mode || '—'));
     const c = d.costs;

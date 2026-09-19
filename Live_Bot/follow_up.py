@@ -275,7 +275,10 @@ def advance_live(fetch_candles=None):
 def _default_fetch(pair, since_ms):
     """Свечи с биржи. Шаг тот же, что у бумажного наблюдения, — 5 минут."""
     import exchange
-    df = exchange.fetch_ohlcv('5m', limit=200, symbol=pair, since=since_ms)
+    # Свечи публичные — клиент без ключей. С ключами в .env их на сервере
+    # может и не быть (фантомный счёт), и наблюдение молча падало.
+    df = exchange.fetch_ohlcv('5m', limit=200, symbol=pair, since=since_ms,
+                              client=exchange.make_market_client())
     if df is None or df.empty:
         return []
     out = []

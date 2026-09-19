@@ -43,6 +43,15 @@ def _app_version():
         return ''
 
 
+def _page_stamp():
+    """Отпечаток dashboard.html: меняется с каждой выкаткой, пусто — если файла нет."""
+    try:
+        st = os.stat(HTML_FILE)
+        return f'{int(st.st_mtime)}-{st.st_size}'
+    except OSError:
+        return ''
+
+
 def _controls_allowed():
     """
     Можно ли менять настройки через дашборд.
@@ -1341,7 +1350,13 @@ class _Handler(BaseHTTPRequestHandler):
             # этом было нечем: Chrome в режиме --app не показывает ошибок, а
             # запуск возвращает успех в любом случае.
             _views['n'] += 1
-            self._send_json(build_payload())
+            payload = build_payload()
+            # ОТПЕЧАТОК СТРАНИЦЫ. Окно приложения на ПК живёт днями, а код
+            # на сервере обновляется; страница, открытая до выкатки, так и
+            # показывала старые кнопки, пока её не перезагрузили руками. По
+            # отпечатку страница сама замечает, что файл сменился.
+            payload['page'] = _page_stamp()
+            self._send_json(payload)
         elif path == '/api/log':
             self._send_json({'lines': read_log(), 'status': dict(_status)})
         elif path == '/api/llm':
