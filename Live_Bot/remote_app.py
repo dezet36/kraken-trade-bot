@@ -414,6 +414,87 @@ def fail(message):
         pass
 
 
+# Имя события Windows, по которому вторая копия узнаёт о первой ещё до
+# того, как та успела занять порт. Порт — второй признак, на случай, если
+# первая копия упала, а её туннель остался жить.
+SINGLE_INSTANCE_NAME = 'Local\\KrakenRemote-single-instance'
+
+# Заголовок окна панели — по нему вторая копия находит окно первой, чтобы
+# поднять его на передний план вместо второго окна.
+DASHBOARD_TITLE_MARK = 'Kraken'
+
+
+def claim_single_instance():
+    """
+    Захватывает именованный мьютекс. False — программа уже запущена.
+
+    Держится открытым до конца процесса намеренно: закрой его — и вторая
+    копия решит, что она первая.
+    """
+    if sys.platform != 'win32':
+        return True
+    try:
+        import ctypes
+        kernel32 = ctypes.windll.kernel32
+        handle = kernel32.CreateMutexW(None, False, SINGLE_INSTANCE_NAME)
+        if not handle:
+            return True
+        already = kernel32.GetLastError() == 183          # ERROR_ALREADY_EXISTS
+        globals()['_single_instance_handle'] = handle     # не дать закрыться
+        return not already
+    except Exception:                                  # noqa: BLE001
+        return True
+
+
+def focus_existing_window():
+    """
+    Поднимает уже открытое окно панели на передний план. False — не нашли.
+
+    Ищется по заголовку среди видимых окон: у окна Chrome в режиме
+    приложения заголовок — это <title> страницы панели.
+    """
+    if sys.platform != 'win32':
+        return False
+    try:
+        import ctypes
+        from ctypes import wintypes
+        user32 = ctypes.windll.user32
+        found = []
+
+        @ctypes.WINFUNCTYPE(ctypes.c_bool, wintypes.HWND, wintypes.LPARAM)
+        def walk(hwnd, _lparam):
+            if not user32.IsWindowVisible(hwnd):
+                return True
+            length = user32.GetWindowTextLengthW(hwnd)
+            if length <= 0:
+                return True
+            buf = ctypes.create_unicode_buffer(length + 1)
+            user32.GetWindowTextW(hwnd, buf, length + 1)
+            title = buf.value
+            if DASHBOARD_TITLE_MARK in title and title != WINDOW_TITLE + ' — настройки':
+                found.append(hwnd)
+            return True
+
+        user32.EnumWindows(walk, 0)
+        for hwnd in found:
+            user32.ShowWindow(hwnd, 9)                    # SW_RESTORE
+            user32.SetForegroundWindow(hwnd)
+        return bool(found)
+    except Exception:                                  # noqa: BLE001
+        return False
+
+
+def tunnel_already_up():
+    """
+    Живой туннель без живой программы: осиротевший ssh после падения.
+
+    Порт занят и за ним отвечает НАША панель (api/whoami). Такой туннель
+    используется, а не оспаривается: иначе программу нельзя было бы запустить
+    до перезагрузки машины.
+    """
+    return remote.port_open(remote.LOCAL_PORT) and views(remote.url()) is not None
+
+
 def keep_alive(cfg, link, sleep=time.sleep, log=print):
     """
     Держит туннель живым, пока окно открыто.
@@ -424,7 +505,13 @@ def keep_alive(cfg, link, sleep=time.sleep, log=print):
     """
     delay = 3
     while not link['closed']:
-        link['process'].wait()
+        process = link['process']
+        if process is not None:
+            process.wait()
+        else:
+            # Чужой (осиротевший) туннель: процесса у нас нет, следим за портом.
+            while not link['closed'] and remote.port_open(remote.LOCAL_PORT):
+                sleep(15)
         if link['closed']:
             return
         log('Соединение с сервером разорвано — переподключаюсь.')
@@ -443,19 +530,37 @@ def keep_alive(cfg, link, sleep=time.sleep, log=print):
 
 
 def main():
+    # ОДНА КОПИЯ, И ТОЛЬКО ОДНА. Второй запуск — по ярлыку, из панели задач,
+    # по привычке — не открывает второе окно и не спорит за порт, а поднимает
+    # уже открытое окно и уходит. Если окно не нашлось (первая копия ещё
+    # поднимает туннель или окно свёрнуто в другой рабочий стол), несколько
+    # секунд пробуем снова и выходим молча: программа уже работает.
+    if not claim_single_instance():
+        for _ in range(10):
+            if focus_existing_window():
+                break
+            time.sleep(1)
+        return 0
+
     cfg = remote.load_settings()
     error = ''
-    # Спрашиваем, пока не получим рабочие настройки или пока не закроют окно.
-    # Один проход был бы хуже: ошибся в адресе — и запускай программу заново.
-    while True:
-        if not cfg.get('host') or error:
-            cfg = ask_settings(cfg, error)
-            if not cfg:
-                return 1
-            remote.save_settings(cfg)
-        process, error = remote.open_tunnel(cfg)
-        if process:
-            break
+    process = None
+    if tunnel_already_up():
+        # Осиротевший туннель прошлой копии: используем, ssh не поднимаем.
+        # Сторож ниже следит за портом и переподключится, если он закроется.
+        print('Туннель уже поднят — использую его.')
+    else:
+        # Спрашиваем, пока не получим рабочие настройки или пока не закроют
+        # окно. Один проход был бы хуже: ошибся в адресе — и запускай заново.
+        while True:
+            if not cfg.get('host') or error:
+                cfg = ask_settings(cfg, error)
+                if not cfg:
+                    return 1
+                remote.save_settings(cfg)
+            process, error = remote.open_tunnel(cfg)
+            if process:
+                break
 
     link = {'process': process, 'closed': False}
 
@@ -463,7 +568,8 @@ def main():
         # Туннель НЕ демон и переживёт окно, заняв порт до перезагрузки.
         link['closed'] = True
         try:
-            link['process'].terminate()
+            if link['process'] is not None:
+                link['process'].terminate()
         except Exception:                          # noqa: BLE001
             pass
 

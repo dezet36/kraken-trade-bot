@@ -745,3 +745,62 @@ class TestTheTunnelComesBackByItself:
                             lambda cfg: (_ for _ in ()).throw(AssertionError('не должно звать')))
         link = {'process': self._Proc(dies=True), 'closed': True}
         remote_app.keep_alive({'host': 'x'}, link, sleep=lambda s: None, log=lambda m: None)
+
+
+class TestOnlyOneCopyRuns:
+    """
+    Второй запуск по ярлыку не открывает второе окно и не спорит за порт:
+    он поднимает уже открытое окно и уходит. Осиротевший туннель прошлой
+    копии используется, а не оспаривается — иначе до перезагрузки машины
+    программу было бы не запустить.
+    """
+
+    def test_the_second_copy_focuses_and_leaves(self, monkeypatch):
+        import remote_app
+
+        focused = []
+        monkeypatch.setattr(remote_app, 'claim_single_instance', lambda: False)
+        monkeypatch.setattr(remote_app, 'focus_existing_window',
+                            lambda: focused.append(1) or True)
+        monkeypatch.setattr(remote_app.remote, 'load_settings',
+                            lambda: (_ for _ in ()).throw(AssertionError('дальше нельзя')))
+        assert remote_app.main() == 0
+        assert focused == [1]
+
+    def test_the_mutex_is_claimed_once_per_process(self):
+        import remote_app
+        if not remote_app.sys.platform.startswith('win'):
+            pytest.skip('мьютекс Windows')
+        assert remote_app.claim_single_instance() is True
+        # Тот же процесс держит мьютекс: повторный захват видит «уже есть».
+        assert remote_app.claim_single_instance() is False
+
+    def test_an_orphaned_tunnel_is_reused_not_fought(self, monkeypatch):
+        import remote_app
+
+        monkeypatch.setattr(remote_app.remote, 'port_open', lambda port, host='127.0.0.1': True)
+        monkeypatch.setattr(remote_app, 'views', lambda url, timeout=3.0: 5)
+        assert remote_app.tunnel_already_up() is True
+
+        monkeypatch.setattr(remote_app, 'views', lambda url, timeout=3.0: None)
+        assert remote_app.tunnel_already_up() is False, 'чужой порт — не наш туннель'
+
+    def test_the_keeper_watches_an_orphaned_tunnel_by_port(self, monkeypatch):
+        import remote_app
+
+        ports = iter([True, True, False])              # порт закрылся на третьей проверке
+        monkeypatch.setattr(remote_app.remote, 'port_open',
+                            lambda port, host='127.0.0.1': next(ports, False))
+        class Replacement:
+            def wait(self):
+                link['closed'] = True             # окно закрыли — сторож уходит
+        replacement = Replacement()
+        monkeypatch.setattr(remote_app.remote, 'open_tunnel', lambda cfg: (replacement, ''))
+        link = {'process': None, 'closed': False}
+        slept = []
+
+        def sleep(seconds):
+            slept.append(seconds)
+        remote_app.keep_alive({'host': 'x'}, link, sleep=sleep, log=lambda m: None)
+        assert link['process'] is replacement
+        assert 15 in slept
