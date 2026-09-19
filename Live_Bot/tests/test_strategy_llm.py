@@ -705,3 +705,53 @@ class TestSevenEntryConditionsAreCode:
             'low': [100, 100, 101.1, 100.9, 101.3], 'close': closes, 'volume': [1.0] * 5})
         out = strategy_llm.scan_for_setups([], gate=None, candles=lambda pair: df)
         assert len(out) == 1 and strategy_llm.armed() == []
+
+
+class TestTheSetupIsAnnounced:
+    """
+    План принят — человеку уходит сообщение с монетой, входом, стопом,
+    целями, условием и графиком; отклонённый код/критиком план — короткой
+    строкой с причиной. Отправка не вмешивается в торговлю.
+    """
+
+    def test_an_accepted_plan_is_announced_with_the_numbers(self, monkeypatch):
+        import telegram_notify as tg
+        sent = {}
+        monkeypatch.setattr(tg, '_allowed', lambda e: True)
+        monkeypatch.setattr(tg, '_send', lambda text, chat_id=None: (sent.setdefault('text', text), True)[1])
+        verdict = approving_verdict(trigger_when='close_above', trigger_level=103.0, trigger_id='L2',
+                                    bias='up', critic={'verdict': 'confirm', 'worst': 'плита у цели'},
+                                    levels=[{'id': 'L5', 'price': 100.0, 'kind': 'пивот'}])
+        signal = strategy_llm._reshape('BTCUSDT', verdict)
+        assert tg.llm_setup_found(signal, None) is True
+        text = sent['text']
+        for piece in ('BTCUSDT LONG', 'Вход:', '100', 'Стоп:', '97', '3.00%', 'Цель 1', '107',
+                      'Цель 2', '109', 'R:R 2.33', 'вероятность 0.58', '4/5',
+                      'close_above 103', 'Куда рынок: up', 'Критик: подтвердил', 'плита у цели'):
+            assert piece in text, piece
+
+    def test_a_rejected_plan_is_announced_briefly(self, monkeypatch):
+        import telegram_notify as tg
+        sent = {}
+        monkeypatch.setattr(tg, '_allowed', lambda e: True)
+        monkeypatch.setattr(tg, '_send', lambda text, chat_id=None: (sent.setdefault('text', text), True)[1])
+        tg.llm_setup_rejected('ETHUSDT', 'SHORT', 2527.67, 'критик отклонил', 'стоп внутри кластера')
+        assert 'отклонён' in sent['text'] and 'ETHUSDT SHORT' in sent['text'] and 'стоп внутри' in sent['text']
+
+    def test_the_switch_silences_it(self, monkeypatch):
+        import telegram_notify as tg
+        monkeypatch.setattr(tg, '_allowed', lambda e: False)
+        monkeypatch.setattr(tg, '_send', lambda *a, **k: (_ for _ in ()).throw(AssertionError('слать нельзя')))
+        assert tg.llm_setup_found(strategy_llm._reshape('BTCUSDT', approving_verdict()), None) is False
+
+    def test_the_collector_announces_and_the_signal_carries_the_plan(self, monkeypatch):
+        import telegram_notify as tg
+        announced = []
+        monkeypatch.setattr(tg, 'llm_setup_found', lambda signal, df=None, **k: announced.append(signal) or True)
+        monkeypatch.setattr(strategy_llm.llm_local, 'available', lambda: True)
+        monkeypatch.setattr(strategy_llm.llm_decide, 'decide',
+                            lambda *a, **k: approving_verdict(levels=[{'id': 'L5', 'price': 100.0, 'kind': 'пивот'}]))
+        out = cycle(['BTCUSDT'])
+        assert len(out) == 1 and len(announced) == 1
+        assert announced[0]['llm']['levels'][0]['id'] == 'L5'
+        assert announced[0]['llm']['trigger_when'] == 'now'

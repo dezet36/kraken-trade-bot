@@ -114,6 +114,27 @@ def build(strategy, signal):
         band(zb.get('bottom'), zb.get('top'),
              f'зона B · {_pct(config.ZONE_B_BOTTOM)}–{_pct(config.ZONE_B_TOP)}%')
         leg('начало импульса', 'конец импульса')
+    elif strategy == 'LLM':
+        # План модели: уровни, из которых она выбирала, — те, что вошли в
+        # план (вход, стоп, цели, инвалидация), плюс уровень условия входа.
+        # Остальные уровни списка не рисуются: шестнадцать подписей делают
+        # график нечитаемым, а решение стояло на этих.
+        llm = signal.get('llm') or {}
+        ids = llm.get('ids') or {}
+        by_id = {lv.get('id'): lv for lv in (llm.get('levels') or [])}
+        used = {ids.get('entry'): 'вход', ids.get('stop'): 'стоп', ids.get('inval'): 'инвалидация'}
+        for k, tp_id in enumerate(ids.get('tp') or [], start=1):
+            used.setdefault(tp_id, f'цель {k}')
+        trigger_id = llm.get('trigger_id')
+        if trigger_id and trigger_id not in used:
+            used[trigger_id] = f"условие · {llm.get('trigger_when', '')}"
+        for level_id, role in used.items():
+            lv = by_id.get(level_id)
+            if not lv or not lv.get('price'):
+                continue
+            lines.append({'price': float(lv['price']),
+                          'label': f"{level_id} · {lv.get('kind', '')} · {role}",
+                          'main': role in ('вход', 'стоп')})
     elif strategy == 'SMC':
         smc = signal.get('smc') or {}
         band(smc.get('poi_bottom'), smc.get('poi_top'),

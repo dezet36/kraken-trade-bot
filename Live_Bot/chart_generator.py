@@ -45,7 +45,7 @@ def _strategy_of(signal: dict) -> str:
     Неизвестный сигнал отдаёт пустую строку, и разметка получится пустой:
     график останется прежним, но не сломается.
     """
-    for section, name in (('smc', 'SMC'), ('levels', 'LEVELS'),
+    for section, name in (('llm', 'LLM'), ('smc', 'SMC'), ('levels', 'LEVELS'),
                           ('rsibb', 'RSIBB')):
         if signal.get(section):
             return name
@@ -74,9 +74,11 @@ def generate_trade_chart(signal: dict, df_1h) -> str:
 
         entry = float(params['entry'])
         sl    = float(params['stop_loss'])
-        tp    = float(params['take_profit_1'])     # единственный тейк (уровень config.TP1_LEVEL)
+        tp    = float(params['take_profit_1'])
+        # Все цели плана, если их несколько (у модели до трёх). У фибо цель
+        # одна — список из одного элемента.
+        targets = [float(t) for t in (params.get('tp_targets') or [tp]) if t]
         rr    = params.get('rr', 0)
-        tp_pct = getattr(config, 'TP1_LEVEL', 0.25) * 100
 
         def _fp(p):
             if p >= 1000:   return f"{p:.2f}"
@@ -99,6 +101,10 @@ def generate_trade_chart(signal: dict, df_1h) -> str:
                 df = df.iloc[start:].copy()
         except Exception:
             pass
+        # У плана модели импульса нет — окно последних пяти суток: на трёх
+        # неделях уровни плана сжимались в полоску у края.
+        if signal.get('llm') and len(df) > 120:
+            df = df.iloc[-120:].copy()
 
         rsi = _rsi(df['Close'])
 
@@ -118,8 +124,8 @@ def generate_trade_chart(signal: dict, df_1h) -> str:
         # РАЗМЕТКА ГРАНИЦЫ НЕ РАСТЯГИВАЕТ. Зона B у Фибоначчи и начало импульса
         # бывают далеко от цены, и ради них пришлось бы сжать все свечи в
         # полоску. Что не поместилось в окно — не рисуется.
-        lo = min(float(df['Low'].min()), sl, entry, tp)
-        hi = max(float(df['High'].max()), sl, entry, tp)
+        lo = min([float(df['Low'].min()), sl, entry] + targets)
+        hi = max([float(df['High'].max()), sl, entry] + targets)
         pad = (hi - lo) * 0.05 or hi * 0.01
         y_min, y_max = lo - pad, hi + pad
 
@@ -141,6 +147,11 @@ def generate_trade_chart(signal: dict, df_1h) -> str:
         dir_icon = "▲ LONG" if is_long else "▼ SHORT"
         htf_str  = f"  HTF: {htf}" if htf not in ('—', 'NEUTRAL', None) else ""
         title    = f"{pair} · 1H  {dir_icon}{htf_str}"
+        llm = signal.get('llm') or {}
+        if llm:
+            when = llm.get('trigger_when') or 'now'
+            title += ('  ·  план ИИ, лимит ждёт цену' if when == 'now'
+                      else f'  ·  план ИИ, условие {when}')
 
         # RSI-панель (с уровнями 70/30)
         n = len(df)
@@ -215,13 +226,16 @@ def generate_trade_chart(signal: dict, df_1h) -> str:
                     bbox=dict(boxstyle='round,pad=0.15', facecolor='#131722',
                               alpha=0.75, edgecolor='none'))
 
-        # ── Ровно 3 линии: Entry / SL / TP ────────────────────────────────────
+        # ── План: вход, стоп, цели — с процентами от входа ───────────────────
         sl_pct = abs(entry - sl) / entry * 100
         levels = [
             (entry, '#2196F3', '--', f"Entry  ${_fp(entry)}"),
             (sl,    '#F44336', '-',  f"SL  ${_fp(sl)}  (-{sl_pct:.2f}%)"),
-            (tp,    '#4CAF50', '-',  f"TP  ${_fp(tp)}  (-{tp_pct:.0f}%)"),
         ]
+        for k, t in enumerate(targets, start=1):
+            tp_pct = abs(t - entry) / entry * 100
+            label = f"TP{k if len(targets) > 1 else ''}  ${_fp(t)}  (+{tp_pct:.2f}%)"
+            levels.append((t, '#4CAF50', '-', label))
         for price, color, ls, label in levels:
             ax.axhline(y=price, color=color, linestyle=ls, linewidth=1.5, alpha=0.95, zorder=5)
             ax.text(xlim[0] + x_rng * 0.01, price, label,

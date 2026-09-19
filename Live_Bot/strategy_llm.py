@@ -358,6 +358,24 @@ def _check_armed(candles):
     return out
 
 
+def _notify_setup(signal, df):
+    """План принят — сообщение с графиком. Отказ отправки торговле не мешает."""
+    try:
+        import telegram_notify as tg
+        tg.llm_setup_found(signal, df if hasattr(df, 'columns') else None)
+    except Exception as exc:                       # noqa: BLE001
+        log(f'   {NAME}: уведомление о сетапе не отправлено — {exc}')
+
+
+def _notify_rejected(pair, verdict):
+    try:
+        import telegram_notify as tg
+        tg.llm_setup_rejected(pair, verdict.get('side', ''), float(verdict.get('entry') or 0),
+                              verdict.get('gate', ''), verdict.get('detail', ''))
+    except Exception:                              # noqa: BLE001
+        pass
+
+
 def _reshape(pair, verdict, df=None):
     """
     Собирает из вердикта модели готовый сигнал на депозите этой стратегии.
@@ -411,6 +429,15 @@ def _reshape(pair, verdict, df=None):
             'cost_r': verdict.get('cost_r'),
             'model': llm_local.last_stats().get('model', ''),
             'ids': verdict.get('ids', {}),
+            'trigger_when': verdict.get('trigger_when', 'now'),
+            'trigger_level': verdict.get('trigger_level'),
+            'trigger_id': verdict.get('trigger_id'),
+            'critic': verdict.get('critic') or {},
+            'bias': verdict.get('bias', ''),
+            # Уровни, из которых модель выбирала: график рисует по ним
+            # подписи «L3 · пивот-максимум · вход».
+            'levels': [{'id': lv.get('id'), 'price': lv.get('price'), 'kind': lv.get('kind')}
+                       for lv in (verdict.get('levels') or [])],
         },
     }
 
@@ -583,6 +610,11 @@ def _collect(finished):
             log(f'   {NAME} {pair}: отказ — {verdict["gate"]}'
                 + (f' ({verdict["detail"]})' if verdict.get('detail') else ''))
             _refuse(pair, verdict)
+            # Модель ПРЕДЛОЖИЛА сетап (есть направление и вход), а отклонил
+            # код или критик — человеку это интересно: видно, что модель
+            # ищет, и что её останавливает.
+            if verdict.get('side') and verdict.get('entry'):
+                _notify_rejected(pair, verdict)
             continue
 
         if age > limit:
@@ -593,6 +625,9 @@ def _collect(finished):
                                      f'пределе {limit // 60}'})
             continue
 
+        signal = _reshape(pair, verdict, df)
+        _notify_setup(signal, df)
+
         if verdict.get('trigger_when', 'now') != 'now' and verdict.get('trigger_level'):
             _arm(pair, verdict)
             continue
@@ -602,7 +637,7 @@ def _collect(finished):
             f'конфлюенс {verdict["votes"]}/5 (разбор занял {age:.0f} с)')
         out.append({
             'pair': pair,
-            'signal': _reshape(pair, verdict, df),
+            'signal': signal,
             'score': verdict.get('votes', 0),
             'rr': verdict['rr'],
             'poi_type': 'LLM',

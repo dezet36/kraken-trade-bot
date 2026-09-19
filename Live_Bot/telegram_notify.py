@@ -370,6 +370,81 @@ def _allowed(event: str) -> bool:
         return True                                # настройка недоступна — не молчим
 
 
+def llm_setup_found(signal: dict, df_1h=None, telegram_id=None):
+    """
+    План модели принят (прошёл проверки кода и критика): монета, вход, стоп,
+    цели, условие и почему — с графиком, где это нарисовано.
+
+    Шлётся В МОМЕНТ ПРИНЯТИЯ ПЛАНА, а не при заполнении лимита: лимит может
+    ждать цену трое суток, а условие — двенадцать часов, и человеку важно
+    увидеть план тогда, когда он появился. О заполнении сообщит обычное
+    «вход в сделку».
+    """
+    if not _allowed('llm_setup'):
+        return False
+    llm = signal.get('llm') or {}
+    params = signal.get('params') or {}
+    pair = signal.get('trading_pair', '?')
+    direction = (signal.get('setup') or {}).get('type', '?')
+    entry = float(params.get('entry') or 0)
+    stop = float(params.get('stop_loss') or 0)
+    targets = [float(t) for t in (params.get('tp_targets') or []) if t]
+    arrow = "🟢" if direction == "LONG" else "🔴"
+
+    def pct(p):
+        return f"{abs(p - entry) / entry * 100:.2f}%" if entry else "—"
+
+    when = llm.get('trigger_when') or 'now'
+    trigger_level = llm.get('trigger_level')
+    condition = ('лимит на вход, ждёт цену до 72 ч' if when == 'now'
+                 else f"{when} {_fmt_p(trigger_level) if trigger_level else ''} — ждёт до 12 ч")
+    critic = llm.get('critic') or {}
+    critic_line = ''
+    if critic.get('verdict') == 'confirm':
+        critic_line = "\nКритик: подтвердил"
+        if critic.get('worst') and critic.get('worst') not in ('—', 'нет'):
+            critic_line += f" · главный риск: {critic['worst'][:160]}"
+
+    lines = [
+        f"{arrow} <b>ИИ нашла сетап</b> · {pair} {direction}",
+        "━━━━━━━━━━━━━━━━━━━━",
+        f"Вход:  <b>{_fmt_p(entry)}</b>",
+        f"Стоп:  {_fmt_p(stop)}  (−{pct(stop)})",
+    ]
+    for k, t in enumerate(targets, start=1):
+        lines.append(f"Цель {k}: {_fmt_p(t)}  (+{pct(t)})")
+    lines.append(f"R:R {llm.get('rr') or params.get('rr') or '—'}   "
+                 f"вероятность {llm.get('p') or '—'}   факторы {llm.get('votes') or '—'}/5")
+    lines.append(f"Условие: {condition}")
+    lines.append(f"Куда рынок: {llm.get('bias') or '—'}")
+    text = "\n".join(lines) + critic_line
+    if llm.get('why'):
+        text += f"\n<i>{llm.get('why', '')[:300]}</i>"
+    if llm.get('risk'):
+        text += f"\nРиск: {llm.get('risk', '')[:200]}"
+
+    if df_1h is not None:
+        try:
+            from chart_generator import generate_trade_chart
+            chart_path = generate_trade_chart(signal, df_1h)
+            if chart_path and _send_photo(chart_path, caption=text, chat_id=telegram_id):
+                return True
+        except Exception as exc:                       # noqa: BLE001
+            log(f"Telegram: график плана ИИ не собрался — {exc}")
+    return _send(text, chat_id=telegram_id)
+
+
+def llm_setup_rejected(pair: str, side: str, entry: float, gate: str, detail: str = ''):
+    """Модель предложила сетап, но его отклонил код или критик — коротко, без картинки."""
+    if not _allowed('llm_setup'):
+        return False
+    return _send(
+        f"⚪ <b>ИИ предложила сетап, отклонён</b> · {pair} {side} от {_fmt_p(entry)}\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"{gate}" + (f": {detail[:300]}" if detail else '')
+    )
+
+
 def paper_trade_opened(strategy: str, pair: str, direction: str, entry: float,
                        stop: float, target: float, rr: float, risk: float,
                        why: str = ''):
