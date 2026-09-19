@@ -538,6 +538,17 @@ def poi_facts(context, price, index, limit=3):
         return min(abs(price - zone['top']), abs(price - zone['bottom']))
 
     active.sort(key=distance)
+    # Один и тот же блок пакет smc может отдать дважды под разными именами
+    # (mitigation-блок поверх того же ордер-блока): модели это читается как
+    # две зоны. Границы одинаковые — печатаем один раз, первое имя.
+    seen, unique = set(), []
+    for z in active:
+        key = (z.get('direction'), round(float(z['top']), 10), round(float(z['bottom']), 10))
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(z)
+    active = unique
     return [{
         'type': z.get('type'),
         'direction': z.get('direction'),

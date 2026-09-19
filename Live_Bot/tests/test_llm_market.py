@@ -591,6 +591,19 @@ class TestPoisAndHtf:
             assert z['bottom'] <= z['top']
             assert z['bars_ago'] >= 0
 
+    def test_the_same_zone_under_two_names_is_printed_once(self):
+        """Живой снимок SOLUSDT 19.09 показал один блок трижды."""
+        class Ctx:
+            frames = {'poi': make_df(wavy(60))}
+            pois = [{'type': t, 'direction': 'BEARISH', 'top': 113.84, 'bottom': 113.33,
+                     'index': 40, 'confirmed_at': 45}
+                    for t in ('ORDER_BLOCK', 'MITIGATION', 'MITIGATION')]
+        import smc.poi as poi_mod
+        out = llm_market.poi_facts(Ctx(), 112.0, 59)
+        if out is None:
+            pytest.skip('зона отсеяна правилами активности на синтетике')
+        assert len(out) == 1 and out[0]['type'] == 'ORDER_BLOCK'
+
     def test_htf_reads_only_closed_candles(self):
         context = self._context()
         df = context.frames['poi']
