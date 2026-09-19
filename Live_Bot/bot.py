@@ -136,17 +136,13 @@ def _build_signal(candidate, strategy, balance):
         signal['scan'] = {
             'score': candidate.get('score'),
             'rr_est': candidate.get('rr'),
-            # Донор попадает в разбор вкладов: по нему потом видно, сетапы
-            # какой стратегии модель берёт чаще и чьи отрабатывают лучше.
-            'donor': llm.get('donor'),
             'p': llm.get('p'),
             'ev': llm.get('ev'),
             'poi_type': 'LLM',
         }
         df_for_chart = candidate.get('df_1h')
         log(f"\n[LLM] {pair}: {signal['setup'].get('type')}, "
-            f"вероятность {llm.get('p')}, конфлюенс {llm.get('votes')}/5, "
-            f"сетап от {llm.get('donor')}")
+            f"вероятность {llm.get('p')}, конфлюенс {llm.get('votes')}/5")
     elif strategy == 'FIBO':
         signal = analyze_market(candidate['df_1h'], None, pair, balance)
         if not signal:
@@ -353,21 +349,13 @@ def _paper_cycle():
                 candidates = strategy_rsibb.scan_for_setups(
                     liquid_pairs, gate, client=client, balance=balance)
             elif strategy == 'LLM':
-                # ЕДИНСТВЕННАЯ СТРАТЕГИЯ, КОТОРОЙ ОТДАЮТ ЧУЖИХ КАНДИДАТОВ, И
-                # ДЕЛАЕТСЯ ЭТО ЯВНО. Правило выше запрещает молчаливую
-                # подмену: уровни однажды месяц торговали сетапы фибо через
-                # ветку else, и разбор оказался недостоверным.
-                #
-                # Здесь заимствование — сам замысел, оно названо в имени
-                # модуля и записано в журнал каждой сделки. И решение всё
-                # равно своё: модель заново выбирает направление и уровни, а
-                # чужой сетап лишь повод посмотреть на эту пару сейчас.
-                #
-                # Работает потому, что LLM стоит ПОСЛЕДНЕЙ в STRATEGIES: к её
-                # очереди остальные уже отсканировали. Проверка на порядок —
-                # в test_strategy_llm.
+                # Те же пары, что и у остальных, и никаких чужих кандидатов:
+                # модель обходит рынок сама. Первый вариант отдавал ей пул
+                # `found` — сетапы других стратегий за цикл, — но сетапа она
+                # не видела, а пары получала лишь когда что-то находили
+                # другие. См. шапку strategy_llm.
                 candidates = strategy_llm.scan_for_setups(
-                    found, gate, client=client, balance=balance)
+                    liquid_pairs, gate, client=client, balance=balance)
             else:
                 log(f"   {strategy}: нет сканера — пропускаем. Отдать пул "
                     f"чужому сканеру нельзя: он найдёт свои сетапы и они "

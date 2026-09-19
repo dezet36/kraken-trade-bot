@@ -1,31 +1,29 @@
 """
-Пятая стратегия: модель судит сетапы и торгует их на своём депозите.
+Пятая стратегия: модель сама разбирает рынок и торгует на своём депозите.
 
-ОТКУДА БЕРУТСЯ ИДЕИ. Не из воздуха. Сканеры четырёх стратегий за цикл находят
-сетапы — их модель и разбирает. Это первый шаг из двух: сначала фильтр над
-готовыми идеями, потом самостоятельный поиск. Конвейер общий, меняется только
-то, кто дёргает модель.
+ОТКУДА БЕРУТСЯ ИДЕИ. Из самого рынка. Стратегия обходит ликвидные пары по
+кругу, по одной за цикл, и по каждой модель получает полную разметку —
+уровни, расстановку участников, профиль объёма, дельту, стакан, структуру —
+и решает сама: есть ли здесь сделка, где вход, стоп и цели, и почему.
 
-ПОЧЕМУ ЭТО НЕ НАРУШАЕТ ГЛАВНОГО ПРАВИЛА ПРОЕКТА. В bot.py прямо записано:
+ТАК БЫЛО НЕ ВСЕГДА, И ПОЧЕМУ ПОМЕНЯЛИ. Первый вариант (19 сентября 2026) был
+фильтром: модели отдавали только те пары, на которых сканеры четырёх других
+стратегий за этот цикл нашли сетап. Замысел — почти парный замер: те же
+сетапы с моделью и без. На деле вышло иначе. Сетапа донора модель не видела
+вовсе — в разметке была только карта пары, — то есть судила не чужую идею, а
+искала свою; а пары ей доставались лишь когда что-то находили другие: за
+четыре часа четыре разбора, остальные циклы — «разбирать нечего». Фильтр
+над чужими идеями, которых модель не видит, — не фильтр. Решено: модель —
+самостоятельный аналитик, и очередь пар она получает независимо от того,
+что нашли остальные.
+
+ПОЧЕМУ ЭТО НЕ НАРУШАЕТ ГЛАВНОГО ПРАВИЛА ПРОЕКТА. В bot.py записано:
 стратегия не должна молча получать чужих кандидатов и торговать их под своим
-именем — так однажды уровни месяц торговали сетапы фибо, и разбор оказался
-недостоверным.
-
-Разница в слове «молча». Здесь заимствование — сам замысел, оно объявлено в
-названии модуля, и в журнале у каждой сделки записано, чей сетап модель взяла
-за основу. Уровни же получали чужое по недосмотру ветки else.
-
-И решение всё равно СВОЁ: модель заново выбирает направление, вход, стоп и
-цели из разметки, а донорский сетап служит поводом посмотреть на эту пару
-именно сейчас. От исходного кандидата в сделке может не остаться ни одного
-уровня.
-
-ЧТО ЭТО ДАЁТ ДЛЯ ЗАМЕРА. Фильтр сравнивается напрямую: те же сетапы с моделью
-и без неё — это почти парный замер, а не сравнение двух разных выборок. У
-самостоятельного поиска такого преимущества не будет.
+именем. Здесь чужих кандидатов нет вовсе: каждая сделка — от разметки до
+уровней — собрана этой стратегией, и в журнале лежит её собственный разбор.
 
 ЦЕНА ВРЕМЕНИ, И ПОЧЕМУ РАЗБОР УШЁЛ В СВОЙ ПОТОК. Один разбор занимает на этом
-процессоре четыре-пять минут, и быстрой модели тут нет: замер 19 сентября 2026
+процессоре пять-семь минут, и быстрой модели тут нет: замер 19 сентября 2026
 дал 1.8 токена в секунду у восьмимиллиардной и 1.6 у тридцатипятимиллиардной
 MoE — второй умнее, но не быстрее. При цикле в пять минут это означало бы, что
 бот половину времени стоит и ждёт пятую стратегию.
@@ -37,9 +35,14 @@ MoE — второй умнее, но не быстрее. При цикле в 
 свечах выглядела рыночным движением, и разбор двадцати трёх сделок дал вывод,
 который оказался следом простоя.
 
-Поэтому модель работает СБОКУ: цикл отдаёт ей один сетап и идёт дальше, а
-готовый вердикт забирает следующим циклом. Задержка в пять минут для сетапа,
-живущего часами, ничего не меняет; остановка бота на пять минут меняет всё.
+Поэтому модель работает СБОКУ: цикл отдаёт ей одну пару и идёт дальше, а
+готовый вердикт забирает следующим циклом. Задержка в пять минут для идеи,
+живущей часами, ничего не меняет; остановка бота на пять минут меняет всё.
+
+СКОЛЬКО ЭТО ДАЁТ. Двадцать пар по семь минут — круг за два с половиной часа,
+каждая пара разбирается заново раз в два-три часа. Для сделок с горизонтом в
+часы и дни этого достаточно; чаще было бы незачем — разметка по часовым
+свечам за это время почти не меняется.
 """
 
 import threading
@@ -56,21 +59,23 @@ from logger import log
 
 NAME = 'LLM'
 
-# Сколько кандидатов за цикл вообще рассматриваем. Разбирается из них один:
-# поток занят минутами, и очередь длиннее единицы означала бы вердикты о
-# сетапах, которых к их приходу уже не будет.
-MAX_PER_CYCLE = int(config.__dict__.get('LLM_MAX_PER_CYCLE', 0) or 4)
-
-# Когда модель уже отвечала об ЭТОМ сетапе — когда именно. Ключ описан в
-# _fingerprint. Живёт в процессе: перезапуск бота законно спрашивает заново.
+# Когда модель уже отвечала об ЭТОЙ паре — когда именно. Живёт в процессе:
+# перезапуск бота законно спрашивает заново. Окно — LLM_REASK_AFTER_MIN: при
+# двадцати парах круг длиннее часа и окно почти не срабатывает, но при пуле в
+# две-три пары оно не даёт разбирать одну и ту же разметку без конца.
 _asked = {}
+
+# Где остановился обход: следующая пара берётся отсюда, а не с начала списка.
+# Без курсора первая пара списка разбиралась бы каждый круг первой, а
+# последние — никогда, если модель не успевает за цикл.
+_cursor = 0
 
 # ── Разбор идёт сбоку от цикла ───────────────────────────────────────────────
 # Поток один и на всех: вторая модель в памяти — это ещё пять гигабайт и
 # вдвое меньше ядер каждому, то есть оба разбора вдвое медленнее вместо
 # выигрыша. llama_cpp к тому же не рассчитан на параллельные вызовы.
 _work_lock = threading.Lock()
-_busy = None            # метка сетапа, который разбирается прямо сейчас
+_busy = None            # пара, которая разбирается прямо сейчас
 _done = []              # готовые вердикты, ждут ближайшего цикла
 _thread = None
 
@@ -92,14 +97,12 @@ def join(timeout=None):
         thread.join(timeout)
 
 
-def _run(candidate, df, market, submitted):
-    """Разбор одного сетапа. Идёт в своём потоке, минутами."""
+def _run(pair, df, market, submitted):
+    """Разбор одной пары. Идёт в своём потоке, минутами."""
     global _busy
-    pair = candidate['pair']
     try:
         verdict = llm_decide.decide(pair, df, llm_local.ask, market=market)
-        llm_journal.record(pair, candidate.get('donor', ''), verdict,
-                           llm_local.last_stats())
+        llm_journal.record(pair, '', verdict, llm_local.last_stats())
     except Exception as exc:                       # noqa: BLE001
         # Поток не имеет права унести с собой причину: без этой строки
         # стратегия молча перестала бы отвечать, и выглядело бы это как
@@ -107,19 +110,19 @@ def _run(candidate, df, market, submitted):
         log(f'⚠️ {NAME} {pair}: разбор оборвался — {exc}')
         verdict = {'ok': False, 'gate': 'разбор оборвался', 'detail': str(exc)[:200]}
     with _work_lock:
-        _done.append((candidate, verdict, submitted))
+        _done.append((pair, df, verdict, submitted))
         _busy = None
 
 
-def _submit(candidate, df, market=None):
-    """Отдаёт сетап модели. False — она занята предыдущим."""
+def _submit(pair, df, market=None):
+    """Отдаёт пару модели. False — она занята предыдущей."""
     global _busy, _thread
     with _work_lock:
         if _busy is not None:
             return False
-        _busy = _fingerprint(candidate)
+        _busy = pair
     _thread = threading.Thread(target=_run,
-                               args=(candidate, df, market, time.time()),
+                               args=(pair, df, market, time.time()),
                                name='llm-decide', daemon=True)
     _thread.start()
     return True
@@ -133,112 +136,55 @@ def _harvest():
     return out
 
 
-def _fresh(pool):
-    """
-    Кандидаты всех стратегий одним списком, лучшие впереди.
-
-    Дубли по паре убираются: две стратегии часто находят сетап на одной паре в
-    один цикл, и разбирать её дважды — значит потратить шесть минут там, где
-    хватит трёх. Остаётся кандидат с большей оценкой.
-    """
-    best = {}
-    for donor, candidates in (pool or {}).items():
-        for candidate in candidates or []:
-            pair = candidate.get('pair')
-            if not pair:
-                continue
-            candidate = dict(candidate)
-            candidate['donor'] = donor
-            known = best.get(pair)
-            if known is None or (candidate.get('score') or 0) > (known.get('score') or 0):
-                best[pair] = candidate
-    return sorted(best.values(),
-                  key=lambda c: (-(c.get('score') or 0), -(c.get('rr') or 0)))
-
-
-def _fingerprint(candidate):
-    """
-    Метка сетапа: пара и цены, ради которых модель и зовётся.
-
-    Своего номера у кандидата нет, и быть не может: сканер находит его заново
-    каждый цикл. А заявка висит часами — 19 сентября один и тот же
-    SHIB1000USDT LONG с одними и теми же ценами разбирался 119 раз подряд по
-    165 секунд. Данные те же, ответ тот же, процессор занят.
-
-    Цены округляются до значащих цифр, а не до копеек: у SHIB и у BTC разный
-    порядок, и общего числа знаков после запятой для них не существует.
-
-    У ФИБО ГОТОВОГО СИГНАЛА НЕТ, и это не оплошность сканера: там сигнал
-    достраивается позже, из свечей. Взять цены только из signal значило бы
-    получить для всех его кандидатов одну метку «пара|—|—» — и пятая
-    стратегия на час переставала бы смотреть на пару после ПЕРВОГО же сетапа
-    на ней, считая следующий тем же самым. Поэтому запасной источник —
-    разметка самого сетапа.
-    """
-    params = (candidate.get('signal') or {}).get('params') or {}
-    setup = candidate.get('setup') or {}
-
-    def mark(*values):
-        for value in values:
-            try:
-                return f'{float(value):.6g}'
-            except (TypeError, ValueError):
-                continue
-        return '—'
-
-    return (f"{candidate.get('pair')}"
-            f"|{mark(params.get('entry'), setup.get('end_price'))}"
-            f"|{mark(params.get('stop_loss'), setup.get('start_price'))}")
-
-
-def _asked_recently(mark, now=None):
-    """Спрашивали ли об этом сетапе недавно. Окно — LLM_REASK_AFTER_MIN."""
+def _asked_recently(pair, now=None):
+    """Спрашивали ли об этой паре недавно. Окно — LLM_REASK_AFTER_MIN."""
     minutes = int(config.__dict__.get('LLM_REASK_AFTER_MIN', 0) or 0)
     if minutes <= 0:
         return False
     now = now if now is not None else time.time()
-    at = _asked.get(mark)
+    at = _asked.get(pair)
     return at is not None and (now - at) < minutes * 60
 
 
-def _remember(mark, now=None):
+def _remember(pair, now=None):
     """Отмечает разбор и выбрасывает протухшие метки, чтобы не копить их."""
     minutes = int(config.__dict__.get('LLM_REASK_AFTER_MIN', 0) or 0)
     now = now if now is not None else time.time()
-    _asked[mark] = now
+    _asked[pair] = now
     if minutes > 0:
         for key, at in list(_asked.items()):
             if now - at >= minutes * 60:
                 _asked.pop(key, None)
 
 
-def _reshape(candidate, verdict):
+def _queue(pairs):
+    """
+    Пары в порядке обхода: от курсора по кругу, недавно разобранные — в конец.
+
+    Курсор сдвигается тем, кто пару отправил (см. scan_for_setups), а не
+    здесь: очередь — это только порядок, отправка может и не состояться.
+    """
+    pairs = [p for p in (pairs or []) if p]
+    if not pairs:
+        return []
+    start = _cursor % len(pairs)
+    ring = pairs[start:] + pairs[:start]
+    fresh = [p for p in ring if not _asked_recently(p)]
+    return fresh
+
+
+def _reshape(pair, verdict, df=None):
     """
     Собирает из вердикта модели готовый сигнал на депозите этой стратегии.
 
-    Берётся СТРУКТУРА донорского сигнала — setup, trigger, разметка, — а
-    уровни подставляются выбранные моделью. Так сохраняется всё, что умеет
-    остальной код: размер позиции, план выхода, график закрытой сделки.
+    Всё с нуля: у этого сигнала нет донора, из которого можно было бы взять
+    структуру. Поля — те, что читают paper_broker и trade_manager: пара,
+    имя стратегии, тип сетапа, параметры входа и выхода.
     """
-    donor = candidate.get('signal') or {}
-    signal = dict(donor)
-    signal['trading_pair'] = candidate['pair']
-    signal['strategy'] = NAME
-
-    params = dict(donor.get('params') or {})
     targets = list(verdict['targets'])
-
-    # РИСК У СТРАТЕГИИ СВОЙ, А НЕ ДОНОРСКИЙ. Доля риска приезжала вместе с
-    # чужими параметрами, и сделка на депозите пятой стратегии шла с
-    # настройкой четвёртой. У сетапов фибо её не было вовсе — там готового
-    # сигнала нет, — и тогда бралась общая настройка бота.
-    #
-    # Размер позиции пересчитывает брокер по этой доле, текущему депозиту и
-    # ДИСТАНЦИИ СТОПА, а стоп у модели свой: копировать донорский размер
-    # значило бы рисковать не тем, что заявлено.
-    params.pop('position_size', None)
-    params.pop('risk_amount', None)
-    params.update({
+    params = {
+        # Размер позиции считает брокер по этой доле, текущему депозиту и
+        # дистанции стопа. Здесь его не бывает.
         'risk_pct': settings.risk_pct(NAME),
         'entry': verdict['entry'],
         'stop_loss': verdict['stop'],
@@ -253,39 +199,35 @@ def _reshape(candidate, verdict):
         'be_level': None,
         'breakeven_after_tp': False,
         'invalidation': verdict.get('inval'),
-    })
-    signal['params'] = params
-
-    setup = dict(donor.get('setup') or {})
-    setup['type'] = verdict['side']
-    signal['setup'] = setup
-
-    # Всё, что модель сказала, уходит в сигнал и дальше в журнал. Без этого
-    # решение нельзя будет разобрать: останутся цены без объяснения.
-    signal['llm'] = {
-        # ДОНОРА БЕРЁМ ИЗ ДВУХ МЕСТ. Обычно его проставляет _fresh, но если
-        # _reshape позовут кандидатом в обход отбора, запись о заимствовании
-        # окажется пустой — а она и есть то, что отличает объявленное
-        # заимствование от молчаливой подмены. Имя стратегии знает и сам
-        # донорский сигнал, оттуда и берём запасным путём.
-        'donor': (candidate.get('donor')
-                  or (candidate.get('signal') or {}).get('strategy', '')),
-        'regime': verdict.get('regime', ''),
-        'analysis': verdict.get('analysis', ''),
-        'trigger': verdict.get('trigger', ''),
-        'why': verdict.get('why', ''),
-        'risk': verdict.get('risk', ''),
-        'alt': verdict.get('alt', ''),
-        'p': verdict.get('p'),
-        'votes': verdict.get('votes'),
-        'confluence': verdict.get('confluence', {}),
-        'rr': verdict.get('rr'),
-        'ev': verdict.get('ev'),
-        'cost_r': verdict.get('cost_r'),
-        'model': llm_local.last_stats().get('model', ''),
-        'ids': verdict.get('ids', {}),
     }
-    return signal
+    return {
+        'trading_pair': pair,
+        'strategy': NAME,
+        'setup': {'type': verdict['side']},
+        # Зона в терминах остальных стратегий здесь одна: уровень, который
+        # выбрала модель. Панель показывает её имя рядом со сделкой.
+        'trigger': {'zone': (verdict.get('ids') or {}).get('entry') or 'LLM'},
+        'params': params,
+        # Всё, что модель сказала, уходит в сигнал и дальше в журнал. Без
+        # этого решение нельзя будет разобрать: останутся цены без объяснения.
+        'llm': {
+            'donor': '',
+            'regime': verdict.get('regime', ''),
+            'analysis': verdict.get('analysis', ''),
+            'trigger': verdict.get('trigger', ''),
+            'why': verdict.get('why', ''),
+            'risk': verdict.get('risk', ''),
+            'alt': verdict.get('alt', ''),
+            'p': verdict.get('p'),
+            'votes': verdict.get('votes'),
+            'confluence': verdict.get('confluence', {}),
+            'rr': verdict.get('rr'),
+            'ev': verdict.get('ev'),
+            'cost_r': verdict.get('cost_r'),
+            'model': llm_local.last_stats().get('model', ''),
+            'ids': verdict.get('ids', {}),
+        },
+    }
 
 
 def _fractions(count):
@@ -297,26 +239,26 @@ def _fractions(count):
     return [0.5, 0.3, 0.2]
 
 
-def _refuse(signal_like, verdict):
+def _refuse(pair, verdict):
     """Пишет отказ модели в общий журнал отказов."""
     try:
         import refused
-        refused.record(NAME, signal_like, f"ИИ: {verdict.get('gate', '')}",
+        refused.record(NAME, {'trading_pair': pair}, f"ИИ: {verdict.get('gate', '')}",
                        verdict.get('detail') or verdict.get('why', ''),
                        verdict.get('cost_r', ''))
     except Exception:                              # noqa: BLE001
         pass
 
 
-def scan_for_setups(pool, gate, client=None, balance=None, candles=None,
+def scan_for_setups(pairs, gate, client=None, balance=None, candles=None,
                     market=None):
     """
-    Забирает готовые вердикты и отдаёт модели следующий сетап. Не ждёт.
+    Забирает готовые вердикты и отдаёт модели следующую пару. Не ждёт.
 
-    pool — словарь «стратегия -> кандидаты», собранный за этот цикл. Пустой
-    словарь означает, что отдавать нечего: модель не выдумывает сетапы на
-    пустом месте, и это правильно. Но забрать готовое надо и тогда — вердикт
-    про ПРОШЛЫЙ сетап приходит независимо от того, нашлось ли что-то сейчас.
+    pairs — ликвидные пары этого цикла, те же, что получают остальные
+    стратегии. Обходятся по кругу: одна пара за цикл, потому что модель
+    разбирает одну за пять-семь минут и очередь длиннее единицы означала бы
+    вердикты о разметке, которой к их приходу уже нет.
 
     candles(pair) -> df — откуда брать свечи. Отдельным параметром, чтобы
     проверки обходились без сети. Свечи берутся ЗДЕСЬ, в цикле, и передаются
@@ -327,17 +269,13 @@ def scan_for_setups(pool, gate, client=None, balance=None, candles=None,
     получает готовый словарь. Без снимка разбор законен — в разметке будут
     прочерки, — но без него модель отмечает профиль и поток вслепую.
     """
+    global _cursor
+
     if not llm_local.available():
         log(f'   {NAME}: модель недоступна — стратегия простаивает')
         return []
 
     out = _collect(_harvest())
-
-    ready = _fresh(pool)
-    if not ready:
-        if not out:
-            log(f'   {NAME}: чужих сетапов за цикл не нашлось, разбирать нечего')
-        return out
 
     if candles is None:
         import exchange
@@ -351,15 +289,15 @@ def scan_for_setups(pool, gate, client=None, balance=None, candles=None,
             return llm_market.snapshot(pair, df, client=client)
 
     if busy():
-        log(f'   {NAME}: модель занята прошлым сетапом, жду её')
+        log(f'   {NAME}: модель занята парой {busy()}, жду её')
         return out
 
-    for candidate in ready[:MAX_PER_CYCLE]:
-        pair = candidate['pair']
-        mark = _fingerprint(candidate)
-        if _asked_recently(mark):
-            continue
+    queue = _queue(pairs)
+    if not queue:
+        log(f'   {NAME}: все пары разобраны недавно, жду')
+        return out
 
+    for pair in queue:
         try:
             df = candles(pair)
         except Exception as exc:                   # noqa: BLE001
@@ -377,17 +315,15 @@ def scan_for_setups(pool, gate, client=None, balance=None, candles=None,
             facts = None
 
         # Метка ставится ПРИ ОТПРАВКЕ, а не по ответу: иначе следующий цикл
-        # отдал бы тот же сетап второй раз, пока первый ещё разбирается. И
-        # только если отправка удалась — запомнив неотправленный сетап, мы на
+        # отдал бы ту же пару второй раз, пока первая ещё разбирается. И
+        # только если отправка удалась — запомнив неотправленную пару, мы на
         # час перестали бы спрашивать о том, чего модель не видела.
-        if _submit(candidate, df, facts):
-            _remember(mark)
-            log(f'   {NAME} {pair}: отдал модели сетап от '
-                f'{candidate.get("donor", "?")}, вердикт будет через '
-                f'несколько минут')
+        if _submit(pair, df, facts):
+            _remember(pair)
+            _cursor = (list(pairs).index(pair) + 1) % max(1, len(pairs))
+            log(f'   {NAME} {pair}: отдал модели на разбор, вердикт будет '
+                f'через несколько минут')
         break
-    else:
-        log(f'   {NAME}: все сетапы цикла уже разобраны')
     return out
 
 
@@ -403,40 +339,37 @@ def _collect(finished):
     """
     out = []
     limit = int(config.__dict__.get('LLM_VERDICT_MAX_AGE_MIN', 0) or 20) * 60
-    for candidate, verdict, submitted in finished:
-        pair = candidate['pair']
+    for pair, df, verdict, submitted in finished:
         age = time.time() - submitted
 
-        # Поломка ответом не является: по такому сетапу спросить надо снова,
+        # Поломка ответом не является: по такой паре спросить надо снова,
         # а не через час. Метку снимаем.
         if verdict.get('gate') in llm_decide.BROKEN_GATES:
-            _asked.pop(_fingerprint(candidate), None)
+            _asked.pop(pair, None)
 
         if not verdict.get('ok'):
             log(f'   {NAME} {pair}: отказ — {verdict["gate"]}'
                 + (f' ({verdict["detail"]})' if verdict.get('detail') else ''))
-            _refuse(candidate.get('signal') or {'trading_pair': pair}, verdict)
+            _refuse(pair, verdict)
             continue
 
         if age > limit:
             log(f'   {NAME} {pair}: вердикт устарел на {age / 60:.0f} мин — '
                 f'не беру')
-            _refuse(candidate.get('signal') or {'trading_pair': pair},
-                    {'gate': 'вердикт устарел',
-                     'detail': f'ответ пришёл через {age / 60:.0f} мин при '
-                               f'пределе {limit // 60}'})
+            _refuse(pair, {'gate': 'вердикт устарел',
+                           'detail': f'ответ пришёл через {age / 60:.0f} мин при '
+                                     f'пределе {limit // 60}'})
             continue
 
         log(f'   {NAME} {pair}: {verdict["side"]} от {verdict["entry"]:.6g}, '
             f'R:R {verdict["rr"]}, EV {verdict["ev"]}, '
-            f'конфлюенс {verdict["votes"]}/5 (сетап от {candidate["donor"]}, '
-            f'разбор занял {age:.0f} с)')
+            f'конфлюенс {verdict["votes"]}/5 (разбор занял {age:.0f} с)')
         out.append({
             'pair': pair,
-            'signal': _reshape(candidate, verdict),
+            'signal': _reshape(pair, verdict, df),
             'score': verdict.get('votes', 0),
             'rr': verdict['rr'],
             'poi_type': 'LLM',
-            'df_1h': candidate.get('df_1h'),
+            'df_1h': df,
         })
     return out
