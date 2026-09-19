@@ -40,6 +40,7 @@ find_pools, и в чтение позиционирования. Проверк�
 """
 
 import numpy as np
+import pandas as pd
 
 import config
 import market_regime
@@ -57,19 +58,27 @@ MAX_LEVELS = 12
 MIN_DISTANCE_PCT = 0.15
 
 
-def min_stop_pct():
+# Доля ATR, ниже которой стоп — это шум свечи, а не защита идеи. Фиксированные
+# 1.5% тесны для монеты с ATR 3% (одна свеча) и щедры для BTC с ATR 0.5%.
+# Минимум берётся как большее из порога по издержкам и этой доли ATR.
+STOP_ATR_SHARE = 0.5
+
+
+def min_stop_pct(atr_pct=None):
     """
-    Минимальная дистанция стопа, при которой сделка окупает комиссии.
+    Минимальная дистанция стопа: по издержкам и, если известен, по размаху.
 
-    Выводится из предела расхода: доля = ставка_туда-обратно / стоп, значит
-    стоп = ставка / доля. При 0.075% туда-обратно и пределе 5% риска это 1.5%.
+    По издержкам: доля = ставка_туда-обратно / стоп, значит стоп = ставка /
+    доля. При 0.075% туда-обратно и пределе 5% риска это 1.5%. По размаху —
+    STOP_ATR_SHARE × ATR%. Берётся большее.
 
-    Ноль в пределе означает «не проверять» — тогда и минимума нет.
+    Ноль в пределе означает «не проверять» — тогда минимум только по ATR.
     """
     limit = getattr(config, 'MAX_ENTRY_COST_SHARE_PCT', 0) or 0
-    if limit <= 0:
-        return 0.0
-    return round(config.ENTRY_COST_ROUND_TRIP / (limit / 100) * 100, 3)
+    floor = 0.0 if limit <= 0 else config.ENTRY_COST_ROUND_TRIP / (limit / 100) * 100
+    if atr_pct:
+        floor = max(floor, STOP_ATR_SHARE * float(atr_pct))
+    return round(floor, 3)
 
 
 def _pools(pivot_list, at, atr_now):
@@ -190,6 +199,22 @@ def _fmt(value, digits=2, suffix=''):
     return f'{value:.{digits}f}{suffix}'
 
 
+def _gap_bars(df, at, window=200):
+    """Сколько свечей не хватает в последних `window` (по шагу времени)."""
+    try:
+        ts = df['timestamp'].iloc[max(0, at - window + 1):at + 1]
+        if len(ts) < 3:
+            return 0
+        deltas = ts.diff().dropna()
+        step = deltas.median()
+        if step <= pd.Timedelta(0):
+            return 0
+        missing = ((deltas / step).round() - 1).clip(lower=0)
+        return int(missing.sum())
+    except Exception:                                  # noqa: BLE001
+        return 0
+
+
 def _signed(value):
     """Процент со знаком: «+2.00%» и «−0.30%» читаются, «2.00%» — нет."""
     return '—' if value is None else f'{value:+.2f}%'
@@ -229,7 +254,7 @@ def build(pair, df, at=None, news=None, market=None, history=None):
                                            close[:at + 1])
     facts = _positioning_facts(pair, upto)
     facts.update({'price': price_now, 'atr_pct': atr_pct,
-                  'min_stop_pct': min_stop_pct()})
+                  'min_stop_pct': min_stop_pct(atr_pct)})
 
     # Ход цены — то, чего модель просила в первом же живом разборе: «данные
     # не показывают динамику цены, только уровень». Без него рост открытого
@@ -239,6 +264,11 @@ def build(pair, df, at=None, news=None, market=None, history=None):
         if at < bars or close[at - bars] <= 0:
             return None
         return (price_now / float(close[at - bars]) - 1) * 100
+    # ДЫРЫ В СВЕЧАХ. Пропуск часовых свечей внутри окна разметки означает,
+    # что пивоты, профиль и структура посчитаны по обрезку; такой разбор в
+    # статистике должен быть помечен, а не растворён среди честных.
+    facts['data_gap_bars'] = _gap_bars(df, at)
+
     facts['change_4h'] = change(4)
     facts['change_24h'] = change(24)
     facts['change_7d'] = change(24 * 7)
@@ -254,7 +284,8 @@ def build(pair, df, at=None, news=None, market=None, history=None):
         f'за 24ч {_signed(facts["change_24h"])}   за 7д {_signed(facts["change_7d"])}   '
         f'в диапазоне 30д: {_fmt(facts["range_30d_pos"], 0, "%")} от низа',
         _activity_line((market or {}).get('activity')),
-        f'Минимальный стоп по издержкам: {facts["min_stop_pct"]:.2f}%',
+        f'Минимальный стоп: {facts["min_stop_pct"]:.2f}% '
+        f'(издержки {min_stop_pct():.2f}%, половина ATR {STOP_ATR_SHARE * (atr_pct or 0):.2f}%)',
         '',
         'УРОВНИ (сверху вниз, расстояние от цены; объём у уровня — к медианной свече, '
         '×3 узел, ×0.5 пустота)',

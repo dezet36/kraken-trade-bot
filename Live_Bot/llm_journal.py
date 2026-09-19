@@ -48,6 +48,9 @@ COLUMNS = [
     # Второе мнение — только у планов «войти»: confirm / reject / broken,
     # возражения и самое сильное из них. Пусто у отказов аналитика.
     'critic', 'critic_issues', 'critic_worst',
+    # Сколько часовых свечей не хватало в окне разметки: ноль — разбор по
+    # непрерывным данным; больше нуля — исключать из статистики.
+    'data_gap_bars',
     # Препятствия между входом и первой целью, посчитанные кодом (плиты,
     # встречные зоны, пулы, оценочные ликвидации). Только у планов «войти».
     'obstacles',
@@ -114,6 +117,7 @@ def record(pair, donor, verdict, stats=None):
             'critic': (verdict.get('critic') or {}).get('verdict', ''),
             'critic_issues': (verdict.get('critic') or {}).get('issues', ''),
             'critic_worst': (verdict.get('critic') or {}).get('worst', ''),
+            'data_gap_bars': verdict.get('data_gap_bars', ''),
             'obstacles': '; '.join(verdict.get('obstacles') or []),
             'raw': str(verdict.get('raw') or '')[:6000],
             'model': stats.get('model', ''),

@@ -22,6 +22,18 @@ import llm_local
 
 
 @pytest.fixture(autouse=True)
+def _in_process(monkeypatch):
+    """
+    Эти проверки подменяют модель прямо в процессе. С 19.09.2026 боевой
+    путь идёт через дочерний процесс (llm_worker) — здесь он выключается,
+    чтобы проверялась логика вызова, а не труба.
+    """
+    # У ТОГО объекта config, что держит llm_local: другие проверки
+    # перезагружают config, и модуль с тем же именем бывает другим.
+    monkeypatch.setattr(llm_local.config, 'LLM_ISOLATE', False)
+
+
+@pytest.fixture(autouse=True)
 def _clean():
     """Состояние модуля глобальное — сбрасываем до и после каждой проверки."""
     llm_local.unload()

@@ -4589,6 +4589,20 @@ function renderLlmState(d) {
     ? `<span style="color:var(--good)">◉ считает: <b>${esc(String(d.busy).split('|')[0])}</b></span>`
     : '<span>сейчас свободна</span>';
 
+  /* Потоки биржи и взведённые планы: обрыв потока неотличим от тихого
+     рынка, если не показать возраст последнего события. */
+  const streamLine = (name, s) => {
+    if (!s) return `<span>${name}: <b>нет</b></span>`;
+    const age = s.last_event ? Math.round((Date.now() - s.last_event) / 60000) : null;
+    const state = !s.connected ? 'нет связи' : (age === null ? 'ждёт' : `${age} мин назад`);
+    const color = (!s.connected || (age !== null && age > 10)) ? 'var(--bad)' : 'var(--good)';
+    return `<span>${name}: <b style="color:${color}">${state}</b> · событий ${s.events || 0}</span>`;
+  };
+  const streams = d.streams || {};
+  const armed = (d.armed || []).map(a =>
+    `<span>${esc(a.pair)} ${esc(a.side || '')} ждёт <b>${esc(a.when || '')}</b> ${a.level ? (+a.level).toPrecision(6) : ''} · ${a.minutes} мин</span>`
+  ).join('');
+
   box.innerHTML = '<div class="ai-state">'
     + now
     + `<span>модель <b>${esc(d.model)}</b></span>`
@@ -4598,7 +4612,11 @@ function renderLlmState(d) {
     + (d.avg_seconds ? `<span>в среднем <b>${d.avg_seconds} с</b></span>` : '')
     + `<span>вердикт годен <b>${d.stale_min} мин</b></span>`
     + `<span>повтор не чаще <b>${d.reask_min} мин</b></span>`
-    + '</div><div class="ai-state" style="margin-top:6px">' + fit + cut + '</div>';
+    + '</div><div class="ai-state" style="margin-top:6px">' + fit + cut + '</div>'
+    + '<div class="ai-state" style="margin-top:6px">'
+    + streamLine('лента сделок', streams.trades) + streamLine('ликвидации', streams.liquidations)
+    + '</div>'
+    + (armed ? '<div class="ai-state" style="margin-top:6px"><span>взведённые планы:</span>' + armed + '</div>' : '');
 }
 
 function renderLlm() {

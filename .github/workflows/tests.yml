@@ -1,0 +1,42 @@
+# Проверки на каждый push и pull request.
+#
+# ЗАЧЕМ ГРАММАТИКА ОТДЕЛЬНО. 19 сентября 2026 ошибка в грамматике llama.cpp
+# прошла все текстовые проверки и роняла бота на сервере на каждом разборе.
+# Здесь грамматика проверяется двумя способами: собственным разборщиком GBNF
+# на десятках образцов ответов (без модели) и настоящим парсером llama.cpp —
+# готовое колесо для CPU ставится без сборки.
+name: tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Зависимости
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pytest
+      - name: Парсер грамматики llama.cpp (готовое колесо, без сборки)
+        continue-on-error: true
+        run: |
+          pip install llama-cpp-python --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cpu
+      - name: Грамматика — разборщик GBNF и настоящий парсер
+        working-directory: Live_Bot
+        env:
+          BOT_DATA_DIR: /tmp/bot_data
+        run: python -m pytest tests/test_grammar_accepts.py tests/test_llm_grammar.py -q -rs
+      - name: Все проверки
+        working-directory: Live_Bot
+        env:
+          BOT_DATA_DIR: /tmp/bot_data
+          TRADING_MODE: PAPER
+        run: python -m pytest tests -q -p no:cacheprovider

@@ -143,6 +143,12 @@ def _load_frames(pair, client=None):
     return frames if 'poi' in frames else None
 
 
+def cached_context(pair):
+    """Контекст из кэша без обращения к бирже. None — ещё не строился."""
+    cached = _context_cache.get(pair)
+    return cached[1] if cached else None
+
+
 def get_context(pair, client=None, force=False):
     """
     Контекст пары, пересобираемый только при появлении новой закрытой свечи

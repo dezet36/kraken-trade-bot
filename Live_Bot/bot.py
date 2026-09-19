@@ -314,6 +314,7 @@ def _paper_cycle():
         trades_ws.ensure_running(liquid_pairs, client)
     except Exception as exc:                           # noqa: BLE001
         log(f'   лента сделок: сборщик не запущен — {exc}')
+    _watch_streams()
 
     hour_utc = datetime.now(timezone.utc).hour
     total_opened = 0
@@ -435,6 +436,45 @@ def note_cycle():
         tg.error_alert(f"Бот не работал {minutes} мин (с "
                        f"{datetime.fromtimestamp(previous).strftime('%d.%m %H:%M')}). "
                        f"Непрерывность нарушена — сделки через дыру помечены в журнале.")
+
+
+_stream_alerted = {}
+
+
+def _watch_streams():
+    """
+    Потоки биржи молчат дольше десяти минут — сообщение, не чаще раза в час.
+
+    Молчание потока неотличимо от спокойного рынка, если не смотреть на
+    возраст последнего события: ликвидации и сделки по двадцати парам идут
+    непрерывно, и десять минут тишины — это обрыв.
+    """
+    now = time.time()
+    checks = []
+    try:
+        import trades_ws
+        s = trades_ws.stats()
+        checks.append(('лента сделок', s.get('last_event') or 0, s.get('since')))
+    except Exception:                                  # noqa: BLE001
+        pass
+    try:
+        import liquidations
+        s = liquidations.stats()
+        checks.append(('ликвидации', s.get('last_event') or 0, s.get('since')))
+    except Exception:                                  # noqa: BLE001
+        pass
+    for name, last_ms, since in checks:
+        if not since or now - since / 1000 < 600:
+            continue                                   # только что запущен
+        silent_min = (now - last_ms / 1000) / 60 if last_ms else (now - since / 1000) / 60
+        if silent_min < 10:
+            continue
+        if now - _stream_alerted.get(name, 0) < 3600:
+            continue
+        _stream_alerted[name] = now
+        log(f"⚠️ {name}: событий нет {silent_min:.0f} мин — поток, вероятно, оборван")
+        tg.error_alert(f"{name}: событий нет {silent_min:.0f} мин — поток биржи молчит, "
+                       f"переподключение идёт само; если не восстановится — смотреть журнал.")
 
 
 def trading_cycle():

@@ -147,9 +147,9 @@ def _harvest():
     return out
 
 
-def _asked_recently(pair, now=None):
-    """Спрашивали ли об этой паре недавно. Окно — LLM_REASK_AFTER_MIN."""
-    minutes = int(config.__dict__.get('LLM_REASK_AFTER_MIN', 0) or 0)
+def _asked_recently(pair, now=None, factor=1.0):
+    """Спрашивали ли об этой паре недавно. Окно — LLM_REASK_AFTER_MIN × factor."""
+    minutes = int(config.__dict__.get('LLM_REASK_AFTER_MIN', 0) or 0) * factor
     if minutes <= 0:
         return False
     now = now if now is not None else time.time()
@@ -168,7 +168,15 @@ def _remember(pair, now=None):
                 _asked.pop(key, None)
 
 
-def _queue(pairs):
+def _cached_context(pair):
+    try:
+        import strategy_smc
+        return strategy_smc.cached_context(pair)
+    except Exception:                              # noqa: BLE001
+        return None
+
+
+def _queue(pairs, context_of=_cached_context):
     """
     Пары в порядке обхода: от курсора по кругу, недавно разобранные — в конец.
 
@@ -180,8 +188,20 @@ def _queue(pairs):
         return []
     start = _cursor % len(pairs)
     ring = pairs[start:] + pairs[:start]
-    fresh = [p for p in ring if not _asked_recently(p)]
-    return fresh
+
+    # СОБЫТИЯ ВПЕРЁД. Свежий слом, всплеск ликвидаций, цена у уровня, скачок
+    # ОИ — такая пара идёт впереди круга, и окно повтора для неё вдвое
+    # короче. Считается кодом из кэша SMC и файлов, без запросов к бирже.
+    import llm_urgency
+    ranked = llm_urgency.rank(ring, context_of)
+    out = []
+    for pair, points, _why in ranked:
+        if points >= llm_urgency.URGENT:
+            if not _asked_recently(pair, factor=0.5):
+                out.append(pair)
+        elif not _asked_recently(pair):
+            out.append(pair)
+    return out
 
 
 def armed():
@@ -202,27 +222,103 @@ def _arm(pair, verdict):
         f'({verdict.get("side")} от {verdict.get("entry"):.6g})')
 
 
-def _closed_bar(df):
+def _closed_bars(df, since_ms):
     """
-    Последняя ЗАКРЫТАЯ часовая свеча: биржа отдаёт и текущую, ещё идущую.
-    Возвращает (метка закрытия в мс, close) или None.
+    Закрытые часовые свечи, закрывшиеся ПОСЛЕ момента since_ms, старые → новые.
+
+    Биржа отдаёт последней текущую, ещё идущую свечу — она отбрасывается.
+    Возвращает список (закрыта_в_мс, open, high, low, close, volume).
     """
     try:
-        row = df.iloc[-2]
-        ts = int(row['timestamp'].timestamp() * 1000)
+        if df is None or len(df) < 3:
+            return []
         step = int((df['timestamp'].iloc[-1] - df['timestamp'].iloc[-2]).total_seconds() * 1000)
-        return ts + step, float(row['close'])
+        out = []
+        for i in range(max(0, len(df) - 60), len(df) - 1):
+            row = df.iloc[i]
+            closed_at = int(row['timestamp'].timestamp() * 1000) + step
+            if closed_at <= since_ms:
+                continue
+            out.append((closed_at, float(row['open']), float(row['high']),
+                        float(row['low']), float(row['close']), float(row['volume'])))
+        return out
     except Exception:                              # noqa: BLE001
-        return None
+        return []
+
+
+def _median_volume(df, bars=48):
+    try:
+        import numpy as np
+        return float(np.median(df['volume'].values[-bars - 1:-1]))
+    except Exception:                              # noqa: BLE001
+        return 0.0
+
+
+def condition_met(when, level, side, bars, median_volume=0.0):
+    """
+    Наступило ли условие входа на свечах, закрывшихся после взведения.
+
+    Возвращает описание для журнала или ''. Семь условий, и каждое —
+    арифметика по закрытым свечам, без модели:
+      close_above / close_below            закрытие за уровнем
+      close_*_with_volume                  то же при объёме ≥ 1.5× медианы
+      retest                               закрытие за уровнем по ходу сделки,
+                                           потом касание уровня с той стороны
+      sweep_reclaim                        экстремум за уровнем против сделки,
+                                           закрытие обратно не позже 3 свечей
+    """
+    if not bars or level is None:
+        return ''
+    level = float(level)
+    long = side == 'LONG'
+    if when in ('close_above', 'close_above_with_volume'):
+        for closed_at, o, h, l, c, v in bars:
+            if c > level and (when == 'close_above' or (median_volume and v >= 1.5 * median_volume)):
+                return f'час закрылся по {c:.6g} выше {level:.6g}' + (
+                    f' на объёме ×{v / median_volume:.1f}' if 'volume' in when else '')
+        return ''
+    if when in ('close_below', 'close_below_with_volume'):
+        for closed_at, o, h, l, c, v in bars:
+            if c < level and (when == 'close_below' or (median_volume and v >= 1.5 * median_volume)):
+                return f'час закрылся по {c:.6g} ниже {level:.6g}' + (
+                    f' на объёме ×{v / median_volume:.1f}' if 'volume' in when else '')
+        return ''
+    if when == 'retest':
+        broke = False
+        for closed_at, o, h, l, c, v in bars:
+            if not broke:
+                broke = c > level if long else c < level
+                continue
+            touched = l <= level if long else h >= level
+            held = c >= level if long else c <= level
+            if touched and held:
+                return f'пробой {level:.6g} и возврат к нему (закрытие {c:.6g})'
+            if (c < level) if long else (c > level):
+                broke = False                      # пробой не удержался — ждём заново
+        return ''
+    if when == 'sweep_reclaim':
+        swept_at = None
+        for i, (closed_at, o, h, l, c, v) in enumerate(bars):
+            beyond = l < level if long else h > level
+            if swept_at is None and beyond:
+                swept_at = i
+            if swept_at is not None and i - swept_at <= 3:
+                back = c > level if long else c < level
+                if back:
+                    return f'вынос за {level:.6g} и возврат за {i - swept_at + 1} св. (закрытие {c:.6g})'
+            elif swept_at is not None and i - swept_at > 3:
+                swept_at = i if beyond else None
+        return ''
+    return ''
 
 
 def _check_armed(candles):
     """
-    Проверяет взведённые условия по последней закрытой свече.
+    Проверяет взведённые условия по свечам, закрывшимся после взведения.
 
-    Считается только свеча, ЗАКРЫВШАЯСЯ ПОСЛЕ взведения: если цена уже стояла
-    выше уровня, когда модель просила «закрытие выше», это не подтверждение,
-    а то самое положение, которое её и не устроило.
+    Считаются только свечи ПОСЛЕ взведения: если цена уже стояла выше
+    уровня, когда модель просила «закрытие выше», это не подтверждение, а
+    то самое положение, которое её и не устроило.
     """
     out = []
     ttl = int(config.__dict__.get('LLM_TRIGGER_TTL_H', 0) or 12) * 3600
@@ -241,20 +337,16 @@ def _check_armed(candles):
         except Exception as exc:                   # noqa: BLE001
             log(f'   {NAME} {pair}: свечи для условия не получены — {exc}')
             continue
-        bar = _closed_bar(df) if df is not None else None
-        if bar is None:
+        bars = _closed_bars(df, plan['armed_at'] * 1000)
+        if not bars:
             continue
-        closed_at, close = bar
-        if closed_at <= plan['armed_at'] * 1000:
-            continue                               # закрылась до взведения
-        level = float(verdict['trigger_level'])
-        hit = close > level if verdict['trigger_when'] == 'close_above' else close < level
-        if not hit:
+        met = condition_met(verdict['trigger_when'], verdict['trigger_level'],
+                            verdict['side'], bars, _median_volume(df))
+        if not met:
             continue
         _armed.pop(pair, None)
-        log(f'   {NAME} {pair}: условие наступило — час закрылся по {close:.6g} '
-            f'{"выше" if verdict["trigger_when"] == "close_above" else "ниже"} '
-            f'{level:.6g}; {verdict["side"]} от {verdict["entry"]:.6g}')
+        log(f'   {NAME} {pair}: условие наступило — {met}; '
+            f'{verdict["side"]} от {verdict["entry"]:.6g}')
         out.append({
             'pair': pair,
             'signal': _reshape(pair, verdict, df),

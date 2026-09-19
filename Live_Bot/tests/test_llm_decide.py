@@ -122,11 +122,11 @@ class TestCostsDecide:
 
     def test_a_stop_tighter_than_the_floor_is_refused(self, monkeypatch):
         # Лонг со стопом 3% от входа: при минимуме 1.5% проходит.
-        monkeypatch.setattr(dec.llm_context, 'min_stop_pct', lambda: 1.5)
+        monkeypatch.setattr(dec.llm_context, 'min_stop_pct', lambda atr_pct=None: 1.5)
         assert verdict()['ok']
 
         # Тот же сетап при минимуме 5% — уже нет.
-        monkeypatch.setattr(dec.llm_context, 'min_stop_pct', lambda: 5.0)
+        monkeypatch.setattr(dec.llm_context, 'min_stop_pct', lambda atr_pct=None: 5.0)
         tight = verdict()
         assert not tight['ok']
         assert tight['gate'] == 'стоп теснее минимального'
@@ -253,7 +253,7 @@ class TestTheWholePass:
     def test_the_model_sees_the_grammar_for_these_levels(self, monkeypatch):
         # Без предела стопа: на синтетике уровни стоят теснее 1.5%, и
         # грамматика с расстояниями честно оставила бы один отказ.
-        monkeypatch.setattr(dec.llm_context, 'min_stop_pct', lambda: 0.0)
+        monkeypatch.setattr(dec.llm_context, 'min_stop_pct', lambda atr_pct=None: 0.0)
         seen = {}
 
         def ask(prompt, grammar, max_tokens):
@@ -425,7 +425,7 @@ class TestTheCriticSecondOpinion:
         # Проверки кода подменяем готовым «прошёл»: на синтетических свечах
         # уровни не те, что в LEVELS, а здесь проверяется вызов критика.
         ready = verdict()
-        monkeypatch.setattr(dec, 'check', lambda parsed, levels, answer=None, market=None: ready)
+        monkeypatch.setattr(dec, 'check', lambda parsed, levels, answer=None, market=None, min_stop=None, atr_pct=None: ready)
         ask, calls = self._ask_pair(
             answer(),
             '{"verdict":"confirm","issues":"возражений нет","worst":"—"}')
@@ -438,7 +438,7 @@ class TestTheCriticSecondOpinion:
     def test_the_critic_can_be_switched_off(self, monkeypatch):
         monkeypatch.setattr(config, 'LLM_CRITIC', False)
         ready = verdict()
-        monkeypatch.setattr(dec, 'check', lambda parsed, levels, answer=None, market=None: ready)
+        monkeypatch.setattr(dec, 'check', lambda parsed, levels, answer=None, market=None, min_stop=None, atr_pct=None: ready)
         ask, calls = self._ask_pair(answer(), 'не должно быть вызвано')
         out = dec.decide('BTCUSDT', TestTheWholePass().make_df(), ask)
         assert len(calls) == 1 and out['ok'] and 'critic' not in out
@@ -602,3 +602,30 @@ class TestBiasIsAlwaysThere:
         import llm_grammar
         for text in (llm_grammar.build(['L1', 'L2', 'L3']), llm_grammar.build([])):
             assert 'bias' in text and 'flat' in text
+
+
+class TestDynamicBuffers:
+    """
+    Порог «стоп под скоплением» и минимальный стоп зависят от размаха:
+    фиксированные 0.25% и 1.5% тесны для монеты с ATR 3% и щедры для BTC.
+    """
+
+    def test_the_hunt_threshold_grows_with_atr(self):
+        assert dec.stop_hunt_pct(None) == pytest.approx(0.3)
+        assert dec.stop_hunt_pct(0.7) == pytest.approx(0.37)
+        assert dec.stop_hunt_pct(3.0) == pytest.approx(0.6)
+
+    def test_a_pool_0_4pct_above_the_stop_is_hunted_on_a_wide_market(self):
+        market = {'smc': {'untapped': [{'price': 97.4, 'side': 'SSL', 'source': 'SWING'}]}}
+        # стоп 97 (L4), пул 97.4: gap 0.41% — при ATR 0.7 (порог 0.37%) проходит,
+        # при ATR 3 (порог 0.6%) — отказ.
+        assert dec.stop_in_liquidity('LONG', 97.0, market, atr_pct=0.7) == ''
+        assert 'снимут' in dec.stop_in_liquidity('LONG', 97.0, market, atr_pct=3.0)
+
+    def test_the_minimum_stop_follows_half_atr(self, monkeypatch):
+        import llm_context
+        assert llm_context.min_stop_pct(None) == pytest.approx(1.5)
+        assert llm_context.min_stop_pct(0.8) == pytest.approx(1.5)
+        assert llm_context.min_stop_pct(4.0) == pytest.approx(2.0)
+        out = dec.check(dec.parse(answer(), LEVELS), LEVELS, min_stop=4.0)
+        assert out['gate'] == 'стоп теснее минимального'

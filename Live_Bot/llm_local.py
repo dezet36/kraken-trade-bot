@@ -116,6 +116,26 @@ def ask(prompt, grammar=None, max_tokens=None):
     """
     Один вопрос модели. Возвращает текст ответа.
 
+    ПО УМОЛЧАНИЮ — В ОТДЕЛЬНОМ ПРОЦЕССЕ (llm_worker): падение llama.cpp в
+    нативном коде убивает процесс целиком, и 19 сентября 2026 оно роняло
+    бота на каждом разборе. С LLM_ISOLATE=0 модель работает прямо здесь —
+    для отладки и для машин, где spawn дорог.
+    """
+    if getattr(config, 'LLM_ISOLATE', True):
+        if not available():
+            raise RuntimeError('модель недоступна')
+        import llm_worker
+        answer, stats = llm_worker.ask(prompt, grammar, max_tokens)
+        if stats:
+            _last.update(stats)
+        return answer
+    return ask_in_process(prompt, grammar, max_tokens)
+
+
+def ask_in_process(prompt, grammar=None, max_tokens=None):
+    """
+    Вопрос модели в ЭТОМ процессе. Возвращает текст ответа.
+
     Бросает RuntimeError, если модель недоступна: вызывающий (llm_decide)
     ловит это и превращает в именованный отказ. Молча возвращать пустоту
     нельзя — пустой ответ неотличим от отказа модели входить.
@@ -223,3 +243,8 @@ def unload():
     with _lock:
         _model = None
         _failed = False
+    try:
+        import llm_worker
+        llm_worker.stop()
+    except Exception:                              # noqa: BLE001
+        pass

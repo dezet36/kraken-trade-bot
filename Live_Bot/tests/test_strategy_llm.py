@@ -643,3 +643,65 @@ class TestAnArmedTriggerWaitsForTheBar:
         out = cycle(['BTCUSDT'])
         assert len(out) == 1
         assert strategy_llm.armed() == []
+
+
+class TestSevenEntryConditionsAreCode:
+    """
+    «Возврат в зону» и «снятие стопов с возвратом» раньше оставались текстом в
+    note и не исполнялись. Теперь это арифметика по закрытым свечам.
+    """
+
+    B = staticmethod(lambda o, h, l, c, v=1.0: (0, o, h, l, c, v))
+
+    def test_close_above_needs_a_close_not_a_wick(self):
+        assert strategy_llm.condition_met('close_above', 100, 'LONG',
+                                          [self.B(99, 101, 98, 99.5)]) == ''
+        assert 'выше' in strategy_llm.condition_met('close_above', 100, 'LONG',
+                                                    [self.B(99, 101, 98, 100.5)])
+
+    def test_close_with_volume_needs_the_volume(self):
+        bars = [self.B(99, 101, 98, 100.5, v=1.2)]
+        assert strategy_llm.condition_met('close_above_with_volume', 100, 'LONG', bars, 1.0) == ''
+        bars = [self.B(99, 101, 98, 100.5, v=1.6)]
+        assert 'объёме ×1.6' in strategy_llm.condition_met('close_above_with_volume', 100, 'LONG', bars, 1.0)
+
+    def test_retest_is_break_then_touch_that_holds(self):
+        bars = [self.B(99, 101, 98.5, 100.8),        # пробой вверх
+                self.B(100.8, 101, 99.9, 100.3)]    # касание 100 и удержание
+        assert 'ретест' not in strategy_llm.condition_met('retest', 100, 'LONG', bars[:1])
+        assert 'возврат' in strategy_llm.condition_met('retest', 100, 'LONG', bars)
+        # Касание, но закрытие ниже уровня — не ретест, а провал.
+        failed = [self.B(99, 101, 98.5, 100.8), self.B(100.8, 101, 99.5, 99.7)]
+        assert strategy_llm.condition_met('retest', 100, 'LONG', failed) == ''
+
+    def test_sweep_reclaim_is_a_wick_beyond_then_close_back(self):
+        bars = [self.B(100.5, 100.8, 99.2, 100.3)]  # вынос под 100 и закрытие выше
+        assert 'вынос' in strategy_llm.condition_met('sweep_reclaim', 100, 'LONG', bars)
+        late = [self.B(100.5, 100.8, 99.2, 99.6), self.B(99.6, 99.9, 99.1, 99.5),
+                self.B(99.5, 99.9, 99.3, 99.6), self.B(99.6, 99.9, 99.3, 99.7),
+                self.B(99.7, 100.5, 99.5, 100.2)]   # вернулась на 5-й свече — поздно
+        assert strategy_llm.condition_met('sweep_reclaim', 100, 'LONG', late) == ''
+
+    def test_short_mirrors_long(self):
+        bars = [self.B(100, 101.2, 99.5, 99.7)]
+        assert 'вынос' in strategy_llm.condition_met('sweep_reclaim', 101, 'SHORT', bars)
+        assert 'ниже' in strategy_llm.condition_met('close_below', 100, 'SHORT', bars)
+
+    def test_the_armed_plan_fires_on_a_retest(self, monkeypatch):
+        import numpy as np
+        import pandas as pd
+        monkeypatch.setattr(strategy_llm.llm_local, 'available', lambda: True)
+        monkeypatch.setattr(strategy_llm.llm_decide, 'decide',
+                            lambda *a, **k: approving_verdict(trigger_when='retest',
+                                                              trigger_level=101.0, trigger_id='L3'))
+        strategy_llm.scan_for_setups(['BTCUSDT'], gate=None, candles=lambda pair: [0] * 500)
+        strategy_llm.join(15)
+        strategy_llm.scan_for_setups([], gate=None, candles=lambda pair: [0] * 500)
+        armed_ms = int(strategy_llm._armed['BTCUSDT']['armed_at'] * 1000)
+        closes = [100, 100, 101.8, 101.2, 101.5]
+        df = pd.DataFrame({
+            'timestamp': pd.to_datetime(np.arange(5) * 3_600_000 + armed_ms - 3_600_000 + 1000, unit='ms'),
+            'open': closes, 'high': [c + 0.3 for c in closes],
+            'low': [100, 100, 101.1, 100.9, 101.3], 'close': closes, 'volume': [1.0] * 5})
+        out = strategy_llm.scan_for_setups([], gate=None, candles=lambda pair: df)
+        assert len(out) == 1 and strategy_llm.armed() == []

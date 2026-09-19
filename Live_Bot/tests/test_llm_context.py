@@ -199,7 +199,7 @@ class TestWhatTheModelActuallyReads:
     def test_the_floor_is_stated_in_the_text(self):
         df = make_df(wavy(400))
         out = llm_context.build('BTCUSDT', df)
-        assert 'Минимальный стоп по издержкам' in out['text']
+        assert 'Минимальный стоп:' in out['text'] and 'издержки' in out['text']
 
     def test_a_missing_series_shows_as_unknown_not_zero(self, monkeypatch):
         """

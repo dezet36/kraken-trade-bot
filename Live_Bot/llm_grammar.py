@@ -122,8 +122,16 @@ def build(level_ids, prices=None, min_stop_pct=0.0, min_rr=0.0):
     # половина её логики не доходила до сделки. Теперь условие исполняет
     # код: «now» — лимит на вход сразу, «close_above»/«close_below» + уровень
     # — ждать закрытия часовой свечи за уровнем.
-    when = ('"\\"now\\"" | "\\"close_above\\"" ws "," ws "\\"level\\":" ws lvl'
-            ' | "\\"close_below\\"" ws "," ws "\\"level\\":" ws lvl')
+    # Семь условий, и все исполняет код (strategy_llm._check_armed):
+    #   now                      лимит на вход сразу, ждёт цену
+    #   close_above / close_below      закрытие часа за уровнем
+    #   close_*_with_volume            то же при объёме ≥ 1.5× медианы
+    #   retest                   пробой уровня по ходу сделки и возврат к нему
+    #   sweep_reclaim            вынос за уровень против сделки и возврат ≤ 3 св.
+    with_level = ('close_above', 'close_below', 'close_above_with_volume',
+                  'close_below_with_volume', 'retest', 'sweep_reclaim')
+    when = ' | '.join(['"\\"now\\""'] + [
+        f'"\\"{name}\\"" ws "," ws "\\"level\\":" ws lvl' for name in with_level])
     return f'''root     ::= enter | skip
 enter    ::= {head} ws "\\"d\\":\\"enter\\"," ws plan ws "," ws "\\"trigger\\":" ws trigger ws "," ws "\\"cf\\":" ws cf ws "," ws "\\"p\\":" ws prob ws "," ws "\\"why\\":" ws why ws "," ws "\\"risk\\":" ws risk ws "," ws "\\"alt\\":" ws alt ws "}}"
 skip     ::= {head} ws "\\"d\\":\\"skip\\"," ws "\\"cf\\":" ws cf ws "," ws "\\"why\\":" ws why ws "}}"

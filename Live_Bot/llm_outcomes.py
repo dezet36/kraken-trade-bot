@@ -47,7 +47,7 @@ COLUMNS = [
     # gate — имя отказа, включая отказы кода и критика по плану «войти».
     'decision', 'gate', 'side',
     # Куда модель ждала рынок — и при отказе: по этому судят направление.
-    'bias',
+    'bias', 'data_gap_bars',
     # Цена в момент разбора и план, если он был.
     'price', 'entry', 'stop', 'tp1',
     # Ход цены от момента разбора, в процентах, на каждом горизонте.
@@ -105,6 +105,7 @@ def watch(pair, verdict, price, ts, at=''):
             'gate': verdict.get('gate', ''),
             'side': side,
             'bias': verdict.get('bias', ''),
+            'data_gap_bars': int(verdict.get('data_gap_bars') or 0),
             'price': float(price),
             'entry': float(entry) if entry else None,
             'stop': float(stop) if stop else None,
@@ -204,7 +205,8 @@ def row(w):
     hours = (w['last_ts'] - w['start_ts']) / _MS_HOUR
     out = {
         'at': w.get('at', ''), 'pair': w['pair'], 'decision': w['decision'],
-        'gate': w['gate'], 'side': w['side'], 'bias': w.get('bias', ''), 'price': p0,
+        'gate': w['gate'], 'side': w['side'], 'bias': w.get('bias', ''),
+        'data_gap_bars': w.get('data_gap_bars', 0), 'price': p0,
         'entry': w['entry'] if w['entry'] is not None else '',
         'stop': w['stop'] if w['stop'] is not None else '',
         'tp1': w['tp1'] if w['tp1'] is not None else '',

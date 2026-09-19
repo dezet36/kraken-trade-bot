@@ -1268,8 +1268,29 @@ def llm_payload(limit=40):
     except Exception:                              # noqa: BLE001
         busy = None
 
+    streams = {}
+    for name, module in (('trades', 'trades_ws'), ('liquidations', 'liquidations')):
+        try:
+            mod = __import__(module)
+            s = mod.stats()
+            streams[name] = {'connected': bool(s.get('connected')),
+                             'events': s.get('events', 0),
+                             'last_event': s.get('last_event'),
+                             'error': s.get('error', '')}
+        except Exception:                              # noqa: BLE001
+            streams[name] = None
+
+    armed = []
+    try:
+        import strategy_llm
+        armed = strategy_llm.armed()
+    except Exception:                                  # noqa: BLE001
+        pass
+
     return {
         'configured': bool(path),
+        'streams': streams,
+        'armed': armed,
         'model': os.path.basename(path) if path else '',
         'exists': bool(path) and os.path.exists(path),
         'ctx': getattr(config, 'LLM_CTX', 0),

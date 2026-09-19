@@ -43,7 +43,8 @@ MIN_RR = 2.0
 FACTORS = ('poi', 'vp', 'der', 'smc', 'flow')
 
 # Условия входа, которые умеет исполнять код (см. strategy_llm._armed).
-TRIGGERS = ('now', 'close_above', 'close_below')
+TRIGGERS = ('now', 'close_above', 'close_below', 'retest', 'sweep_reclaim',
+            'close_above_with_volume', 'close_below_with_volume')
 
 # Отказы, за которыми стоит НЕИСПРАВНОСТЬ, а не суждение модели. Разница не
 # косметическая: «мало конфлюенса» — это работа, законченная ответом, а «ответ
@@ -54,7 +55,7 @@ TRIGGERS = ('now', 'close_above', 'close_below')
 # Список здесь, а не в каждом из трёх мест, где он нужен: стратегии, панели и
 # странице. Правило, записанное трижды, расходится — в этом проекте так уже
 # вышло с дневным стоп-краном.
-BROKEN_GATES = ('ответ обрезан', 'ответ не разобран', 'ответ пуст',
+BROKEN_GATES = ('модель упала', 'модель зависла', 'ответ обрезан', 'ответ не разобран', 'ответ пуст',
                 'окно контекста мало', 'модель недоступна')
 
 
@@ -192,9 +193,16 @@ def truncated(answer):
     return bool(text) and not text.endswith('}')
 
 
-# Ближе этой доли цены стоп считается «под скоплением»: свип чужих стопов
-# обычно проходит 0.05-0.3% за уровень (см. smc SWEEP_MIN_PENETRATION_PCT).
-STOP_HUNT_PCT = 0.25
+# Ближе этого стоп считается «под скоплением»: свип чужих стопов проходит
+# за уровень на десятые процента, а на волатильной монете — на доли ATR.
+# Порог динамический: 0.3% + 0.1 × ATR% (при ATR 0.7% это 0.37%, при 3% —
+# 0.6%). Было 0.25% фиксированно — по замечанию стороннего разбора мало.
+STOP_HUNT_BASE_PCT = 0.3
+STOP_HUNT_ATR_SHARE = 0.1
+
+
+def stop_hunt_pct(atr_pct=None):
+    return STOP_HUNT_BASE_PCT + STOP_HUNT_ATR_SHARE * float(atr_pct or 0.0)
 
 
 def _pools(market):
@@ -216,16 +224,16 @@ def trigger_against_idea(side, entry, parsed):
     level = parsed.get('trigger_level')
     if when == 'now' or not level or not entry:
         return ''
-    if side == 'LONG' and when == 'close_below' and level >= entry:
+    if side == 'LONG' and when in ('close_below', 'close_below_with_volume') and level >= entry:
         return (f'лонг от {entry:.6g} после закрытия ниже {level:.6g} — '
                 f'это ожидание слома идеи, а не подтверждения')
-    if side == 'SHORT' and when == 'close_above' and level <= entry:
+    if side == 'SHORT' and when in ('close_above', 'close_above_with_volume') and level <= entry:
         return (f'шорт от {entry:.6g} после закрытия выше {level:.6g} — '
                 f'это ожидание слома идеи, а не подтверждения')
     return ''
 
 
-def stop_in_liquidity(side, stop, market):
+def stop_in_liquidity(side, stop, market, atr_pct=None):
     """
     Стоп вплотную за скоплением чужих стопов. Возвращает описание или ''.
 
@@ -236,15 +244,16 @@ def stop_in_liquidity(side, stop, market):
     """
     if not market or not stop:
         return ''
+    threshold = stop_hunt_pct(atr_pct)
     for price, pool_side, source in _pools(market):
         if side == 'LONG' and pool_side == 'SSL' and price > stop:
             gap = (price - stop) / price * 100
-            if gap <= STOP_HUNT_PCT:
+            if gap <= threshold:
                 return (f'стоп {stop:.6g} на {gap:.2f}% ниже скопления стопов '
                         f'лонгов {price:.6g} ({source}) — снимут вместе с ними')
         if side == 'SHORT' and pool_side == 'BSL' and price < stop:
             gap = (stop - price) / price * 100
-            if gap <= STOP_HUNT_PCT:
+            if gap <= threshold:
                 return (f'стоп {stop:.6g} на {gap:.2f}% выше скопления стопов '
                         f'шортов {price:.6g} ({source}) — снимут вместе с ними')
     return ''
@@ -288,7 +297,7 @@ def obstacles_to_target(side, entry, target, market):
     return out[:6]
 
 
-def check(parsed, levels, answer=None, market=None):
+def check(parsed, levels, answer=None, market=None, min_stop=None, atr_pct=None):
     """
     Проверяет разобранный ответ. Возвращает решение со всеми числами.
 
@@ -345,7 +354,7 @@ def check(parsed, levels, answer=None, market=None):
                         f'цели {[round(t, 6) for t in targets]}', base)
 
     stop_pct = abs(entry - stop) / entry * 100
-    floor = llm_context.min_stop_pct()
+    floor = min_stop if min_stop is not None else llm_context.min_stop_pct(atr_pct)
     if floor and stop_pct < floor:
         return _refusal('стоп теснее минимального',
                         f'{stop_pct:.2f}% при минимуме {floor:.2f}%', base)
@@ -360,7 +369,7 @@ def check(parsed, levels, answer=None, market=None):
     # проверяется арифметикой, и отдавать её модели значило бы платить пять
     # минут за то, что считается за микросекунду. Препятствия на пути к цели
     # не запрещают вход — они уходят критику и в журнал.
-    hunted = stop_in_liquidity(side, stop, market)
+    hunted = stop_in_liquidity(side, stop, market, atr_pct)
     if hunted:
         return _refusal('стоп в скоплении стопов', hunted, base)
 
@@ -416,9 +425,10 @@ def decide(pair, df, ask, news=None, at=None, max_tokens=None, market=None,
     if not levels:
         return _refusal('нет разметки', 'уровней на этом баре не найдено')
 
+    facts = context['facts']
     grammar = llm_grammar.build([lv['id'] for lv in levels],
                                 prices=[lv['price'] for lv in levels],
-                                min_stop_pct=llm_context.min_stop_pct(),
+                                min_stop_pct=facts.get('min_stop_pct') or llm_context.min_stop_pct(),
                                 min_rr=MIN_RR)
     # Разметка без задачи — таблица без вопроса. Первый прогон по живому рынку
     # отдавал модели только context['text'], и она отвечала «no news, no
@@ -440,10 +450,12 @@ def decide(pair, df, ask, news=None, at=None, max_tokens=None, market=None,
                         str(exc)[:300])
 
     verdict = check(parse(answer, levels), levels, answer,
-                    market=context['facts'].get('market'))
+                    market=facts.get('market'),
+                    min_stop=facts.get('min_stop_pct'), atr_pct=facts.get('atr_pct'))
     verdict['pair'] = pair
     verdict['levels'] = levels
     verdict['raw'] = answer
+    verdict['data_gap_bars'] = int(facts.get('data_gap_bars') or 0)
     if verdict.get('ok') and critic_enabled():
         verdict = review(verdict, context['text'], ask)
     return verdict

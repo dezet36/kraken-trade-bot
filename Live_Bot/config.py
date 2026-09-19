@@ -273,6 +273,10 @@ LLM_VERDICT_MAX_AGE_MIN = int(os.getenv('LLM_VERDICT_MAX_AGE_MIN', 35))
 # занят — за девять часов так сгорело больше двух часов счёта.
 LLM_REASK_AFTER_MIN = int(os.getenv('LLM_REASK_AFTER_MIN', 60))
 
+# Модель — в отдельном процессе: падение llama.cpp (abort в нативном коде)
+# не роняет бота. 0 — в том же процессе, для отладки.
+LLM_ISOLATE = os.getenv('LLM_ISOLATE', '1') not in ('0', 'false', 'False', '')
+
 # Второе мнение о каждом плане «войти»: тот же движок, роль проверяющего.
 # Выключается, если нужно замерить аналитика без него.
 LLM_CRITIC = os.getenv('LLM_CRITIC', '1') not in ('0', 'false', 'False', '')
