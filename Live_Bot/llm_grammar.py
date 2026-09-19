@@ -59,16 +59,23 @@ MAX_TARGETS = 3
 #
 # Поэтому просторно ровно там, где есть что сказать: разбор. Остальные поля
 # отвечают на один вопрос каждое, и предложения-двух им хватает.
+#
+# УЖАТО 19 СЕНТЯБРЯ 2026 ПО ПЕРВОМУ ОТВЕТУ «ВОЙТИ». Отказ — это разбор и
+# «почему»; вход — ещё условие, риск и встречный сценарий, и полный ответ
+# ETHUSDT упёрся в 1200 токенов на поле trigger, просчитав 862 секунды.
+# На этом процессоре каждый токен ответа — две трети секунды, и просторные
+# поля стоят минут, а не байтов. Лучшие живые разборы укладывались в 400-670
+# знаков, ужатие их не задевает.
 REGIME_CHARS = 120
-ANALYSIS_CHARS = 1000
-TRIGGER_CHARS = 240
-WHY_CHARS = 320
-RISK_CHARS = 240
-ALT_CHARS = 320
+ANALYSIS_CHARS = 800
+TRIGGER_CHARS = 160
+WHY_CHARS = 240
+RISK_CHARS = 180
+ALT_CHARS = 240
 
 # Ответ проверяющего короче: он не разбирает рынок, а называет возражения.
-CRITIC_ISSUES_CHARS = 600
-CRITIC_WORST_CHARS = 200
+CRITIC_ISSUES_CHARS = 450
+CRITIC_WORST_CHARS = 160
 
 
 def _alt(values):
@@ -134,7 +141,7 @@ why      ::= {_text(WHY_CHARS)}
 risk     ::= {_text(RISK_CHARS)}
 alt      ::= {_text(ALT_CHARS)}
 ch       ::= [^"\\\\\\x00-\\x1f]
-ws       ::= [ \\n]*
+ws       ::= [ \\n]{0,2}
 '''
 
 
@@ -150,7 +157,7 @@ verdict  ::= "\\"confirm\\"" | "\\"reject\\""
 issues   ::= {_text(CRITIC_ISSUES_CHARS)}
 worst    ::= {_text(CRITIC_WORST_CHARS)}
 ch       ::= [^"\\\\\\x00-\\x1f]
-ws       ::= [ \\n]*
+ws       ::= [ \\n]{0,2}
 '''
 
 
@@ -241,7 +248,7 @@ regime   ::= {_text(REGIME_CHARS)}
 analysis ::= {_text(ANALYSIS_CHARS)}
 why      ::= {_text(WHY_CHARS)}
 ch       ::= [^"\\\\\\x00-\\x1f]
-ws       ::= [ \\n]*
+ws       ::= [ \\n]{0,2}
 '''
 
 
