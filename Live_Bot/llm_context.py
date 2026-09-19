@@ -29,10 +29,14 @@
 на неё, в бою не воспроизводится. Поэтому `at` протаскивается насквозь: и в
 find_pools, и в чтение позиционирования. Проверка на это — test_llm_context.
 
-ЧЕГО ЗДЕСЬ НЕТ. Зон интереса SMC (ордерные блоки, брейкеры, FVG): им нужен
-объект структуры, который строит свой сканер, и тащить его сюда значило бы
-связать сборщик с одной стратегией. Добавляются вторым заходом, когда основной
-путь заработает.
+ВТОРОЙ ЗАХОД — СНИМОК РЫНКА (llm_market). Первые живые разборы дали
+конфлюенс 1/5 и 3/5 не потому, что рынок был пуст, а потому что модель
+спрашивали о профиле объёма и потоке, которых ей не показывали. Снимок
+приносит их: профиль объёма, поглощение, дельту агрессора, стакан и структуру
+из пакета smc. Собирается он В ЦИКЛЕ, в нём есть запросы к бирже, и сюда
+приходит готовым — этот модуль его только печатает. Отсутствие снимка или
+любого его куска — законное состояние: на месте пропажи стоит прочерк, и в
+шапке каждого блока сказано, факт это или прокси.
 """
 
 import config
@@ -170,7 +174,12 @@ def _fmt(value, digits=2, suffix=''):
     return f'{value:.{digits}f}{suffix}'
 
 
-def build(pair, df, at=None, news=None):
+def _signed(value):
+    """Процент со знаком: «+2.00%» и «−0.30%» читаются, «2.00%» — нет."""
+    return '—' if value is None else f'{value:+.2f}%'
+
+
+def build(pair, df, at=None, news=None, market=None):
     """
     Всё, что нужно модели для одного решения.
 
@@ -179,6 +188,10 @@ def build(pair, df, at=None, news=None):
 
     news — готовый дайджест или None. None означает «фона нет», и в тексте это
     прямо сказано: иначе модель начнёт рассуждать о новостях, которых не видела.
+
+    market — снимок llm_market.snapshot или None. Печатается всегда, даже
+    пустым: блок с прочерками говорит модели «не измерено», а отсутствие
+    блока она прочтёт как «на рынке этого нет».
     """
     found, atr_now = levels(df, at)
     if not found:
@@ -200,9 +213,22 @@ def build(pair, df, at=None, news=None):
     facts.update({'price': price_now, 'atr_pct': atr_pct,
                   'min_stop_pct': min_stop_pct()})
 
+    # Ход цены — то, чего модель просила в первом же живом разборе: «данные
+    # не показывают динамику цены, только уровень». Без него рост открытого
+    # интереса нечем сопоставить, а именно из этого сопоставления берутся
+    # противоречия, ради которых её и спрашивают.
+    def change(bars):
+        if at < bars or close[at - bars] <= 0:
+            return None
+        return (price_now / float(close[at - bars]) - 1) * 100
+    facts['change_4h'] = change(4)
+    facts['change_24h'] = change(24)
+
     lines = [
         f'Пара: {pair}   Цена: {price_now:.6g}   '
         f'Размах (ATR): {_fmt(atr_pct, 2, "%")}',
+        f'Ход цены: за 4ч {_signed(facts["change_4h"])}   '
+        f'за 24ч {_signed(facts["change_24h"])}',
         f'Минимальный стоп по издержкам: {facts["min_stop_pct"]:.2f}%',
         '',
         'УРОВНИ (сверху вниз, расстояние от текущей цены)',
@@ -225,6 +251,9 @@ def build(pair, df, at=None, news=None):
         '',
     ]
 
+    lines += market_lines(market, price_now)
+    facts['market'] = market
+
     if news:
         lines += ['НОВОСТНОЙ ФОН', f"  {news}", '']
     else:
@@ -232,6 +261,172 @@ def build(pair, df, at=None, news=None):
         lines += ['НОВОСТНОЙ ФОН', '  Не получен. Не рассуждай о новостях.', '']
 
     return {'levels': found, 'text': '\n'.join(lines), 'facts': facts}
+
+
+# ── Снимок рынка текстом ─────────────────────────────────────────────────────
+
+_DIRECTION = {'BULLISH': 'вверх', 'BEARISH': 'вниз'}
+_SIDE = {'BSL': 'над ценой, стопы шортов', 'SSL': 'под ценой, стопы лонгов'}
+_RANGE_SIDE = {'DISCOUNT': 'дисконт', 'PREMIUM': 'премия',
+               'EQUILIBRIUM': 'равновесие'}
+_NONE = '  —'
+
+
+def _pct(price, price_now):
+    """Расстояние уровня от цены, со знаком."""
+    if price is None or not price_now:
+        return '—'
+    return f'{(float(price) / price_now - 1) * 100:+.2f}%'
+
+
+def _p(price):
+    """Цена в шесть значащих цифр или прочерк."""
+    return '—' if price is None else f'{float(price):.6g}'
+
+
+def _profile_lines(profile, price_now):
+    if not profile:
+        return [_NONE]
+    thin = ', '.join(f'{_p(lo)}..{_p(hi)}' for lo, hi in (profile.get('thin') or []))
+    return [
+        f"  Пик объёма (POC) {_p(profile.get('poc'))} "
+        f"({_pct(profile.get('poc'), price_now)})   "
+        f"зона стоимости {_p(profile.get('value_low'))}"
+        f"..{_p(profile.get('value_high'))}   "
+        f"по {profile.get('bars', '—')} свечам",
+        f"  Разрежения (цена проскакивает): {thin or 'нет'}",
+    ]
+
+
+def _absorption_lines(rows):
+    if not rows:
+        return [_NONE]
+    return [f"  {row.get('side')} {_p(row.get('price'))}   "
+            f"объём ×{row.get('volume_x')}   {row.get('bars_ago')} св. назад"
+            for row in rows]
+
+
+def _delta_lines(delta):
+    if not delta:
+        return [_NONE]
+    if delta.get('stale'):
+        return [f"  — (последняя запись {delta.get('fresh_min')} мин назад, "
+                f"не измерено)"]
+
+    def cell(name):
+        win = delta.get(name)
+        if not win or win.get('share_pct') is None:
+            return '—'
+        return f"{win['share_pct']:+.1f}%"
+
+    fresh = delta.get('fresh_min')
+    lines = [f"  Перевес агрессора от оборота:  1ч {cell('h1')}   "
+             f"4ч {cell('h4')}   24ч {cell('h24')}"
+             + (f"   (данные {fresh} мин назад)" if fresh is not None else '')]
+    if delta.get('divergence'):
+        lines.append(f"  РАСХОЖДЕНИЕ: {delta['divergence']}")
+    return lines
+
+
+def _book_lines(book):
+    if not book:
+        return [_NONE]
+
+    def walls(rows):
+        if not rows:
+            return 'нет'
+        return ', '.join(f"{_p(w['price'])} (×{w['volume_x']}, "
+                         f"{w['dist_pct']:+.3f}%)" for w in rows)
+
+    return [
+        f"  Перекос bid/ask {book.get('imbalance', 0):.2f} "
+        f"(больше 1 — заявок на покупку больше)   "
+        f"спред {book.get('spread_pct', 0):.4f}%",
+        f"  Плиты ниже: {walls(book.get('walls_below'))}",
+        f"  Плиты выше: {walls(book.get('walls_above'))}",
+    ]
+
+
+def _smc_lines(smc, price_now):
+    if not smc:
+        return [_NONE]
+    lines = []
+
+    brk = smc.get('last_break')
+    lines.append(
+        f"  Старший порядок: {_DIRECTION.get(smc.get('bias'), '—')}   "
+        f"тренд рабочего ТФ: {_DIRECTION.get(smc.get('trend'), '—')}   "
+        + (f"последний слом: {brk.get('type')} "
+           f"{_DIRECTION.get(brk.get('direction'), '')} у {_p(brk.get('price'))}, "
+           f"{brk.get('bars_ago')} св. назад" if brk else 'слома нет'))
+
+    sweep = smc.get('sweep')
+    if sweep:
+        lines.append(
+            f"  Вынос за {_p(sweep.get('price'))} "
+            f"({_SIDE.get(sweep.get('side'), sweep.get('side'))}), "
+            f"{'с возвратом' if sweep.get('reclaimed') else 'без возврата'}, "
+            f"{sweep.get('bars_ago')} св. назад")
+    else:
+        lines.append('  Свежего выноса за уровень нет')
+
+    fvg = smc.get('fvg')
+    if fvg:
+        lines.append(f"  Незакрытый имбаланс {_p(fvg.get('bottom'))}"
+                     f"..{_p(fvg.get('top'))} "
+                     f"({_DIRECTION.get(fvg.get('direction'), '')})")
+
+    leg = smc.get('leg')
+    if leg:
+        lines.append(
+            f"  Нога {_DIRECTION.get(leg.get('direction'), '')} "
+            f"{_p(leg.get('from'))} → {_p(leg.get('to'))}   "
+            f"равновесие {_p(smc.get('equilibrium'))}   "
+            f"цена в зоне: {_RANGE_SIDE.get(smc.get('side_of_range'), '—')}")
+
+    equal = smc.get('equal_levels')
+    if equal:
+        lines.append('  Равные экстремумы (прокси чужих стопов, не замер): '
+                     + ', '.join(f"{_p(e['price'])} {e['source']} "
+                                 f"({_pct(e['price'], price_now)})"
+                                 for e in equal))
+
+    untapped = smc.get('untapped')
+    if untapped:
+        lines.append('  Нетронутые скопления: '
+                     + ', '.join(f"{_p(u['price'])} "
+                                 f"({_SIDE.get(u.get('side'), u.get('side'))}, "
+                                 f"{_pct(u['price'], price_now)})"
+                                 for u in untapped))
+    return lines
+
+
+def market_lines(market, price_now):
+    """
+    Снимок рынка пятью блоками. Прочерк — «не измерено», не «нет».
+
+    В ШАПКЕ КАЖДОГО БЛОКА СКАЗАНО, ФАКТ ЭТО ИЛИ ДОГАДКА. Стакан и дельта —
+    настоящие заявки и настоящие сделки. Поглощение и равные экстремумы —
+    прокси по свечам: чужие стопы биржа не отдаёт, а ленты в снимке нет.
+    Модель обязана видеть разницу, иначе догадка в её разборе станет фактом.
+    """
+    market = market or {}
+    book = market.get('book') or {}
+    reach = (f"видно ±{book['range_pct']:.3g}% от цены"
+             if book.get('range_pct') is not None else 'глубина не измерена')
+    out = ['ПРОФИЛЬ ОБЪЁМА (по свечам)']
+    out += _profile_lines(market.get('profile'), price_now)
+    out += ['', 'ПОГЛОЩЕНИЕ (прокси по фитилям на аномальном объёме — догадка)']
+    out += _absorption_lines(market.get('absorption'))
+    out += ['', 'ДЕЛЬТА АГРЕССОРА (по ленте сделок — факт)']
+    out += _delta_lines(market.get('delta'))
+    out += ['', f'СТАКАН (факт, но снимок момента: заявку снимают за секунды; '
+                f'{reach})']
+    out += _book_lines(market.get('book'))
+    out += ['', 'СТРУКТУРА (SMC по рабочему ТФ)']
+    out += _smc_lines(market.get('smc'), price_now)
+    out.append('')
+    return out
 
 
 def price_of(found, level_id):

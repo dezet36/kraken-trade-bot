@@ -50,6 +50,7 @@ import llm_context
 import llm_decide
 import llm_journal
 import llm_local
+import llm_market
 import settings_store as settings
 from logger import log
 
@@ -91,12 +92,12 @@ def join(timeout=None):
         thread.join(timeout)
 
 
-def _run(candidate, df, submitted):
+def _run(candidate, df, market, submitted):
     """Разбор одного сетапа. Идёт в своём потоке, минутами."""
     global _busy
     pair = candidate['pair']
     try:
-        verdict = llm_decide.decide(pair, df, llm_local.ask)
+        verdict = llm_decide.decide(pair, df, llm_local.ask, market=market)
         llm_journal.record(pair, candidate.get('donor', ''), verdict,
                            llm_local.last_stats())
     except Exception as exc:                       # noqa: BLE001
@@ -110,14 +111,15 @@ def _run(candidate, df, submitted):
         _busy = None
 
 
-def _submit(candidate, df):
+def _submit(candidate, df, market=None):
     """Отдаёт сетап модели. False — она занята предыдущим."""
     global _busy, _thread
     with _work_lock:
         if _busy is not None:
             return False
         _busy = _fingerprint(candidate)
-    _thread = threading.Thread(target=_run, args=(candidate, df, time.time()),
+    _thread = threading.Thread(target=_run,
+                               args=(candidate, df, market, time.time()),
                                name='llm-decide', daemon=True)
     _thread.start()
     return True
@@ -306,7 +308,8 @@ def _refuse(signal_like, verdict):
         pass
 
 
-def scan_for_setups(pool, gate, client=None, balance=None, candles=None):
+def scan_for_setups(pool, gate, client=None, balance=None, candles=None,
+                    market=None):
     """
     Забирает готовые вердикты и отдаёт модели следующий сетап. Не ждёт.
 
@@ -318,6 +321,11 @@ def scan_for_setups(pool, gate, client=None, balance=None, candles=None):
     candles(pair) -> df — откуда брать свечи. Отдельным параметром, чтобы
     проверки обходились без сети. Свечи берутся ЗДЕСЬ, в цикле, и передаются
     потоку готовыми: клиент биржи на параллельные обращения не рассчитан.
+
+    market(pair, df) -> снимок — то же самое про стакан, дельту и структуру:
+    llm_market.snapshot ходит на биржу, поэтому зовётся в цикле, а поток
+    получает готовый словарь. Без снимка разбор законен — в разметке будут
+    прочерки, — но без него модель отмечает профиль и поток вслепую.
     """
     if not llm_local.available():
         log(f'   {NAME}: модель недоступна — стратегия простаивает')
@@ -338,6 +346,10 @@ def scan_for_setups(pool, gate, client=None, balance=None, candles=None):
             return exchange.fetch_ohlcv('1h', limit=500, symbol=pair,
                                         client=client)
 
+    if market is None:
+        def market(pair, df):
+            return llm_market.snapshot(pair, df, client=client)
+
     if busy():
         log(f'   {NAME}: модель занята прошлым сетапом, жду её')
         return out
@@ -356,11 +368,19 @@ def scan_for_setups(pool, gate, client=None, balance=None, candles=None):
         if df is None or len(df) < 100:
             continue
 
+        # Снимок не обязателен, свечи обязательны: без уровней модели не из
+        # чего выбирать, а без стакана она просто скажет «не измерено».
+        try:
+            facts = market(pair, df)
+        except Exception as exc:                   # noqa: BLE001
+            log(f'   {NAME} {pair}: снимок рынка не собран — {exc}')
+            facts = None
+
         # Метка ставится ПРИ ОТПРАВКЕ, а не по ответу: иначе следующий цикл
         # отдал бы тот же сетап второй раз, пока первый ещё разбирается. И
         # только если отправка удалась — запомнив неотправленный сетап, мы на
         # час перестали бы спрашивать о том, чего модель не видела.
-        if _submit(candidate, df):
+        if _submit(candidate, df, facts):
             _remember(mark)
             log(f'   {NAME} {pair}: отдал модели сетап от '
                 f'{candidate.get("donor", "?")}, вердикт будет через '

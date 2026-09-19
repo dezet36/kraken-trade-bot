@@ -238,7 +238,7 @@ def check(parsed, levels, answer=None):
     return {'ok': True, 'gate': '', 'detail': '', **base, **numbers}
 
 
-def decide(pair, df, ask, news=None, at=None, max_tokens=None):
+def decide(pair, df, ask, news=None, at=None, max_tokens=None, market=None):
     """
     Полный проход: разметка -> грамматика -> модель -> проверка.
 
@@ -254,8 +254,12 @@ def decide(pair, df, ask, news=None, at=None, max_tokens=None):
 
     Пустое значение означает «решает настройка»: предел один и лежит в одном
     месте. Правило, записанное дважды, расходится.
+
+    market — снимок llm_market.snapshot, собранный ЗАРАНЕЕ и в цикле: здесь
+    запросов к бирже быть не может, этот код идёт в потоке разбора минутами,
+    а клиент биржи на параллельные обращения не рассчитан.
     """
-    context = llm_context.build(pair, df, at=at, news=news)
+    context = llm_context.build(pair, df, at=at, news=news, market=market)
     levels = context['levels']
     if not levels:
         return _refusal('нет разметки', 'уровней на этом баре не найдено')

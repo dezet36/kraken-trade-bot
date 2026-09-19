@@ -64,6 +64,7 @@ def main(pairs):
     import llm_context
     import llm_decide
     import llm_local
+    import llm_market
 
     if not llm_local.available():
         print('Модель недоступна. Задайте LLM_MODEL_PATH на существующий файл.')
@@ -82,8 +83,11 @@ def main(pairs):
         if df is None or len(df) < 100:
             print(f'{pair}: свечей не хватило\n')
             continue
-        context = llm_context.build(pair, df)
-        verdict = llm_decide.decide(pair, df, llm_local.ask)
+        # Снимок собирается тем же путём, что и в бою: иначе прогон показал
+        # бы разметку, которой модель в цикле не увидит.
+        snapshot = llm_market.snapshot(pair, df, client=market)
+        context = llm_context.build(pair, df, market=snapshot)
+        verdict = llm_decide.decide(pair, df, llm_local.ask, market=snapshot)
         show(pair, verdict, context)
     return 0
 
