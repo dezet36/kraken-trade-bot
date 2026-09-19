@@ -45,6 +45,7 @@ MoE — второй умнее, но не быстрее. При цикле в 
 свечам за это время почти не меняется.
 """
 
+import os
 import threading
 import time
 
@@ -67,9 +68,17 @@ _asked = {}
 
 # Взведённые условия входа: пара -> план. Модель сказала «войти после
 # закрытия часа выше L3» — план лежит здесь, и каждый цикл код смотрит на
-# последнюю ЗАКРЫТУЮ свечу. Живёт в процессе: после перезапуска условие
-# пропадает, и это честнее, чем исполнить его по разметке, которой уже нет.
+# последнюю ЗАКРЫТУЮ свечу.
+#
+# ПЕРЕЖИВАЕТ ПЕРЕЗАПУСК. Сначала план жил в процессе — «честнее, чем
+# исполнить его по разметке, которой уже нет». На деле план — это цены:
+# вход, стоп, цели и уровень условия, — а разметка нужна была модели, не
+# коду. Условие ждёт до 12 часов, выкатки идут по несколько раз в день, и
+# каждая молча стирала план, о котором человеку уже пришло сообщение.
+# Срок считается от взведения, а не от перезапуска.
 _armed = {}
+_ARMED_FILE = os.path.join(config.DATA_DIR, 'llm_armed.json')
+_armed_loaded = False
 
 # Где остановился обход: следующая пара берётся отсюда, а не с начала списка.
 # Без курсора первая пара списка разбиралась бы каждый круг первой, а
@@ -217,9 +226,43 @@ def armed():
 def _arm(pair, verdict):
     """Откладывает вход до условия. Новый план по паре сменяет старый."""
     _armed[pair] = {'verdict': verdict, 'armed_at': time.time()}
+    _save_armed()
     log(f'   {NAME} {pair}: вход отложен до условия '
         f'{verdict.get("trigger_when")} {verdict.get("trigger_level"):.6g} '
         f'({verdict.get("side")} от {verdict.get("entry"):.6g})')
+
+
+def _save_armed():
+    """Взведённые планы — на диск. Отказ записи торговле не мешает."""
+    try:
+        import json
+        tmp = _ARMED_FILE + '.tmp'
+        with open(tmp, 'w', encoding='utf-8') as fh:
+            json.dump(_armed, fh, ensure_ascii=False, default=str)
+        os.replace(tmp, _ARMED_FILE)
+    except Exception as exc:                       # noqa: BLE001
+        log(f'   {NAME}: взведённые планы не сохранены — {exc}')
+
+
+def _load_armed():
+    """Планы с диска — один раз за запуск; просроченные снимет проверка."""
+    global _armed_loaded
+    if _armed_loaded:
+        return
+    _armed_loaded = True
+    try:
+        import json
+        if not os.path.exists(_ARMED_FILE):
+            return
+        with open(_ARMED_FILE, encoding='utf-8') as fh:
+            stored = json.load(fh)
+        for pair, plan in (stored or {}).items():
+            if pair not in _armed and plan.get('verdict') and plan.get('armed_at'):
+                _armed[pair] = plan
+        if stored:
+            log(f'   {NAME}: взведённых планов с прошлого запуска — {len(stored)}')
+    except Exception as exc:                       # noqa: BLE001
+        log(f'   {NAME}: взведённые планы не прочитаны — {exc}')
 
 
 def _closed_bars(df, since_ms):
@@ -321,12 +364,14 @@ def _check_armed(candles):
     то самое положение, которое её и не устроило.
     """
     out = []
+    _load_armed()
     ttl = int(config.__dict__.get('LLM_TRIGGER_TTL_H', 0) or 12) * 3600
     now = time.time()
     for pair, plan in list(_armed.items()):
         verdict = plan['verdict']
         if now - plan['armed_at'] > ttl:
             _armed.pop(pair, None)
+            _save_armed()
             log(f'   {NAME} {pair}: условие входа не наступило за {ttl // 3600} ч — снято')
             _refuse(pair, {'gate': 'условие не наступило',
                            'detail': f'{verdict.get("trigger_when")} '
@@ -345,6 +390,7 @@ def _check_armed(candles):
         if not met:
             continue
         _armed.pop(pair, None)
+        _save_armed()
         log(f'   {NAME} {pair}: условие наступило — {met}; '
             f'{verdict["side"]} от {verdict["entry"]:.6g}')
         out.append({

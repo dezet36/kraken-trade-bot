@@ -64,12 +64,14 @@ def cycle(pairs, candles=lambda pair: [0] * 500):
 
 
 @pytest.fixture(autouse=True)
-def _forget_previous_pairs():
+def _forget_previous_pairs(tmp_path):
     """
     Состояние модуля глобальное: память о парах, курсор, очередь и поток.
 
     Не почистив, вторая проверка получила бы ответ первой и прошла бы по
     ошибке — или, хуже, заняла бы «модель» потоком, который уже не нужен.
+    Файл взведённых планов — во временной папке, чтобы проверки не читали
+    планы настоящего бота и не писали в его папку.
     """
     strategy_llm.join(10)
     strategy_llm._asked.clear()
@@ -77,6 +79,8 @@ def _forget_previous_pairs():
     strategy_llm._busy = None
     strategy_llm._cursor = 0
     strategy_llm._armed.clear()
+    strategy_llm._ARMED_FILE = str(tmp_path / 'llm_armed.json')
+    strategy_llm._armed_loaded = True
     yield
     strategy_llm.join(10)
     strategy_llm._asked.clear()
@@ -755,3 +759,32 @@ class TestTheSetupIsAnnounced:
         assert len(out) == 1 and len(announced) == 1
         assert announced[0]['llm']['levels'][0]['id'] == 'L5'
         assert announced[0]['llm']['trigger_when'] == 'now'
+
+
+class TestArmedPlansSurviveARestart:
+    """
+    План с условием ждёт до 12 часов, а выкатки идут по несколько раз в
+    день: каждая молча стирала план, о котором человеку уже пришло
+    сообщение. Теперь план лежит на диске, срок — от взведения.
+    """
+
+    def test_an_armed_plan_is_read_back_after_a_restart(self):
+        strategy_llm._arm('SOLUSDT', approving_verdict(trigger_when='close_below',
+                                                       trigger_level=112.09, trigger_id='L4'))
+        # «Перезапуск»: память пуста, файл остался.
+        strategy_llm._armed.clear()
+        strategy_llm._armed_loaded = False
+        out = strategy_llm._check_armed(lambda pair: None)
+        assert out == []
+        assert 'SOLUSDT' in strategy_llm._armed
+        assert strategy_llm._armed['SOLUSDT']['verdict']['trigger_level'] == 112.09
+
+    def test_an_expired_plan_is_dropped_on_read(self, monkeypatch):
+        strategy_llm._arm('SOLUSDT', approving_verdict(trigger_when='close_below',
+                                                       trigger_level=112.09, trigger_id='L4'))
+        strategy_llm._armed['SOLUSDT']['armed_at'] -= 13 * 3600
+        strategy_llm._save_armed()
+        strategy_llm._armed.clear()
+        strategy_llm._armed_loaded = False
+        strategy_llm._check_armed(lambda pair: None)
+        assert strategy_llm._armed == {}
