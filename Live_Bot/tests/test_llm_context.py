@@ -214,10 +214,14 @@ class TestWhatTheModelActuallyReads:
         assert '—' in out['text']
         assert '0.00%' not in out['text'].split('РАССТАНОВКА')[1]
 
-    def test_absent_news_are_named_absent(self):
-        """Молчание модель заполнит сама, поэтому о пустом фоне говорим прямо."""
+    def test_absent_news_leave_no_block(self):
+        """
+        Блок «не получен» стоял в каждом вопросе с первого дня и ни разу не
+        был заполнен: источника нет. Мёртвый блок убран — модели незачем
+        читать о том, чего нет.
+        """
         out = llm_context.build('BTCUSDT', make_df(wavy(400)), news=None)
-        assert 'Не получен' in out['text']
+        assert 'НОВОСТНОЙ ФОН' not in out['text']
 
     def test_given_news_reach_the_text(self):
         out = llm_context.build('BTCUSDT', make_df(wavy(400)),

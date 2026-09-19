@@ -179,7 +179,7 @@ def _signed(value):
     return '—' if value is None else f'{value:+.2f}%'
 
 
-def build(pair, df, at=None, news=None, market=None):
+def build(pair, df, at=None, news=None, market=None, history=None):
     """
     Всё, что нужно модели для одного решения.
 
@@ -192,6 +192,8 @@ def build(pair, df, at=None, news=None, market=None):
     market — снимок llm_market.snapshot или None. Печатается всегда, даже
     пустым: блок с прочерками говорит модели «не измерено», а отсутствие
     блока она прочтёт как «на рынке этого нет».
+
+    history — прошлые строки журнала разборов (llm_journal.last) или None.
     """
     found, atr_now = levels(df, at)
     if not found:
@@ -226,7 +228,7 @@ def build(pair, df, at=None, news=None, market=None):
 
     lines = [
         f'Пара: {pair}   Цена: {price_now:.6g}   '
-        f'Размах (ATR): {_fmt(atr_pct, 2, "%")}',
+        f'Размах (ATR): {_fmt(atr_pct, 2, "%")}   {_when(df, at)}',
         f'Ход цены: за 4ч {_signed(facts["change_4h"])}   '
         f'за 24ч {_signed(facts["change_24h"])}',
         f'Минимальный стоп по издержкам: {facts["min_stop_pct"]:.2f}%',
@@ -254,13 +256,52 @@ def build(pair, df, at=None, news=None, market=None):
     lines += market_lines(market, price_now)
     facts['market'] = market
 
+    # Новостной фон печатается только когда он есть. Блок «не получен»
+    # стоял в каждом вопросе с первого дня и ни разу не был заполнен:
+    # источника нет, а токены и внимание модели на него уходили.
     if news:
         lines += ['НОВОСТНОЙ ФОН', f"  {news}", '']
-    else:
-        # Прямо сказать, что фона нет. Молчание модель заполнит сама.
-        lines += ['НОВОСТНОЙ ФОН', '  Не получен. Не рассуждай о новостях.', '']
+
+    lines += _history_lines(pair, history)
 
     return {'levels': found, 'text': '\n'.join(lines), 'facts': facts}
+
+
+def _when(df, at):
+    """Время бара решения и торговая сессия — из правил smc, не свои."""
+    try:
+        ts = df['timestamp'].iloc[at]
+        from smc import sessions
+        zone = sessions.killzone_of(ts) or 'вне сессий'
+        import pandas as pd
+        stamp = pd.Timestamp(ts)
+        stamp = stamp.tz_localize('UTC') if stamp.tzinfo is None else stamp.tz_convert('UTC')
+        return f'Время: {stamp.strftime("%a %H:%M")} UTC, {zone}'
+    except Exception:                                  # noqa: BLE001
+        return ''
+
+
+def _history_lines(pair, history):
+    """
+    Прошлые разборы этой пары — решение и причина. Иначе модель каждый раз
+    видит пару впервые и не может ни подтвердить прошлую мысль, ни признать,
+    что рынок её опроверг.
+
+    history — список строк журнала (llm_journal.last) или None. Берутся до
+    двух последних по этой паре.
+    """
+    rows = [r for r in (history or []) if r.get('pair') == pair][:2]
+    if not rows:
+        return []
+    out = ['ПРОШЛЫЕ РАЗБОРЫ ЭТОЙ ПАРЫ']
+    for r in rows:
+        when = (r.get('at') or '')[11:16]
+        decision = ('вход ' + (r.get('side') or '') if r.get('decision') == 'enter'
+                    else 'отказ')
+        why = (r.get('why') or r.get('detail') or '')[:160]
+        out.append(f"  {when} UTC: {decision} — {why}")
+    out.append('')
+    return out
 
 
 # ── Снимок рынка текстом ─────────────────────────────────────────────────────
@@ -401,6 +442,103 @@ def _smc_lines(smc, price_now):
     return lines
 
 
+_ZONE = {'ORDER_BLOCK': 'ордер-блок', 'BREAKER': 'брейкер',
+         'MITIGATION': 'mitigation-блок', 'WICK': 'зона фитиля'}
+
+
+def _poi_lines(pois, price_now):
+    if not pois:
+        return [_NONE]
+    out = []
+    for z in pois:
+        where = ('цена внутри' if z.get('inside') else
+                 f"{_pct((z['top'] + z['bottom']) / 2, price_now)}")
+        out.append(f"  {_ZONE.get(z.get('type'), z.get('type'))} "
+                   f"{_DIRECTION.get(z.get('direction'), '')} "
+                   f"{_p(z.get('bottom'))}..{_p(z.get('top'))}   {where}   "
+                   f"касаний {z.get('touches', 0)}, {z.get('bars_ago')} св. назад")
+    return out
+
+
+def _htf_lines(htf, price_now):
+    if not htf:
+        return [_NONE]
+    out = []
+    for key, name in (('htf', '4ч'), ('bias', 'День')):
+        frame = htf.get(key)
+        if not frame:
+            continue
+        brk = frame.get('break')
+        out.append(
+            f"  {name}: тренд {_DIRECTION.get(frame.get('trend'), '—')}   "
+            + (f"слом {brk.get('type')} {_DIRECTION.get(brk.get('direction'), '')} "
+               f"у {_p(brk.get('price'))}, {brk.get('bars_ago')} св. назад   "
+               if brk else 'слома нет   ')
+            + f"свинги: верх {_p(frame.get('swing_high'))} "
+              f"({_pct(frame.get('swing_high'), price_now)}), "
+              f"низ {_p(frame.get('swing_low'))} "
+              f"({_pct(frame.get('swing_low'), price_now)})")
+    return out or [_NONE]
+
+
+def _oi_flow_lines(flow):
+    if not flow:
+        return [_NONE]
+    bars = [b or '—' for b in (flow.get('bars') or [])]
+    line = f"  Последние {len(bars)} св. (старые → новые): " + ' → '.join(bars)
+    if flow.get('change_pct') is not None:
+        line += f"   ОИ за окно {flow['change_pct']:+.2f}%"
+    return [line]
+
+
+def _liq_lines(liq):
+    if not liq:
+        return [_NONE]
+
+    def side(rows):
+        if not rows:
+            return 'нет'
+        return ', '.join(
+            (f"{_p(c['from'])}" if c['from'] == c['to'] else f"{_p(c['from'])}..{_p(c['to'])}")
+            + f" ({c['dist_pct']:+.1f}%, {c['share_pct']:.0f}% объёма стороны)"
+            for c in rows)
+    return [f"  Лонги ликвидируются ниже: {side(liq.get('below'))}",
+            f"  Шорты ликвидируются выше: {side(liq.get('above'))}"]
+
+
+def _liq_fact_lines(liq):
+    if not liq:
+        return [_NONE]
+    if liq.get('young_min') is not None:
+        return [f"  сбор идёт {liq['young_min']} мин, истории ещё нет "
+                f"(событий: {liq.get('events', 0)})"]
+
+    def tot(t):
+        return (f"лонгов {t['long_n']} (объём {t['long_size']:.4g}), "
+                f"шортов {t['short_n']} (объём {t['short_size']:.4g})")
+    out = [f"  За 24ч: {tot(liq['h24'])}   за 4ч: {tot(liq['h4'])}"]
+    if liq.get('clusters'):
+        out.append('  Где ликвидировали больше всего: ' + ', '.join(
+            (f"{_p(c['from'])}" if c['from'] == c['to'] else f"{_p(c['from'])}..{_p(c['to'])}")
+            + f" ({c['mostly']}, {c['dist_pct']:+.1f}%, {c['share_pct']:.0f}%)"
+            for c in liq['clusters']))
+    if liq.get('hours', 24) < 24:
+        out.append(f"  История пока {liq['hours']:.0f} ч из 24")
+    return out
+
+
+def _benchmark_lines(bench):
+    if not bench:
+        return [_NONE]
+    line = (f"  BTC за 4ч {_signed(bench.get('btc_4h'))}   "
+            f"за 24ч {_signed(bench.get('btc_24h'))}")
+    if bench.get('relative_24h') is not None:
+        rel = bench['relative_24h']
+        line += (f"   пара относительно BTC за 24ч {rel:+.2f} п.п. "
+                 f"({'сильнее' if rel > 0 else 'слабее'})")
+    return [line]
+
+
 def market_lines(market, price_now):
     """
     Снимок рынка пятью блоками. Прочерк — «не измерено», не «нет».
@@ -425,6 +563,20 @@ def market_lines(market, price_now):
     out += _book_lines(market.get('book'))
     out += ['', 'СТРУКТУРА (SMC по рабочему ТФ)']
     out += _smc_lines(market.get('smc'), price_now)
+    out += ['', 'ЗОНЫ ИНТЕРЕСА (ордер-блоки и брейкеры по 1ч, только живые)']
+    out += _poi_lines(market.get('pois'), price_now)
+    out += ['', 'СТАРШИЕ ТАЙМФРЕЙМЫ (закрытые свечи)']
+    out += _htf_lines(market.get('htf'), price_now)
+    out += ['', 'ОТКРЫТЫЙ ИНТЕРЕС ПО СВЕЧАМ (кто набирает, кто выходит)']
+    out += _oi_flow_lines(market.get('oi_flow'))
+    out += ['', 'КАРТА ЛИКВИДАЦИЙ (ОЦЕНКА по приросту ОИ и типичным плечам — '
+                'не факт; чужих позиций биржа не отдаёт)']
+    out += _liq_lines(market.get('liquidations'))
+    out += ['', 'ЛИКВИДАЦИИ ПО ФАКТУ (поток биржи, последние 24ч)']
+    out += _liq_fact_lines(market.get('liq_fact'))
+    if market.get('benchmark') is not None:
+        out += ['', 'BTC КАК ОРИЕНТИР']
+        out += _benchmark_lines(market.get('benchmark'))
     out.append('')
     return out
 

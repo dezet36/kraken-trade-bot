@@ -357,3 +357,128 @@ class TestTheAnswerLimitComesFromTheSettings:
         dec.decide('BTCUSDT', TestTheWholePass().make_df(), ask)
         assert seen['max_tokens'] is None, (
             'decide навязывает свой предел — настройка снова не дойдёт')
+
+
+class TestTheTriggerIsExecutable:
+    """
+    Условие входа — объект, который исполняет код, а не текст для журнала.
+
+    Пока условие было строкой, модель писала «дождаться закрытия выше L3», а
+    код ставил лимит немедленно: половина её логики не доходила до сделки.
+    """
+
+    def test_an_object_trigger_resolves_to_a_price(self):
+        out = verdict(trigger={'when': 'close_above', 'level': 'L2',
+                               'note': 'и объём выше медианы'})
+        assert out['ok']
+        assert out['trigger_when'] == 'close_above'
+        assert out['trigger_level'] == 107.0
+        assert out['trigger_id'] == 'L2'
+        assert out['trigger'] == 'close_above L2: и объём выше медианы'
+
+    def test_a_string_trigger_still_means_now(self):
+        """Старые ответы и проверки отвечают строкой — это «сейчас»."""
+        out = verdict(trigger='возврат в уровень')
+        assert out['trigger_when'] == 'now'
+        assert out['trigger_level'] is None
+        assert out['trigger'] == 'возврат в уровень'
+
+    def test_a_trigger_on_an_unknown_level_falls_back_to_now(self):
+        out = verdict(trigger={'when': 'close_below', 'level': 'L9', 'note': 'x'})
+        assert out['trigger_when'] == 'now'
+        assert 'не найден' in out['trigger']
+
+    def test_now_needs_no_level(self):
+        out = verdict(trigger={'when': 'now', 'note': 'лимит на уровень'})
+        assert out['trigger_when'] == 'now'
+        assert out['trigger'] == 'лимит на уровень'
+
+    def test_the_grammar_only_allows_known_conditions(self):
+        import llm_grammar
+        text = llm_grammar.build([lv['id'] for lv in LEVELS])
+        assert 'close_above' in text and 'close_below' in text and 'now' in text
+        assert 'touch' not in text
+
+
+class TestTheCriticSecondOpinion:
+    """
+    Второе мнение — только на «войти», тем же движком, другой ролью.
+
+    Отклонение — отказ с именем; всё сказанное аналитиком остаётся в
+    вердикте. Поломка критика — не подтверждение и не отказ.
+    """
+
+    def _ask_pair(self, analyst, critic):
+        """Первый вызов — аналитик, второй — критик."""
+        calls = []
+
+        def ask(prompt, grammar, max_tokens):
+            calls.append((prompt, grammar))
+            return analyst if len(calls) == 1 else critic
+        return ask, calls
+
+    def test_a_confirmed_plan_passes_with_the_opinion_attached(self, monkeypatch):
+        monkeypatch.setattr(config, 'LLM_CRITIC', True)
+        # Проверки кода подменяем готовым «прошёл»: на синтетических свечах
+        # уровни не те, что в LEVELS, а здесь проверяется вызов критика.
+        ready = verdict()
+        monkeypatch.setattr(dec, 'check', lambda parsed, levels, answer=None: ready)
+        ask, calls = self._ask_pair(
+            answer(),
+            '{"verdict":"confirm","issues":"возражений нет","worst":"—"}')
+        out = dec.decide('BTCUSDT', TestTheWholePass().make_df(), ask)
+        assert len(calls) == 2, 'критика не позвали'
+        assert 'ПЛАН АНАЛИТИКА' in calls[1][0]
+        assert 'verdict' in calls[1][1] and 'confirm' in calls[1][1]
+        assert out['ok'] and out['critic']['verdict'] == 'confirm'
+
+    def test_the_critic_can_be_switched_off(self, monkeypatch):
+        monkeypatch.setattr(config, 'LLM_CRITIC', False)
+        ready = verdict()
+        monkeypatch.setattr(dec, 'check', lambda parsed, levels, answer=None: ready)
+        ask, calls = self._ask_pair(answer(), 'не должно быть вызвано')
+        out = dec.decide('BTCUSDT', TestTheWholePass().make_df(), ask)
+        assert len(calls) == 1 and out['ok'] and 'critic' not in out
+
+    def test_a_rejected_plan_is_a_named_refusal(self):
+        v = verdict()
+        assert v['ok']
+        out = dec.review(v, 'разметка', lambda p, g, m:
+                         '{"verdict":"reject","issues":"стоп под равными минимумами",'
+                         '"worst":"стоп снимут первым"}')
+        assert out['ok'] is False
+        assert out['gate'] == 'критик отклонил'
+        assert out['detail'] == 'стоп снимут первым'
+        assert out['critic']['verdict'] == 'reject'
+        # Всё, что сказал аналитик, осталось: по нему потом видно, где спор.
+        assert out['entry'] == 100.0 and out['analysis'] == v['analysis']
+
+    def test_a_broken_critic_neither_confirms_nor_rejects(self):
+        v = verdict()
+
+        def boom(p, g, m):
+            raise RuntimeError('модель не загрузилась')
+        out = dec.review(v, 'разметка', boom)
+        assert out['ok'] is True
+        assert out['critic']['verdict'] == 'broken'
+
+        out = dec.review(verdict(), 'разметка', lambda p, g, m: 'не json')
+        assert out['ok'] is True and out['critic']['verdict'] == 'broken'
+
+    def test_the_critic_is_not_called_on_a_refusal(self, monkeypatch):
+        monkeypatch.setattr(config, 'LLM_CRITIC', True)
+        calls = []
+
+        def ask(prompt, grammar, max_tokens):
+            calls.append(prompt)
+            return answer(d='skip')
+        dec.decide('BTCUSDT', TestTheWholePass().make_df(), ask)
+        assert len(calls) == 1
+
+    def test_the_plan_text_names_what_the_critic_must_see(self):
+        text = dec.plan_text(verdict(trigger={'when': 'close_above', 'level': 'L2',
+                                              'note': 'x'}))
+        assert 'Направление: LONG' in text
+        assert 'Вход: L3 100' in text and 'Стоп: L4 97' in text
+        assert 'close_above L2' in text
+        assert 'Разбор:' in text

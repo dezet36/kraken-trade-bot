@@ -290,7 +290,8 @@ class TestSnapshot:
         out = llm_market.snapshot('BTCUSDT', make_df(wavy(300)))
         assert out['book'] is None
         assert out['profile'] is not None
-        assert set(out) == {'profile', 'absorption', 'delta', 'book', 'smc'}
+        assert {'profile', 'absorption', 'delta', 'book', 'smc', 'pois', 'htf',
+                'oi_flow', 'liquidations'} <= set(out)
 
     def test_not_a_frame_is_not_a_snapshot(self):
         assert llm_market.snapshot('BTCUSDT', [0] * 500) is None
@@ -332,9 +333,13 @@ class TestMarkup:
         out = llm_context.build('BTCUSDT', make_df(wavy(400)), market=None)
         text = out['text']
         for head in ('ПРОФИЛЬ ОБЪЁМА', 'ПОГЛОЩЕНИЕ', 'ДЕЛЬТА АГРЕССОРА',
-                     'СТАКАН', 'СТРУКТУРА'):
+                     'СТАКАН', 'СТРУКТУРА', 'ЗОНЫ ИНТЕРЕСА', 'СТАРШИЕ ТАЙМФРЕЙМЫ',
+                     'ОТКРЫТЫЙ ИНТЕРЕС ПО СВЕЧАМ', 'КАРТА ЛИКВИДАЦИЙ',
+                     'ЛИКВИДАЦИИ ПО ФАКТУ'):
             assert head in text, head
-        assert text.count('\n  —') == 5, 'каждый блок обязан стоять с прочерком'
+        assert text.count('\n  —') == 10, 'каждый блок обязан стоять с прочерком'
+        # Без свечей BTC блока про BTC нет вовсе: для самого BTC он бессмыслен.
+        assert 'BTC КАК ОРИЕНТИР' not in text
 
     def test_the_snapshot_is_printed(self):
         market = {
@@ -364,6 +369,18 @@ class TestMarkup:
                     'equal_levels': [{'price': 106.0, 'source': 'EQH',
                                       'side': 'BSL'}],
                     'untapped': [{'price': 94.0, 'side': 'SSL', 'source': 'SWING'}]},
+            'pois': [{'type': 'ORDER_BLOCK', 'direction': 'BULLISH', 'top': 100.0,
+                      'bottom': 99.0, 'touches': 1, 'bars_ago': 5, 'inside': True}],
+            'htf': {'htf': {'trend': 'BULLISH',
+                            'break': {'type': 'BOS', 'direction': 'BULLISH',
+                                      'price': 104.0, 'bars_ago': 2},
+                            'swing_high': 105.0, 'swing_low': 95.0}},
+            'oi_flow': {'bars': ['набор лонгов', 'закрытие шортов'], 'change_pct': 1.2},
+            'liquidations': {'below': [{'from': 96.0, 'to': 96.5, 'share_pct': 70.0,
+                                        'dist_pct': -3.8, 'side': 'лонги'}],
+                             'above': [], 'bars': 72},
+            'benchmark': {'btc_4h': 1.0, 'btc_24h': 2.0, 'relative_24h': -0.5},
+            'liq_fact': {'young_min': 20, 'events': 0},
         }
         text = llm_context.build('BTCUSDT', make_df(wavy(400)),
                                  market=market)['text']
@@ -380,6 +397,11 @@ class TestMarkup:
         assert 'Вынос за 97 (под ценой, стопы лонгов), с возвратом' in text
         assert 'цена в зоне: дисконт' in text
         assert '106 EQH' in text
+        assert 'ордер-блок вверх 99..100   цена внутри' in text
+        assert '4ч: тренд вверх   слом BOS вверх у 104' in text
+        assert 'набор лонгов → закрытие шортов' in text
+        assert 'Лонги ликвидируются ниже: 96..96.5 (-3.8%, 70% объёма стороны)' in text
+        assert 'BTC за 4ч +1.00%' in text and 'слабее' in text
         assert '\n  —' not in text, 'снимок полный — прочерков быть не должно'
 
     def test_the_markup_still_fits_the_context_window(self):
@@ -390,11 +412,16 @@ class TestMarkup:
         русского текста — три символа на токен. Полная разметка со снимком
         не должна съесть весь запас.
         """
+        import config
         import llm_prompt
         text = llm_context.build('BTCUSDT', make_df(wavy(400)),
                                  market=_full_market())['text']
         prompt = llm_prompt.build(text)
-        assert len(prompt) / 3 < 2400, f'вопрос ~{len(prompt) // 3} токенов'
+        # 2.3 знака на токен — нижняя граница, замеренная на сервере.
+        need = len(prompt) / 2.3 + config.LLM_MAX_TOKENS
+        assert need < config.LLM_CTX * 0.9, (
+            f'вопрос ~{len(prompt) / 2.3:.0f} токенов + ответ '
+            f'{config.LLM_MAX_TOKENS} не оставляют запаса в окне {config.LLM_CTX}')
 
 
 def _full_market():
@@ -427,4 +454,148 @@ def _full_market():
                                   'side': 'BSL'} for i in range(3)],
                 'untapped': [{'price': 94.0 - i, 'side': 'SSL',
                               'source': 'SWING'} for i in range(3)]},
+        'pois': [{'type': t, 'direction': 'BULLISH', 'top': 100.0 - i,
+                  'bottom': 99.0 - i, 'touches': 1, 'bars_ago': 5 + i, 'inside': False}
+                 for i, t in enumerate(('ORDER_BLOCK', 'BREAKER', 'MITIGATION'))],
+        'htf': {k: {'trend': 'BULLISH',
+                    'break': {'type': 'BOS', 'direction': 'BULLISH',
+                              'price': 104.0, 'bars_ago': 2},
+                    'swing_high': 105.0, 'swing_low': 95.0} for k in ('htf', 'bias')},
+        'oi_flow': {'bars': ['набор лонгов'] * 6, 'change_pct': 1.2},
+        'liquidations': {'below': [{'from': 96.0 - i, 'to': 96.5 - i, 'share_pct': 30.0,
+                                    'dist_pct': -3.8 - i, 'side': 'лонги'} for i in range(3)],
+                         'above': [{'from': 104.0 + i, 'to': 104.5 + i, 'share_pct': 30.0,
+                                    'dist_pct': 3.8 + i, 'side': 'шорты'} for i in range(3)],
+                         'bars': 72},
+        'benchmark': {'btc_4h': 1.0, 'btc_24h': 2.0, 'relative_24h': -0.5},
+        'liq_fact': {'hours': 24,
+                     'h24': {'long_n': 12, 'long_size': 3.5, 'short_n': 8, 'short_size': 2.1},
+                     'h4': {'long_n': 2, 'long_size': 0.5, 'short_n': 1, 'short_size': 0.1},
+                     'clusters': [{'from': 96.0 + i, 'to': 96.4 + i, 'share_pct': 30.0,
+                                   'dist_pct': -3.8 + i, 'mostly': 'лонги'} for i in range(3)],
+                     'events': 20},
     }
+
+
+# ── Новые блоки снимка ───────────────────────────────────────────────────────
+
+def oi_rows(df, values):
+    """Ряд ОИ: по записи в конце каждой свечи."""
+    out = []
+    for i, value in enumerate(values):
+        ts = int(df['timestamp'].iloc[i].timestamp() * 1000) + 3_600_000 - 1
+        out.append({'ts': ts, 'value': value, 'pair': 'BTCUSDT'})
+    return out
+
+
+class TestOiFlow:
+
+    def test_each_bar_is_named_by_price_and_oi(self, monkeypatch):
+        closes = np.array([100, 101, 100, 101, 100, 99, 98.0])
+        oi = [1000, 1010, 1020, 1015, 1005, 1015, 1005.0]
+        df = make_df(closes)
+        monkeypatch.setattr(llm_market.positioning, 'series',
+                            lambda *a, **k: oi_rows(df, oi))
+        out = llm_market.oi_flow('BTCUSDT', df, len(df) - 1, bars=7)
+        assert out['bars'] == ['набор лонгов', 'набор шортов', 'закрытие шортов',
+                               'закрытие лонгов', 'набор шортов', 'закрытие лонгов']
+        assert out['change_pct'] == pytest.approx(0.5)
+
+    def test_no_series_is_not_measured(self, monkeypatch):
+        monkeypatch.setattr(llm_market.positioning, 'series', lambda *a, **k: [])
+        assert llm_market.oi_flow('BTCUSDT', make_df(wavy(50)), 49) is None
+
+    def test_a_stale_series_is_not_flat_but_unmeasured(self, monkeypatch):
+        """Ряд, оборвавшийся давно, — не «ОИ без изменений», а «не измерено»."""
+        df = make_df(wavy(50))
+        old = [{'ts': int(df['timestamp'].iloc[0].timestamp() * 1000), 'value': 1000.0,
+                'pair': 'BTCUSDT'}]
+        monkeypatch.setattr(llm_market.positioning, 'series', lambda *a, **k: old)
+        assert llm_market.oi_flow('BTCUSDT', df, 49) is None
+        assert llm_market.liquidation_estimate('BTCUSDT', df, 49) is None
+
+
+class TestLiquidationEstimate:
+
+    def test_new_longs_put_a_cluster_below_the_price(self, monkeypatch):
+        """
+        Лонги, набранные на 100 при плече 10, ликвидируются у 90; при 25 — у
+        96. Цена туда не ходила — уровни живы и лежат ниже цены.
+        """
+        n = 30
+        closes = np.full(n, 100.0)
+        closes[10] = 100.0
+        df = make_df(closes, spread=np.full(n, 0.1))
+        oi = [1000.0] * n
+        oi[10:] = [2000.0] * (n - 10)                 # прирост ОИ на свече 10
+        df.loc[10, 'close'] = 100.5                   # свеча вверх → лонги
+        df.loc[10, 'open'] = 100.0
+        monkeypatch.setattr(llm_market.positioning, 'series',
+                            lambda *a, **k: oi_rows(df, oi))
+        out = llm_market.liquidation_estimate('BTCUSDT', df, n - 1, bars=n)
+        assert out['above'] == []
+        levels = [c['from'] for c in out['below']]
+        assert any(abs(l - 100.5 * 0.96) < 0.2 for l in levels), levels
+        assert any(abs(l - 100.5 * 0.9) < 0.2 for l in levels), levels
+        assert all(c['dist_pct'] < 0 for c in out['below'])
+
+    def test_levels_the_price_already_visited_are_gone(self, monkeypatch):
+        """Ликвидированное не ликвидируется второй раз."""
+        n = 30
+        closes = np.full(n, 100.0)
+        df = make_df(closes, spread=np.full(n, 0.1))
+        oi = [1000.0] * 10 + [2000.0] * 20
+        df.loc[10, 'close'] = 100.5
+        df.loc[20, 'low'] = 85.0                      # цена сходила к 85: 10× и 25× сняты
+        monkeypatch.setattr(llm_market.positioning, 'series',
+                            lambda *a, **k: oi_rows(df, oi))
+        out = llm_market.liquidation_estimate('BTCUSDT', df, n - 1, bars=n)
+        levels = [c['from'] for c in (out or {}).get('below', [])]
+        assert all(l > 99 for l in levels), levels   # остались только 50× и 100×
+
+
+class TestBenchmark:
+
+    def test_relative_strength(self):
+        pair = make_df(np.linspace(100, 110, 60))    # +10% за 59 баров
+        btc = make_df(np.linspace(100, 105, 60))
+        out = llm_market.benchmark_facts(pair, btc, 59)
+        assert out['btc_24h'] > 0
+        assert out['relative_24h'] > 0
+
+    def test_no_benchmark_no_block(self):
+        assert llm_market.benchmark_facts(make_df(wavy(60)), None, 59) is None
+
+
+class TestPoisAndHtf:
+
+    def _context(self):
+        from smc import signal as smc_signal
+        poi = make_df(wavy(400))
+        htf = make_df(wavy(200, period=6), spread=None)
+        htf['timestamp'] = pd.to_datetime(
+            np.arange(200) * 4 * 3_600_000 + 1_700_000_000_000 - 200 * 4 * 3_600_000
+            + 400 * 3_600_000, unit='ms')
+        return smc_signal.build_context({'poi': poi, 'htf': htf}, pair='BTCUSDT')
+
+    def test_pois_are_the_active_ones_nearest_to_price(self):
+        context = self._context()
+        df = context.frames['poi']
+        price = float(df['close'].iloc[-1])
+        out = llm_market.poi_facts(context, price, len(df) - 1)
+        if out is None:
+            pytest.skip('на синтетике зон не нашлось')
+        assert len(out) <= 3
+        for z in out:
+            assert z['type'] in ('ORDER_BLOCK', 'BREAKER', 'MITIGATION', 'WICK')
+            assert z['bottom'] <= z['top']
+            assert z['bars_ago'] >= 0
+
+    def test_htf_reads_only_closed_candles(self):
+        context = self._context()
+        df = context.frames['poi']
+        out = llm_market.htf_facts(context, df['timestamp'].iloc[-1])
+        assert out and 'htf' in out
+        assert out['htf']['trend'] in ('BULLISH', 'BEARISH', 'NEUTRAL')
+        import json
+        json.dumps(out)

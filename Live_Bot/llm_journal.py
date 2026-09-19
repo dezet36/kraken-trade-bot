@@ -45,7 +45,11 @@ COLUMNS = [
     # только у сетапа, дошедшего до проверок.
     'side', 'entry', 'stop', 'tp1', 'inval',
     'rr', 'ev', 'p', 'cost_r', 'votes', 'confluence',
-    # Цена разбора и его границы — см. шапку модуля.
+    # Второе мнение — только у планов «войти»: confirm / reject / broken,
+    # возражения и самое сильное из них. Пусто у отказов аналитика.
+    'critic', 'critic_issues', 'critic_worst',
+    # Цена разбора и его границы — см. шапку модуля. При вызове критика
+    # токены и finish — его вызова (последнего), seconds — обоих вместе.
     'model', 'ctx', 'prompt_tokens', 'answer_tokens', 'limit', 'finish',
     'seconds',
 ]
@@ -99,6 +103,9 @@ def record(pair, donor, verdict, stats=None):
             # Списком имён, а не пятью колонками: набор факторов меняется
             # вместе с промтом, и колонки пришлось бы переименовывать следом.
             'confluence': ','.join(name for name, yes in confluence.items() if yes),
+            'critic': (verdict.get('critic') or {}).get('verdict', ''),
+            'critic_issues': (verdict.get('critic') or {}).get('issues', ''),
+            'critic_worst': (verdict.get('critic') or {}).get('worst', ''),
             'model': stats.get('model', ''),
             'ctx': stats.get('ctx', ''),
             'prompt_tokens': stats.get('prompt_tokens', ''),

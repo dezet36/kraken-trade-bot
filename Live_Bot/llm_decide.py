@@ -42,6 +42,9 @@ MIN_RR = 2.0
 
 FACTORS = ('poi', 'vp', 'der', 'smc', 'flow')
 
+# Условия входа, которые умеет исполнять код (см. strategy_llm._armed).
+TRIGGERS = ('now', 'close_above', 'close_below')
+
 # Отказы, за которыми стоит НЕИСПРАВНОСТЬ, а не суждение модели. Разница не
 # косметическая: «мало конфлюенса» — это работа, законченная ответом, а «ответ
 # обрезан» означает, что ответа не было вовсе. Их нельзя ни считать вместе, ни
@@ -122,10 +125,10 @@ def parse(answer, levels):
            # именно она разглядела в данных, а не только чем кончила.
            'regime': data.get('regime', ''),
            'analysis': data.get('analysis', ''),
-           'trigger': data.get('trigger', ''),
            'alt': data.get('alt', ''),
            'confluence': {f: bool((data.get('cf') or {}).get(f))
                           for f in FACTORS}}
+    out.update(_trigger(data.get('trigger'), levels))
     if data.get('d') != 'enter':
         return out
 
@@ -139,6 +142,33 @@ def parse(answer, levels):
     out['ids'] = {'entry': data.get('entry'), 'stop': data.get('stop'),
                   'tp': data.get('tp'), 'inval': data.get('inval')}
     return out
+
+
+def _trigger(raw, levels):
+    """
+    Условие входа: объект {when, level, note} или, по-старому, строка.
+
+    Строка означает «сейчас»: так отвечала модель до того, как условие стало
+    исполняемым, и так до сих пор отвечают проверки. В журнал уходит одна
+    строка «when Lx: note» — её читает человек; коду нужны when и цена.
+    """
+    if isinstance(raw, dict):
+        when = raw.get('when') or 'now'
+        level_id = raw.get('level')
+        note = raw.get('note') or ''
+    else:
+        when, level_id, note = 'now', None, (raw or '')
+    if when not in TRIGGERS:
+        when = 'now'
+    price = llm_context.price_of(levels, level_id) if level_id else None
+    if when != 'now' and price is None:
+        # Условие без уровня исполнить нельзя — считаем, что входим сейчас,
+        # и пишем об этом в текст: это видно в журнале.
+        note = f'[уровень условия не найден] {note}'
+        when = 'now'
+    text = note if when == 'now' else f'{when} {level_id}: {note}'
+    return {'trigger': text, 'trigger_when': when,
+            'trigger_level': price, 'trigger_id': level_id}
 
 
 def truncated(answer):
@@ -191,6 +221,9 @@ def check(parsed, levels, answer=None):
             'regime': parsed.get('regime', ''),
             'analysis': parsed.get('analysis', ''),
             'trigger': parsed.get('trigger', ''),
+            'trigger_when': parsed.get('trigger_when', 'now'),
+            'trigger_level': parsed.get('trigger_level'),
+            'trigger_id': parsed.get('trigger_id'),
             'alt': parsed.get('alt', '')}
 
     if parsed['decision'] != 'enter':
@@ -238,7 +271,8 @@ def check(parsed, levels, answer=None):
     return {'ok': True, 'gate': '', 'detail': '', **base, **numbers}
 
 
-def decide(pair, df, ask, news=None, at=None, max_tokens=None, market=None):
+def decide(pair, df, ask, news=None, at=None, max_tokens=None, market=None,
+           history=None):
     """
     Полный проход: разметка -> грамматика -> модель -> проверка.
 
@@ -259,7 +293,8 @@ def decide(pair, df, ask, news=None, at=None, max_tokens=None, market=None):
     запросов к бирже быть не может, этот код идёт в потоке разбора минутами,
     а клиент биржи на параллельные обращения не рассчитан.
     """
-    context = llm_context.build(pair, df, at=at, news=news, market=market)
+    context = llm_context.build(pair, df, at=at, news=news, market=market,
+                                history=history)
     levels = context['levels']
     if not levels:
         return _refusal('нет разметки', 'уровней на этом баре не найдено')
@@ -288,4 +323,70 @@ def decide(pair, df, ask, news=None, at=None, max_tokens=None, market=None):
     verdict['pair'] = pair
     verdict['levels'] = levels
     verdict['raw'] = answer
+    if verdict.get('ok') and critic_enabled():
+        verdict = review(verdict, context['text'], ask)
+    return verdict
+
+
+def critic_enabled():
+    """Включён ли проверяющий. Настройка, а не константа: его можно снять."""
+    return bool(getattr(config, 'LLM_CRITIC', True))
+
+
+def plan_text(verdict):
+    """План аналитика в том виде, в каком его читает проверяющий."""
+    ids = verdict.get('ids') or {}
+    targets = ', '.join(f'{t:.6g}' for t in verdict.get('targets') or [])
+    lines = [
+        f"Направление: {verdict.get('side')}",
+        f"Вход: {ids.get('entry')} {verdict.get('entry'):.6g}   "
+        f"Стоп: {ids.get('stop')} {verdict.get('stop'):.6g} "
+        f"({verdict.get('stop_pct')}%)   Цели: {targets}",
+        f"Инвалидация: {verdict.get('inval'):.6g}" if verdict.get('inval') else '',
+        f"Условие входа: {verdict.get('trigger') or 'сейчас'}",
+        f"Вероятность по аналитику: {verdict.get('p')}   R:R {verdict.get('rr')}   "
+        f"EV {verdict.get('ev')}R   факторы {verdict.get('votes')}/5",
+        f"Режим: {verdict.get('regime', '')}",
+        f"Разбор: {verdict.get('analysis', '')}",
+        f"Почему: {verdict.get('why', '')}",
+        f"Риск по аналитику: {verdict.get('risk', '')}",
+    ]
+    return '\n'.join(line for line in lines if line)
+
+
+def review(verdict, context_text, ask):
+    """
+    Второе мнение о плане: тот же движок, другая роль.
+
+    ТОЛЬКО НА «ВОЙТИ». Проверять каждый отказ значило бы удвоить время
+    каждого разбора ради ответа «да, отказ верный». Входы редки, и пять
+    минут на каждый — цена, которую стоит платить: ошибочный вход стоит
+    дороже.
+
+    Отклонение — полноценный отказ с именем «критик отклонил»; всё, что
+    сказал аналитик, остаётся в вердикте и уходит в журнал вместе с
+    возражениями. Поломка критика входа не отменяет и не подтверждает —
+    она записывается как поломка, а решение остаётся за проверками кода.
+    """
+    import llm_grammar
+    import llm_prompt
+    try:
+        answer = ask(llm_prompt.build_critic(context_text, plan_text(verdict)),
+                     llm_grammar.critic(), None)
+        data = json.loads(answer)
+        if not isinstance(data, dict) or data.get('verdict') not in ('confirm', 'reject'):
+            raise ValueError(f'ответ критика не разобран: {str(answer)[:80]}')
+    except Exception as exc:                           # noqa: BLE001
+        log(f'⚠️ {verdict.get("pair")}: проверяющий не ответил — {exc}')
+        verdict['critic'] = {'verdict': 'broken', 'issues': str(exc)[:300], 'worst': ''}
+        return verdict
+
+    verdict['critic'] = {'verdict': data['verdict'],
+                         'issues': data.get('issues', ''),
+                         'worst': data.get('worst', '')}
+    if data['verdict'] == 'reject':
+        out = dict(verdict)
+        out.update({'ok': False, 'gate': 'критик отклонил',
+                    'detail': (data.get('worst') or data.get('issues') or '')[:300]})
+        return out
     return verdict

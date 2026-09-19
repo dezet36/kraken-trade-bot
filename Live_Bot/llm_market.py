@@ -34,6 +34,8 @@
 открытый интерес трёхнедельной давности, попавший в разбор как сегодняшний.
 """
 
+import time
+
 import numpy as np
 
 import config
@@ -409,6 +411,11 @@ def smc_facts(pair, price, client=None, context=None):
         context = strategy_smc.get_context(pair, client=client)
     if context is None:
         return None
+    return _smc_from_context(context, price)
+
+
+def _smc_from_context(context, price):
+    """Тело smc_facts, отделённое, чтобы контекст брался один раз на снимок."""
 
     from smc import fib as smc_fib
     from smc import imbalance
@@ -502,9 +509,342 @@ def smc_facts(pair, price, client=None, context=None):
     return out or None
 
 
+
+
+# ── Зоны интереса: ордер-блоки, брейкеры, mitigation ────────────────────────
+
+def poi_facts(context, price, index, limit=3):
+    """
+    Ближайшие к цене живые зоны интереса из пакета smc.
+
+    Считались каждый цикл для четвёртой стратегии и до сих пор модели не
+    отдавались — при том что «ордер-блок» первое, о чём спрашивают, когда
+    речь о структуре. Берутся только АКТИВНЫЕ: подтверждённые к этому бару,
+    не пробитые насквозь и не перетестированные — те же правила, по которым
+    их берёт SMC, второго определения зоны здесь нет.
+    """
+    from smc import poi as poi_mod
+
+    df = context.frames.get('poi')
+    if df is None or not len(df) or not context.pois:
+        return None
+    active = poi_mod.active_pois(df, context.pois, index)
+    if not active:
+        return None
+
+    def distance(zone):
+        if zone['bottom'] <= price <= zone['top']:
+            return 0.0
+        return min(abs(price - zone['top']), abs(price - zone['bottom']))
+
+    active.sort(key=distance)
+    return [{
+        'type': z.get('type'),
+        'direction': z.get('direction'),
+        'top': _number(z.get('top')),
+        'bottom': _number(z.get('bottom')),
+        'touches': int(z.get('touches') or 0),
+        'bars_ago': int(index - int(z.get('confirmed_at', index))),
+        'inside': bool(z['bottom'] <= price <= z['top']),
+    } for z in active[:limit]]
+
+
+# ── Структура старших таймфреймов ────────────────────────────────────────────
+
+def htf_facts(context, timestamp):
+    """
+    Тренд, последний слом и крайние свинги на 4ч и на дне.
+
+    Модели уходило одно слово «старший порядок: вверх». Но за дневным
+    свингом стоят стопы позиционных игроков, а не внутридневных, и слом
+    дневной структуры — событие другого веса, чем часовой BOS. Индекс
+    старшей свечи выравнивается по ЗАКРЫТИЮ, как в bias_at: дневная свеча
+    сегодняшнего дня ещё не закрыта, и читать её значило бы читать будущее.
+    """
+    import pandas as pd
+    from smc import structure as structure_mod
+    from smc.signal import align_index
+
+    decision = pd.Timestamp(timestamp)
+    decision = (decision.tz_localize('UTC') if decision.tzinfo is None
+                else decision.tz_convert('UTC'))
+    decision += pd.Timedelta(context._durations.get('poi', 0), unit='ns')
+
+    out = {}
+    for key, struct in (('htf', getattr(context, 'htf_structure', None)),
+                        ('bias', getattr(context, 'bias_structure', None))):
+        df = context.frames.get(key)
+        if struct is None or df is None:
+            continue
+        idx = align_index(df, decision, duration_ns=context._durations.get(key))
+        if idx < 0:
+            continue
+        state = structure_mod.state_at(struct, idx)
+        event = state.get('last_event') or {}
+        points = structure_mod.visible_points(struct, idx)
+        last_high = next((p for p in reversed(points) if p['kind'] == 'high'), None)
+        last_low = next((p for p in reversed(points) if p['kind'] == 'low'), None)
+        out[key] = {
+            'trend': state.get('trend'),
+            'break': {'type': event.get('type'),
+                      'direction': event.get('direction'),
+                      'price': _number(event.get('level')),
+                      'bars_ago': int(idx - int(event.get('index', idx)))}
+            if event else None,
+            'swing_high': _number(last_high['price']) if last_high else None,
+            'swing_low': _number(last_low['price']) if last_low else None,
+        }
+    return out or None
+
+
+# ── Открытый интерес против цены: кто набирает, кто выходит ─────────────────
+
+def _oi_by_bar(pair, df, index, upto, bars):
+    """ОИ на закрытие каждой из последних `bars` свечей: последняя запись
+    не позже конца свечи. Ряд собирается раз в час, свечи часовые."""
+    rows = positioning.series('open_interest', pair, upto=upto)
+    if not rows:
+        return None
+    stamps = [int(r['ts']) for r in rows]
+    values = [float(r['value']) for r in rows]
+    start = max(1, index - bars + 1)
+    out = []
+    step = None
+    try:
+        step = int((df['timestamp'].iloc[1] - df['timestamp'].iloc[0]).total_seconds() * 1000)
+    except Exception:                                  # noqa: BLE001
+        step = 3_600_000
+    for i in range(start - 1, index + 1):
+        try:
+            end_ms = int(df['timestamp'].iloc[i].timestamp() * 1000) + step
+        except Exception:                              # noqa: BLE001
+            return None
+        pos = int(np.searchsorted(stamps, end_ms, side='right')) - 1
+        # Запись старше двух свечей — это не ОИ этой свечи, а последнее, что
+        # успел записать сборщик до простоя. Первый прогон на машине
+        # разработки показал шесть свечей «ОИ без изменений» по ряду
+        # трёхнедельной давности — ровно та подмена, которой быть не должно.
+        fresh = pos >= 0 and end_ms - stamps[pos] <= 2 * step
+        out.append((i, values[pos] if fresh else None,
+                    float(df['close'].iloc[i])))
+    return out
+
+
+def oi_flow(pair, df, index, upto=None, bars=6):
+    """
+    Последние свечи как «цена × ОИ»: набор лонгов, набор шортов, закрытие.
+
+    Четыре сочетания, и каждое — другой рынок. Рост на растущем ОИ — новые
+    лонги; рост на падающем — закрываются шорты, то есть топливо кончается.
+    Ряд ОИ копится с первого дня, а читался только как «за 24ч +4%».
+    """
+    series = _oi_by_bar(pair, df, index, upto, bars)
+    if not series or len(series) < 2:
+        return None
+    labels = []
+    for (_, oi_prev, px_prev), (i, oi, px) in zip(series, series[1:]):
+        if oi is None or oi_prev is None or oi_prev <= 0 or px_prev <= 0:
+            labels.append(None)
+            continue
+        d_oi = (oi / oi_prev - 1) * 100
+        d_px = (px / px_prev - 1) * 100
+        if abs(d_oi) < 0.05:
+            labels.append('ОИ без изменений')
+        elif d_px >= 0 and d_oi > 0:
+            labels.append('набор лонгов')
+        elif d_px < 0 and d_oi > 0:
+            labels.append('набор шортов')
+        elif d_px >= 0:
+            labels.append('закрытие шортов')
+        else:
+            labels.append('закрытие лонгов')
+    known = [l for l in labels if l]
+    if not known:
+        return None
+    first_oi = next((oi for _, oi, _ in series if oi), None)
+    last_oi = series[-1][1]
+    return {
+        'bars': labels,
+        'change_pct': ((last_oi / first_oi - 1) * 100
+                       if first_oi and last_oi else None),
+    }
+
+
+# ── Оценка карты ликвидаций ──────────────────────────────────────────────────
+
+# Доли нового открытого интереса по плечам. ЭТО ДОПУЩЕНИЕ, А НЕ ЗАМЕР: биржа
+# не публикует, с каким плечом открыты чужие позиции, и любая «карта
+# ликвидаций» в интернете строится на таком же допущении. Веса взяты по
+# общедоступной статистике розничных плеч на бессрочных контрактах; они
+# влияют на веса кластеров, но не на их положение — а положение и есть то,
+# что модели важно.
+LEVERAGE_MIX = ((10, 0.45), (25, 0.30), (50, 0.15), (100, 0.10))
+
+# Сколько часовых свечей назад смотрим: трое суток. Позиции старше либо уже
+# закрыты, либо переставили стопы, и их ликвидационные уровни — шум.
+LIQ_BARS = 72
+
+# Кластер — уровни ближе этой доли цены друг к другу.
+LIQ_CLUSTER_PCT = 0.4
+
+
+def liquidation_estimate(pair, df, index, upto=None, bars=None):
+    """
+    Где скопились ликвидации ОЦЕНОЧНО — по приросту ОИ и типичным плечам.
+
+    Позиции, открытые на свече с ценой P при плече L, ликвидируются у
+    P·(1 − 1/L) для лонгов и P·(1 + 1/L) для шортов. Прирост ОИ на свече —
+    сколько таких позиций добавилось; куда именно, лонги или шорты, — по
+    направлению свечи (см. oi_flow). Уровни, которые цена уже прошла,
+    выброшены: те позиции ликвидированы.
+
+    Это прокси, и в разметке он подписан как оценка. Настоящие ликвидации
+    копит сборщик по веб-сокету (liquidations.py) — когда его история
+    станет длиннее суток, она уйдёт в снимок отдельным блоком.
+    """
+    series = _oi_by_bar(pair, df, index, upto, bars or LIQ_BARS)
+    if not series or len(series) < 3:
+        return None
+    price = float(df['close'].iloc[index])
+    high = np.asarray(df['high'].values, dtype=float)
+    low = np.asarray(df['low'].values, dtype=float)
+
+    longs, shorts = [], []
+    for (_, oi_prev, px_prev), (i, oi, px) in zip(series, series[1:]):
+        if oi is None or oi_prev is None or oi <= oi_prev or px_prev <= 0:
+            continue
+        opened = oi - oi_prev
+        bucket = longs if px >= px_prev else shorts
+        for lev, share in LEVERAGE_MIX:
+            level = px * (1 - 1 / lev) if bucket is longs else px * (1 + 1 / lev)
+            # Уже ликвидированы, если цена после той свечи туда доходила.
+            later_low = float(np.min(low[i + 1:index + 1])) if i + 1 <= index else price
+            later_high = float(np.max(high[i + 1:index + 1])) if i + 1 <= index else price
+            if bucket is longs and later_low <= level:
+                continue
+            if bucket is shorts and later_high >= level:
+                continue
+            bucket.append((level, opened * share))
+
+    def clusters(points, side):
+        points = sorted(points)
+        out, cur = [], None
+        for level, weight in points:
+            if cur is not None and abs(level - cur['to']) / price * 100 <= LIQ_CLUSTER_PCT:
+                cur['to'] = level
+                cur['weight'] += weight
+            else:
+                cur = {'from': level, 'to': level, 'weight': weight}
+                out.append(cur)
+        total = sum(c['weight'] for c in out) or 1.0
+        out.sort(key=lambda c: -c['weight'])
+        keep = out[:3]
+        return [{'from': _number(c['from']), 'to': _number(c['to']),
+                 'share_pct': c['weight'] / total * 100,
+                 'dist_pct': ((c['from'] + c['to']) / 2 / price - 1) * 100,
+                 'side': side}
+                for c in sorted(keep, key=lambda c: abs((c['from'] + c['to']) / 2 - price))]
+
+    below = clusters([p for p in longs if p[0] < price], 'лонги')
+    above = clusters([p for p in shorts if p[0] > price], 'шорты')
+    if not below and not above:
+        return None
+    return {'below': below, 'above': above, 'bars': len(series) - 1}
+
+
+# ── Ликвидации по факту: поток биржи ────────────────────────────────────────
+
+# Кластер — события ближе этой доли цены друг к другу.
+LIQ_FACT_CLUSTER_PCT = 0.5
+
+
+def liquidation_facts(pair, price, upto=None, hours=24):
+    """
+    Что ликвидировали на самом деле за последние сутки — из потока Bybit.
+
+    Это ФАКТ, в отличие от оценки по ОИ: цена, сторона и объём каждой
+    принудительной ликвидации. Но история начинается с запуска сборщика
+    (liquidations.py), и первые часы честно называются «сбор идёт N ч»:
+    источник есть, ряда ещё нет.
+    """
+    import liquidations
+
+    now = int(upto) if upto else int(time.time() * 1000)
+    started = liquidations.first_ts()
+    if started is None:
+        return None
+    age_h = (now - started) / 3_600_000
+    rows = liquidations.rows(pair, since=now - hours * 3_600_000, upto=now)
+    if age_h < 1:
+        return {'young_min': int(age_h * 60), 'events': len(rows)}
+
+    def totals(window_h):
+        edge = now - window_h * 3_600_000
+        part = [r for r in rows if int(r['ts']) >= edge]
+        return {
+            'long_n': sum(1 for r in part if r['side'] == 'long'),
+            'long_size': sum(float(r['size']) for r in part if r['side'] == 'long'),
+            'short_n': sum(1 for r in part if r['side'] == 'short'),
+            'short_size': sum(float(r['size']) for r in part if r['side'] == 'short'),
+        }
+
+    clusters = []
+    for row in sorted(rows, key=lambda r: float(r['price'])):
+        p, size, side = float(row['price']), float(row['size']), row['side']
+        if clusters and abs(p - clusters[-1]['to']) / price * 100 <= LIQ_FACT_CLUSTER_PCT:
+            c = clusters[-1]
+            c['to'] = p
+            c['size'] += size
+            c[side] += size
+        else:
+            clusters.append({'from': p, 'to': p, 'size': size,
+                             'long': size if side == 'long' else 0.0,
+                             'short': size if side == 'short' else 0.0})
+    total = sum(c['size'] for c in clusters) or 1.0
+    top = sorted(clusters, key=lambda c: -c['size'])[:3]
+    top = [{'from': c['from'], 'to': c['to'],
+            'share_pct': c['size'] / total * 100,
+            'dist_pct': ((c['from'] + c['to']) / 2 / price - 1) * 100,
+            'mostly': 'лонги' if c['long'] >= c['short'] else 'шорты'}
+           for c in sorted(top, key=lambda c: abs((c['from'] + c['to']) / 2 - price))]
+
+    return {'hours': min(hours, age_h), 'h24': totals(24), 'h4': totals(4),
+            'clusters': top, 'events': len(rows)}
+
+
+# ── BTC как ориентир для альткоинов ─────────────────────────────────────────
+
+def benchmark_facts(df_pair, df_btc, index):
+    """
+    Ход BTC за 4ч/24ч и сила пары относительно него.
+
+    Правило из исходного задания аналитика: альткоин слабее BTC при падающем
+    BTC — лонг с повышенным риском. Без этой строки модель судит альт так,
+    будто он живёт сам по себе.
+    """
+    if df_btc is None or 'close' not in getattr(df_btc, 'columns', ()):
+        return None
+    n = len(df_btc)
+    if n < 25:
+        return None
+
+    def change(df, at, bars):
+        earlier = float(df['close'].iloc[at - bars])
+        return (float(df['close'].iloc[at]) / earlier - 1) * 100 if earlier > 0 else None
+
+    at_btc = n - 1
+    if index < 24:
+        return None
+    out = {'btc_4h': change(df_btc, at_btc, 4), 'btc_24h': change(df_btc, at_btc, 24)}
+    pair_24h = change(df_pair, index, 24)
+    if pair_24h is not None and out['btc_24h'] is not None:
+        out['relative_24h'] = pair_24h - out['btc_24h']
+    return out
+
+
 # ── Снимок целиком ───────────────────────────────────────────────────────────
 
-def snapshot(pair, df, at=None, client=None):
+def snapshot(pair, df, at=None, client=None, benchmark=None):
     """
     Всё сразу. Зовётся В ЦИКЛЕ: внутри есть запросы к бирже.
 
@@ -516,6 +856,8 @@ def snapshot(pair, df, at=None, client=None):
     же свечам: вызывающему незачем знать, что дельте нужна отсечка, а
     расхождению — ход цены. Без отсечки дельта читалась бы до конца файла,
     и разбор прошлого видел бы будущее.
+
+    benchmark — свечи BTC того же ТФ для альткоина, или None для самого BTC.
     """
     if df is None or 'close' not in getattr(df, 'columns', ()):
         return None
@@ -536,10 +878,31 @@ def snapshot(pair, df, at=None, client=None):
         if earlier > 0:
             change_4h = (price / earlier - 1) * 100
 
+    context = None
+    try:
+        import strategy_smc
+        context = strategy_smc.get_context(pair, client=client)
+    except Exception as exc:                           # noqa: BLE001
+        log(f'   разметка: контекст SMC не собран — {exc}')
+
     return {
         'profile': _safe('профиль объёма', volume_profile, df, index),
         'absorption': _safe('поглощение', absorption, df, index),
         'delta': _safe('дельта', delta_facts, pair, upto, change_4h),
         'book': _safe('стакан', book_facts, client, pair),
-        'smc': _safe('структура', smc_facts, pair, price, client),
+        'smc': (_safe('структура', _smc_from_context, context, price)
+                if context is not None else None),
+        'pois': (_safe('зоны интереса', poi_facts, context, price,
+                       len(context.frames['poi']) - 1)
+                 if context is not None else None),
+        'htf': (_safe('старшие ТФ', htf_facts, context,
+                      context.frames['poi']['timestamp'].iloc[-1])
+                if context is not None else None),
+        'oi_flow': _safe('ОИ по свечам', oi_flow, pair, df, index, upto),
+        'liquidations': _safe('оценка ликвидаций', liquidation_estimate,
+                              pair, df, index, upto),
+        'liq_fact': _safe('ликвидации по факту', liquidation_facts,
+                          pair, price, upto),
+        'benchmark': (_safe('BTC', benchmark_facts, df, benchmark, index)
+                      if benchmark is not None else None),
     }

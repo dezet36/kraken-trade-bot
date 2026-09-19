@@ -878,6 +878,16 @@ class PaperBroker:
         for w in (self.state.get('follow') or []):
             pairs[w['pair']] = min(pairs.get(w['pair'], w['last_ts']), w['last_ts'])
 
+        # Наблюдения за вердиктами модели — тот же приём: свечи нужны и там,
+        # где нет ни ордера, ни позиции.
+        try:
+            import llm_outcomes
+            for pair, since in llm_outcomes.pairs().items():
+                pairs[pair] = min(pairs.get(pair, since), since)
+            llm_outcomes.expire(_now_ms())
+        except Exception as exc:                       # noqa: BLE001
+            log(f'⚠️ наблюдения за вердиктами: {exc}')
+
         if not pairs:
             return
 
@@ -1016,6 +1026,11 @@ class PaperBroker:
             if watches:
                 import follow_up
                 finished.extend(follow_up.advance(watches, pair, ts, high, low, close))
+            try:
+                import llm_outcomes
+                llm_outcomes.advance(pair, ts, high, low, close)
+            except Exception as exc:                   # noqa: BLE001
+                log(f'⚠️ наблюдения за вердиктами {pair}: {exc}')
 
             pending = self.pending(strategy).get(pair)
             if pending and ts > pending['last_ts']:

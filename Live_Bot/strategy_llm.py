@@ -65,6 +65,12 @@ NAME = 'LLM'
 # две-три пары оно не даёт разбирать одну и ту же разметку без конца.
 _asked = {}
 
+# Взведённые условия входа: пара -> план. Модель сказала «войти после
+# закрытия часа выше L3» — план лежит здесь, и каждый цикл код смотрит на
+# последнюю ЗАКРЫТУЮ свечу. Живёт в процессе: после перезапуска условие
+# пропадает, и это честнее, чем исполнить его по разметке, которой уже нет.
+_armed = {}
+
 # Где остановился обход: следующая пара берётся отсюда, а не с начала списка.
 # Без курсора первая пара списка разбиралась бы каждый круг первой, а
 # последние — никогда, если модель не успевает за цикл.
@@ -101,7 +107,12 @@ def _run(pair, df, market, submitted):
     """Разбор одной пары. Идёт в своём потоке, минутами."""
     global _busy
     try:
-        verdict = llm_decide.decide(pair, df, llm_local.ask, market=market)
+        # Прошлые разборы этой пары читаются здесь, в потоке: файл журнала
+        # растёт на строку за разбор, и чтение его целиком — секунды, а не
+        # минуты. В цикле этому не место, в потоке — самое оно.
+        history = llm_journal.last(80)
+        verdict = llm_decide.decide(pair, df, llm_local.ask, market=market,
+                                    history=history)
         llm_journal.record(pair, '', verdict, llm_local.last_stats())
     except Exception as exc:                       # noqa: BLE001
         # Поток не имеет права унести с собой причину: без этой строки
@@ -171,6 +182,88 @@ def _queue(pairs):
     ring = pairs[start:] + pairs[:start]
     fresh = [p for p in ring if not _asked_recently(p)]
     return fresh
+
+
+def armed():
+    """Взведённые условия — для панели: пара, условие, уровень, возраст."""
+    now = time.time()
+    return [{'pair': pair, 'when': p['verdict'].get('trigger_when'),
+             'level': p['verdict'].get('trigger_level'),
+             'side': p['verdict'].get('side'),
+             'minutes': int((now - p['armed_at']) / 60)}
+            for pair, p in _armed.items()]
+
+
+def _arm(pair, verdict):
+    """Откладывает вход до условия. Новый план по паре сменяет старый."""
+    _armed[pair] = {'verdict': verdict, 'armed_at': time.time()}
+    log(f'   {NAME} {pair}: вход отложен до условия '
+        f'{verdict.get("trigger_when")} {verdict.get("trigger_level"):.6g} '
+        f'({verdict.get("side")} от {verdict.get("entry"):.6g})')
+
+
+def _closed_bar(df):
+    """
+    Последняя ЗАКРЫТАЯ часовая свеча: биржа отдаёт и текущую, ещё идущую.
+    Возвращает (метка закрытия в мс, close) или None.
+    """
+    try:
+        row = df.iloc[-2]
+        ts = int(row['timestamp'].timestamp() * 1000)
+        step = int((df['timestamp'].iloc[-1] - df['timestamp'].iloc[-2]).total_seconds() * 1000)
+        return ts + step, float(row['close'])
+    except Exception:                              # noqa: BLE001
+        return None
+
+
+def _check_armed(candles):
+    """
+    Проверяет взведённые условия по последней закрытой свече.
+
+    Считается только свеча, ЗАКРЫВШАЯСЯ ПОСЛЕ взведения: если цена уже стояла
+    выше уровня, когда модель просила «закрытие выше», это не подтверждение,
+    а то самое положение, которое её и не устроило.
+    """
+    out = []
+    ttl = int(config.__dict__.get('LLM_TRIGGER_TTL_H', 0) or 12) * 3600
+    now = time.time()
+    for pair, plan in list(_armed.items()):
+        verdict = plan['verdict']
+        if now - plan['armed_at'] > ttl:
+            _armed.pop(pair, None)
+            log(f'   {NAME} {pair}: условие входа не наступило за {ttl // 3600} ч — снято')
+            _refuse(pair, {'gate': 'условие не наступило',
+                           'detail': f'{verdict.get("trigger_when")} '
+                                     f'{verdict.get("trigger_level")} за {ttl // 3600} ч'})
+            continue
+        try:
+            df = candles(pair)
+        except Exception as exc:                   # noqa: BLE001
+            log(f'   {NAME} {pair}: свечи для условия не получены — {exc}')
+            continue
+        bar = _closed_bar(df) if df is not None else None
+        if bar is None:
+            continue
+        closed_at, close = bar
+        if closed_at <= plan['armed_at'] * 1000:
+            continue                               # закрылась до взведения
+        level = float(verdict['trigger_level'])
+        hit = close > level if verdict['trigger_when'] == 'close_above' else close < level
+        if not hit:
+            continue
+        _armed.pop(pair, None)
+        log(f'   {NAME} {pair}: условие наступило — час закрылся по {close:.6g} '
+            f'{"выше" if verdict["trigger_when"] == "close_above" else "ниже"} '
+            f'{level:.6g}; {verdict["side"]} от {verdict["entry"]:.6g}')
+        out.append({
+            'pair': pair,
+            'signal': _reshape(pair, verdict, df),
+            'score': verdict.get('votes', 0),
+            'rr': verdict['rr'],
+            'poi_type': 'LLM',
+            'df_1h': df,
+        })
+    return out
 
 
 def _reshape(pair, verdict, df=None):
@@ -275,8 +368,6 @@ def scan_for_setups(pairs, gate, client=None, balance=None, candles=None,
         log(f'   {NAME}: модель недоступна — стратегия простаивает')
         return []
 
-    out = _collect(_harvest())
-
     if candles is None:
         import exchange
 
@@ -284,9 +375,25 @@ def scan_for_setups(pairs, gate, client=None, balance=None, candles=None,
             return exchange.fetch_ohlcv('1h', limit=500, symbol=pair,
                                         client=client)
 
+    out = _collect(_harvest())
+    out += _check_armed(candles)
+
     if market is None:
+        benchmark = {}
+
         def market(pair, df):
-            return llm_market.snapshot(pair, df, client=client)
+            # Свечи BTC для альткоина — один запрос на цикл, и только когда
+            # он нужен: для самого BTC ориентир бессмыслен.
+            btc = None
+            if pair != 'BTCUSDT':
+                if 'df' not in benchmark:
+                    try:
+                        benchmark['df'] = candles('BTCUSDT')
+                    except Exception as exc:       # noqa: BLE001
+                        log(f'   {NAME}: свечи BTC не получены — {exc}')
+                        benchmark['df'] = None
+                btc = benchmark['df']
+            return llm_market.snapshot(pair, df, client=client, benchmark=btc)
 
     if busy():
         log(f'   {NAME}: модель занята парой {busy()}, жду её')
@@ -327,6 +434,19 @@ def scan_for_setups(pairs, gate, client=None, balance=None, candles=None,
     return out
 
 
+def _observe(pair, df, verdict):
+    """Заводит наблюдение за исходом: куда пошла цена после вердикта."""
+    try:
+        import llm_outcomes
+        from datetime import datetime, timezone
+        price = float(df['close'].iloc[-1])
+        ts = int(df['timestamp'].iloc[-1].timestamp() * 1000)
+        llm_outcomes.watch(pair, verdict, price, ts,
+                           at=datetime.now(timezone.utc).isoformat(timespec='seconds'))
+    except Exception:                              # noqa: BLE001
+        pass                                       # свечи не DataFrame — так в проверках
+
+
 def _collect(finished):
     """
     Превращает готовые вердикты в сигналы. Отказы пишет в журнал отказов.
@@ -341,6 +461,7 @@ def _collect(finished):
     limit = int(config.__dict__.get('LLM_VERDICT_MAX_AGE_MIN', 0) or 20) * 60
     for pair, df, verdict, submitted in finished:
         age = time.time() - submitted
+        _observe(pair, df, verdict)
 
         # Поломка ответом не является: по такой паре спросить надо снова,
         # а не через час. Метку снимаем.
@@ -359,6 +480,10 @@ def _collect(finished):
             _refuse(pair, {'gate': 'вердикт устарел',
                            'detail': f'ответ пришёл через {age / 60:.0f} мин при '
                                      f'пределе {limit // 60}'})
+            continue
+
+        if verdict.get('trigger_when', 'now') != 'now' and verdict.get('trigger_level'):
+            _arm(pair, verdict)
             continue
 
         log(f'   {NAME} {pair}: {verdict["side"]} от {verdict["entry"]:.6g}, '

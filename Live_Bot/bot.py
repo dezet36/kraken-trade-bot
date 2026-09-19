@@ -298,6 +298,15 @@ def _paper_cycle():
         log("Нет ликвидных пар — пропускаем цикл")
         return
 
+    # Ликвидации приходят потоком, а не по запросу: поток поднимается один
+    # раз и дальше только пополняет список пар. Падение потока бот не
+    # трогает — без него всё торгует как вчера.
+    try:
+        import liquidations
+        liquidations.ensure_running(liquid_pairs, client)
+    except Exception as exc:                           # noqa: BLE001
+        log(f'   ликвидации: сборщик не запущен — {exc}')
+
     hour_utc = datetime.now(timezone.utc).hour
     total_opened = 0
     # Кандидаты этого цикла по стратегиям: их разбирает модель, когда доходит

@@ -76,6 +76,7 @@ def _forget_previous_pairs():
     strategy_llm._done.clear()
     strategy_llm._busy = None
     strategy_llm._cursor = 0
+    strategy_llm._armed.clear()
     yield
     strategy_llm.join(10)
     strategy_llm._asked.clear()
@@ -556,3 +557,89 @@ class TestABrokenAnswerIsNotTakenForAJudgement:
         import llm_decide
         assert 'ответ обрезан' in llm_decide.BROKEN_GATES
         assert 'мало конфлюенса' not in llm_decide.BROKEN_GATES
+
+
+class TestAnArmedTriggerWaitsForTheBar:
+    """
+    «Войти после закрытия часа выше L3» — код ждёт, а не входит сразу.
+
+    Считается только свеча, закрывшаяся ПОСЛЕ взведения: цена, уже стоящая
+    выше уровня в момент разбора, — это положение, которое модель и не
+    устроило, а не подтверждение.
+    """
+
+    def _df(self, closes, start_ms):
+        import numpy as np
+        import pandas as pd
+        closes = np.asarray(closes, dtype=float)
+        return pd.DataFrame({
+            'timestamp': pd.to_datetime(
+                np.arange(len(closes)) * 3_600_000 + start_ms, unit='ms'),
+            'open': closes, 'high': closes + 0.1, 'low': closes - 0.1,
+            'close': closes, 'volume': np.full(len(closes), 1.0)})
+
+    def _arm(self, monkeypatch, when='close_above', level=101.0):
+        monkeypatch.setattr(strategy_llm.llm_local, 'available', lambda: True)
+        monkeypatch.setattr(strategy_llm.llm_decide, 'decide',
+                            lambda *a, **k: approving_verdict(
+                                trigger_when=when, trigger_level=level,
+                                trigger_id='L3'))
+        strategy_llm.scan_for_setups(['BTCUSDT'], gate=None,
+                                     candles=lambda pair: [0] * 500)
+        strategy_llm.join(15)
+        # Вердикт забирает следующий цикл — он же и взводит условие.
+        return strategy_llm.scan_for_setups([], gate=None,
+                                            candles=lambda pair: [0] * 500)
+
+    def test_the_verdict_is_armed_not_traded(self, monkeypatch):
+        out = self._arm(monkeypatch)
+        assert out == []
+        assert strategy_llm.armed()[0]['pair'] == 'BTCUSDT'
+        assert strategy_llm.armed()[0]['when'] == 'close_above'
+
+    def test_it_fires_on_a_bar_closed_above_after_arming(self, monkeypatch):
+        import time as real_time
+        self._arm(monkeypatch)
+        armed_ms = int(strategy_llm._armed['BTCUSDT']['armed_at'] * 1000)
+        # Свеча -2 закрылась ПОСЛЕ взведения по 102 > 101; свеча -1 ещё идёт.
+        df = self._df([100, 100, 102, 103], start_ms=armed_ms - 2 * 3_600_000 + 1000)
+        out = strategy_llm.scan_for_setups([], gate=None, candles=lambda pair: df)
+        assert len(out) == 1
+        assert out[0]['signal']['params']['entry'] == 100.0
+        assert strategy_llm.armed() == []
+
+    def test_a_bar_closed_before_arming_does_not_count(self, monkeypatch):
+        self._arm(monkeypatch)
+        armed_ms = int(strategy_llm._armed['BTCUSDT']['armed_at'] * 1000)
+        # Все свечи закрылись до взведения — даже выше уровня.
+        df = self._df([100, 102, 103, 104], start_ms=armed_ms - 10 * 3_600_000)
+        out = strategy_llm.scan_for_setups([], gate=None, candles=lambda pair: df)
+        assert out == []
+        assert strategy_llm.armed()
+
+    def test_a_bar_closed_below_does_not_fire_close_above(self, monkeypatch):
+        self._arm(monkeypatch)
+        armed_ms = int(strategy_llm._armed['BTCUSDT']['armed_at'] * 1000)
+        df = self._df([100, 100, 100.5, 103], start_ms=armed_ms - 2 * 3_600_000 + 1000)
+        out = strategy_llm.scan_for_setups([], gate=None, candles=lambda pair: df)
+        assert out == []
+
+    def test_it_expires_and_is_refused_by_name(self, monkeypatch):
+        written = []
+        import refused
+        monkeypatch.setattr(refused, 'record', lambda *a, **k: written.append(a))
+        self._arm(monkeypatch)
+        strategy_llm._armed['BTCUSDT']['armed_at'] -= 13 * 3600
+        out = strategy_llm.scan_for_setups([], gate=None,
+                                           candles=lambda pair: [0] * 500)
+        assert out == []
+        assert strategy_llm.armed() == []
+        assert any('условие не наступило' in row[2] for row in written), written
+
+    def test_a_now_trigger_trades_immediately(self, monkeypatch):
+        monkeypatch.setattr(strategy_llm.llm_local, 'available', lambda: True)
+        monkeypatch.setattr(strategy_llm.llm_decide, 'decide',
+                            lambda *a, **k: approving_verdict(trigger_when='now'))
+        out = cycle(['BTCUSDT'])
+        assert len(out) == 1
+        assert strategy_llm.armed() == []

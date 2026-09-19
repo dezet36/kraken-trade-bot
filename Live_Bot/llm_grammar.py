@@ -66,6 +66,10 @@ WHY_CHARS = 320
 RISK_CHARS = 240
 ALT_CHARS = 320
 
+# Ответ проверяющего короче: он не разбирает рынок, а называет возражения.
+CRITIC_ISSUES_CHARS = 600
+CRITIC_WORST_CHARS = 200
+
 
 def _alt(values):
     """Перечисление строковых литералов: "A" | "B" | "C"."""
@@ -105,6 +109,13 @@ def build(level_ids):
     head = ('"{" ws "\\"regime\\":" ws regime ws ","'
             ' ws "\\"analysis\\":" ws analysis ws ","')
     body = '\n'.join(rules)
+    # УСЛОВИЕ ВХОДА — ОБЪЕКТ, А НЕ ТЕКСТ. Пока оно было строкой, модель
+    # писала «дождаться закрытия выше L3», а код ставил лимит немедленно:
+    # половина её логики не доходила до сделки. Теперь условие исполняет
+    # код: «now» — лимит на вход сразу, «close_above»/«close_below» + уровень
+    # — ждать закрытия часовой свечи за уровнем.
+    when = ('"\\"now\\"" | "\\"close_above\\"" ws "," ws "\\"level\\":" ws lvl'
+            ' | "\\"close_below\\"" ws "," ws "\\"level\\":" ws lvl')
     return f'''root     ::= enter | skip
 enter    ::= {head} ws "\\"d\\":\\"enter\\"," ws plan ws "," ws "\\"trigger\\":" ws trigger ws "," ws "\\"cf\\":" ws cf ws "," ws "\\"p\\":" ws prob ws "," ws "\\"why\\":" ws why ws "," ws "\\"risk\\":" ws risk ws "," ws "\\"alt\\":" ws alt ws "}}"
 skip     ::= {head} ws "\\"d\\":\\"skip\\"," ws "\\"cf\\":" ws cf ws "," ws "\\"why\\":" ws why ws "}}"
@@ -115,10 +126,29 @@ bool     ::= "true" | "false"
 prob     ::= "0." [0-9] [1-9] | "0." [1-9] [0-9]
 regime   ::= {_text(REGIME_CHARS)}
 analysis ::= {_text(ANALYSIS_CHARS)}
-trigger  ::= {_text(TRIGGER_CHARS)}
+trigger  ::= "{{" ws "\\"when\\":" ws when ws "," ws "\\"note\\":" ws tnote ws "}}"
+when     ::= {when}
+lvl      ::= {_alt(level_ids)}
+tnote    ::= {_text(TRIGGER_CHARS)}
 why      ::= {_text(WHY_CHARS)}
 risk     ::= {_text(RISK_CHARS)}
 alt      ::= {_text(ALT_CHARS)}
+ch       ::= [^"\\\\\\x00-\\x1f]
+ws       ::= [ \\n]*
+'''
+
+
+def critic():
+    """
+    Грамматика ответа проверяющего: подтвердить или отклонить, и почему.
+
+    Отдельная и короткая: у критика нет уровней и плана — только вердикт о
+    чужом плане. Общая грамматика позволила бы ему «войти» самому.
+    """
+    return f'''root     ::= "{{" ws "\\"verdict\\":" ws verdict ws "," ws "\\"issues\\":" ws issues ws "," ws "\\"worst\\":" ws worst ws "}}"
+verdict  ::= "\\"confirm\\"" | "\\"reject\\""
+issues   ::= {_text(CRITIC_ISSUES_CHARS)}
+worst    ::= {_text(CRITIC_WORST_CHARS)}
 ch       ::= [^"\\\\\\x00-\\x1f]
 ws       ::= [ \\n]*
 '''
