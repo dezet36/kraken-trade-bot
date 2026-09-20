@@ -107,6 +107,17 @@ def _load():
         log(f'⚠️ Модель не загрузилась — стратегия LLM выключена ({exc})')
         _failed = True
         return None
+    # КЭШ ПРЕФИКСА. Состояние после общего начала вопроса (системный промт)
+    # хранится и переиспользуется: llama-cpp-python сам находит самый
+    # длинный общий префикс с прошлым вызовом и не считает его заново —
+    # это ~3700 токенов, минута-полторы на каждый разбор.
+    cache_mb = int(getattr(config, 'LLM_PREFIX_CACHE_MB', 0) or 0)
+    if cache_mb > 0:
+        try:
+            from llama_cpp import LlamaRAMCache
+            _model.set_cache(LlamaRAMCache(capacity_bytes=cache_mb << 20))
+        except Exception as exc:                   # noqa: BLE001
+            log(f'   кэш префикса не включён — {exc}')
     log(f'🧠 Модель загружена за {time.time() - started:.1f} с: '
         f'{os.path.basename(model_path())}, потоков {config.LLM_THREADS}')
     return _model

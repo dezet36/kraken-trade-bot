@@ -395,12 +395,34 @@ class TestThePairIsNotReExaminedEveryCycle:
         strategy_llm.scan_for_setups(['BTCUSDT'], gate=None,
                                      candles=lambda pair: [0] * 500)
         strategy_llm.join(15)
+        import llm_urgency
         minutes = strategy_llm.config.LLM_REASK_AFTER_MIN
+        # Окно повтора прошло, но повода нет — пара ждёт события…
         for key in list(strategy_llm._asked):
             strategy_llm._asked[key] -= minutes * 60 + 1
-
         strategy_llm.scan_for_setups(['BTCUSDT'], gate=None,
                                      candles=lambda pair: [0] * 500)
+        assert len(asked) == 1
+        # …или планового прохода раз в STALE_HOURS.
+        for key in list(strategy_llm._asked):
+            strategy_llm._asked[key] -= llm_urgency.STALE_HOURS * 3600
+        strategy_llm.scan_for_setups(['BTCUSDT'], gate=None,
+                                     candles=lambda pair: [0] * 500)
+        assert len(asked) == 2
+
+    def test_a_reason_reopens_the_pair_after_the_window(self, monkeypatch):
+        """Событие (цена у уровня, слом, ликвидации) — и пара идёт снова."""
+        import llm_urgency
+        asked = []
+        monkeypatch.setattr(strategy_llm.llm_local, 'available', lambda: True)
+        monkeypatch.setattr(strategy_llm.llm_decide, 'decide', refusing_decide(asked))
+        strategy_llm.scan_for_setups(['BTCUSDT'], gate=None, candles=lambda pair: [0] * 500)
+        strategy_llm.join(15)
+        for key in list(strategy_llm._asked):
+            strategy_llm._asked[key] -= strategy_llm.config.LLM_REASK_AFTER_MIN * 60 + 1
+        monkeypatch.setattr(llm_urgency, 'rank',
+                            lambda pairs, context_of, now_ms=None: [(p, 2, ['цена у L5']) for p in pairs])
+        strategy_llm.scan_for_setups(['BTCUSDT'], gate=None, candles=lambda pair: [0] * 500)
         assert len(asked) == 2
 
     def test_the_round_continues_past_recently_asked_pairs(self, monkeypatch):

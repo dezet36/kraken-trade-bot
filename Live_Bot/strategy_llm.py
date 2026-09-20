@@ -170,10 +170,13 @@ def _remember(pair, now=None):
     minutes = int(config.__dict__.get('LLM_REASK_AFTER_MIN', 0) or 0)
     now = now if now is not None else time.time()
     _asked[pair] = now
-    if minutes > 0:
-        for key, at in list(_asked.items()):
-            if now - at >= minutes * 60:
-                _asked.pop(key, None)
+    # Метки живут дольше окна повтора: по ним _stale решает, что пару
+    # давно не разбирали. Выбрасываем только совсем старые.
+    import llm_urgency
+    keep_sec = max(minutes * 60, llm_urgency.STALE_HOURS * 3600 * 2)
+    for key, at in list(_asked.items()):
+        if now - at >= keep_sec:
+            _asked.pop(key, None)
 
 
 def _cached_context(pair):
@@ -207,14 +210,33 @@ def _queue(pairs, context_of=_cached_context, skip=()):
     # короче. Считается кодом из кэша SMC и файлов, без запросов к бирже.
     import llm_urgency
     ranked = llm_urgency.rank(ring, context_of)
-    out = []
+    out, idle = [], []
     for pair, points, _why in ranked:
         if points >= llm_urgency.URGENT:
             if not _asked_recently(pair, factor=0.5):
                 out.append(pair)
-        elif not _asked_recently(pair):
+            continue
+        if _asked_recently(pair):
+            continue
+        # РАЗБОР ПО ПОВОДУ. Нет события и цена не у уровня — модели там
+        # делать нечего; пара подождёт повода или планового прохода раз в
+        # STALE_HOURS. Освобождает половину времени модели под пары, где
+        # сетап возможен сейчас.
+        if points >= llm_urgency.REASON or _stale(pair):
             out.append(pair)
+        else:
+            idle.append(pair)
+    if idle:
+        log(f'   {NAME}: без повода, ждут события — {", ".join(idle)}')
     return out
+
+
+def _stale(pair, now=None):
+    """Пару давно (или никогда) не разбирали — плановый проход без повода."""
+    import llm_urgency
+    now = now if now is not None else time.time()
+    at = _asked.get(pair)
+    return at is None or (now - at) >= llm_urgency.STALE_HOURS * 3600
 
 
 def armed():

@@ -256,6 +256,12 @@ LLM_MAX_TOKENS = int(os.getenv('LLM_MAX_TOKENS', 3000))
 # знаков). Мысль уходит в журнал колонкой thought. LLM_THINK_CHARS=0 —
 # выключить (к вопросу добавится /no_think).
 LLM_THINK_CHARS = int(os.getenv('LLM_THINK_CHARS', 4000))
+
+# Кэш состояния после общего начала вопроса. Системный промт — половина
+# вопроса (~3700 токенов) и у всех пар один; llama.cpp хранит состояние
+# после него и на следующем вызове пересчитывает только разметку. Ёмкость
+# в мегабайтах: одно состояние на окно 12288 занимает ~1.5 ГБ. 0 — выключить.
+LLM_PREFIX_CACHE_MB = int(os.getenv('LLM_PREFIX_CACHE_MB', 3072))
 LLM_THINK_TAG = os.getenv('LLM_THINK_TAG', '' if LLM_THINK_CHARS > 0 else '/no_think')
 
 # Низкая температура: нам нужен разбор, а не разнообразие. Ноль не ставим —
