@@ -299,6 +299,12 @@ LLM_REASK_AFTER_MIN = int(os.getenv('LLM_REASK_AFTER_MIN', 60))
 # не роняет бота. 0 — в том же процессе, для отладки.
 LLM_ISOLATE = os.getenv('LLM_ISOLATE', '1') not in ('0', 'false', 'False', '')
 
+# Модель в llama-server (llm_server.py): адрес вида http://127.0.0.1:8788.
+# Задан — вопросы идут туда по HTTP, рабочий процесс с llama-cpp-python не
+# поднимается. Пусто — как раньше. Причина: MTP-ускорение есть только в
+# llama-server (см. шапку llm_server.py).
+LLM_SERVER_URL = os.getenv('LLM_SERVER_URL', '').strip()
+
 # Второе мнение о каждом плане «войти»: тот же движок, роль проверяющего.
 # Выключается, если нужно замерить аналитика без него.
 LLM_CRITIC = os.getenv('LLM_CRITIC', '1') not in ('0', 'false', 'False', '')

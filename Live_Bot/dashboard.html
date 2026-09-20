@@ -4637,7 +4637,7 @@ function renderLlmState(d) {
 
   box.innerHTML = '<div class="ai-state">'
     + now
-    + `<span>модель <b>${esc(d.model)}</b></span>`
+    + `<span>модель <b>${esc(d.model)}</b>${d.server ? ` · llama-server <b style="color:${d.server_alive ? 'var(--good)' : 'var(--bad)'}">${d.server_alive ? 'жив' : 'не отвечает'}</b>` : ''}</span>`
     + `<span>потоков <b>${d.threads}</b></span>`
     + `<span>окно <b>${d.ctx}</b></span>`
     + (last.seconds ? `<span>последний разбор <b>${last.seconds} с</b></span>` : '')

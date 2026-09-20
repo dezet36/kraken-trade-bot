@@ -78,6 +78,9 @@ def available():
     Проверяется ДО сборки разметки: незачем считать уровни и грамматику для
     вызова, которого не будет.
     """
+    import llm_server
+    if llm_server.enabled():
+        return llm_server.health() is not None
     if _failed or not model_path():
         return False
     return os.path.exists(model_path())
@@ -132,6 +135,12 @@ def ask(prompt, grammar=None, max_tokens=None):
     бота на каждом разборе. С LLM_ISOLATE=0 модель работает прямо здесь —
     для отладки и для машин, где spawn дорог.
     """
+    import llm_server
+    if llm_server.enabled():
+        answer, stats = llm_server.ask(prompt, grammar, max_tokens)
+        if stats:
+            _last.update(stats)
+        return answer
     if getattr(config, 'LLM_ISOLATE', True):
         if not available():
             raise RuntimeError('модель недоступна')
@@ -244,6 +253,14 @@ def last_stats():
     панели, а они спрашивают раньше, чем модель успевает ответить.
     """
     out = {'model': os.path.basename(model_path()) if model_path() else ''}
+    try:
+        import llm_server
+        if llm_server.enabled():
+            name = (llm_server.props().get('model_path') or '')
+            out['model'] = os.path.basename(name) or 'llama-server'
+            out['server'] = llm_server.url()
+    except Exception:                              # noqa: BLE001
+        pass
     out.update(_last)
     return out
 

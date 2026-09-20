@@ -1302,13 +1302,29 @@ def llm_payload(limit=40):
     except Exception:                                  # noqa: BLE001
         pass
 
+    # Модель в llama-server: имя и живость — с сервера, а не с диска.
+    server = ''
+    server_alive = None
+    try:
+        import llm_server
+        if llm_server.enabled():
+            server = llm_server.url()
+            server_alive = llm_server.health() is not None
+            name = (llm_server.props().get('model_path') or '')
+            if name:
+                path = name
+    except Exception:                                  # noqa: BLE001
+        pass
+
     return {
         'configured': bool(path),
         'streams': streams,
         'armed': armed,
         'critic': critic,
+        'server': server,
+        'server_alive': server_alive,
         'model': os.path.basename(path) if path else '',
-        'exists': bool(path) and os.path.exists(path),
+        'exists': (server_alive if server else (bool(path) and os.path.exists(path))),
         'ctx': getattr(config, 'LLM_CTX', 0),
         'threads': getattr(config, 'LLM_THREADS', 0),
         'limit_tokens': getattr(config, 'LLM_MAX_TOKENS', 0),

@@ -1,0 +1,34 @@
+# Модель бота в llama-server с MTP-ускорением. Ставится рядом с kraken-bot:
+#   cp Live_Bot/kraken-llm.service /etc/systemd/system/ && systemctl daemon-reload
+#   systemctl enable --now kraken-llm
+# Бот ходит к нему по LLM_SERVER_URL=http://127.0.0.1:8788 (bot_data/.env).
+#
+# Сборка: /opt/kraken/llama.cpp (git clone ggml-org/llama.cpp; cmake -B build
+# -DGGML_NATIVE=ON; cmake --build build --target llama-server). MTP есть только
+# в llama-server, не в llama-cpp-python — см. шапку Live_Bot/llm_server.py.
+#
+# Флаги: -np 1 — один слот (с MTP больше нельзя); -c 12288 — окно как у бота;
+# --spec-type draft-mtp --spec-draft-n-max 2 — черновик из MTP-головы модели.
+
+[Unit]
+Description=Kraken LLM (llama-server, MTP)
+After=network.target
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/kraken/llama.cpp
+Environment=LD_LIBRARY_PATH=/opt/kraken/llama.cpp/build/bin
+ExecStart=/opt/kraken/llama.cpp/build/bin/llama-server \
+    -m /opt/kraken/bot_data/models/Qwen3.6-35B-A3B-MTP-UD-Q3_K_M.gguf \
+    --host 127.0.0.1 --port 8788 \
+    -c 12288 -t 6 -np 1 \
+    --spec-type draft-mtp --spec-draft-n-max 2 \
+    --temp 0.3
+Restart=always
+RestartSec=5
+Nice=0
+
+[Install]
+WantedBy=multi-user.target
