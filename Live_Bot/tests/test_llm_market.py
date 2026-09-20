@@ -337,7 +337,7 @@ class TestMarkup:
                      'ОТКРЫТЫЙ ИНТЕРЕС ПО СВЕЧАМ', 'КАРТА ЛИКВИДАЦИЙ',
                      'ЛИКВИДАЦИИ ПО ФАКТУ', 'ЭКСТРЕМУМЫ ДНЯ', 'НЕЗАКРЫТЫЕ ИМБАЛАНСЫ'):
             assert head in text, head
-        assert text.count('\n  —') == 13, 'каждый блок обязан стоять с прочерком'
+        assert text.count('\n  —') == 14, 'каждый блок обязан стоять с прочерком'
         # Без свечей BTC блока про BTC нет вовсе: для самого BTC он бессмыслен.
         assert 'BTC КАК ОРИЕНТИР' not in text
 
@@ -390,6 +390,8 @@ class TestMarkup:
             'oi_week': 3.4,
             'htf_zones': [{'kind': 'FVG', 'direction': 'BEARISH', 'top': 106.0, 'bottom': 104.5,
                            'bars_ago': 5, 'inside': False}],
+            'day_profile': {'vwap_today': 100.4, 'vwap_yesterday': 99.1, 'poc_24h': 100.2,
+                            'va_low_24h': 99.5, 'va_high_24h': 101.0, 'hours_24h': 16.0},
             'liq_fact': {'young_min': 20, 'events': 0},
         }
         text = llm_context.build('BTCUSDT', make_df(wavy(400)),
@@ -494,6 +496,8 @@ def _full_market():
         'oi_week': 3.4,
         'htf_zones': [{'kind': 'ORDER_BLOCK', 'direction': 'BULLISH', 'top': 99.0, 'bottom': 97.5,
                        'bars_ago': 3, 'inside': False}],
+        'day_profile': {'vwap_today': 100.4, 'vwap_yesterday': 99.1, 'poc_24h': 100.2,
+                        'va_low_24h': 99.5, 'va_high_24h': 101.0, 'hours_24h': 16.0},
         'liq_fact': {'hours': 24,
                      'h24': {'long_n': 12, 'long_size': 3.5, 'short_n': 8, 'short_size': 2.1},
                      'h4': {'long_n': 2, 'long_size': 0.5, 'short_n': 1, 'short_size': 0.1},
@@ -638,3 +642,60 @@ class TestPoisAndHtf:
         assert out['htf']['trend'] in ('BULLISH', 'BEARISH', 'NEUTRAL')
         import json
         json.dumps(out)
+
+
+class TestDeltaAtLevel:
+    """Дельта в минуты касания уровня — защищали его или продавали в стакан."""
+
+    def tape(self):
+        base = 1_700_000_000_000
+        rows = []
+        for k in range(120):
+            price = 100.0 + (0.5 if 30 <= k < 40 else 0.0)      # 10 минут у 100.5
+            rows.append({'ts': base + k * 60_000, 'high': price + 0.02, 'low': price - 0.02,
+                         'volume': 10.0, 'buy': 3.0 if 30 <= k < 40 else 1.0, 'sell': 1.0})
+        return rows
+
+    def test_touching_minutes_are_summed_and_counted(self):
+        out = llm_market.delta_at_level(self.tape(), 100.5, tol_pct=0.1)
+        assert out['minutes'] == 10 and out['touches'] == 1
+        assert out['share_pct'] == pytest.approx((30 - 10) / 40 * 100)
+
+    def test_a_level_never_touched_gives_nothing(self):
+        assert llm_market.delta_at_level(self.tape(), 103.0, tol_pct=0.1) is None
+
+    def test_minutes_without_tape_coverage_do_not_count(self):
+        rows = self.tape()
+        for r in rows:
+            r['buy'] = r['sell'] = None
+        assert llm_market.delta_at_level(rows, 100.5, tol_pct=0.1) is None
+
+
+class TestDayProfile:
+    def test_vwap_and_minute_poc(self):
+        import pandas as pd
+        n = 30
+        df = pd.DataFrame({
+            'timestamp': pd.to_datetime([pd.Timestamp('2026-09-20 00:00') + pd.Timedelta(hours=h) for h in range(n)]),
+            'open': [100.0] * n, 'high': [101.0] * n, 'low': [99.0] * n, 'close': [100.0] * n,
+            'volume': [1.0] * n})
+        base = 1_700_000_000_000
+        tape = [{'ts': base + k * 60_000, 'high': 100.6, 'low': 100.4, 'volume': 5.0, 'buy': 1, 'sell': 1}
+                for k in range(120)]
+        tape += [{'ts': base + (120 + k) * 60_000, 'high': 99.1, 'low': 98.9, 'volume': 1.0, 'buy': 1, 'sell': 1}
+                 for k in range(60)]
+        out = llm_market.day_profile(tape, df, n - 1)
+        assert out['vwap_today'] == pytest.approx(100.0)
+        assert out['vwap_yesterday'] == pytest.approx(100.0)
+        assert abs(out['poc_24h'] - 100.5) < 0.2      # шаг сетки (101.6-98.9)/60 ≈ 0.045, центр бина
+        assert out['va_low_24h'] <= 100.5 <= out['va_high_24h']
+
+    def test_no_tape_still_gives_vwap(self):
+        import pandas as pd
+        n = 10
+        df = pd.DataFrame({
+            'timestamp': pd.to_datetime([pd.Timestamp('2026-09-20 00:00') + pd.Timedelta(hours=h) for h in range(n)]),
+            'open': [100.0] * n, 'high': [102.0] * n, 'low': [98.0] * n, 'close': [101.0] * n,
+            'volume': [2.0] * n})
+        out = llm_market.day_profile(None, df, n - 1)
+        assert out['vwap_today'] == pytest.approx((102 + 98 + 101) / 3) and 'poc_24h' not in out

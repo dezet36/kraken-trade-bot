@@ -166,6 +166,11 @@ def extra_levels(market):
         if g.get('top') and g.get('bottom'):
             out.append({'price': float(g['top']), 'kind': 'верх имбаланса', 'touches': 2, 'last': 0})
             out.append({'price': float(g['bottom']), 'kind': 'низ имбаланса', 'touches': 2, 'last': 0})
+    dp = market.get('day_profile') or {}
+    if dp.get('vwap_today'):
+        out.append({'price': float(dp['vwap_today']), 'kind': 'VWAP дня', 'touches': 2, 'last': 0})
+    if dp.get('poc_24h'):
+        out.append({'price': float(dp['poc_24h']), 'kind': 'POC суток', 'touches': 2, 'last': 0})
     # Зоны 4ч — края с именем ТФ: стоп за низом ордер-блока 4ч держит дни.
     for z in (market.get('htf_zones') or []):
         if z.get('top') and z.get('bottom'):
@@ -226,7 +231,7 @@ def _dedupe(found, span):
     return kept
 
 
-def levels(df, at=None, extra=None):
+def levels(df, at=None, extra=None, extra_market=None):
     """
     Пронумерованный список уровней: сверху вниз, L1 — самый высокий.
 
@@ -300,8 +305,13 @@ def levels(df, at=None, extra=None):
     start = max(0, at - 199)
     window_h, window_l, window_v = high[start:at + 1], low[start:at + 1], volume[start:at + 1]
     median_v = float(np.median(window_v)) if len(window_v) else 0.0
+    tape = (extra_market or {}).get('tape') if extra_market else None
+    tol = max(0.1, 0.15 * (atr_now / price_now * 100)) if price_now else 0.1
     for number, level in enumerate(near, start=1):
         level['id'] = f'L{number}'
+        if tape:
+            import llm_market
+            level['delta'] = llm_market.delta_at_level(tape, level['price'], tol)
         level['dist_pct'] = round((level['price'] - price_now) / price_now * 100, 2)
         if median_v > 0:
             tol = level['price'] * 0.0025
@@ -413,7 +423,7 @@ def build(pair, df, at=None, news=None, market=None, history=None):
 
     history — прошлые строки журнала разборов (llm_journal.last) или None.
     """
-    found, atr_now = levels(df, at, extra=extra_levels(market))
+    found, atr_now = levels(df, at, extra=extra_levels(market), extra_market=market)
     if not found:
         return {'levels': [], 'text': '', 'facts': {}}
 
@@ -466,14 +476,18 @@ def build(pair, df, at=None, news=None, market=None, history=None):
         f'   Отступ стопа за уровень: {_stop_buffer(atr_pct):.2f}% (ставит код)',
         '',
         'УРОВНИ (сверху вниз, расстояние от цены; объём у уровня — к медианной свече, '
-        '×3 узел, ×0.5 пустота)',
+        '×3 узел, ×0.5 пустота; дельта у уровня — перевес агрессора в минуты касания за ~16ч: '
+        'плюс — покупали, минус — продавали)',
     ]
     for level in found:
         touches = (f", касаний {level['touches']}"
                    if level['touches'] > 1 and not level.get('synthetic') else '')
         vol = (f"   объём у уровня ×{level['volume_x']}" if level.get('volume_x') else '')
+        d = level.get('delta')
+        delta = (f"   дельта у уровня {d['share_pct']:+.0f}% ({d['touches']} кас., {d['minutes']} мин)"
+                 if d else '')
         lines.append(f"  {level['id']:<4}{level['price']:>14.6g}   "
-                     f"{level['dist_pct']:+6.2f}%   {level['kind']}{touches}{vol}")
+                     f"{level['dist_pct']:+6.2f}%   {level['kind']}{touches}{vol}{delta}")
 
     lines += _candle_lines(df, at)
 
@@ -595,6 +609,20 @@ def _profile_lines(profile, price_now):
         f"по {profile.get('bars', '—')} свечам",
         f"  Разрежения (цена проскакивает): {thin or 'нет'}",
     ]
+
+
+def _day_profile_lines(dp, price_now):
+    if not dp:
+        return [_NONE]
+    out = []
+    if dp.get('vwap_today'):
+        side = 'выше' if price_now > dp['vwap_today'] else 'ниже'
+        out.append(f"  VWAP сегодня {_p(dp['vwap_today'])} ({_pct(dp['vwap_today'], price_now)}, цена {side})"
+                   + (f"   VWAP вчера {_p(dp['vwap_yesterday'])}" if dp.get('vwap_yesterday') else ''))
+    if dp.get('poc_24h'):
+        out.append(f"  POC за {dp.get('hours_24h', 24)}ч по минутам {_p(dp['poc_24h'])} ({_pct(dp['poc_24h'], price_now)})"
+                   f"   зона стоимости суток {_p(dp['va_low_24h'])}..{_p(dp['va_high_24h'])}")
+    return out or [_NONE]
 
 
 def _absorption_lines(rows):
@@ -774,7 +802,9 @@ def _liq_lines(liq):
             return 'нет'
         return ', '.join(
             (f"{_p(c['from'])}" if c['from'] == c['to'] else f"{_p(c['from'])}..{_p(c['to'])}")
-            + f" ({c['dist_pct']:+.1f}%, {c['share_pct']:.0f}% объёма стороны)"
+            + f" ({c['dist_pct']:+.1f}%, {c['share_pct']:.0f}% объёма стороны"
+            + (f"; по факту тут уже ликвидировали {c['realized_n']} за 48ч — магнит слабее"
+               if c.get('realized_n') else '') + ')'
             for c in rows)
     return [f"  Лонги ликвидируются ниже: {side(liq.get('below'))}",
             f"  Шорты ликвидируются выше: {side(liq.get('above'))}"]
@@ -881,6 +911,8 @@ def market_lines(market, price_now):
              if book.get('range_pct') is not None else 'глубина не измерена')
     out = ['ПРОФИЛЬ ОБЪЁМА (по свечам)']
     out += _profile_lines(market.get('profile'), price_now)
+    out += ['', 'СУТОЧНЫЙ ПРОФИЛЬ И VWAP (по минутам и часам, UTC)']
+    out += _day_profile_lines(market.get('day_profile'), price_now)
     out += ['', 'ПОГЛОЩЕНИЕ (прокси по фитилям на аномальном объёме — догадка)']
     out += _absorption_lines(market.get('absorption'))
     out += ['', 'ДЕЛЬТА АГРЕССОРА (по ленте сделок — факт)']

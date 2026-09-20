@@ -37,6 +37,7 @@
 import time
 
 import numpy as np
+import pandas as pd
 
 import config
 import positioning
@@ -822,6 +823,155 @@ def liquidation_estimate(pair, df, index, upto=None, bars=None):
     return {'below': below, 'above': above, 'bars': len(series) - 1}
 
 
+# ── Минутная лента с ценой: дельта у каждого уровня ─────────────────────────
+
+MINUTE_BARS = 1000       # 1м свечей с биржи: ~16 часов, предел одного запроса
+
+
+def minute_tape(pair, client, upto=None, bars=MINUTE_BARS):
+    """
+    Минуты последних ~16 часов: high, low и дельта агрессора в каждой.
+
+    Дельта по часам говорит, кто давил в целом; дельта У УРОВНЯ — защищали
+    ли его: покупал ли кто-то в минуты, когда цена стояла на EQL, или
+    продавали в стакан. Лента дельты хранится по минутам без цены, свечи 1м
+    берутся с биржи одним запросом и склеиваются по метке минуты.
+    """
+    import exchange
+    if client is None:
+        return None                    # без клиента биржи — нет и минут
+    rows = positioning.series('delta', pair, upto=upto)
+    if not rows:
+        return None
+    by_minute = {int(r['ts']) // 60_000 * 60_000: r for r in rows}
+    try:
+        df = exchange.fetch_ohlcv('1m', limit=bars, symbol=pair, client=client)
+    except Exception as exc:                           # noqa: BLE001
+        log(f'   разметка: минутные свечи не получены — {exc}')
+        return None
+    if df is None or not len(df):
+        return None
+    out = []
+    for ts, high, low, vol in zip(df['timestamp'], df['high'], df['low'], df['volume']):
+        ms = int(pd.Timestamp(ts).timestamp() * 1000)
+        if upto and ms > upto:
+            continue
+        r = by_minute.get(ms // 60_000 * 60_000)
+        out.append({'ts': ms, 'high': float(high), 'low': float(low), 'volume': float(vol),
+                    'buy': float(r.get('buy') or 0) if r else None,
+                    'sell': float(r.get('sell') or 0) if r else None})
+    return out or None
+
+
+def delta_at_level(tape, price, tol_pct):
+    """
+    Перевес агрессора в минуты, когда цена стояла в ±tol_pct от уровня.
+
+    -> {'share_pct', 'minutes', 'touches'} или None, если таких минут нет
+    или лента там не покрыта. Касание — серия соседних минут у уровня.
+    """
+    if not tape or not price:
+        return None
+    lo, hi = price * (1 - tol_pct / 100), price * (1 + tol_pct / 100)
+    buy = sell = 0.0
+    minutes = touches = 0
+    prev_ts = None
+    for m in tape:
+        if m['low'] > hi or m['high'] < lo:
+            continue
+        if m['buy'] is None:
+            continue
+        buy += m['buy']; sell += m['sell']; minutes += 1
+        if prev_ts is None or m['ts'] - prev_ts > 5 * 60_000:
+            touches += 1
+        prev_ts = m['ts']
+    total = buy + sell
+    if minutes == 0 or total <= 0:
+        return None
+    return {'share_pct': (buy - sell) / total * 100, 'minutes': minutes, 'touches': touches}
+
+
+# ── Суточный профиль и VWAP ──────────────────────────────────────────────────
+
+def day_profile(tape, df, index):
+    """
+    VWAP сегодняшнего дня (UTC) и вчерашнего по часовым свечам; POC и зона
+    стоимости за последние сутки — по минутам, если лента есть.
+
+    Крупный участник торгует от VWAP; уровень, совпавший с VWAP и узлом
+    суточного профиля, весит больше голого пивота.
+    """
+    out = {}
+    try:
+        ts = pd.to_datetime(df['timestamp'])
+        if getattr(ts.dt, 'tz', None) is not None:
+            ts = ts.dt.tz_convert('UTC').dt.tz_localize(None)
+        part = df.iloc[:index + 1].copy()
+        part['t'] = ts.iloc[:index + 1].values
+        day = part['t'].iloc[-1].normalize()
+        for key, lo_t, hi_t in (('vwap_today', day, None),
+                                ('vwap_yesterday', day - pd.Timedelta(days=1), day)):
+            sel = part[(part['t'] >= lo_t) & ((part['t'] < hi_t) if hi_t is not None else True)]
+            vol = sel['volume'].astype(float)
+            if len(sel) >= 3 and float(vol.sum()) > 0:
+                typical = (sel['high'].astype(float) + sel['low'].astype(float) + sel['close'].astype(float)) / 3
+                out[key] = float((typical * vol).sum() / vol.sum())
+    except Exception:                                  # noqa: BLE001
+        pass
+    if tape and len(tape) >= 60:
+        lo = min(m['low'] for m in tape); hi = max(m['high'] for m in tape)
+        if hi > lo:
+            bins = 60
+            edges = np.linspace(lo, hi, bins + 1)
+            weight = np.zeros(bins)
+            for m in tape:
+                a = int(np.searchsorted(edges, m['low'], 'right') - 1)
+                b = int(np.searchsorted(edges, m['high'], 'right') - 1)
+                a, b = max(0, min(a, bins - 1)), max(0, min(b, bins - 1))
+                weight[a:b + 1] += m['volume'] / (b - a + 1)
+            if weight.sum() > 0:
+                poc = int(np.argmax(weight))
+                centers = (edges[:-1] + edges[1:]) / 2
+                taken = {poc}; collected = weight[poc]; l = r = poc
+                while collected < 0.7 * weight.sum():
+                    left = weight[l - 1] if l > 0 else -1
+                    right = weight[r + 1] if r < bins - 1 else -1
+                    if left < 0 and right < 0:
+                        break
+                    if right >= left:
+                        r += 1; taken.add(r); collected += weight[r]
+                    else:
+                        l -= 1; taken.add(l); collected += weight[l]
+                out['poc_24h'] = float(centers[poc])
+                out['va_low_24h'] = float(centers[min(taken)])
+                out['va_high_24h'] = float(centers[max(taken)])
+                out['hours_24h'] = round(len(tape) / 60, 1)
+    return out or None
+
+
+def _mark_realized(estimate, pair, price, upto, hours=48):
+    """
+    Оценочный кластер, в котором за последние 48 ч уже ликвидировали по
+    факту, — магнит слабее: часть его уже сняли. Помечается числом событий
+    и объёмом; сама оценка не переписывается.
+    """
+    if not estimate:
+        return
+    try:
+        import liquidations
+        import time as _time
+        now = int(upto) if upto else int(_time.time() * 1000)
+        rows = liquidations.rows(pair, since=now - hours * 3_600_000, upto=now) or []
+    except Exception:                                  # noqa: BLE001
+        return
+    for side in ('below', 'above'):
+        for c in estimate.get(side) or []:
+            lo, hi = float(c['from']), float(c['to'])
+            hits = [r for r in rows if lo <= float(r['price']) <= hi]
+            c['realized_n'] = len(hits)
+            c['realized_size'] = float(sum(float(r['size']) for r in hits))
+
+
 # ── Ликвидации по факту: поток биржи ────────────────────────────────────────
 
 # Кластер — события ближе этой доли цены друг к другу.
@@ -1089,7 +1239,7 @@ def snapshot(pair, df, at=None, client=None, benchmark=None):
     except Exception as exc:                           # noqa: BLE001
         log(f'   разметка: контекст SMC не собран — {exc}')
 
-    return {
+    out = {
         'profile': _safe('профиль объёма', volume_profile, df, index),
         'absorption': _safe('поглощение', absorption, df, index),
         'delta': _safe('дельта', delta_facts, pair, upto, change_4h),
@@ -1110,6 +1260,7 @@ def snapshot(pair, df, at=None, client=None, benchmark=None):
                               pair, df, index, upto),
         'liq_fact': _safe('ликвидации по факту', liquidation_facts,
                           pair, price, upto),
+        'tape': _safe('минутная лента', minute_tape, pair, client, upto),
         'benchmark': (_safe('BTC', benchmark_facts, df, benchmark, index)
                       if benchmark is not None else None),
         'sessions': _safe('экстремумы дня и недели', session_levels, df, index),
@@ -1121,3 +1272,6 @@ def snapshot(pair, df, at=None, client=None, benchmark=None):
         'funding_trend': _safe('фандинг', funding_trend, pair, upto),
         'oi_week': _safe('ОИ за неделю', oi_week, pair, upto),
     }
+    out['day_profile'] = _safe('суточный профиль', day_profile, out.get('tape'), df, index)
+    _mark_realized(out.get('liquidations'), pair, price, upto)
+    return out
