@@ -40,7 +40,7 @@ COLUMNS = [
     'decision', 'gate', 'detail',
     # Что модель разглядела. Эти четыре колонки и есть смысл файла.
     'regime', 'analysis', 'bias', 'trigger', 'alt',
-    'why', 'risk',
+    'why', 'risk', 'stop_why', 'tp_why',
     # Решение в числах. Пусто, когда модель отказалась: числа появляются
     # только у сетапа, дошедшего до проверок.
     'side', 'entry', 'stop', 'tp1', 'inval',
@@ -101,6 +101,8 @@ def record(pair, donor, verdict, stats=None):
             'alt': verdict.get('alt', ''),
             'why': verdict.get('why', ''),
             'risk': verdict.get('risk', ''),
+            'stop_why': verdict.get('stop_why', ''),
+            'tp_why': verdict.get('tp_why', ''),
             'side': verdict.get('side', ''),
             'entry': verdict.get('entry', ''),
             'stop': verdict.get('stop', ''),

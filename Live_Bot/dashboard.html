@@ -4748,6 +4748,8 @@ function renderLlm() {
       + aiLine('Условие входа', row.trigger)
       + aiLine('Против', row.alt)
       + aiLine('Почему', row.why)
+      + aiLine('Стоп за', row.stop_why)
+      + aiLine('Цель там', row.tp_why)
       + aiLine('Чем рискуем', row.risk)
       + aiLine('Совпало', row.confluence)
       + (row.detail && !entered ? aiLine('Подробность', row.detail) : '')

@@ -28,17 +28,23 @@ import llm_decide as dec
 # отношение 0.5, и предохранитель справедливо отвергал его как плохой. Ошибка
 # была в наборе данных, а выглядела как поломка проверяемого кода.
 #
-#   лонг:  вход L3 100, стоп L4 97 (риск 3), цель L2 107 (ход 7) -> R:R 2.33
-#   шорт:  вход L2 107, стоп L1 109 (риск 2), цель L3 100 (ход 7) -> R:R 3.50
+#   лонг:  вход L3 100, стоп ЗА L4 98 (код отступает 0.3%: 97.706, риск
+#          2.294), цель L2 107 (ход 7) -> R:R 3.05
+#   шорт:  вход L2 107, стоп за L1 109 (109.327, риск 2.327), цель L3 100
+#          (ход 7) -> R:R 3.0
 LEVELS = [
     {'id': 'L1', 'price': 109.0, 'touches': 3, 'kind': 'скопление максимумов'},
     {'id': 'L2', 'price': 107.0, 'touches': 2, 'kind': 'скопление максимумов'},
     {'id': 'L3', 'price': 100.0, 'touches': 4, 'kind': 'скопление минимумов'},
-    {'id': 'L4', 'price': 97.0, 'touches': 5, 'kind': 'скопление минимумов'},
+    {'id': 'L4', 'price': 98.0, 'touches': 5, 'kind': 'скопление минимумов'},
     {'id': 'L5', 'price': 94.0, 'touches': 2, 'kind': 'пивот-минимум'},
 ]
 
 ALL_TRUE = {'poi': True, 'vp': True, 'der': True, 'smc': True, 'flow': True}
+
+# Стоп, который поставит код: уровень L4 минус буфер охоты (0.3% без ATR).
+STOP = 98.0 * (1 - dec.stop_hunt_pct() / 100)
+RISK = 100.0 - STOP
 
 
 def answer(**over):
@@ -62,7 +68,8 @@ class TestTheGoodSetupPasses:
         assert out['ok'], out.get('gate')
         assert out['side'] == 'LONG'
         assert out['entry'] == 100.0
-        assert out['stop'] == 97.0
+        assert out['stop_level'] == 98.0
+        assert out['stop'] == pytest.approx(STOP)
         assert out['targets'] == [107.0, 109.0]
 
     def test_the_numbers_are_computed_not_taken_from_the_model(self):
@@ -72,12 +79,12 @@ class TestTheGoodSetupPasses:
         не защищает ни от чего.
         """
         out = verdict()
-        # Вход 100, стоп 97, первая цель 107: риск 3, ход 7.
-        assert out['rr'] == pytest.approx(7 / 3, abs=0.01)
+        # Вход 100, стоп 97.706, первая цель 107: риск 2.294, ход 7.
+        assert out['rr'] == pytest.approx(7 / RISK, abs=0.01)
         assert out['cost_r'] == pytest.approx(
-            config.ENTRY_COST_ROUND_TRIP / 0.03, rel=1e-6)
+            config.ENTRY_COST_ROUND_TRIP / (RISK / 100), abs=1e-4)
         assert out['ev'] == pytest.approx(
-            0.6 * (7 / 3) - 0.4 - out['cost_r'], abs=0.01)
+            0.6 * (7 / RISK) - 0.4 - out['cost_r'], abs=0.01)
 
 
 class TestGeometryTheGrammarCannotSee:
@@ -136,10 +143,10 @@ class TestExpectedValue:
 
     def test_a_losing_setup_is_refused(self):
         """
-        Тот же сетап, что проходит при вероятности 0.6, при 0.30 обязан
-        отсеяться: 0.30 x 2.33 - 0.70 - 0.025 = -0.026.
+        Тот же сетап, что проходит при вероятности 0.6, при 0.20 обязан
+        отсеяться: 0.20 x 3.05 - 0.80 - 0.033 = -0.22.
         """
-        out = verdict(p=0.30)
+        out = verdict(p=0.20)
         assert not out['ok']
         assert out['gate'] == 'ожидание не положительно'
 
@@ -154,7 +161,7 @@ class TestExpectedValue:
         Отказ по ожиданию обязан сохранить числа: без них нельзя потом
         проверить, правильно ли предохранитель отсекал.
         """
-        out = verdict(p=0.30)
+        out = verdict(p=0.20)
         assert out['gate'] == 'ожидание не положительно'
         assert 'ev' in out and 'rr' in out and 'cost_r' in out
 
@@ -506,7 +513,7 @@ class TestGeometryAgainstLiquidityIsCode:
     """
 
     MARKET = {
-        'smc': {'untapped': [{'price': 97.15, 'side': 'SSL', 'source': 'SWING'},
+        'smc': {'untapped': [{'price': 97.8, 'side': 'SSL', 'source': 'SWING'},
                              {'price': 110.0, 'side': 'BSL', 'source': 'SWING'}],
                 'equal_levels': [{'price': 104.0, 'source': 'EQH', 'side': 'BSL'}]},
         'book': {'walls_above': [{'price': 103.0, 'volume_x': 8.0, 'dist_pct': 3.0}],
@@ -518,11 +525,13 @@ class TestGeometryAgainstLiquidityIsCode:
     }
 
     def test_a_stop_just_under_a_pool_is_refused(self):
-        # Вход L3 100, стоп L4 97 — пул стопов лонгов на 97.15, в 0.15% выше.
+        # Вход L3 100, стоп за L4 98 → 97.706; пул стопов лонгов на 97.8,
+        # в 0.1% выше стопа — снимут одним ходом. Сам L4 пулом не считается:
+        # за него стоп и спрятан.
         out = dec.check(dec.parse(answer(), LEVELS), LEVELS, market=self.MARKET)
         assert out['ok'] is False
         assert out['gate'] == 'стоп в скоплении стопов'
-        assert '97.15' in out['detail']
+        assert '97.8' in out['detail']
 
     def test_a_stop_safely_below_the_pool_passes(self):
         market = {'smc': {'untapped': [{'price': 98.5, 'side': 'SSL', 'source': 'SWING'}]}}

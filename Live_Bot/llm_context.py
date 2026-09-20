@@ -49,7 +49,7 @@ from liquidity import core as liq
 
 # Сколько уровней максимум уходит в модель. Больше — не лучше: список на сорок
 # позиций модель разбирает хуже, чем на десять, а грамматика вырастает линейно.
-MAX_LEVELS = 16
+MAX_LEVELS = 20
 
 # Больше 16 стало 19.09.2026: к пивотам добавились точки ликвидности из
 # снимка (экстремумы дня и недели, Азия, равные экстремумы, нетронутые пулы,
@@ -57,6 +57,13 @@ MAX_LEVELS = 16
 # входом и следующим уровнем 4.7% (ETH, 19.09), модель ставит стоп туда — и
 # план умирает на R:R. Реальные точки, за которые цепляется стоп, в списке
 # быть обязаны.
+#
+# 20 стало 20.09.2026: в списке появились края имбалансов, свинги старших
+# ТФ и края кластеров ликвидаций. За 11 часов 33 плана ставили стоп на
+# пивоты в 1.5-2% от входа — не потому что там структура, а потому что
+# из 16 мест 12 занимали пивоты, и ближайший разрешённый пивот побеждал
+# по R:R. Стоп обязан стоять за элементом структуры, значит эти элементы
+# должны быть в списке с именами.
 
 # Ближе этого к текущей цене уровни не показываем: вход вплотную к цене даёт
 # стоп, который не проходит предел издержек, и модель будет исправно предлагать
@@ -152,7 +159,48 @@ def extra_levels(market):
                     'MITIGATION': 'mitigation'}.get(z.get('type'), 'зона')
             out.append({'price': float(z['top']), 'kind': f'верх зоны {kind}', 'touches': 2, 'last': 0})
             out.append({'price': float(z['bottom']), 'kind': f'низ зоны {kind}', 'touches': 2, 'last': 0})
+    # Края имбалансов: вход — у ближнего края, стоп — за дальним.
+    for g in (market.get('fvgs') or []):
+        if g.get('top') and g.get('bottom'):
+            out.append({'price': float(g['top']), 'kind': 'верх имбаланса', 'touches': 2, 'last': 0})
+            out.append({'price': float(g['bottom']), 'kind': 'низ имбаланса', 'touches': 2, 'last': 0})
+    # Свинги старших ТФ: за ними стоят стопы позиций, живущих днями.
+    for tf, name in (('4h', '4ч'), ('1d', 'дня')):
+        row = (market.get('htf') or {}).get(tf) or {}
+        if row.get('swing_high'):
+            out.append({'price': float(row['swing_high']), 'kind': f'свинг-максимум {name}', 'touches': 3, 'last': 0})
+        if row.get('swing_low'):
+            out.append({'price': float(row['swing_low']), 'kind': f'свинг-минимум {name}', 'touches': 3, 'last': 0})
+    # Кластеры ликвидаций (оценка): ближний край — магнит и цель, дальний —
+    # место, за которое прячут стоп. Два самых тяжёлых на сторону.
+    liq = market.get('liquidations') or {}
+    for side_key, who in (('below', 'лонгов'), ('above', 'шортов')):
+        rows = sorted(liq.get(side_key) or [], key=lambda c: -c.get('share_pct', 0))[:2]
+        for c in rows:
+            lo, hi = float(c['from']), float(c['to'])
+            near, far = (hi, lo) if side_key == 'below' else (lo, hi)
+            out.append({'price': near, 'kind': f'ближний край ликвидаций {who}', 'touches': 2, 'last': 0})
+            if abs(far - near) / near * 100 >= 0.2:
+                out.append({'price': far, 'kind': f'дальний край ликвидаций {who}', 'touches': 2, 'last': 0})
     return out
+
+
+def _dedupe(found, span):
+    """
+    Один уровень — одна строка: пивот-максимум 2615.00 и пивот-минимум
+    2615.11 занимали два места из шестнадцати. Сильнейший остаётся, имя
+    второго дописывается через « / », чтобы модель знала, что здесь сошлось.
+    """
+    kept = []
+    for lv in sorted(found, key=lambda lv: -lv['touches']):
+        twin = next((k for k in kept if abs(k['price'] - lv['price']) <= span), None)
+        if twin is None:
+            kept.append(dict(lv))
+            continue
+        if lv['kind'] not in twin['kind'] and twin['kind'].count(' / ') < 1:
+            twin['kind'] = f"{twin['kind']} / {lv['kind']}"
+        twin['touches'] = max(twin['touches'], lv['touches'])
+    return kept
 
 
 def levels(df, at=None, extra=None):
@@ -178,11 +226,8 @@ def levels(df, at=None, extra=None):
     pivot_list = liq.pivots(high, low)
     pools = _pools(pivot_list, at, atr_now)
     span = liq.params.POOL_TOLERANCE_ATR * atr_now
-    found = pools + _lone_pivots(pivot_list, at, pools, span)
-    for cand in (extra or []):
-        if any(abs(cand['price'] - lv['price']) <= span for lv in found):
-            continue
-        found.append(dict(cand))
+    found = _dedupe(pools + _lone_pivots(pivot_list, at, pools, span)
+                    + [dict(c) for c in (extra or [])], span)
 
     price_now = float(close[at])
     near = [lv for lv in found
@@ -242,6 +287,12 @@ def levels(df, at=None, extra=None):
         else:
             level['volume_x'] = None
     return near, atr_now
+
+
+def _stop_buffer(atr_pct):
+    """Отступ стопа за уровень — тот же, что применяет llm_decide."""
+    import llm_decide
+    return llm_decide.stop_hunt_pct(atr_pct)
 
 
 def _positioning_facts(pair, upto=None):
@@ -350,7 +401,8 @@ def build(pair, df, at=None, news=None, market=None, history=None):
         f'в диапазоне 30д: {_fmt(facts["range_30d_pos"], 0, "%")} от низа',
         _activity_line((market or {}).get('activity')),
         f'Минимальный стоп: {facts["min_stop_pct"]:.2f}% '
-        f'(издержки {min_stop_pct():.2f}%, половина ATR {STOP_ATR_SHARE * (atr_pct or 0):.2f}%)',
+        f'(издержки {min_stop_pct():.2f}%, половина ATR {STOP_ATR_SHARE * (atr_pct or 0):.2f}%)'
+        f'   Отступ стопа за уровень: {_stop_buffer(atr_pct):.2f}% (ставит код)',
         '',
         'УРОВНИ (сверху вниз, расстояние от цены; объём у уровня — к медианной свече, '
         '×3 узел, ×0.5 пустота)',

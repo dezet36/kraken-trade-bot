@@ -409,6 +409,10 @@ def llm_setup_found(signal: dict, df_1h=None, frames=None):
     text = "\n".join(lines) + critic_line
     if llm.get('why'):
         text += f"\n<i>{llm.get('why', '')[:300]}</i>"
+    if llm.get('stop_why'):
+        text += f"\nСтоп за: {llm.get('stop_why', '')[:160]}"
+    if llm.get('tp_why'):
+        text += f"\nЦель там: {llm.get('tp_why', '')[:160]}"
     if llm.get('risk'):
         text += f"\nРиск: {llm.get('risk', '')[:200]}"
 

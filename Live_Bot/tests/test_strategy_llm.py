@@ -788,3 +788,34 @@ class TestArmedPlansSurviveARestart:
         strategy_llm._armed_loaded = False
         strategy_llm._check_armed(lambda pair: None)
         assert strategy_llm._armed == {}
+
+
+class TestBusyPairsAreNotReAsked:
+    """
+    Пара с взведённым планом, позицией или заявкой в очередь не идёт:
+    ответ был бы тем же, а человеку прилетало бы то же сообщение.
+    """
+
+    def test_an_armed_pair_waits_for_its_condition(self, monkeypatch):
+        asked = []
+        monkeypatch.setattr(strategy_llm.llm_local, 'available', lambda: True)
+        monkeypatch.setattr(strategy_llm.llm_decide, 'decide',
+                            lambda pair, *a, **k: asked.append(pair) or approving_verdict())
+        strategy_llm._arm('BTCUSDT', approving_verdict(trigger_when='close_above',
+                                                       trigger_level=103.0, trigger_id='L2'))
+        strategy_llm.scan_for_setups(['BTCUSDT', 'ETHUSDT'], gate=None, candles=lambda pair: [0] * 500)
+        strategy_llm.join(15)
+        assert asked == ['ETHUSDT']
+
+    def test_a_pair_with_a_position_is_skipped(self, monkeypatch):
+        asked = []
+        monkeypatch.setattr(strategy_llm.llm_local, 'available', lambda: True)
+        monkeypatch.setattr(strategy_llm.llm_decide, 'decide',
+                            lambda pair, *a, **k: asked.append(pair) or approving_verdict())
+
+        class Gate:
+            def has_position_or_order(self, pair):
+                return pair == 'BTCUSDT'
+        strategy_llm.scan_for_setups(['BTCUSDT', 'ETHUSDT'], gate=Gate(), candles=lambda pair: [0] * 500)
+        strategy_llm.join(15)
+        assert asked == ['ETHUSDT']

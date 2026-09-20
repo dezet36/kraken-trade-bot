@@ -71,6 +71,8 @@ ANALYSIS_CHARS = 800
 TRIGGER_CHARS = 160
 WHY_CHARS = 240
 RISK_CHARS = 180
+STOP_WHY_CHARS = 140
+TP_WHY_CHARS = 140
 ALT_CHARS = 240
 
 # Ответ проверяющего короче: он не разбирает рынок, а называет возражения.
@@ -88,7 +90,7 @@ def _text(limit):
     return f'"\\"" ch{{1,{limit}}} "\\""'
 
 
-def build(level_ids, prices=None, min_stop_pct=0.0, min_rr=0.0):
+def build(level_ids, prices=None, min_stop_pct=0.0, min_rr=0.0, stop_buffer_pct=0.0):
     """
     Грамматика под КОНКРЕТНЫЙ список уровней.
 
@@ -106,7 +108,7 @@ def build(level_ids, prices=None, min_stop_pct=0.0, min_rr=0.0):
     if not level_ids:
         return _skip_only()
 
-    plans, rules = _plans(level_ids, prices, min_stop_pct, min_rr)
+    plans, rules = _plans(level_ids, prices, min_stop_pct, min_rr, stop_buffer_pct)
     if not plans:
         # Меньше трёх уровней — сделки не выразить: вход, стоп и цель обязаны
         # быть разными уровнями. Разрешить вход здесь значило бы разрешить
@@ -133,7 +135,7 @@ def build(level_ids, prices=None, min_stop_pct=0.0, min_rr=0.0):
     when = ' | '.join(['"\\"now\\""'] + [
         f'"\\"{name}\\"" ws "," ws "\\"level\\":" ws lvl' for name in with_level])
     return f'''root     ::= enter | skip
-enter    ::= {head} ws "\\"d\\":\\"enter\\"," ws plan ws "," ws "\\"trigger\\":" ws trigger ws "," ws "\\"cf\\":" ws cf ws "," ws "\\"p\\":" ws prob ws "," ws "\\"why\\":" ws why ws "," ws "\\"risk\\":" ws risk ws "," ws "\\"alt\\":" ws alt ws "}}"
+enter    ::= {head} ws "\\"d\\":\\"enter\\"," ws plan ws "," ws "\\"trigger\\":" ws trigger ws "," ws "\\"cf\\":" ws cf ws "," ws "\\"p\\":" ws prob ws "," ws "\\"why\\":" ws why ws "," ws "\\"stop_why\\":" ws stopwhy ws "," ws "\\"tp_why\\":" ws tpwhy ws "," ws "\\"risk\\":" ws risk ws "," ws "\\"alt\\":" ws alt ws "}}"
 skip     ::= {head} ws "\\"d\\":\\"skip\\"," ws "\\"cf\\":" ws cf ws "," ws "\\"why\\":" ws why ws "}}"
 plan     ::= {' | '.join(plans)}
 {body}
@@ -148,6 +150,8 @@ when     ::= {when}
 lvl      ::= {_alt(level_ids)}
 tnote    ::= {_text(TRIGGER_CHARS)}
 why      ::= {_text(WHY_CHARS)}
+stopwhy  ::= {_text(STOP_WHY_CHARS)}
+tpwhy    ::= {_text(TP_WHY_CHARS)}
 risk     ::= {_text(RISK_CHARS)}
 alt      ::= {_text(ALT_CHARS)}
 ch       ::= [^"\\\\\\x00-\\x1f]
@@ -171,7 +175,7 @@ ws       ::= [ \\n]{{0,2}}
 '''
 
 
-def _plans(level_ids, prices=None, min_stop_pct=0.0, min_rr=0.0):
+def _plans(level_ids, prices=None, min_stop_pct=0.0, min_rr=0.0, stop_buffer_pct=0.0):
     """
     По одному правилу на каждую пару «направление + уровень входа».
 
@@ -205,7 +209,12 @@ def _plans(level_ids, prices=None, min_stop_pct=0.0, min_rr=0.0):
     #
     # Цель проверяется по НЕОБХОДИМОМУ условию (расстояние ≥ min_rr × минимум
     # стопа): точный R:R зависит от выбранного стопа и остаётся за кодом.
+    # ОТСТУП СТОПА. Модель называет уровень, за которым стоп; код ставит
+    # стоп на stop_buffer_pct ЗА ним (llm_decide.check). Значит расстояние
+    # стопа — это дистанция до уровня плюс отступ, и обе проверки здесь
+    # считают именно так, иначе грамматика и код разошлись бы на отступе.
     price_of = dict(zip(level_ids, prices)) if prices else {}
+    buffer = float(stop_buffer_pct or 0.0)
 
     def far_enough(a, b, pct):
         if not pct or a not in price_of or b not in price_of or not price_of[a]:
@@ -223,7 +232,7 @@ def _plans(level_ids, prices=None, min_stop_pct=0.0, min_rr=0.0):
             higher = list(level_ids[:index])
             lower = list(level_ids[index + 1:])
             stops, targets = (lower, higher) if side == 'LONG' else (higher, lower)
-            stops = [s for s in stops if far_enough(entry, s, min_stop_pct)]
+            stops = [s for s in stops if far_enough(entry, s, max(0.0, min_stop_pct - buffer))]
             # R:R ЦЕЛИКОМ В ГРАММАТИКЕ: ветка на каждую пару «вход + стоп», и
             # цели в ней — только те, что дальше min_rr × дистанции ЭТОГО
             # стопа. 19 сентября 2026 ETH: 5 факторов из 5, план в тексте, и
@@ -238,7 +247,7 @@ def _plans(level_ids, prices=None, min_stop_pct=0.0, min_rr=0.0):
                                   if far_enough(entry, t, min_rr * min_stop_pct)]
                 else:
                     ok_targets = [t for t in targets
-                                  if (distance(entry, t) or 0) >= min_rr * d_stop]
+                                  if (distance(entry, t) or 0) >= min_rr * (d_stop + buffer)]
                 if ok_targets:
                     branches.append((stop, ok_targets))
             if not branches:

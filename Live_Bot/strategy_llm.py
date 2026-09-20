@@ -184,14 +184,19 @@ def _cached_context(pair):
         return None
 
 
-def _queue(pairs, context_of=_cached_context):
+def _queue(pairs, context_of=_cached_context, skip=()):
     """
     Пары в порядке обхода: от курсора по кругу, недавно разобранные — в конец.
 
     Курсор сдвигается тем, кто пару отправил (см. scan_for_setups), а не
     здесь: очередь — это только порядок, отправка может и не состояться.
+
+    skip — пары, о которых спрашивать сейчас незачем: план уже взведён,
+    позиция или заявка уже стоит. 20.09.2026 DOT разобрали шесть раз за
+    ночь с одним и тем же планом — и шесть раз прислали его человеку.
     """
-    pairs = [p for p in (pairs or []) if p]
+    skip = set(skip or ())
+    pairs = [p for p in (pairs or []) if p and p not in skip]
     if not pairs:
         return []
     start = _cursor % len(pairs)
@@ -354,6 +359,27 @@ def condition_met(when, level, side, bars, median_volume=0.0):
     return ''
 
 
+def _busy_pairs(pairs, gate):
+    """
+    Пары, по которым модель спрашивать незачем: взведённый план, своя
+    позиция или заявка, а при «одна пара — одна позиция» — и чужая.
+    """
+    busy = set(_armed)
+    if gate is None:
+        return busy
+    broker = getattr(gate, '_broker', None)
+    exclusive = bool(getattr(config, 'PAPER_EXCLUSIVE_PAIRS', False))
+    for pair in pairs or ():
+        try:
+            if gate.has_position_or_order(pair):
+                busy.add(pair)
+            elif exclusive and broker is not None and broker.pair_taken_by(pair):
+                busy.add(pair)
+        except Exception:                          # noqa: BLE001
+            continue
+    return busy
+
+
 def _check_armed(candles):
     """
     Проверяет взведённые условия по свечам, закрывшимся после взведения.
@@ -471,6 +497,9 @@ def _reshape(pair, verdict, df=None):
             'analysis': verdict.get('analysis', ''),
             'trigger': verdict.get('trigger', ''),
             'why': verdict.get('why', ''),
+            'stop_why': verdict.get('stop_why', ''),
+            'tp_why': verdict.get('tp_why', ''),
+            'stop_level': verdict.get('stop_level'),
             'risk': verdict.get('risk', ''),
             'alt': verdict.get('alt', ''),
             'p': verdict.get('p'),
@@ -576,9 +605,9 @@ def scan_for_setups(pairs, gate, client=None, balance=None, candles=None,
         log(f'   {NAME}: модель занята парой {busy()}, жду её')
         return out
 
-    queue = _queue(pairs)
+    queue = _queue(pairs, skip=_busy_pairs(pairs, gate))
     if not queue:
-        log(f'   {NAME}: все пары разобраны недавно, жду')
+        log(f'   {NAME}: все пары разобраны недавно или заняты планами, жду')
         return out
 
     for pair in queue:

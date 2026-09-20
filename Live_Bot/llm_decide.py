@@ -38,7 +38,7 @@ MIN_CONFLUENCE = 4
 
 # Ниже этого отношения сделка не берётся. При винрейте около трети меньшее
 # отношение не окупает даже без комиссий.
-MIN_RR = 2.0
+MIN_RR = 2.5
 
 FACTORS = ('poi', 'vp', 'der', 'smc', 'flow')
 
@@ -121,6 +121,11 @@ def parse(answer, levels):
 
     out = {'decision': data.get('d'), 'why': data.get('why', ''),
            'risk': data.get('risk', ''),
+           # За что стоит стоп и почему цель именно там — отдельными полями:
+           # «вход тут, стоп минус 1.5%» без ответа на эти два вопроса —
+           # не план.
+           'stop_why': data.get('stop_why', ''),
+           'tp_why': data.get('tp_why', ''),
            # Разбор и режим рынка модель пишет ПЕРЕД решением — это её
            # рассуждение вслух, и оно нужно и при отказе: по нему видно, что
            # именно она разглядела в данных, а не только чем кончила.
@@ -233,7 +238,7 @@ def trigger_against_idea(side, entry, parsed):
     return ''
 
 
-def stop_in_liquidity(side, stop, market, atr_pct=None):
+def stop_in_liquidity(side, stop, market, atr_pct=None, stop_level=None):
     """
     Стоп вплотную за скоплением чужих стопов. Возвращает описание или ''.
 
@@ -241,11 +246,16 @@ def stop_in_liquidity(side, stop, market, atr_pct=None):
     повезут снимать его, и наш стоп в 0.1% ниже снимут тем же ходом. Для
     шорта зеркально — BSL чуть ниже стопа. Стоп ЗА пулом с запасом — как
     раз правильное место, и он не трогается.
+
+    stop_level — уровень, который модель назвала, а код отступил за него:
+    пул на самом этом уровне — не ловушка, а то, за что стоп и спрятан.
     """
     if not market or not stop:
         return ''
     threshold = stop_hunt_pct(atr_pct)
     for price, pool_side, source in _pools(market):
+        if stop_level and abs(price - stop_level) / price * 100 < 0.05:
+            continue
         if side == 'LONG' and pool_side == 'SSL' and price > stop:
             gap = (price - stop) / price * 100
             if gap <= threshold:
@@ -256,6 +266,36 @@ def stop_in_liquidity(side, stop, market, atr_pct=None):
             if gap <= threshold:
                 return (f'стоп {stop:.6g} на {gap:.2f}% выше скопления стопов '
                         f'шортов {price:.6g} ({source}) — снимут вместе с ними')
+    return ''
+
+
+def stop_inside_entry_zone(side, entry, stop_level, market):
+    """
+    Вход из зоны (ордер-блок, имбаланс), а стоп — внутри неё. Описание или ''.
+
+    Зона держит цену целиком: стоп между входом и её дальним краем снимает
+    обычный заход внутрь зоны, который идею не отменяет. Стоп ставится ЗА
+    дальний край — для лонга ниже низа, для шорта выше верха.
+    """
+    if not market or not entry or not stop_level:
+        return ''
+    zones = []
+    for z in (market.get('pois') or []):
+        if z.get('top') and z.get('bottom'):
+            zones.append((float(z['bottom']), float(z['top']), 'зона'))
+    for g in (market.get('fvgs') or []):
+        if g.get('top') and g.get('bottom'):
+            zones.append((float(g['bottom']), float(g['top']), 'имбаланс'))
+    tol = entry * 0.0005
+    for bottom, top, name in zones:
+        if not (bottom - tol <= entry <= top + tol):
+            continue
+        if side == 'LONG' and stop_level > bottom + tol:
+            return (f'вход {entry:.6g} из {name} {bottom:.6g}..{top:.6g}, а стоп '
+                    f'{stop_level:.6g} внутри неё — ставить за низ {bottom:.6g}')
+        if side == 'SHORT' and stop_level < top - tol:
+            return (f'вход {entry:.6g} из {name} {bottom:.6g}..{top:.6g}, а стоп '
+                    f'{stop_level:.6g} внутри неё — ставить за верх {top:.6g}')
     return ''
 
 
@@ -326,6 +366,7 @@ def check(parsed, levels, answer=None, market=None, min_stop=None, atr_pct=None)
     votes = sum(1 for f in FACTORS if parsed['confluence'].get(f))
     base = {'confluence': parsed['confluence'], 'votes': votes,
             'why': parsed.get('why', ''), 'risk': parsed.get('risk', ''),
+            'stop_why': parsed.get('stop_why', ''), 'tp_why': parsed.get('tp_why', ''),
             'regime': parsed.get('regime', ''),
             'analysis': parsed.get('analysis', ''),
             'bias': parsed.get('bias', ''),
@@ -338,9 +379,14 @@ def check(parsed, levels, answer=None, market=None, min_stop=None, atr_pct=None)
     if parsed['decision'] != 'enter':
         return _refusal('модель пропустила', parsed.get('why', ''), base)
 
-    entry, stop = parsed.get('entry'), parsed.get('stop')
-    targets = [t for t in (parsed.get('targets') or []) if t is not None]
-    if not entry or not stop or not targets:
+    entry, stop_level = parsed.get('entry'), parsed.get('stop')
+    # Одна и та же цель дважды — это одна цель: грамматика повтор не
+    # запрещает, а брокер делил бы позицию на две одинаковые части.
+    targets = []
+    for t in (parsed.get('targets') or []):
+        if t is not None and t not in targets:
+            targets.append(t)
+    if not entry or not stop_level or not targets:
         return _refusal('уровень не найден',
                         'ответ ссылается на то, чего нет в разметке', base)
 
@@ -348,10 +394,20 @@ def check(parsed, levels, answer=None, market=None, min_stop=None, atr_pct=None)
         return _refusal('мало конфлюенса', f'{votes} из {len(FACTORS)}', base)
 
     side = parsed.get('side')
-    if not _geometry_ok(side, entry, stop, targets):
+    if not _geometry_ok(side, entry, stop_level, targets):
         return _refusal('геометрия неверна',
-                        f'{side}: вход {entry:.6g}, стоп {stop:.6g}, '
+                        f'{side}: вход {entry:.6g}, стоп {stop_level:.6g}, '
                         f'цели {[round(t, 6) for t in targets]}', base)
+
+    # СТОП — ЗА УРОВНЕМ, А НЕ НА НЁМ. Модель называет структуру, которая
+    # защищает идею; код отступает за неё на буфер охоты за стопами (база
+    # плюс доля ATR). До 20.09.2026 стоп стоял ровно на уровне — то есть
+    # ровно там, где стоят чужие стопы, которые снимают первыми.
+    buffer = stop_hunt_pct(atr_pct)
+    stop = stop_level * (1 - buffer / 100) if side == 'LONG' else stop_level * (1 + buffer / 100)
+    inside = stop_inside_entry_zone(side, entry, stop_level, market)
+    if inside:
+        return _refusal('стоп внутри зоны входа', inside, base)
 
     stop_pct = abs(entry - stop) / entry * 100
     floor = min_stop if min_stop is not None else llm_context.min_stop_pct(atr_pct)
@@ -369,7 +425,7 @@ def check(parsed, levels, answer=None, market=None, min_stop=None, atr_pct=None)
     # проверяется арифметикой, и отдавать её модели значило бы платить пять
     # минут за то, что считается за микросекунду. Препятствия на пути к цели
     # не запрещают вход — они уходят критику и в журнал.
-    hunted = stop_in_liquidity(side, stop, market, atr_pct)
+    hunted = stop_in_liquidity(side, stop, market, atr_pct, stop_level=stop_level)
     if hunted:
         return _refusal('стоп в скоплении стопов', hunted, base)
 
@@ -383,7 +439,8 @@ def check(parsed, levels, answer=None, market=None, min_stop=None, atr_pct=None)
 
     cost_r = cost_in_r(entry, stop)
     ev = expected_value(parsed['p'], rr, cost_r)
-    numbers = {'side': side, 'entry': entry, 'stop': stop, 'targets': targets,
+    numbers = {'side': side, 'entry': entry, 'stop': stop, 'stop_level': stop_level,
+               'stop_buffer_pct': round(buffer, 3), 'targets': targets,
                'inval': parsed.get('inval'), 'p': parsed['p'],
                'rr': round(rr, 2), 'cost_r': round(cost_r, 4),
                'ev': round(ev, 4), 'stop_pct': round(stop_pct, 2),
@@ -429,7 +486,8 @@ def decide(pair, df, ask, news=None, at=None, max_tokens=None, market=None,
     grammar = llm_grammar.build([lv['id'] for lv in levels],
                                 prices=[lv['price'] for lv in levels],
                                 min_stop_pct=facts.get('min_stop_pct') or llm_context.min_stop_pct(),
-                                min_rr=MIN_RR)
+                                min_rr=MIN_RR,
+                                stop_buffer_pct=stop_hunt_pct(facts.get('atr_pct')))
     # Разметка без задачи — таблица без вопроса. Первый прогон по живому рынку
     # отдавал модели только context['text'], и она отвечала «no news, no
     # comment»: её просто не спросили.
@@ -495,6 +553,8 @@ def plan_text(verdict):
         f"Режим: {verdict.get('regime', '')}",
         f"Разбор: {verdict.get('analysis', '')}",
         f"Почему: {verdict.get('why', '')}",
+        f"Стоп за: {verdict.get('stop_why', '')}",
+        f"Цель там: {verdict.get('tp_why', '')}",
         f"Риск по аналитику: {verdict.get('risk', '')}",
     ]
     return '\n'.join(line for line in lines if line)

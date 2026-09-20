@@ -63,8 +63,9 @@ def enter_answer(n, side='LONG', entry='L3', stop='L4', tp=('L1',), inval=None,
             'side': side, 'entry': entry, 'stop': stop, 'tp': list(tp), 'inval': inval or stop,
             'trigger': trigger,
             'cf': {'poi': True, 'vp': True, 'der': True, 'smc': True, 'flow': False},
-            'p': float(p), 'why': 'за скоплением, к экстремуму дня', 'risk': 'слив ОИ',
-            'alt': 'пробой вниз отменяет идею'}
+            'p': float(p), 'why': 'за скоплением, к экстремуму дня',
+            'stop_why': 'за низом ордер-блока', 'tp_why': 'кластер ликвидаций шортов',
+            'risk': 'слив ОИ', 'alt': 'пробой вниз отменяет идею'}
     # Компактно, как пишет модель под грамматикой: у "d":"skip" пробела нет.
     text = json.dumps(body, ensure_ascii=False, separators=(',', ':'))
     # json пишет 0.9 как 0.9 — грамматика требует ровно две цифры
@@ -182,3 +183,30 @@ class TestInvalidAnswersAreRejected:
         text = gr.build(ids(4)).replace('{0,2}', '(0, 2)')
         with pytest.raises(ValueError):
             Grammar(text)
+
+
+class TestTheStopBufferIsInTheGrammar:
+    """
+    Код отступает за уровень стопа на буфер; грамматика считает R:R с тем же
+    отступом, иначе план проходил бы грамматику и умирал на коде.
+    """
+
+    def test_a_target_that_fits_without_the_buffer_but_not_with_it(self):
+        # Лонг L4 100, стоп L5 95: без отступа R:R 2 требует цели ≥10% — L1
+        # 120 годится, L3 106 нет. С отступом 2% стоп 7% → цель ≥14%: L1 всё
+        # ещё годится; при отступе 5% (стоп 10%) нужна цель ≥20% — L1 ровно.
+        loose = Grammar(gr.build(ids(6), prices=PRICES[6], min_stop_pct=1.5, min_rr=2.0,
+                                 stop_buffer_pct=2.0))
+        assert loose.accepts(enter_answer(6, 'LONG', 'L4', 'L5', ('L1',)))
+        tight = Grammar(gr.build(ids(6), prices=PRICES[6], min_stop_pct=1.5, min_rr=2.0,
+                                 stop_buffer_pct=5.5))
+        assert not tight.accepts(enter_answer(6, 'LONG', 'L4', 'L5', ('L1',)))
+
+    def test_the_buffer_counts_toward_the_minimum_stop(self):
+        # L3 106 → L4 100: 5.7%. Предел 6% не пускает; с отступом 0.5% стоп
+        # встанет на 6.2% — пускает.
+        strict = Grammar(gr.build(ids(6), prices=PRICES[6], min_stop_pct=6.0, min_rr=0.0))
+        assert not strict.accepts(enter_answer(6, 'LONG', 'L3', 'L4', ('L1',)))
+        buffered = Grammar(gr.build(ids(6), prices=PRICES[6], min_stop_pct=6.0, min_rr=0.0,
+                                    stop_buffer_pct=0.5))
+        assert buffered.accepts(enter_answer(6, 'LONG', 'L3', 'L4', ('L1',)))
