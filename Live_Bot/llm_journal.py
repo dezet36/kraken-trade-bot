@@ -45,6 +45,8 @@ COLUMNS = [
     # Список уровней, из которого модель выбирала: [id, цена, подпись].
     # Без него план из журнала не перерисовать: список живёт час.
     'levels',
+    # Мысль модели перед ответом (режим размышления), дословно.
+    'thought',
     # Решение в числах. Пусто, когда модель отказалась: числа появляются
     # только у сетапа, дошедшего до проверок.
     'side', 'entry', 'stop', 'tp1', 'inval',
@@ -107,6 +109,7 @@ def record(pair, donor, verdict, stats=None):
             'risk': verdict.get('risk', ''),
             'stop_why': verdict.get('stop_why', ''),
             'tp_why': verdict.get('tp_why', ''),
+            'thought': str(verdict.get('thought') or '')[:6000],
             'levels': json.dumps([[lv.get('id'), lv.get('price'), lv.get('kind')]
                                   for lv in (verdict.get('levels') or [])],
                                  ensure_ascii=False),

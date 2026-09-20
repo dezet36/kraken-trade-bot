@@ -747,3 +747,39 @@ class TestTheJustificationMustMatchThePlan:
     def test_prose_without_levels_is_not_checked(self):
         out = verdict(tp_why='ближайший магнит сверху', stop_why='за защищающей структурой')
         assert out['ok'], out.get('gate')
+
+
+class TestThinkingBeforeTheAnswer:
+    """Мысль в <think> отделяется от JSON, идёт в вердикт и не путает
+    проверку на обрубок."""
+
+    def test_the_thought_is_split_off_and_kept(self):
+        raw = '<think>стоп за свингом дня, цель EQL</think>\n' + answer()
+        parsed = dec.parse(raw, LEVELS)
+        assert parsed['thought'] == 'стоп за свингом дня, цель EQL'
+        out = dec.check(parsed, LEVELS)
+        assert out['ok'] and out['thought'].startswith('стоп за')
+
+    def test_without_a_thought_nothing_changes(self):
+        assert dec.split_thought(answer()) == ('', answer())
+        assert dec.parse(answer(), LEVELS)['thought'] == ''
+
+    def test_a_cut_answer_after_a_thought_is_still_a_cut(self):
+        assert dec.truncated('<think>x</think>{"d":"enter",') is True
+        assert dec.truncated('<think>x</think>' + answer()) is False
+
+
+class TestTheGrammarAdmitsAThought:
+    def test_the_think_block_is_optional_and_bounded(self):
+        import llm_grammar as g
+        text = g.build(['L1', 'L2', 'L3', 'L4', 'L5', 'L6'], prices=[120, 112, 106, 100, 95, 90],
+                       min_stop_pct=1.5, min_rr=2.0, think_chars=4000)
+        head = text.splitlines()[:5]
+        assert head[0] == 'root     ::= think answer | answer'
+        assert 'tchar{0,4000}' in head[1] and head[4].startswith('answer   ::= enter | skip')
+
+    def test_zero_budget_means_no_block(self):
+        import llm_grammar as g
+        text = g.build(['L1', 'L2', 'L3', 'L4', 'L5', 'L6'], prices=[120, 112, 106, 100, 95, 90],
+                       min_stop_pct=1.5, min_rr=2.0, think_chars=0)
+        assert text.startswith('root     ::= enter | skip')

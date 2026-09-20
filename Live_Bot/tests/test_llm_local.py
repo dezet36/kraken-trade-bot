@@ -141,13 +141,15 @@ class TestTheSettingsAreReadable:
         import config
         assert 1 <= config.LLM_THREADS <= 8
 
-    def test_thinking_is_off_by_default(self):
+    def test_thinking_is_on_with_a_budget(self):
         """
-        На процессоре без видеокарты цепочка рассуждений стоит минут, а
-        проверки в llm_decide всё равно пересчитывают за моделью.
+        С 20.09.2026 размышление включено: грамматика пускает <think> до
+        LLM_THINK_CHARS знаков, и метка /no_think к вопросу не добавляется.
+        Нулевой бюджет возвращает метку — и режим выключен.
         """
         import config
-        assert config.LLM_THINK_TAG == '/no_think'
+        assert config.LLM_THINK_CHARS > 0
+        assert config.LLM_THINK_TAG == ''
 
 
 class FakeModel:

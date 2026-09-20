@@ -104,6 +104,16 @@ def _refusal(gate, detail, extra=None):
     return out
 
 
+def split_thought(answer):
+    """(мысль, ответ): блок <think>…</think> отделяется от JSON."""
+    text = answer or ''
+    if '<think>' in text and '</think>' in text:
+        start = text.index('<think>') + len('<think>')
+        end = text.index('</think>')
+        return text[start:end].strip(), text[end + len('</think>'):].strip()
+    return '', text
+
+
 def parse(answer, levels):
     """
     Разбирает ответ модели в цены. Возвращает словарь или None при поломке.
@@ -112,6 +122,7 @@ def parse(answer, levels):
     вызов может пройти и без грамматики — например, если её отключат ради
     отладки, — и тогда сюда придёт что угодно.
     """
+    thought, answer = split_thought(answer)
     try:
         data = json.loads(answer)
     except (ValueError, TypeError):
@@ -121,6 +132,7 @@ def parse(answer, levels):
 
     out = {'decision': data.get('d'), 'why': data.get('why', ''),
            'risk': data.get('risk', ''),
+           'thought': thought,
            # За что стоит стоп и почему цель именно там — отдельными полями:
            # «вход тут, стоп минус 1.5%» без ответа на эти два вопроса —
            # не план.
@@ -208,6 +220,7 @@ def truncated(answer):
     Признак прямой: грамматика заканчивает ответ закрывающей скобкой. Нет её —
     значит генерация оборвалась, а не модель написала мусор.
     """
+    _, answer = split_thought(answer)
     text = (answer or '').strip()
     return bool(text) and not text.endswith('}')
 
@@ -474,6 +487,7 @@ def check(parsed, levels, answer=None, market=None, min_stop=None, atr_pct=None)
 
     votes = sum(1 for f in FACTORS if parsed['confluence'].get(f))
     base = {'confluence': parsed['confluence'], 'votes': votes,
+            'thought': parsed.get('thought', ''),
             'why': parsed.get('why', ''), 'risk': parsed.get('risk', ''),
             'stop_why': parsed.get('stop_why', ''), 'tp_why': parsed.get('tp_why', ''),
             'regime': parsed.get('regime', ''),
@@ -602,7 +616,8 @@ def decide(pair, df, ask, news=None, at=None, max_tokens=None, market=None,
                                 prices=[lv['price'] for lv in levels],
                                 min_stop_pct=facts.get('min_stop_pct') or llm_context.min_stop_pct(),
                                 min_rr=MIN_RR,
-                                stop_buffer_pct=stop_hunt_pct(facts.get('atr_pct')))
+                                stop_buffer_pct=stop_hunt_pct(facts.get('atr_pct')),
+                                think_chars=getattr(config, 'LLM_THINK_CHARS', 0))
     # Разметка без задачи — таблица без вопроса. Первый прогон по живому рынку
     # отдавал модели только context['text'], и она отвечала «no news, no
     # comment»: её просто не спросили.

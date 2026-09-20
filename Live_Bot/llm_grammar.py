@@ -101,7 +101,8 @@ def _analysis_rule():
     return f'"{{" ws {body} ws "}}"'
 
 
-def build(level_ids, prices=None, min_stop_pct=0.0, min_rr=0.0, stop_buffer_pct=0.0):
+def build(level_ids, prices=None, min_stop_pct=0.0, min_rr=0.0, stop_buffer_pct=0.0,
+          think_chars=0):
     """
     Грамматика под КОНКРЕТНЫЙ список уровней.
 
@@ -117,14 +118,38 @@ def build(level_ids, prices=None, min_stop_pct=0.0, min_rr=0.0, stop_buffer_pct=
     сетапе, а о том, что модель себя не откалибровала.
     """
     if not level_ids:
-        return _skip_only()
+        return with_thinking(_skip_only(), think_chars)
 
     plans, rules = _plans(level_ids, prices, min_stop_pct, min_rr, stop_buffer_pct)
     if not plans:
         # Меньше трёх уровней — сделки не выразить: вход, стоп и цель обязаны
         # быть разными уровнями. Разрешить вход здесь значило бы разрешить
         # стоп на цене входа.
-        return _skip_only()
+        return with_thinking(_skip_only(), think_chars)
+    return with_thinking(_build_answer(level_ids, plans, rules), think_chars)
+
+
+def with_thinking(grammar, think_chars):
+    """
+    Блок размышления перед ответом: root ::= think answer | answer.
+
+    Внутри мысли — любой текст, кроме последовательности «</think>»; предел
+    в знаках — бюджет. Без него грамматика требует JSON с первого токена, и
+    режим размышления Qwen3 был несовместим с ней.
+    """
+    if not think_chars or think_chars <= 0:
+        return grammar
+    head = 'root     ::='
+    assert grammar.startswith(head)
+    think = ('root     ::= think answer | answer' + chr(10)
+             + 'think    ::= "<think>" tchar{0,' + str(int(think_chars)) + '} "</think>" nl' + chr(10)
+             + 'tchar    ::= [^<] | "<" [^/]' + chr(10)
+             + 'nl       ::= [ ' + chr(92) + 'n]{0,4}' + chr(10))
+    return think + 'answer   ::=' + grammar[len(head):]
+
+
+def _build_answer(level_ids, plans, rules):
+    """Грамматика ответа: вход или отказ, без блока размышления."""
 
     head = ('"{" ws "\\"regime\\":" ws regime ws ","'
             ' ws "\\"analysis\\":" ws analysis ws ","'
