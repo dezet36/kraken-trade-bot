@@ -306,12 +306,15 @@ def levels(df, at=None, extra=None, extra_market=None):
     window_h, window_l, window_v = high[start:at + 1], low[start:at + 1], volume[start:at + 1]
     median_v = float(np.median(window_v)) if len(window_v) else 0.0
     tape = (extra_market or {}).get('tape') if extra_market else None
-    tol = max(0.1, 0.15 * (atr_now / price_now * 100)) if price_now else 0.1
+    # Допуск касания в процентах цены. Имя своё: ниже в цикле есть tol в
+    # ценах для объёма у уровня, и первая версия перетирала одно другим —
+    # все уровни «касались» 950 минут из 968.
+    touch_pct = max(0.1, 0.15 * (atr_now / price_now * 100)) if price_now else 0.1
     for number, level in enumerate(near, start=1):
         level['id'] = f'L{number}'
         if tape:
             import llm_market
-            level['delta'] = llm_market.delta_at_level(tape, level['price'], tol)
+            level['delta'] = llm_market.delta_at_level(tape, level['price'], touch_pct)
         level['dist_pct'] = round((level['price'] - price_now) / price_now * 100, 2)
         if median_v > 0:
             tol = level['price'] * 0.0025

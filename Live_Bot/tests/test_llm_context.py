@@ -461,3 +461,20 @@ class TestPastVerdictsCarryTheirOutcome:
         joined = '\n'.join(lines)
         assert '10:11 UTC: вход SHORT' in joined
         assert 'с тех пор -1.20% за 4ч' in joined and 'цели нет' in joined and 'стоп снят' not in joined
+
+
+class TestDeltaAtLevelInTheList:
+    def test_only_touched_levels_get_a_delta(self):
+        df = make_df(wavy(300))
+        price = float(df['close'].iloc[-1])
+        base = int(df['timestamp'].iloc[-1].timestamp() * 1000) - 600 * 60_000
+        # 600 минут ровно на цене: касаются только уровни в ±0.1-0.2% от неё
+        tape = [{'ts': base + k * 60_000, 'high': price * 1.0002, 'low': price * 0.9998,
+                 'volume': 1.0, 'buy': 2.0, 'sell': 1.0} for k in range(600)]
+        found, _ = llm_context.levels(df, extra_market={'tape': tape})
+        with_delta = [lv for lv in found if lv.get('delta')]
+        for lv in with_delta:
+            assert abs(lv['price'] - price) / price * 100 <= 0.35
+        assert all(lv['delta']['minutes'] == 600 for lv in with_delta)
+        far = [lv for lv in found if abs(lv['price'] - price) / price * 100 > 1.0]
+        assert far and all(not lv.get('delta') for lv in far)
