@@ -673,11 +673,41 @@ class TestEntryOnAPoolIsRefused:
         assert out['ok'] is False and out['gate'] == 'вход на пуле стопов'
         assert 'EQL' in out['detail']
 
-    def test_after_a_sweep_and_reclaim_the_pool_is_a_valid_entry(self):
+    def test_a_short_from_equal_lows_is_refused_even_after_a_sweep(self):
+        # Вынос минимумов с возвратом вверх — это разворот ВВЕРХ; шорт после
+        # него — продажа в дно. BNB 20.09, второй заход.
         out = dec.check(dec.parse(answer(side='SHORT', entry='L3', stop='L2', tp=['L5'], inval='L2',
                                          trigger={'when': 'sweep_reclaim', 'level': 'L3', 'note': ''}),
                                   self.LEVELS), self.LEVELS)
-        assert out['gate'] != 'вход на пуле стопов', out.get('detail')
+        assert out['gate'] == 'вход на пуле стопов' and 'дно выноса' in out['detail']
+
+    def test_a_long_from_equal_lows_after_a_sweep_and_reclaim_is_valid(self):
+        levels = [
+            {'id': 'L1', 'price': 109.0, 'touches': 3, 'kind': 'скопление максимумов'},
+            {'id': 'L2', 'price': 107.0, 'touches': 2, 'kind': 'пивот-максимум'},
+            {'id': 'L3', 'price': 100.0, 'touches': 4, 'kind': 'равные экстремумы EQL'},
+            {'id': 'L4', 'price': 98.0, 'touches': 5, 'kind': 'пивот-минимум'},
+            {'id': 'L5', 'price': 94.0, 'touches': 2, 'kind': 'пивот-минимум'},
+        ]
+        plain = dec.check(dec.parse(answer(entry='L3', stop='L4', tp=['L2']), levels), levels)
+        assert plain['gate'] == 'вход на пуле стопов'
+        swept = dec.check(dec.parse(answer(entry='L3', stop='L4', tp=['L2'],
+                                           trigger={'when': 'sweep_reclaim', 'level': 'L3', 'note': ''}),
+                                    levels), levels)
+        assert swept['gate'] != 'вход на пуле стопов', swept.get('detail')
+
+    def test_a_long_from_equal_highs_is_always_refused(self):
+        levels = [
+            {'id': 'L1', 'price': 109.0, 'touches': 3, 'kind': 'скопление максимумов'},
+            {'id': 'L2', 'price': 107.0, 'touches': 2, 'kind': 'равные экстремумы EQH'},
+            {'id': 'L3', 'price': 100.0, 'touches': 4, 'kind': 'пивот-минимум'},
+            {'id': 'L4', 'price': 98.0, 'touches': 5, 'kind': 'пивот-минимум'},
+            {'id': 'L5', 'price': 94.0, 'touches': 2, 'kind': 'пивот-минимум'},
+        ]
+        out = dec.check(dec.parse(answer(entry='L2', stop='L3', tp=['L1'],
+                                         trigger={'when': 'sweep_reclaim', 'level': 'L2', 'note': ''}),
+                                  levels), levels)
+        assert out['gate'] == 'вход на пуле стопов' and 'вершине выноса' in out['detail']
 
     def test_a_zone_edge_that_coincides_with_a_pool_is_fine(self):
         out = verdict()                      # L3 — низ зоны ордер-блок / скопление

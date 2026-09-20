@@ -294,22 +294,53 @@ POOL_KINDS = ('равные экстремумы', 'скопление', 'нет
 ZONE_KINDS = ('зоны', 'имбаланса', 'ордер-блок', 'брейкер', 'свинг', 'POC')
 
 
+# Чьи стопы стоят за пулом — по подписи. Минимумы, EQL, ликвидации лонгов —
+# стопы лонгов (SSL); максимумы, EQH, ликвидации шортов — стопы шортов (BSL).
+_SSL_WORDS = ('минимум', 'EQL', 'ликвидаций лонгов')
+_BSL_WORDS = ('максимум', 'EQH', 'ликвидаций шортов')
+
+
+def _pool_sides(kind):
+    sides = set()
+    if any(w in kind for w in _SSL_WORDS):
+        sides.add('SSL')
+    if any(w in kind for w in _BSL_WORDS):
+        sides.add('BSL')
+    return sides
+
+
 def entry_on_pool(parsed, levels):
-    """Вход стоит на пуле чужих стопов без условия sweep_reclaim. Описание или ''."""
+    """
+    Вход стоит на пуле чужих стопов. Описание или ''.
+
+    Пул НЕ ТОЙ стороны — всегда отказ: лонг на EQH или шорт на EQL — это
+    покупка на вершине выноса или продажа в его дно. 20.09.2026 BNB, второй
+    заход: шорт от EQL «после выноса с возвратом ВВЕРХ» — после такого
+    выноса рынок идёт вверх, а не вниз. Пул СВОЕЙ стороны (лонг на EQL,
+    шорт на EQH) законен только с условием sweep_reclaim: дождаться выноса
+    и возврата — и войти по ходу возврата.
+    """
     entry_id = (parsed.get('ids') or {}).get('entry')
     level = next((lv for lv in (levels or []) if lv.get('id') == entry_id), None)
     if not level:
         return ''
-    if (parsed.get('trigger_when') or 'now') == 'sweep_reclaim':
-        return ''
-    names = [n.strip() for n in str(level.get('kind', '')).split('/')]
+    kind = str(level.get('kind', ''))
+    names = [n.strip() for n in kind.split('/')]
     if any(any(z in n for z in ZONE_KINDS) for n in names):
         return ''
-    if any(any(p in n for p in POOL_KINDS) for n in names):
-        return (f'вход {entry_id} {level.get("price"):.6g} — {level.get("kind")}: там чужие '
-                f'стопы, это цель или место выноса; вход — из зоны инициатора или '
-                f'после sweep_reclaim')
-    return ''
+    if not any(any(p in n for p in POOL_KINDS) for n in names):
+        return ''
+    side = parsed.get('side')
+    sides = _pool_sides(kind)
+    own = 'SSL' if side == 'LONG' else 'BSL'
+    wrong = 'BSL' if side == 'LONG' else 'SSL'
+    head = f'вход {entry_id} {level.get("price"):.6g} — {kind}: там чужие стопы'
+    if wrong in sides and own not in sides:
+        return (f'{head}; {"лонг на стопах шортов — покупка на вершине выноса" if side == "LONG" else "шорт на стопах лонгов — продажа в дно выноса"}; '
+                f'для {side} это цель, а вход — из зоны инициатора')
+    if (parsed.get('trigger_when') or 'now') == 'sweep_reclaim':
+        return ''
+    return f'{head}, это цель или место выноса; вход — из зоны инициатора или после sweep_reclaim'
 
 
 def stop_inside_entry_zone(side, entry, stop_level, market):
