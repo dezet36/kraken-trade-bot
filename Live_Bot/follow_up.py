@@ -21,7 +21,6 @@
 Связь по trade_id: при разборе два файла соединяются по нему.
 """
 
-import csv
 import os
 
 import config
@@ -259,8 +258,7 @@ def advance_live(fetch_candles=None):
             log(f'   {pair}: свечи для наблюдения не получены — {exc}')
             continue
         for candle in candles or []:
-            ts, _o, high, low, close = (candle[0], candle[1], candle[2],
-                                        candle[3], candle[4])
+            ts, high, low, close = candle[0], candle[2], candle[3], candle[4]
             finished.extend(advance(mine, pair, ts, high, low, close))
 
     if finished:

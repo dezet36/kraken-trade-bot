@@ -129,11 +129,3 @@ def visible_swings(swings, at_index):
     """
     return [s for s in swings if s['confirmed_at'] <= at_index]
 
-
-def last_swing(swings, kind, at_index=None):
-    """Последний свинг заданного типа ('high'/'low'), видимый на at_index."""
-    pool = swings if at_index is None else visible_swings(swings, at_index)
-    for swing in reversed(pool):
-        if swing['kind'] == kind:
-            return swing
-    return None

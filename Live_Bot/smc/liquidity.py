@@ -24,7 +24,7 @@
 import numpy as np
 import pandas as pd
 
-from . import params, swings as swings_mod
+from . import params
 
 BSL = 'BSL'
 SSL = 'SSL'

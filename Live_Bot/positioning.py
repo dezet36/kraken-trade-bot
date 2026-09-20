@@ -277,7 +277,6 @@ def collect_if_due(client, pairs=None):
     вещь, которая может незаметно умереть. Здесь сбор живёт ровно столько,
     сколько живёт бот.
     """
-    global _last_run
     now = time.time()
     due = [name for name in SOURCES
            if now - _last_run.get(name, 0) >= _interval(name)]

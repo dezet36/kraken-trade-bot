@@ -27,7 +27,7 @@ POI — область потенциального разворота, где �
 
 import numpy as np
 
-from . import params, structure as structure_mod
+from . import params
 
 BULLISH = 'BULLISH'
 BEARISH = 'BEARISH'

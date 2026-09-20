@@ -41,15 +41,6 @@ def killzone_of(timestamp, zones=None):
     return None
 
 
-def in_killzone(timestamp, enabled=None):
-    """Разрешено ли открывать сделку в этот момент (§11.2)."""
-    enabled = params.KILLZONES_ENABLED if enabled is None else enabled
-    if not params.REQUIRE_KILLZONE:
-        return True
-    zone = killzone_of(timestamp)
-    return zone is not None and zone in enabled
-
-
 def killzone_mask(df, enabled=None):
     """
     Векторная версия in_killzone для всей серии свечей — нужна бэктесту,
@@ -75,71 +66,3 @@ def killzone_mask(df, enabled=None):
         mask |= (hours >= start) & (hours < end)
     return mask
 
-
-def period_opens(df, day_open_hour=None):
-    """
-    Открытия дня / недели / месяца (§11.1) для каждой свечи.
-
-    Методичка: открытия старших таймфреймов используются как вспомогательные
-    уровни поддержки/сопротивления, и чем старше таймфрейм открытия, тем
-    сильнее уровень. На бычьем рынке ищем набор позиции НИЖЕ открытия,
-    на медвежьем — ВЫШЕ.
-
-    Возвращает DataFrame с колонками day_open / week_open / month_open.
-    """
-    day_open_hour = params.DAY_OPEN_HOUR_UTC if day_open_hour is None else day_open_hour
-
-    ts = pd.to_datetime(df['timestamp'], utc=True)
-    shifted = ts - pd.Timedelta(hours=day_open_hour)
-    opens = pd.Series(df['open'].to_numpy(dtype=float), index=shifted)
-
-    out = pd.DataFrame(index=df.index)
-    for label, rule in (('day', 'D'), ('week', 'W'), ('month', 'MS')):
-        first = opens.resample(rule).first()
-        out[f'{label}_open'] = first.reindex(shifted, method='ffill').to_numpy()
-    return out
-
-
-def asian_range(df, at_index, day_open_hour=None):
-    """
-    Азиатский рендж текущего дня (§11.3) на момент свечи `at_index`.
-
-    Используется как источник ликвидности: London Open обычно агрессивно
-    снимает одну из границ рenджа, после чего идёт движение по тренду.
-
-    Возвращает {'high','low','complete'} или None, если данных ещё нет.
-    complete=False означает, что азиатская сессия ещё не закрылась.
-    """
-    day_open_hour = params.DAY_OPEN_HOUR_UTC if day_open_hour is None else day_open_hour
-    if at_index >= len(df):
-        return None
-
-    ts = pd.to_datetime(df['timestamp'], utc=True)
-    current = ts.iloc[at_index]
-    day_start = (current - pd.Timedelta(hours=day_open_hour)).normalize() \
-        + pd.Timedelta(hours=day_open_hour)
-
-    asia_start, asia_end = params.KILLZONES['ASIA']
-    window_start = day_start + pd.Timedelta(hours=asia_start)
-    window_end = day_start + pd.Timedelta(hours=asia_end)
-
-    # Только уже закрытые свечи: всё строго до at_index включительно
-    positions = np.arange(len(df))
-    mask = (
-        (ts.to_numpy() >= window_start.to_datetime64())
-        & (ts.to_numpy() < window_end.to_datetime64())
-        & (positions <= at_index)
-    )
-    if not mask.any():
-        return None
-
-    highs = df['high'].to_numpy(dtype=float)[mask]
-    lows = df['low'].to_numpy(dtype=float)[mask]
-
-    return {
-        'high': float(highs.max()),
-        'low': float(lows.min()),
-        'complete': bool(current >= window_end),
-        'start': window_start,
-        'end': window_end,
-    }

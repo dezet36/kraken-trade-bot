@@ -232,17 +232,14 @@ def trade_opened(signal: dict, df_1h=None):
     # Zone context
     if trigger['zone'] == 'Zone_A':
         zone_desc = "Классич. коррекция (38.2%–61.8%)"
-        sl_ctx    = "ниже зоны A" if is_long else "выше зоны A"
     elif trigger['zone'] == 'Zone_B':
         zone_desc = "Глубокая коррекция (78.6%–88.6%)"
-        sl_ctx    = "ниже старта импульса" if is_long else "выше старта импульса"
     else:
         # Вход между зонами. Называем глубину отката числом: выдавать это за
         # зону B, как делала прежняя ветка `else`, значит писать неправду.
         _retr = (abs(setup['end_price'] - params['entry']) / setup['size'] * 100
                  if setup.get('size') else 0)
         zone_desc = f"Коррекция {_retr:.1f}% — между зонами"
-        sl_ctx    = "ниже зоны A" if is_long else "выше зоны A"
 
     # Цели берём из плана ЭТОЙ сделки: у стратегий он разный, и глобальная
     # настройка показывала бы SMC один тейк вместо трёх.
@@ -300,15 +297,6 @@ def tp_hit(pair: str, tp_num: int, direction: str, price: float,
         f"Закрыто:       {closed_pct}% позиции\n"
         f"Осталось:      {remaining_pct}%\n"
         f"Зафиксировано: <b>{pnl_str}</b>",
-    )
-
-
-def trail_activated(pair: str, direction: str, trail_level: float):
-    dir_s = "LONG" if direction == "LONG" else "SHORT"
-    _send(
-        f"<b>🔄 Трейлинг активирован — {pair} {dir_s}</b>\n"
-        f"Стартовый стоп: <code>${trail_level:.4f}</code>\n"
-        f"Прибыль с TP2 защищена"
     )
 
 

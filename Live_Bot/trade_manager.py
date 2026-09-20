@@ -1279,27 +1279,6 @@ class LiveTradeManager:
             self.exchange = get_exchange()
             return False
 
-    def _close_partial(self, trading_pair, position, fraction, reason):
-        """Закрывает часть позиции рыночным ордером"""
-        close_size = round(position['remaining_size'] * fraction, 6)
-        if close_size <= 0:
-            return
-
-        side = 'sell' if position['signal']['setup']['type'] == 'LONG' else 'buy'
-
-        try:
-            self.exchange.create_order(
-                symbol=trading_pair,
-                type='market',
-                side=side,
-                amount=close_size,
-                params={'reduce_only': True},
-            )
-            position['remaining_size'] = round(position['remaining_size'] - close_size, 6)
-            log(f"📤 Частичное закрытие {reason}: {close_size:.6f} | Осталось: {position['remaining_size']:.6f}")
-        except Exception as e:
-            log(f"⚠️ Ошибка частичного закрытия {reason}: {e}")
-
     def _cancel_order(self, trading_pair, order_id):
         if not order_id:
             return
@@ -1386,12 +1365,6 @@ class LiveTradeManager:
                 return float(pos.get('remaining_size')
                              or pos.get('position_size') or 0)
         return 0.0
-
-    def _update_trail_stop(self, trading_pair, position, new_stop_price):
-        """Обновляет защитный стоп позиции — на любой бирже."""
-        if self._set_position_stop(trading_pair, new_stop_price):
-            log(f"   Трейлинг стоп → ${new_stop_price:.4f}")
-        position['trail_stop'] = new_stop_price
 
     def _move_sl_to_breakeven(self, trading_pair, position):
         """Переносит стоп в безубыток — на любой бирже."""

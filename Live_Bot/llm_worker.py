@@ -29,7 +29,6 @@ import os
 import threading
 import time
 
-import config
 from logger import log
 
 # Сколько ждём ответа, прежде чем считать модель зависшей. Разбор с критиком

@@ -1,4 +1,3 @@
-import pandas as pd
 import config
 import settings_store as settings
 from logger import log
@@ -226,7 +225,6 @@ def calculate_trade_params(setup, entry_price, balance, trading_pair=None, log_r
     - TP1 = -TP1_LEVEL за B (-25%, единственный тейк, закрывает 100%)
     - be_level = уровень B импульса (0%, конец импульса) — для безубытка
     """
-    start_price = setup['start_price']
     end_price   = setup['end_price']
     size        = setup['size']
 

@@ -39,7 +39,6 @@
 превратил бы работающую арифметику в заведомо убыточную.
 """
 
-import numpy as np
 import pandas as pd
 
 import config

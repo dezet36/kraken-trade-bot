@@ -199,26 +199,6 @@ def make_market_client(exchange_name: str = 'bybit'):
     return _market_client
 
 
-def validate_credentials(exchange_name: str, api_key: str, api_secret: str, mode: str = 'DEMO'):
-    """
-    Проверяет ключи при онбординге. Возвращает (ok: bool, balance_usdt: float, error: str|None).
-    Прим.: программно проверить «нет права вывода» по биржам ненадёжно — пользователю
-    отдельно показываем требование создавать trade-only ключ.
-    """
-    try:
-        client = make_client(exchange_name, api_key, api_secret, mode)
-        client.load_markets()
-        bal = client.fetch_balance()
-        usdt = bal.get('USDT', {}).get('total', 0) or 0
-        return True, float(usdt), None
-    except ccxt.AuthenticationError:
-        return False, 0.0, "Неверный API-ключ или секрет (ошибка аутентификации)"
-    except ccxt.PermissionDenied as e:
-        return False, 0.0, f"Недостаточно прав у ключа: {e}"
-    except Exception as e:
-        return False, 0.0, str(e)
-
-
 # ── Legacy single-user (используется текущим ботом до перехода на платформу) ──
 def configured_exchanges():
     """

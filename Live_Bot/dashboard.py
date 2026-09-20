@@ -1298,7 +1298,6 @@ def llm_payload(limit=40):
 
     critic = True
     try:
-        import llm_decide
         critic = bool(llm_decide.critic_enabled())
     except Exception:                                  # noqa: BLE001
         pass

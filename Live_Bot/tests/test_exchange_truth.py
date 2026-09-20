@@ -124,7 +124,7 @@ class TestTheStopIsAttachedEverywhere:
         безубыток и трейлинг там не работали вовсе.
         """
         assert 'def _set_position_stop' in self.SRC
-        for method in ('_update_trail_stop', '_move_sl_to_breakeven'):
+        for method in ('_move_sl_to_breakeven',):
             spot = self.SRC.index(f'def {method}')
             body = self.SRC[spot:self.SRC.index('\n    def ', spot + 10)]
             assert 'privatePostV5PositionTradingStop' not in body, (

@@ -24,7 +24,6 @@ import os
 import time
 import tempfile
 import pandas as pd
-import config
 from logger import log
 
 

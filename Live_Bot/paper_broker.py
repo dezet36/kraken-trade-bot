@@ -36,7 +36,6 @@
 
 import csv
 import json
-import math
 import os
 import shutil
 from datetime import datetime, timezone
@@ -490,11 +489,6 @@ class PaperBroker:
         return sum(1 for book in (self.positions(strategy), self.pending(strategy))
                    for item in book.values() if item['direction'] == direction)
 
-    def free_slots(self, strategy):
-        """Сколько ещё можно открыть. None — предела нет."""
-        import settings_store
-        return settings_store.slots_free(strategy, self.slots_used_by(strategy))
-
     def equity(self, strategy):
         """Баланс + нереализованный результат по открытым позициям."""
         total = self.balance(strategy)
@@ -799,8 +793,7 @@ class PaperBroker:
             'targets': targets,
             'fractions': fractions,
             'be_level': params.get('be_level'),
-            'breakeven_after_tp': bool(params.get(
-                'breakeven_after_tp', getattr(config, 'BREAKEVEN_AT_B', True))),
+            'breakeven_after_tp': wants_breakeven(params),
             'risk_amount': risk_amount,
             'cost_share_pct': round(cost_share, 3),
             'size': size,

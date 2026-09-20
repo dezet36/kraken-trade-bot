@@ -233,38 +233,6 @@ def visible_points(structure, index):
     return [p for p in structure['points'] if p['confirmed_at'] <= index]
 
 
-def last_labelled(structure, label, index=None):
-    """Последний свинг с заданной меткой ('HH'/'HL'/'LH'/'LL')."""
-    pool = structure['points'] if index is None else visible_points(structure, index)
-    for point in reversed(pool):
-        if point['label'] == label:
-            return point
-    return None
-
-
-def find_failure_swing(structure, index=None):
-    """
-    Failure swing / SMS (§2.5): тренд не смог обновить экстремум.
-
-    В восходящем тренде это LH после серии HH — первичный тренд не дотянул до
-    нового максимума. Возвращает свинг-неудачник или None.
-    Именно на этой конструкции строится Mitigation Block (§5.3).
-    """
-    pool = structure['points'] if index is None else visible_points(structure, index)
-    labelled = [p for p in pool if p['label']]
-    if len(labelled) < 3:
-        return None
-
-    last = labelled[-1]
-    prior = [p['label'] for p in labelled[:-1]]
-
-    if last['label'] == 'LH' and 'HH' in prior[-3:]:
-        return {**last, 'sms_direction': BEARISH}
-    if last['label'] == 'HL' and 'LL' in prior[-3:]:
-        return {**last, 'sms_direction': BULLISH}
-    return None
-
-
 def last_leg(structure, index=None):
     """
     Последняя импульсная нога (от свинга к противоположному свингу).

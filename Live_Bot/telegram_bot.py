@@ -239,7 +239,6 @@ class BotController:
             trail_ico = " 🔄" if pos.get('trailing_active') else ""
             be_ico    = " ➿" if pos.get('breakeven_set') else ""
             dir_icon  = "📈" if direction == "LONG" else "📉"
-            since     = pos['entry_time'].strftime("%H:%M %d.%m")
 
             # Duration
             minutes = int((datetime.now() - pos['entry_time']).total_seconds() / 60)

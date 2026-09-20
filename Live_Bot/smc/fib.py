@@ -101,24 +101,6 @@ def is_valid_side(price, leg, direction):
     return side == (DISCOUNT if direction == BULLISH else PREMIUM)
 
 
-def zone_of_interest(leg):
-    """
-    Зона интереса по сетке — 38.2%-61.8% коррекции (§22.1).
-
-    Возвращает (bottom, top) в ценах, независимо от направления ноги.
-    """
-    a = retracement(leg, params.FIB_ZONE_SHALLOW)
-    b = retracement(leg, params.FIB_ZONE_DEEP)
-    return (min(a, b), max(a, b))
-
-
-def deep_zone(leg):
-    """Зона глубокой коррекции 78.6%-88.6% (§22.1)."""
-    a = retracement(leg, params.FIB_DEEP_RETRACE_LO)
-    b = retracement(leg, params.FIB_DEEP_RETRACE_HI)
-    return (min(a, b), max(a, b))
-
-
 def ote_zone(leg):
     """
     Optimal Trade Entry — 0.62-0.79 коррекции (§10.1).

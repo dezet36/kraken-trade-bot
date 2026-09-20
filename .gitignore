@@ -136,3 +136,8 @@ Live_Bot/leak_trace.txt
 Live_Bot/remote.json
 dist/remote.json
 Live_Bot/window_profile/
+
+# Данные бота, случайно попадавшие в репозиторий рядом с кодом
+Live_Bot/*.csv
+Live_Bot/*.jsonl
+Live_Bot/bot_log.txt.*

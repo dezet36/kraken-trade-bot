@@ -46,7 +46,6 @@ import config
 import market_regime
 import positioning
 from liquidity import core as liq
-from logger import log
 
 # Сколько уровней максимум уходит в модель. Больше — не лучше: список на сорок
 # позиций модель разбирает хуже, чем на десять, а грамматика вырастает линейно.

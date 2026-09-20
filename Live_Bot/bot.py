@@ -7,7 +7,7 @@ from apscheduler.schedulers.blocking import BlockingScheduler
 import config
 import telegram_notify as tg
 from telegram_bot import controller
-from exchange import get_exchange, make_market_client, fetch_ohlcv
+from exchange import get_exchange, make_market_client
 import dashboard
 import error_log
 import positioning
@@ -484,8 +484,6 @@ def _watch_streams():
 
 
 def trading_cycle():
-    global _last_summary_date
-
     note_cycle()
     if config.PAPER_MODE:
         log("\n" + "=" * 60)
