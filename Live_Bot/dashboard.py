@@ -35,10 +35,10 @@ from logger import log
 
 
 def _app_version():
-    """Версия приложения, если её удаётся узнать. Пусто — тоже ответ."""
+    """Версия — короткий хеш коммита. Пусто — тоже ответ (не репозиторий)."""
     try:
-        import updater_app
-        return updater_app.current_version() or ''
+        import updater
+        return updater.current_commit() or ''
     except Exception:                              # noqa: BLE001
         return ''
 
@@ -1518,7 +1518,7 @@ class _Handler(BaseHTTPRequestHandler):
             # факт замены. Проверка идёт тем же способом и на том же адресе,
             # каким потом пойдёт бот, — иначе демо-ключи при боевом режиме
             # прошли бы молча.
-            import first_run
+            import exchange_keys
             exchange = str(changes.get('exchange') or config.EXCHANGE_NAME).lower()
             mode = str(changes.get('mode') or config.TRADING_MODE).upper()
             api_key = str(changes.get('key') or '').strip()
@@ -1526,7 +1526,7 @@ class _Handler(BaseHTTPRequestHandler):
             if not api_key or not secret:
                 self._fail(400, 'Заполните оба поля')
                 return
-            ok, error = first_run.check_keys(exchange, mode, api_key, secret)
+            ok, error = exchange_keys.check_keys(exchange, mode, api_key, secret)
             if not ok:
                 self._fail(409, f'Биржа не приняла ключи: {error}')
                 return
@@ -1536,7 +1536,7 @@ class _Handler(BaseHTTPRequestHandler):
             if mode == 'LIVE':
                 values['LIVE_CONFIRMED'] = 'YES'
             try:
-                first_run._write_env(values)
+                exchange_keys.write_env(values)
             except Exception as exc:               # noqa: BLE001
                 self._fail(500, f'Не удалось записать настройки: {exc}')
                 return

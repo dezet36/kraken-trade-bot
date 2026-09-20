@@ -195,44 +195,9 @@ def _commit_info(ref='HEAD'):
     return {'commit': short, 'date': date, 'subject': subject}
 
 
-def _app_mode():
-    """
-    Приложение собрано в .exe — обновляться надо выпусками, а не git.
-
-    Развилка стоит здесь, а не в дашборде: панель обновления одна, и знать,
-    как именно устроено то, что она обновляет, ей незачем. Обе реализации
-    отвечают словарём одной формы.
-    """
-    try:
-        import updater_app
-    except Exception:                              # noqa: BLE001
-        # Модуль не уехал в сборку — обновляться будет нечем, но узнать об
-        # этом надо из панели, а не по молчаливому переходу на git-ветку,
-        # которая в собранном приложении всегда отвечает «не репозиторий».
-        return None
-
-    # ПОРЯДОК ПРИЗНАКОВ ВАЖЕН, И ПЕРВАЯ ПОПЫТКА БЫЛА НЕВЕРНОЙ.
-    #
-    # sys.frozen ставит PyInstaller — обычно этого достаточно. Но у
-    # пользователя собранное приложение сообщало «каталог не является
-    # git-репозиторием», значит развилка ушла в git-ветку, и на один флаг
-    # полагаться нельзя. Я добавил второй признак — файл VERSION, которого в
-    # репозитории нет и который создаётся только при сборке.
-    #
-    # И сразу сломал десять проверок. После локальной сборки файл VERSION
-    # остаётся лежать в рабочем каталоге, и запуск ИЗ ИСХОДНИКОВ начинал
-    # считать себя выпуском: обновление предлагало скачать .exe поверх
-    # рабочей копии с git-историей.
-    #
-    # Правильный порядок такой. Собранное приложение — выпуск всегда. Живой
-    # git-репозиторий — исходники всегда, что бы рядом ни лежало. И только
-    # когда ни того ни другого, VERSION решает: это распакованная сборка,
-    # у которой почему-то не встал флаг.
-    if updater_app.is_frozen():
-        return updater_app
-    if is_repo():
-        return None
-    return updater_app if updater_app.current_version() else None
+def current_commit():
+    """Короткий хеш HEAD; пусто, если это не репозиторий."""
+    return _commit_info().get('commit', '')
 
 
 def status(fetch=True):
@@ -242,37 +207,12 @@ def status(fetch=True):
     fetch=False — быстрый ответ без обращения к сети (для отрисовки
     страницы, чтобы она не ждала git по несколько секунд).
     """
-    app = _app_mode()
-    if app is not None:
-        return app.status(fetch=fetch)
-
     if not is_repo():
-        # Отвечаем ПОДРОБНО, а не одной строкой про git. Эта же строка
-        # появлялась у собранного приложения, и по ней нельзя было понять
-        # главного: какая версия работает и почему она считает себя
-        # запущенной из исходников. Разбор превращался в переписку.
-        import sys as _sys
-
-        frozen = bool(getattr(_sys, 'frozen', False))
-        try:
-            import updater_app
-            version = updater_app.current_version() or 'файла VERSION нет'
-        except Exception as exc:                   # noqa: BLE001
-            version = f'не определилась: {exc}'
-        reason = ('Обновление недоступно: приложение считает, что запущено '
-                  f'из исходников, а каталог {ROOT} — не '
-                  'git-репозиторий.')
-        if not frozen:
-            reason += (' Если вы запускали Kraken.exe, значит работает НЕ он: '
-                       'проверьте в диспетчере задач, какой файл держит процесс.')
         return {'available': False, 'can_update': False,
-                'reason': reason,
-                'current': {'commit': version, 'date': '',
-                            'subject': 'запуск из исходников' if not frozen
-                                       else 'собранное приложение'},
-                'mode': 'exe' if frozen else 'source',
-                'frozen': frozen,
-                'app_dir': ROOT}
+                'reason': f'Обновление недоступно: каталог {ROOT} — не '
+                          'git-репозиторий.',
+                'current': {'commit': '', 'date': '', 'subject': ''},
+                'mode': 'source', 'app_dir': ROOT}
 
     code, branch, _ = _git('rev-parse', '--abbrev-ref', 'HEAD')
     branch = branch if code == 0 else '?'
@@ -375,10 +315,6 @@ def apply():
 
     Возвращает (успех, сообщение, подробности).
     """
-    app = _app_mode()
-    if app is not None:
-        return app.apply()
-
     info = status(fetch=True)
     if not info.get('can_update'):
         return False, info.get('reason') or 'обновление недоступно', info
@@ -417,10 +353,6 @@ def apply():
 
 def rollback():
     """Возврат на коммит, который стоял до последнего обновления."""
-    app = _app_mode()
-    if app is not None:
-        return app.rollback()
-
     previous = _load_state().get('previous')
     if not previous:
         return False, 'нет записи о предыдущей версии'

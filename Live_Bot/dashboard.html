@@ -492,7 +492,7 @@
   }
 
   /* ── Уведомления ─────────────────────────────────────────────────── */
-  .nt-head, .nt-row { display: grid; grid-template-columns: 1fr 110px 110px;
+  .nt-head, .nt-row { display: grid; grid-template-columns: 1fr 110px;
                       align-items: center; gap: 8px; }
   .nt-head { margin: 10px 0 4px; }
   .nt-head span { font-size: 11.5px; color: var(--ink-3); text-align: center; }
@@ -2742,7 +2742,7 @@ const NOTIFY_EVENTS = [
   ['error', 'Ошибки бота'],
   ['daily', 'Дневная сводка'],
 ];
-const NOTIFY_CHANNELS = [['desktop', 'Windows'], ['telegram', 'Telegram']];
+const NOTIFY_CHANNELS = [['telegram', 'Telegram']];
 
 function renderNotify(writable) {
   const box = el('notify');

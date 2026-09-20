@@ -154,11 +154,8 @@ def _version():
     это первый же уточняющий вопрос в переписке.
     """
     try:
-        import updater_app
-        version = updater_app.current_version()
-        if version:
-            return version
-        return 'сборка «из рук», файла VERSION нет'
+        import updater
+        return updater.current_commit() or 'не git-репозиторий'
     except Exception as exc:                       # noqa: BLE001
         return f'не определилась: {exc}'
 

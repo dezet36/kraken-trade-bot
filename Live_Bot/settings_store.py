@@ -79,7 +79,7 @@ EXCHANGES = ('bybit', 'bingx')
 # перестанет что-то получать и не поймёт почему.
 NOTIFY = 'NOTIFY'
 NOTIFY_EVENTS = ('trade_opened', 'trade_closed', 'error', 'daily', 'llm_setup')
-NOTIFY_CHANNELS = ('desktop', 'telegram')
+NOTIFY_CHANNELS = ('telegram',)
 
 _lock = threading.Lock()
 _cache = None

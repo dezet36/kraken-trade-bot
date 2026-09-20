@@ -1341,12 +1341,6 @@ class PaperBroker:
         # Уведомление — вспомогательное: его отказ не имеет права мешать
         # торговле, поэтому глушится целиком.
         try:
-            import notify
-            notify.trade_opened(strategy, pair, order['direction'], price,
-                                order['risk_amount'])
-        except Exception:                          # noqa: BLE001
-            pass
-        try:
             import telegram_notify as tg
             tg.paper_trade_opened(strategy, pair, order['direction'], price,
                                   order['stop_loss'], order['targets'][0],
@@ -1508,12 +1502,6 @@ class PaperBroker:
         log(f"   👻 [{strategy}] {pair}: {icon} {reason} @ ${_fmt_p(exit_price)} | "
             f"${net:+.2f} ({net / pos['risk_amount']:+.2f}R) | депозит ${balance_after:,.2f}")
         pnl_r = net / pos['risk_amount'] if pos['risk_amount'] else 0
-        try:
-            import notify
-            notify.trade_closed(strategy, pair, net, pnl_r,
-                                glossary.exit_reason(reason))
-        except Exception:                          # noqa: BLE001
-            pass
         try:
             import telegram_notify as tg
             tg.paper_trade_closed(strategy, pair, glossary.exit_reason(reason),
