@@ -51,6 +51,9 @@ from liquidity import core as liq
 # позиций модель разбирает хуже, чем на десять, а грамматика вырастает линейно.
 MAX_LEVELS = 20
 
+_ZONE = {'ORDER_BLOCK': 'ордер-блок', 'BREAKER': 'брейкер',
+         'MITIGATION': 'mitigation-блок', 'WICK': 'зона фитиля'}
+
 # Больше 16 стало 19.09.2026: к пивотам добавились точки ликвидности из
 # снимка (экстремумы дня и недели, Азия, равные экстремумы, нетронутые пулы,
 # границы зон). Стоп и цель выбираются ТОЛЬКО из этого списка, и когда между
@@ -155,8 +158,7 @@ def extra_levels(market):
                         'touches': 2, 'last': 0})
     for z in (market.get('pois') or []):
         if z.get('top') and z.get('bottom'):
-            kind = {'ORDER_BLOCK': 'ордер-блок', 'BREAKER': 'брейкер',
-                    'MITIGATION': 'mitigation'}.get(z.get('type'), 'зона')
+            kind = _ZONE.get(z.get('type'), 'зона')
             out.append({'price': float(z['top']), 'kind': f'верх зоны {kind}', 'touches': 2, 'last': 0})
             out.append({'price': float(z['bottom']), 'kind': f'низ зоны {kind}', 'touches': 2, 'last': 0})
     # Края имбалансов: вход — у ближнего края, стоп — за дальним.
@@ -173,15 +175,21 @@ def extra_levels(market):
             out.append({'price': float(row['swing_low']), 'kind': f'свинг-минимум {name}', 'touches': 3, 'last': 0})
     # Кластеры ликвидаций (оценка): ближний край — магнит и цель, дальний —
     # место, за которое прячут стоп. Два самых тяжёлых на сторону.
+    # Самый тяжёлый кластер — оба края, второй — только ближний: три
+    # края ликвидаций подряд занимали три места из двадцати.
     liq = market.get('liquidations') or {}
     for side_key, who in (('below', 'лонгов'), ('above', 'шортов')):
         rows = sorted(liq.get(side_key) or [], key=lambda c: -c.get('share_pct', 0))[:2]
-        for c in rows:
+        for rank, c in enumerate(rows):
             lo, hi = float(c['from']), float(c['to'])
             near, far = (hi, lo) if side_key == 'below' else (lo, hi)
             out.append({'price': near, 'kind': f'ближний край ликвидаций {who}', 'touches': 2, 'last': 0})
-            if abs(far - near) / near * 100 >= 0.2:
+            if rank == 0 and abs(far - near) / near * 100 >= 0.2:
                 out.append({'price': far, 'kind': f'дальний край ликвидаций {who}', 'touches': 2, 'last': 0})
+    # У точек из снимка «касания» — вес при отборе, а не число заходов
+    # цены; в разметке их не печатаем.
+    for lv in out:
+        lv['synthetic'] = True
     return out
 
 
@@ -200,6 +208,8 @@ def _dedupe(found, span):
         if lv['kind'] not in twin['kind'] and twin['kind'].count(' / ') < 1:
             twin['kind'] = f"{twin['kind']} / {lv['kind']}"
         twin['touches'] = max(twin['touches'], lv['touches'])
+        if not lv.get('synthetic'):
+            twin['synthetic'] = False      # настоящие касания есть — печатаем
     return kept
 
 
@@ -408,7 +418,8 @@ def build(pair, df, at=None, news=None, market=None, history=None):
         '×3 узел, ×0.5 пустота)',
     ]
     for level in found:
-        touches = (f", касаний {level['touches']}" if level['touches'] > 1 else '')
+        touches = (f", касаний {level['touches']}"
+                   if level['touches'] > 1 and not level.get('synthetic') else '')
         vol = (f"   объём у уровня ×{level['volume_x']}" if level.get('volume_x') else '')
         lines.append(f"  {level['id']:<4}{level['price']:>14.6g}   "
                      f"{level['dist_pct']:+6.2f}%   {level['kind']}{touches}{vol}")
@@ -623,8 +634,6 @@ def _smc_lines(smc, price_now):
     return lines
 
 
-_ZONE = {'ORDER_BLOCK': 'ордер-блок', 'BREAKER': 'брейкер',
-         'MITIGATION': 'mitigation-блок', 'WICK': 'зона фитиля'}
 
 
 def _poi_lines(pois, price_now):
