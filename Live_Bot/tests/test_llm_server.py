@@ -47,7 +47,7 @@ class FakeLlamaServer(BaseHTTPRequestHandler):
         time.sleep(FakeLlamaServer.delay)
         if FakeLlamaServer.status != 200:
             self.send_response(FakeLlamaServer.status); self.end_headers(); self.wfile.write(b'boom'); return
-        self._json({'content': FakeLlamaServer.answer, 'tokens_evaluated': 120, 'tokens_predicted': 9,
+        self._json({'content': FakeLlamaServer.answer, 'tokens_evaluated': 20, 'tokens_predicted': 9,
                     'tokens_cached': 3000, 'truncated': False, 'stop_type': 'eos', 'n_ctx': 12288,
                     'timings': {'predicted_per_second': 3.1, 'draft_n': 10, 'draft_n_accepted': 7}})
 
@@ -76,7 +76,7 @@ def test_the_question_goes_as_chatml_with_grammar(server):
     assert sent.startswith('<|im_start|>user' + chr(10) + 'ВОПРОС<|im_end|>') and sent.endswith('assistant' + chr(10))
     assert body['grammar'] == 'root ::= "x"' and body['n_predict'] == 50 and body['cache_prompt'] is True
     assert stats['answer_tokens'] == 9 and stats['finish'] == 'stop'
-    assert stats['prompt_tokens'] == len(body['prompt']) and stats['cached_tokens'] == len(body['prompt']) - 120
+    assert stats['prompt_tokens'] == len(body['prompt']) and stats['cached_tokens'] == len(body['prompt']) - 20
     assert stats['draft_accepted'] == 7 and stats['tok_s'] == 3.1
 
 
