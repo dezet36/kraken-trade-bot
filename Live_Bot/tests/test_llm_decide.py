@@ -725,3 +725,25 @@ class TestTheAnalysisIsSixFields:
 
     def test_a_plain_string_still_works(self):
         assert dec.analysis_text('строкой') == 'строкой'
+
+
+class TestTheJustificationMustMatchThePlan:
+    """BNB 20.09: в tp_why — L12 746.5, в плане — L20: грамматика не пустила
+    близкую цель, модель взяла первую разрешённую и продолжила писать о своей."""
+
+    def test_a_target_justified_by_another_level_is_refused(self):
+        out = verdict(tp_why='L5 (94.0) — скопление минимумов, магнит')
+        assert out['ok'] is False and out['gate'] == 'обоснование не о том плане'
+        assert 'L5' in out['detail'] and 'L2' in out['detail']
+
+    def test_the_price_counts_as_a_mention(self):
+        out = verdict(tp_why='цель у 94.0 — скопление минимумов')
+        assert out['gate'] == 'обоснование не о том плане'
+
+    def test_a_matching_justification_passes(self):
+        out = verdict(tp_why='L2 (107) — скопление максимумов, магнит', stop_why='за L4 98 — низ скопления')
+        assert out['ok'], out.get('gate')
+
+    def test_prose_without_levels_is_not_checked(self):
+        out = verdict(tp_why='ближайший магнит сверху', stop_why='за защищающей структурой')
+        assert out['ok'], out.get('gate')

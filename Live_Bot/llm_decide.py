@@ -343,6 +343,41 @@ def entry_on_pool(parsed, levels):
     return f'{head}, это цель или место выноса; вход — из зоны инициатора или после sweep_reclaim'
 
 
+def _mentioned_levels(text, levels):
+    """Идентификаторы уровней, названные в тексте — по имени или по цене."""
+    import re
+    found = set(re.findall(r'\bL\d{1,2}\b', text or ''))
+    numbers = [float(x) for x in re.findall(r'\d+(?:\.\d+)?', text or '')]
+    for lv in levels or []:
+        price = float(lv.get('price') or 0)
+        if price and any(abs(n - price) / price < 0.0005 for n in numbers):
+            found.add(lv.get('id'))
+    return found
+
+
+def justification_mismatch(parsed, levels):
+    """
+    Обоснование говорит об одном уровне, план — о другом. Описание или ''.
+
+    20.09.2026 BNB: в мысли и в tp_why цель — L12 746.5 (EQL), а в плане —
+    L20 710.4: грамматика не пустила близкую цель по R:R, и модель молча
+    взяла первую разрешённую, продолжая писать про 746.5. План, в который
+    модель сама не верит, хуже отказа.
+    """
+    ids = parsed.get('ids') or {}
+    checks = (('stop_why', 'стоп', {ids.get('stop')}),
+              ('tp_why', 'цель', set(ids.get('tp') or [])))
+    for field, name, chosen in checks:
+        chosen = {c for c in chosen if c}
+        mentioned = _mentioned_levels(parsed.get(field, ''), levels)
+        if not chosen or not mentioned:
+            continue
+        if not (mentioned & chosen):
+            return (f'{name} в плане — {", ".join(sorted(chosen))}, а обоснование говорит о '
+                    f'{", ".join(sorted(mentioned))}: модель выбрала не тот уровень, о котором думала')
+    return ''
+
+
 def stop_inside_entry_zone(side, entry, stop_level, market):
     """
     Вход из зоны (ордер-блок, имбаланс), а стоп — внутри неё. Описание или ''.
@@ -485,6 +520,9 @@ def check(parsed, levels, answer=None, market=None, min_stop=None, atr_pct=None)
     pooled = entry_on_pool(parsed, levels)
     if pooled:
         return _refusal('вход на пуле стопов', pooled, base)
+    mismatch = justification_mismatch(parsed, levels)
+    if mismatch:
+        return _refusal('обоснование не о том плане', mismatch, base)
 
     stop_pct = abs(entry - stop) / entry * 100
     floor = min_stop if min_stop is not None else llm_context.min_stop_pct(atr_pct)
