@@ -39,7 +39,7 @@ ROOT = os.path.dirname(BOT)
 RESEARCH = os.path.join(ROOT, 'research')
 
 # Пакеты стратегий: чистая логика, без биржи и без настроек.
-PACKAGES = ('smc', 'levels', 'grid', 'scalp', 'revert', 'wave', 'rsibb')
+PACKAGES = ('smc', 'levels', 'liquidity', 'rsibb')
 
 # Адаптер -> пакет, который ему единственно разрешён.
 ADAPTERS = {
