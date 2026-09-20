@@ -253,6 +253,7 @@ def last_stats():
     панели, а они спрашивают раньше, чем модель успевает ответить.
     """
     out = {'model': os.path.basename(model_path()) if model_path() else ''}
+    out.update(_last)
     try:
         import llm_server
         if llm_server.enabled():
@@ -261,7 +262,6 @@ def last_stats():
             out['server'] = llm_server.url()
     except Exception:                              # noqa: BLE001
         pass
-    out.update(_last)
     return out
 
 
