@@ -75,7 +75,8 @@ def test_the_question_goes_as_chatml_with_grammar(server):
     sent = ''.join(chr(t) for t in body['prompt'])        # поддельный /tokenize: символ = токен
     assert sent.startswith('<|im_start|>user' + chr(10) + 'ВОПРОС<|im_end|>') and sent.endswith('assistant' + chr(10))
     assert body['grammar'] == 'root ::= "x"' and body['n_predict'] == 50 and body['cache_prompt'] is True
-    assert stats['answer_tokens'] == 9 and stats['cached_tokens'] == 3000 and stats['finish'] == 'stop'
+    assert stats['answer_tokens'] == 9 and stats['finish'] == 'stop'
+    assert stats['prompt_tokens'] == len(body['prompt']) and stats['cached_tokens'] == len(body['prompt']) - 120
     assert stats['draft_accepted'] == 7 and stats['tok_s'] == 3.1
 
 

@@ -179,13 +179,16 @@ def ask(prompt, grammar=None, max_tokens=None, timeout=None):
 
     answer = out.get('content') or ''
     timings = out.get('timings') or {}
-    prompt_tokens = int(out.get('tokens_evaluated') or timings.get('prompt_n') or 0)
+    evaluated = int(out.get('tokens_evaluated') or timings.get('prompt_n') or 0)
     answer_tokens = int(out.get('tokens_predicted') or timings.get('predicted_n') or 0)
-    # Кэш префикса: сколько токенов вопроса сервер не пересчитывал.
-    cached = int(out.get('tokens_cached') or 0)
+    # Вопрос целиком — сколько токенов ушло; из кэша — сколько из них сервер
+    # не пересчитывал. tokens_cached сервера — это размер кэша после ответа,
+    # не то же самое (первая версия печатала «7962 вход, 8690 из кэша»).
+    total = len(prompt_ids) if prompt_ids else evaluated
+    cached = max(0, total - evaluated)
     finish = 'length' if out.get('truncated') or (out.get('stop_type') == 'limit') else 'stop'
     stats = {
-        'prompt_tokens': prompt_tokens + cached if cached and not prompt_tokens else prompt_tokens,
+        'prompt_tokens': total,
         'answer_tokens': answer_tokens,
         'limit': limit,
         'ctx': int(out.get('n_ctx') or getattr(config, 'LLM_CTX', 0)),
