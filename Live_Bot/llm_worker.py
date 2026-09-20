@@ -33,7 +33,9 @@ from logger import log
 
 # Сколько ждём ответа, прежде чем считать модель зависшей. Разбор с критиком
 # укладывается в двадцать минут; тридцать — с запасом на загрузку модели.
-CALL_TIMEOUT_SEC = int(os.getenv('LLM_CALL_TIMEOUT_MIN', 30)) * 60
+# 45 минут с 20.09.2026: вопрос ~7500 токенов плюс мысль и ответ до 3000
+# при 1.6 ток/с — до 35 минут в норме; 30 обрубали бы честный разбор.
+CALL_TIMEOUT_SEC = int(os.getenv('LLM_CALL_TIMEOUT_MIN', 45)) * 60
 
 _lock = threading.Lock()
 _process = None
