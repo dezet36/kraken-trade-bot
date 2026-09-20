@@ -38,7 +38,12 @@ class FakeLlamaServer(BaseHTTPRequestHandler):
     def do_POST(self):
         import time
         body = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
+        if self.path == '/tokenize':
+            # один токен на символ — границы совпадают всегда
+            self._json({'tokens': [ord(ch) for ch in body['content']]}); return
         FakeLlamaServer.seen.append(body)
+        if body.get('n_predict') == 0:
+            self._json({'content': '', 'tokens_evaluated': len(body['prompt']), 'tokens_predicted': 0}); return
         time.sleep(FakeLlamaServer.delay)
         if FakeLlamaServer.status != 200:
             self.send_response(FakeLlamaServer.status); self.end_headers(); self.wfile.write(b'boom'); return
@@ -67,7 +72,8 @@ def test_the_question_goes_as_chatml_with_grammar(server):
     answer, stats = llm_server.ask('ВОПРОС', grammar='root ::= "x"', max_tokens=50)
     assert answer == '{"d":"skip"}'
     body = FakeLlamaServer.seen[-1]
-    assert body['prompt'].startswith('<|im_start|>user\nВОПРОС<|im_end|>') and body['prompt'].endswith('assistant\n')
+    sent = ''.join(chr(t) for t in body['prompt'])        # поддельный /tokenize: символ = токен
+    assert sent.startswith('<|im_start|>user' + chr(10) + 'ВОПРОС<|im_end|>') and sent.endswith('assistant' + chr(10))
     assert body['grammar'] == 'root ::= "x"' and body['n_predict'] == 50 and body['cache_prompt'] is True
     assert stats['answer_tokens'] == 9 and stats['cached_tokens'] == 3000 and stats['finish'] == 'stop'
     assert stats['draft_accepted'] == 7 and stats['tok_s'] == 3.1
@@ -101,3 +107,13 @@ def test_a_slow_server_is_named_hung(server):
     with pytest.raises(RuntimeError) as err:
         llm_server.ask('x', timeout=1)
     assert err.value.llm_gate == 'модель зависла'
+
+
+def test_the_prefix_is_warmed_before_the_question(server):
+    import llm_prompt
+    full = 'СИСТЕМА ' * 40 + llm_server.PREFIX_SEP + 'Пара: XRPUSDT'
+    llm_server.ask(full, max_tokens=5)
+    warm, question = FakeLlamaServer.seen[-2], FakeLlamaServer.seen[-1]
+    assert warm['n_predict'] == 0
+    assert question['prompt'][:len(warm['prompt'])] == warm['prompt'], 'прогрев — точное начало вопроса'
+    assert ''.join(chr(t) for t in warm['prompt']).endswith(llm_server.PREFIX_SEP)

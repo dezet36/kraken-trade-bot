@@ -71,6 +71,62 @@ def props():
         return {}
 
 
+# Разделитель между системным промтом и разметкой — тот же, что ставит
+# llm_prompt.build. По нему ищется общее начало вопроса.
+PREFIX_SEP = chr(10) + '-' * 40 + chr(10)
+
+
+def _tokenize(text, timeout=60):
+    data = json.dumps({'content': text}).encode('utf-8')
+    req = urllib.request.Request(f'{url()}/tokenize', data=data,
+                                 headers={'Content-Type': 'application/json'})
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        return list(json.loads(resp.read().decode('utf-8')).get('tokens') or [])
+
+
+def _warm_prefix(full_text, full_ids):
+    """
+    Прогревает кэш общим началом вопроса (системный промт) — отдельным
+    запросом без генерации.
+
+    ЗАЧЕМ. У Qwen3.6 часть слоёв рекуррентная (Gated DeltaNet): состояние
+    нельзя откатить на произвольную позицию, поэтому llama-server
+    переиспользует кэш только когда сохранённый промт целиком совпадает с
+    началом нового. После разбора ETH в кэше лежит «промт+разметка ETH+ответ»,
+    и вопрос про XRP расходится с ним на 4500-м токене — сервер считал всё
+    заново: 7961 токен, 13 минут (20.09.2026, task 101). Запрос ровно с
+    префиксом и n_predict=0 оставляет состояние на границе, и следующий
+    вопрос продолжает с неё. Если префикс уже в кэше, прогрев стоит секунду.
+
+    Возвращает число токенов префикса или 0, если прогрев не удался.
+    """
+    head, sep, _ = full_text.partition(PREFIX_SEP)
+    if not sep:
+        return 0
+    try:
+        prefix_ids = _tokenize(head + sep)
+    except Exception:                              # noqa: BLE001
+        return 0
+    n = len(prefix_ids)
+    if n < 64 or full_ids[:n] != prefix_ids:
+        return 0                                   # граница легла не на токен
+    body = {'prompt': prefix_ids, 'n_predict': 0, 'cache_prompt': True}
+    data = json.dumps(body).encode('utf-8')
+    req = urllib.request.Request(f'{url()}/completion', data=data,
+                                 headers={'Content-Type': 'application/json'})
+    started = time.time()
+    try:
+        with urllib.request.urlopen(req, timeout=CALL_TIMEOUT_SEC) as resp:
+            resp.read()
+    except Exception as exc:                       # noqa: BLE001
+        log(f'   модель: прогрев префикса не удался — {exc}')
+        return 0
+    spent = time.time() - started
+    if spent > 5:
+        log(f'   модель: префикс вопроса ({n} ток.) посчитан заново за {spent:.0f} с')
+    return n
+
+
 def ask(prompt, grammar=None, max_tokens=None, timeout=None):
     """
     Один вопрос серверу. -> (текст ответа, статистика) как у llm_worker.ask.
@@ -79,8 +135,18 @@ def ask(prompt, grammar=None, max_tokens=None, timeout=None):
     «модель упала».
     """
     limit = int(max_tokens or config.LLM_MAX_TOKENS)
+    text = _chatml(prompt + ('\n' + config.LLM_THINK_TAG if config.LLM_THINK_TAG else ''))
+    # Вопрос уходит токенами, а не строкой: так префикс прогрева и начало
+    # вопроса совпадают гарантированно, а не «обычно».
+    prompt_ids = None
+    try:
+        prompt_ids = _tokenize(text)
+        _warm_prefix(text, prompt_ids)
+    except Exception as exc:                       # noqa: BLE001
+        log(f'   модель: токенизация не удалась, шлю строкой — {exc}')
+        prompt_ids = None
     body = {
-        'prompt': _chatml(prompt + ('\n' + config.LLM_THINK_TAG if config.LLM_THINK_TAG else '')),
+        'prompt': prompt_ids if prompt_ids else text,
         'n_predict': limit,
         'temperature': float(getattr(config, 'LLM_TEMPERATURE', 0.3)),
         'cache_prompt': True,
