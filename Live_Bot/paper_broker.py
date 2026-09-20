@@ -1010,8 +1010,9 @@ class PaperBroker:
         while cursor + 2 * BAR_MS <= now and pages < self.MAX_PAGES:
             pages += 1
             try:
-                raw = self.client.fetch_ohlcv(pair, BAR_TF, since=cursor + 1,
-                                              limit=self.MAX_BARS)
+                import exchange
+                raw = exchange.fetch_raw(self.client, pair, BAR_TF,
+                                         cursor + 1, self.MAX_BARS)
             except Exception as exc:
                 log(f"   ⚠️ {pair}: свечи недоступны — {exc}")
                 break

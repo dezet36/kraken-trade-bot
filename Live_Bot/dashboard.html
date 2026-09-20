@@ -2984,7 +2984,7 @@ function renderUpdate(writable) {
       </div>
       <div class="upd-state ${UPDATE.behind ? 'has' : ''}">${state}</div>
       ${list ? `<div class="upd-list">${list}</div>` : ''}
-      ${UPDATE.reason && !UPDATE.can_update
+      ${UPDATE.reason && !UPDATE.can_update && UPDATE.reason !== state
         ? `<div class="ctl-note">${esc(UPDATE.reason)}</div>` : ''}
       ${UPDATE.restart_required
         ? `<div class="warn-box">Код обновлён, но работает ещё старый: Python

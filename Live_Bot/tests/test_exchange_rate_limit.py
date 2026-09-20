@@ -39,25 +39,25 @@ def no_sleep(monkeypatch):
 
 def test_rate_limit_is_retried():
     ex = Flaky(2, ccxt.RateLimitExceeded('bybit {"retCode":10006}'))
-    assert exchange._fetch_with_backoff(ex, 'BTCUSDT', '1h', None, 10) == [[1, 1, 1, 1, 1, 1]]
+    assert exchange.fetch_raw(ex, 'BTCUSDT', '1h', None, 10) == [[1, 1, 1, 1, 1, 1]]
     assert ex.calls == 3
 
 
 def test_bybit_code_in_a_plain_exchange_error_is_retried_too():
     ex = Flaky(1, ccxt.NetworkError('bybit {"retCode":10006,"retMsg":"Too many visits"}'))
-    assert exchange._fetch_with_backoff(ex, 'BTCUSDT', '1h', None, 10)
+    assert exchange.fetch_raw(ex, 'BTCUSDT', '1h', None, 10)
     assert ex.calls == 2
 
 
 def test_other_network_errors_are_not_retried():
     ex = Flaky(1, ccxt.NetworkError('timeout'))
     with pytest.raises(ccxt.NetworkError):
-        exchange._fetch_with_backoff(ex, 'BTCUSDT', '1h', None, 10)
+        exchange.fetch_raw(ex, 'BTCUSDT', '1h', None, 10)
     assert ex.calls == 1
 
 
 def test_a_persistent_limit_still_fails_after_the_retries():
     ex = Flaky(99, ccxt.RateLimitExceeded('10006'))
     with pytest.raises(ccxt.RateLimitExceeded):
-        exchange._fetch_with_backoff(ex, 'BTCUSDT', '1h', None, 10)
+        exchange.fetch_raw(ex, 'BTCUSDT', '1h', None, 10)
     assert ex.calls == len(exchange.RATE_LIMIT_RETRIES) + 1

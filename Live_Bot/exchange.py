@@ -285,8 +285,14 @@ def reset_exchange():
 RATE_LIMIT_RETRIES = (2.0, 4.0, 8.0)
 
 
-def _fetch_with_backoff(ex, native, timeframe, since, limit):
-    """Свечи с повтором после предела запросов; прочие ошибки — наверх."""
+def fetch_raw(ex, native, timeframe, since, limit):
+    """
+    Сырые свечи ccxt с повтором после предела запросов; прочие ошибки — наверх.
+
+    Общая точка для всех, кто ходит за свечами мимо fetch_ohlcv: фантомный
+    брокер берёт пятиминутки постранично и тоже упирался в предел в начале
+    часа.
+    """
     import time
     for pause in RATE_LIMIT_RETRIES + (None,):
         try:
@@ -324,7 +330,7 @@ def fetch_ohlcv(timeframe, limit=500, symbol=None, client=None, since=None):
         if native is None:
             log(f'⚠️ {symbol}: нет такого рынка на {getattr(ex, "id", "бирже")}')
             return None
-        ohlcv = _fetch_with_backoff(ex, native, timeframe, since, limit)
+        ohlcv = fetch_raw(ex, native, timeframe, since, limit)
         if not ohlcv or len(ohlcv) < 10:
             log(f"⚠️ Мало данных для {symbol} {timeframe}: {len(ohlcv) if ohlcv else 0} свечей")
             return None
