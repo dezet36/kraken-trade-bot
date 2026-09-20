@@ -130,7 +130,7 @@ def _apply_bybit_demo(client):
 
 def make_client(exchange_name: str, api_key: str, api_secret: str, mode: str = 'DEMO'):
     """
-    Фабрика: ccxt-клиент под конкретные ключи (мульти-тенант).
+    Фабрика: ccxt-клиент под конкретные ключи (проверка ключей из панели).
     exchange_name: 'bybit' | 'bingx'; mode: 'DEMO' | 'LIVE'.
     """
     name = (exchange_name or 'bybit').lower()

@@ -65,7 +65,6 @@ DATA_FILES = (
     'Live_Bot/paper_state.json',
     'Live_Bot/paper_trades.csv',
     'Live_Bot/paper_trades.jsonl',
-    'Live_Bot/platform.db',
 )
 
 

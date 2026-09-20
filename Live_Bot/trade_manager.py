@@ -55,22 +55,12 @@ def _refuse(signal, gate, detail='', cost_share=''):
 
 
 class LiveTradeManager:
-    def __init__(self, exchange_client=None, telegram_id=None):
-        # Мульти-тенант: свой клиент и своё состояние на пользователя.
-        # Legacy (telegram_id=None): клиент из .env, файлы состояния в модульной папке.
-        self.telegram_id = telegram_id
+    def __init__(self, exchange_client=None):
         self.exchange = exchange_client if exchange_client is not None else get_exchange()
 
-        if telegram_id is not None:
-            state_dir = os.path.join(config.DATA_DIR, 'state', str(telegram_id))
-            os.makedirs(state_dir, exist_ok=True)
-            self.cooldown_file = os.path.join(state_dir, 'cooldown_state.json')
-            self.positions_file = os.path.join(state_dir, 'positions_state.json')
-            self.pending_file  = os.path.join(state_dir, 'pending_orders.json')
-        else:
-            self.cooldown_file = COOLDOWN_FILE
-            self.positions_file = POSITIONS_FILE
-            self.pending_file  = PENDING_ORDERS_FILE
+        self.cooldown_file = COOLDOWN_FILE
+        self.positions_file = POSITIONS_FILE
+        self.pending_file  = PENDING_ORDERS_FILE
 
         # Карта «пара -> стратегия» для параллельной торговли двумя стратегиями.
         # Живёт отдельным файлом и переживает рестарт: без неё после перезапуска
@@ -338,7 +328,7 @@ class LiveTradeManager:
                     exch_map[self._norm_symbol(ep.get('symbol', ''))] = ep
         except Exception as e:
             log(f"⚠️ W7: не удалось загрузить позиции с биржи — {e}")
-            tg.error_alert(f"W7 ошибка восстановления: {e}", telegram_id=self.telegram_id)
+            tg.error_alert(f"W7 ошибка восстановления: {e}")
             return
 
         recovered = []
@@ -372,7 +362,7 @@ class LiveTradeManager:
                 log(f"W7: ❌ ошибка восстановления {pair}: {e}")
 
         if recovered:
-            tg.positions_restored(recovered, telegram_id=self.telegram_id)
+            tg.positions_restored(recovered)
             log(f"W7: восстановлено {len(recovered)} позиций")
         else:
             log("W7: ни одну позицию не удалось восстановить")
@@ -562,17 +552,7 @@ class LiveTradeManager:
             return 0
 
     def get_trading_balance(self):
-        """База для расчёта размера позиции. Если юзер задал свой депозит (deposit_usd>0) —
-        используем ЕГО «как есть» (по решению пользователя), иначе реальный баланс счёта."""
-        if self.telegram_id is not None:
-            try:
-                import db
-                user = db.get_user(self.telegram_id)
-                dep = (user or {}).get('deposit_usd')
-                if dep and float(dep) > 0:
-                    return float(dep)
-            except Exception:
-                pass
+        """База для расчёта размера позиции — реальный баланс счёта."""
         return self.get_real_balance()
 
     # ── W9: Рыночный вход (fallback) ─────────────────────────────────────────
@@ -827,7 +807,7 @@ class LiveTradeManager:
             signal_for_tg['params'] = params
             # График сетапа уже был отправлен при постановке лимита — здесь краткое
             # подтверждение заполнения без второго графика.
-            tg.trade_opened(signal_for_tg, df_1h=None, telegram_id=self.telegram_id)
+            tg.trade_opened(signal_for_tg, df_1h=None)
 
             log(f"✅ {pair}: GTC лимит исполнен @ ${_fmt_p(actual_entry)} "
                 f"(ожидание {waited_min} мин) | Баланс: ${self.get_real_balance():.2f}")
@@ -1205,7 +1185,6 @@ class LiveTradeManager:
                         f"Инвалидация @ ${_fmt_p(inv)}")
                     tg.limit_order_placed(trading_pair, side, limit_price,
                                           params['stop_loss'], config.PENDING_ORDER_MAX_HOURS,
-                                          telegram_id=self.telegram_id,
                                           signal=signal, df_1h=df_1h)
                     return True
                 except Exception as e:
@@ -1289,7 +1268,7 @@ class LiveTradeManager:
 
             # Уведомление с ФАКТИЧЕСКИМИ params (entry/SL могли скорректироваться из-за
             # проскальзывания рынка) — signal сам по себе всё ещё хранит плановые.
-            tg.trade_opened({**signal, 'params': params}, df_1h=df_1h, telegram_id=self.telegram_id)
+            tg.trade_opened({**signal, 'params': params}, df_1h=df_1h)
             log(f"💰 Баланс после открытия: ${self.get_real_balance():.2f}")
             return True
 
@@ -1596,8 +1575,7 @@ class LiveTradeManager:
                     remaining_pct = int(round(position['remaining_size'] / params['position_size'] * 100))
                     journal.record_tp_hit(position, tp_num, current_price)
                     tg.tp_hit(trading_pair, tp_num, setup['type'], current_price,
-                              remaining_pct, position['realized_pnl'],
-                              telegram_id=self.telegram_id)
+                              remaining_pct, position['realized_pnl'])
 
                     # Стоп в безубыток после частичной фиксации — тоже только по
                     # заказу стратегии: для SMC это отнимает основную прибыль.
@@ -1679,10 +1657,9 @@ class LiveTradeManager:
             f"(грязный ${gross:+.4f} − издержки ${fees + funding:.4f}, "
             f"{costs['fees_source']}) | Дневной PnL: ${self.daily_pnl:+.4f}")
 
-        # Записываем в журнал (БД per-user при мульти-тенант, иначе CSV)
+        # Записываем в журнал (CSV + JSONL)
         balance_after = self.get_real_balance()
-        journal.close_trade(position, exit_price, reason, pnl, balance_after, config,
-                            telegram_id=self.telegram_id, gross_pnl=gross, costs=costs)
+        journal.close_trade(position, exit_price, reason, pnl, balance_after, config, gross_pnl=gross, costs=costs)
         # Что было с ценой ПОСЛЕ выхода. Отвечает на вопрос, который по самому
         # журналу задать нельзя: выход спас или обрезал. На бумаге такое
         # наблюдение ведётся с 30 августа 2026, бой получил его тогда же.
@@ -1709,7 +1686,6 @@ class LiveTradeManager:
             exit_price=exit_price,
             duration_min=duration_min,
             tps_hit=position.get('tp_hit', 0),
-            telegram_id=self.telegram_id,
         )
 
     def close_position_by_pair(self, trading_pair: str):
@@ -1754,19 +1730,15 @@ class LiveTradeManager:
             return False, 0.0
 
     def get_stats_dict(self) -> dict:
-        """Статистика юзера: из БД (мульти-тенант) или CSV-журнала (legacy). None если пусто."""
-        if self.telegram_id is not None:
-            import db
-            trades = db.get_user_trades(self.telegram_id)
-        else:
-            jf = journal.JOURNAL_FILE
-            if not os.path.exists(jf):
-                return None
-            try:
-                with open(jf, 'r', encoding='utf-8') as f:
-                    trades = list(csv.DictReader(f))
-            except Exception:
-                return None
+        """Статистика по CSV-журналу. None если пусто."""
+        jf = journal.JOURNAL_FILE
+        if not os.path.exists(jf):
+            return None
+        try:
+            with open(jf, 'r', encoding='utf-8') as f:
+                trades = list(csv.DictReader(f))
+        except Exception:
+            return None
         return compute_stats(trades)
 
     def get_stats(self):
@@ -1794,8 +1766,8 @@ class LiveTradeManager:
 def compute_stats(trades) -> dict:
     """Сводная статистика по списку сделок (строки журнала/БД). None если пусто.
 
-    Вынесено из метода get_stats_dict, чтобы Telegram-команды могли считать прямо
-    из БД (db.get_user_trades) без живого LiveTradeManager."""
+    Вынесено из метода get_stats_dict, чтобы Telegram-команды могли считать
+    без живого LiveTradeManager."""
     if not trades:
         return None
 

@@ -15,7 +15,7 @@ from datetime import datetime
 
 def _send(text: str, chat_id=None) -> bool:
     """Отправка сообщения. chat_id=None -> legacy общий чат (config.TELEGRAM_CHAT_ID);
-    в мульти-тенант режиме передаётся telegram_id конкретного юзера."""
+    адресат — общий чат из .env."""
     target = chat_id if chat_id is not None else config.TELEGRAM_CHAT_ID
     if not config.TELEGRAM_BOT_TOKEN or not target:
         return False
@@ -62,7 +62,7 @@ def _dur_str(minutes: int) -> str:
 
 def _send_photo(photo_path: str, caption: str = "", chat_id=None) -> bool:
     """Send a photo file via Telegram sendPhoto. Deletes the file afterwards.
-    chat_id=None -> legacy общий чат; иначе telegram_id конкретного юзера."""
+    chat_id=None -> общий чат из .env."""
     target = chat_id if chat_id is not None else config.TELEGRAM_CHAT_ID
     if not config.TELEGRAM_BOT_TOKEN or not target:
         return False
@@ -115,7 +115,7 @@ def bot_started(balance: float):
     )
 
 
-def positions_restored(recovered: list, telegram_id=None):
+def positions_restored(recovered: list):
     """W7: уведомление о восстановленных позициях после перезапуска."""
     if not recovered:
         return
@@ -132,12 +132,11 @@ def positions_restored(recovered: list, telegram_id=None):
         f"━━━━━━━━━━━━━━━━━━━━\n"
         + "\n".join(lines) +
         f"\n⏰ {_now()}",
-        chat_id=telegram_id,
     )
 
 
 def limit_order_placed(pair: str, side: str, limit_price: float, stop_loss: float,
-                       max_hours: float, telegram_id=None, signal: dict = None, df_1h=None):
+                       max_hours: float, signal: dict = None, df_1h=None):
     """W9+: GTC лимитный ордер выставлен, мониторинг до N часов.
     Если переданы signal+df_1h — прикладывает график сетапа (импульс, зоны, вход/SL/TP)."""
     dir_s = "LONG" if side == 'buy' else "SHORT"
@@ -155,12 +154,12 @@ def limit_order_placed(pair: str, side: str, limit_price: float, stop_loss: floa
         try:
             from chart_generator import generate_trade_chart
             chart_path = generate_trade_chart(signal, df_1h)
-            if chart_path and _send_photo(chart_path, caption=text, chat_id=telegram_id):
+            if chart_path and _send_photo(chart_path, caption=text):
                 return
         except Exception as e:
             log(f"limit_order_placed: ошибка графика — {e}")
 
-    _send(text, chat_id=telegram_id)
+    _send(text)
 
 
 def bot_stopped(trade_count: int, daily_pnl: float, balance: float):
@@ -194,7 +193,7 @@ def _fmt_ts(ts) -> str:
             return '—'
 
 
-def trade_opened(signal: dict, df_1h=None, telegram_id=None):
+def trade_opened(signal: dict, df_1h=None):
     setup   = signal["setup"]
     trigger = signal["trigger"]
     params  = signal["params"]
@@ -279,17 +278,17 @@ def trade_opened(signal: dict, df_1h=None, telegram_id=None):
         try:
             from chart_generator import generate_trade_chart
             chart_path = generate_trade_chart(signal, df_1h)
-            if chart_path and _send_photo(chart_path, caption=text, chat_id=telegram_id):
+            if chart_path and _send_photo(chart_path, caption=text):
                 return  # photo sent — no need for plain text
         except Exception as e:
             log(f"trade_opened: ошибка графика — {e}")
 
     # Fallback: plain text message
-    _send(text, chat_id=telegram_id)
+    _send(text)
 
 
 def tp_hit(pair: str, tp_num: int, direction: str, price: float,
-           remaining_pct: int, realized_pnl: float = 0.0, telegram_id=None):
+           remaining_pct: int, realized_pnl: float = 0.0):
     icons   = {1: "🎯", 2: "🏆"}
     icon    = icons.get(tp_num, "🎯")
     dir_s   = "LONG" if direction == "LONG" else "SHORT"
@@ -301,7 +300,6 @@ def tp_hit(pair: str, tp_num: int, direction: str, price: float,
         f"Закрыто:       {closed_pct}% позиции\n"
         f"Осталось:      {remaining_pct}%\n"
         f"Зафиксировано: <b>{pnl_str}</b>",
-        chat_id=telegram_id,
     )
 
 
@@ -317,7 +315,7 @@ def trail_activated(pair: str, direction: str, trail_level: float):
 def trade_closed(pair: str, direction: str, reason: str, pnl: float,
                  daily_pnl: float, balance: float,
                  entry: float = 0.0, exit_price: float = 0.0,
-                 duration_min: int = 0, tps_hit: int = 0, telegram_id=None):
+                 duration_min: int = 0, tps_hit: int = 0):
     dir_s = "LONG" if direction == "LONG" else "SHORT"
 
     n_tp = len(getattr(config, 'TP_CLOSE_FRACTIONS', [1.0]))
@@ -351,7 +349,6 @@ def trade_closed(pair: str, direction: str, reason: str, pnl: float,
         f"Дневной PnL: <b>{_pnl_str(daily_pnl)}</b>\n"
         f"Баланс:      <b>${balance:,.2f}</b>\n"
         f"⏰ {_now()}",
-        chat_id=telegram_id,
     )
 
 
@@ -370,7 +367,7 @@ def _allowed(event: str) -> bool:
         return True                                # настройка недоступна — не молчим
 
 
-def llm_setup_found(signal: dict, df_1h=None, telegram_id=None, frames=None):
+def llm_setup_found(signal: dict, df_1h=None, frames=None):
     """
     План модели принят (прошёл проверки кода и критика): монета, вход, стоп,
     цели, условие и почему — с графиком, где это нарисовано.
@@ -443,11 +440,11 @@ def llm_setup_found(signal: dict, df_1h=None, telegram_id=None, frames=None):
                     log(f"Telegram: свечи {tf} для графика не пришли — {exc}; рисую часовые")
             text += f"\nГрафик: {chart_frame.SPAN_TEXT.get(shown, shown)}"
             chart_path = generate_trade_chart(signal, df, timeframe=shown)
-            if chart_path and _send_photo(chart_path, caption=text, chat_id=telegram_id):
+            if chart_path and _send_photo(chart_path, caption=text):
                 return True
         except Exception as exc:                       # noqa: BLE001
             log(f"Telegram: график плана ИИ не собрался — {exc}")
-    return _send(text, chat_id=telegram_id)
+    return _send(text)
 
 
 def llm_setup_rejected(pair: str, side: str, entry: float, gate: str, detail: str = ''):
@@ -545,7 +542,7 @@ def scan_result(liquid: int, candidates: int, active_positions: int):
     )
 
 
-def error_alert(message: str, telegram_id=None):
+def error_alert(message: str):
     if not _allowed('error'):
         return
     _send(
@@ -553,41 +550,8 @@ def error_alert(message: str, telegram_id=None):
         f"━━━━━━━━━━━━━━━━━━━━\n"
         f"<code>{message[:400]}</code>\n"
         f"⏰ {_now()}",
-        chat_id=telegram_id,
     )
 
 
 # ── Подписка (платформа) ───────────────────────────────────────────────────────
 
-def subscription_expiring(days: int, until_str: str, telegram_id=None):
-    """Напоминание за N дней до окончания доступа."""
-    _send(
-        f"⏳ <b>Подписка скоро истекает</b>\n"
-        f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"Осталось: <b>{days} дн.</b> (до {until_str})\n"
-        f"Продли заранее, чтобы бот не перестал открывать новые сделки.\n"
-        f"Оплата: /pay  ·  Статус: /subscription",
-        chat_id=telegram_id,
-    )
-
-
-def subscription_expired(telegram_id=None):
-    """Уведомление в момент окончания доступа."""
-    _send(
-        f"⛔ <b>Подписка истекла</b>\n"
-        f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"Новые сделки больше не открываются. Уже открытые позиции продолжают вестись\n"
-        f"до их TP/SL — принудительно не закрываем.\n"
-        f"Возобновить доступ: /pay",
-        chat_id=telegram_id,
-    )
-
-
-def subscription_extended(days_added: int, until_str: str, telegram_id=None):
-    """Уведомление о продлении подписки (оплата или админ-грант)."""
-    _send(
-        f"✅ <b>Подписка продлена</b> на {days_added} дн.\n"
-        f"Доступ до: <b>{until_str}</b>\n"
-        f"Спасибо! 🚀",
-        chat_id=telegram_id,
-    )

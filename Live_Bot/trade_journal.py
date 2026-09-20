@@ -4,8 +4,7 @@ One row per trade, written at close. Tracks full lifecycle in-memory.
 Open in Excel / Google Sheets for analysis.
 
 Расширение 2026-07-05: ПОЛНЫЙ дамп каждой сделки дополнительно пишется в
-trades_detail.jsonl (одна JSON-строка на сделку; мульти-тенант — в
-state/<telegram_id>/trades_detail.jsonl). Содержит всё для разбора: контекст
+trades_detail.jsonl (одна JSON-строка на сделку). Содержит всё для разбора: контекст
 скана (score/RR/близость), якоря импульса A/B со временами, границы зоны A,
 уровень инвалидации, жизненный цикл входа (лимит/маркет, ожидание, слиппедж),
 MFE/MAE с R-мультипликаторами, время безубытка. CSV-колонки легаси не меняются.
@@ -197,7 +196,7 @@ def open_trade(position: dict, signal: dict, balance_before: float) -> int:
         # Размах свечей в процентах цены на момент решения. None, если свечей
         # не хватило — пустая клетка честнее выдуманного числа.
         'atr_pct':          signal.get('atr_pct'),
-        # контекст скана: score и компоненты (bot.py/platform_manager кладут в signal)
+        # контекст скана: score и компоненты (bot.py кладёт в signal)
         **{f'scan_{k}': v for k, v in (signal.get('scan') or {}).items()},
     }
     return trade_id
@@ -214,12 +213,11 @@ def record_tp_hit(position: dict, tp_num: int, price: float):
 
 
 def close_trade(position: dict, exit_price: float, exit_reason: str,
-                pnl_usd: float, balance_after: float, import_config, telegram_id=None,
+                pnl_usd: float, balance_after: float, import_config,
                 gross_pnl=None, costs=None):
     """
     Вызывается при закрытии сделки. Пишет полную строку:
-    - telegram_id задан (мульти-тенант) -> в БД (db.record_trade)
-    - иначе -> в общий CSV (legacy одно-юзер)
+    - в общий CSV-журнал и JSONL с полным дампом
     Возвращает построенную строку (dict) либо None.
 
     pnl_usd — ЧИСТЫЙ итог, уже за вычетом издержек. gross_pnl и costs приходят
@@ -374,20 +372,14 @@ def close_trade(position: dict, exit_price: float, exit_reason: str,
         except Exception:
             pass
 
-    if telegram_id is not None:
-        import db
-        db.record_trade(telegram_id, row)   # полный row уходит в data-JSON
-        detail_path = os.path.join(config.DATA_DIR, 'state',
-                                   str(telegram_id), 'trades_detail.jsonl')
-    else:
-        csv_journal.migrate_header(JOURNAL_FILE, COLUMNS, 'боевой журнал')
-        write_header = not os.path.exists(JOURNAL_FILE) or os.path.getsize(JOURNAL_FILE) == 0
-        with open(JOURNAL_FILE, 'a', encoding='utf-8', newline='') as f:
-            writer = csv.DictWriter(f, fieldnames=COLUMNS, extrasaction='ignore')
-            if write_header:
-                writer.writeheader()
-            writer.writerow(row)
-        detail_path = DETAIL_JSONL
+    csv_journal.migrate_header(JOURNAL_FILE, COLUMNS, 'боевой журнал')
+    write_header = not os.path.exists(JOURNAL_FILE) or os.path.getsize(JOURNAL_FILE) == 0
+    with open(JOURNAL_FILE, 'a', encoding='utf-8', newline='') as f:
+        writer = csv.DictWriter(f, fieldnames=COLUMNS, extrasaction='ignore')
+        if write_header:
+            writer.writeheader()
+        writer.writerow(row)
+    detail_path = DETAIL_JSONL
 
     # JSONL с ПОЛНЫМ дампом — в обоих режимах (сбой записи не роняет закрытие сделки)
     try:

@@ -149,7 +149,7 @@ fi
 
 # ── Дальше — обычный установщик ──────────────────────────────────────────────
 cd "$DIR"
-chmod +x install.sh run.sh install_service.sh update.sh bootstrap.sh 2>/dev/null || true
+chmod +x install.sh run.sh install_service.sh bootstrap.sh 2>/dev/null || true
 
 echo
 echo "── Установка окружения ─────────────────────────────────────────────────"

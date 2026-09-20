@@ -83,9 +83,9 @@ def scan_for_setups(liquid_pairs, trade_manager, client=None):
     Only loads 5M data later (in bot.py) for the top candidates to
     minimise API calls.
 
-    client=None -> legacy single-user OHLCV (get_exchange). В мульти-тенант
-    режиме передаётся общий keyless market-client (make_market_client), чтобы
-    скан рынка делался ОДИН раз и не зависел от ключей конкретного юзера.
+    client=None -> клиент с ключами из .env (get_exchange); бот передаёт
+    общий keyless market-client (make_market_client), чтобы скан рынка не
+    зависел от ключей.
     """
     candidates = []
     report.begin('FIBO')
