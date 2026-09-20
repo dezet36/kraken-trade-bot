@@ -60,7 +60,7 @@ def skip_answer(n, bias='up', analysis_len=150):
 
 
 def enter_answer(n, side='LONG', entry='L3', stop='L4', tp=('L1',), inval=None,
-                 when='now', level=None, bias='up', p='0.62', trig_note='возврат в уровень'):
+                 when='now', level=None, bias='up', p='0.60', trig_note='возврат в уровень'):
     trigger = {'when': when, 'note': trig_note}
     if when != 'now':
         trigger = {'when': when, 'level': level, 'note': trig_note}
@@ -118,7 +118,7 @@ class TestValidAnswersAreAccepted:
             level = RNG.choice(levels)
             text = enter_answer(n, side, levels[e], levels[s], tuple(levels[t] for t in targets),
                                 when=when, level=level, bias=RNG.choice(['up', 'down', 'flat']),
-                                p=RNG.choice(['0.51', '0.62', '0.75', '0.90']))
+                                p=RNG.choice(['0.50', '0.60', '0.70', '0.75']))
             assert g.accepts(text), text[:200]
             accepted += 1
         # У четырёх уровней сочетаний мало — часть выборки пуста законно.
@@ -182,6 +182,9 @@ class TestInvalidAnswersAreRejected:
         g, _ = grammar(6)
         assert not g.accepts(enter_answer(6, p='1.00'))
         assert not g.accepts(enter_answer(6, p='0.00'))
+        # Шкала: только шесть ступеней, «0.62 на глаз» невыразимо.
+        assert not g.accepts(enter_answer(6, p='0.62'))
+        assert g.accepts(enter_answer(6, p='0.65'))
 
     def test_the_bug_of_the_day_is_caught(self):
         """`(0, 2)` вместо `{0,2}` — разборщик такого не знает и падает."""

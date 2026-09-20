@@ -75,6 +75,10 @@ TRIGGER_CHARS = 160
 WHY_CHARS = 240
 RISK_CHARS = 180
 STOP_WHY_CHARS = 140
+# Вероятность — шкала, а не число: локальная модель не калибруется, а
+# 0.65/0.75 «на глаз» была во всех 40 разборах. Шесть ступеней с
+# названными условиями в промте.
+P_SCALE = ('0.50', '0.55', '0.60', '0.65', '0.70', '0.75')
 TP_WHY_CHARS = 140
 ALT_CHARS = 240
 
@@ -178,7 +182,7 @@ plan     ::= {' | '.join(plans)}
 cf       ::= "{{" ws "\\"poi\\":" ws bool ws "," ws "\\"vp\\":" ws bool ws "," ws "\\"der\\":" ws bool ws "," ws "\\"smc\\":" ws bool ws "," ws "\\"flow\\":" ws bool ws "}}"
 bool     ::= "true" | "false"
 bias     ::= "\\"up\\"" | "\\"down\\"" | "\\"flat\\""
-prob     ::= "0." [0-9] [1-9] | "0." [1-9] [0-9]
+prob     ::= {' | '.join(chr(34) + v + chr(34) for v in P_SCALE)}
 regime   ::= {_text(REGIME_CHARS)}
 analysis ::= {_analysis_rule()}
 part     ::= {_text(ANALYSIS_CHARS)}

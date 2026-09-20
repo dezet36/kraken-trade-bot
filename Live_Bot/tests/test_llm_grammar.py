@@ -144,7 +144,10 @@ class TestTheNumbersAreBounded:
         text = gr.build(['L1', 'L2', 'L3'])
         prob = [l for l in text.splitlines() if l.startswith('prob')][0]
         assert '"1.' not in prob
-        assert '"0."' in prob
+        # Шкала из шести ступеней 0.50…0.75: «на глаз» невыразимо.
+        for value in gr.P_SCALE:
+            assert f'"{value}"' in prob
+        assert '"0.62"' not in prob and '"0.90"' not in prob
 
     def test_the_explanation_is_length_capped(self):
         """

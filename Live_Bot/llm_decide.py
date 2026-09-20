@@ -256,12 +256,15 @@ def trigger_against_idea(side, entry, parsed):
     level = parsed.get('trigger_level')
     if when == 'now' or not level or not entry:
         return ''
-    if side == 'LONG' and when in ('close_below', 'close_below_with_volume') and level >= entry:
+    # Исключение «close_below для лонга с уровнем ниже входа» снято 20.09:
+    # ждать выноса под уровень — это sweep_reclaim, а второе имя для того же
+    # путало и модель, и читателя.
+    if side == 'LONG' and when in ('close_below', 'close_below_with_volume'):
         return (f'лонг от {entry:.6g} после закрытия ниже {level:.6g} — '
-                f'это ожидание слома идеи, а не подтверждения')
-    if side == 'SHORT' and when in ('close_above', 'close_above_with_volume') and level <= entry:
+                f'это ожидание слома идеи, а не подтверждения; вынос под уровень — sweep_reclaim')
+    if side == 'SHORT' and when in ('close_above', 'close_above_with_volume'):
         return (f'шорт от {entry:.6g} после закрытия выше {level:.6g} — '
-                f'это ожидание слома идеи, а не подтверждения')
+                f'это ожидание слома идеи, а не подтверждения; вынос над уровнем — sweep_reclaim')
     return ''
 
 
