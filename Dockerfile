@@ -17,5 +17,5 @@ RUN pip install --no-cache-dir -r /tmp/requirements.txt
 RUN useradd -m botuser
 USER botuser
 
-# Команда задаётся в docker-compose.yml (bot.py или platform_bot.py)
+# Команда задаётся в docker-compose.yml (bot.py)
 CMD ["python", "bot.py"]

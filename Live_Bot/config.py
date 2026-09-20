@@ -395,13 +395,10 @@ log(f"   BINGX_API_KEY: {'Загружен' if BINGX_API_KEY else 'НЕ ЗАГР
 # Риск-менеджмент
 RISK_PER_TRADE = float(os.getenv('RISK_PER_TRADE', 0.5))   # % баланса на сделку (W11: 0.5% по бэктесту — DD ~33%)
 BALANCE = float(os.getenv('BALANCE', 10000))
-RISK_PER_PAIR = RISK_PER_TRADE  # риск фиксирован на сделку; макс. экспозиция = MAX_ACTIVE_PAIRS × RISK_PER_TRADE
 
 # Плечо — устанавливается явно перед каждой сделкой
 LEVERAGE = int(os.getenv('LEVERAGE', 20))
 
-# Максимум пар для сканирования в динамическом режиме
-MAX_SCAN_PAIRS = int(os.getenv('MAX_SCAN_PAIRS', 60))
 
 # ── Фильтры сканера ──────────────────────────────────────────────────────────
 # Порог объёма за 24ч. Был $50M, но фильтр из-за ошибки сопоставления символов
@@ -431,9 +428,6 @@ LIMIT_ENTRY_OFFSET_PCT  = float(os.getenv('LIMIT_ENTRY_OFFSET_PCT', 0.001))  # 0
 # независимо от срока, кулдаун 12ч истекает до отмены — ре-детекция как в модели)
 PENDING_ORDER_MAX_HOURS = float(os.getenv('PENDING_ORDER_MAX_HOURS', 72.0))
 
-# Таймфреймы
-TIMEFRAME_MAJOR = '1h'
-TIMEFRAME_MINOR = '5m'
 LOOKBACK_CANDLES = 48
 
 # ── HTF фильтр тренда ────────────────────────────────────────────────────────
@@ -447,8 +441,8 @@ HTF_ALLOW_NEUTRAL = True   # True = торговать оба направлен
 # Тейк/стоп — см. блок «ГЕОМЕТРИЯ v2» ниже (TP1_LEVEL/SL_LEVEL_R/TP_CLOSE_FRACTIONS).
 # Безубыток при пробое уровня B импульса (BREAKEVEN_AT_B).
 ENTRY_MODE          = 'ZONE_LIMIT'   # лимит в зоне A (не BoS-вход)
-REQUIRE_BOS         = False          # BoS-подтверждение основного входа ВРЕДНО (бэктест)
-USE_ZONE_B_ENTRY    = False          # глубокая зона B не окупается — отключена
+# BoS-подтверждение входа и глубокая зона B были и отключены: первое по
+# бэктесту вредно, второе не окупается. Кода под них больше нет.
 BREAKEVEN_AT_B      = True           # SL -> вход при пробое уровня B (0%, конец импульса)
 # Проверено 2026-08-05 (research/fibo_breakeven.py), два периода, один и тот же
 # поток сетапов прогнан с переносом стопа и без:
@@ -544,8 +538,6 @@ SCORE_RR_CAP           = 3.5    # нормировка RR (чуть выше p75
 SCORE_HTF_STRENGTH_CAP = 0.10   # нормировка |EMA50-EMA200|/EMA200 (4H)
 SCORE_NOMINAL_BALANCE  = 10_000.0   # для оценки RR на этапе скана (RR от баланса не зависит)
 
-# Volume confirmation (legacy, не используется при REQUIRE_BOS=False)
-VOLUME_CONFIRM_MULT = 1.2
 
 # Кулдаун
 COOLDOWN_HOURS = 12

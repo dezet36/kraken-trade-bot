@@ -2936,10 +2936,9 @@ function renderUpdate(writable) {
   const verBox = el('ver');
   if (verBox && UPDATE) {
     const c = UPDATE.current || {};
-    const mode = UPDATE.mode === 'exe' ? 'приложение'
-      : (UPDATE.mode === 'source' ? 'из исходников' : (UPDATE.branch || ''));
+    const branch = UPDATE.branch || '';
     verBox.textContent = (c.commit ? 'версия ' + c.commit : 'версия неизвестна')
-      + (mode ? ' · ' + mode : '');
+      + (branch ? ' · ' + branch : '');
   }
   const box = el('update');
   if (!box || !UPDATE) return;
@@ -2957,9 +2956,6 @@ function renderUpdate(writable) {
       ${UPDATE.app_dir ? `<div class="ctl-note">Папка программы: <code>${
         esc(UPDATE.app_dir)}</code></div>` : ''}
       <div class="warn-box">${esc(UPDATE.reason || '')}</div>
-      <div class="ctl-note">Если это собранное приложение, обновление берётся
-        из выпусков на GitHub. Скачать вручную всегда можно здесь:
-        <code>github.com/dezet36/kraken-trade-bot/releases/latest</code></div>
       </div>`;
     return;
   }

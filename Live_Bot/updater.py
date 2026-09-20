@@ -211,7 +211,7 @@ def status(fetch=True):
                 'reason': f'Обновление недоступно: каталог {ROOT} — не '
                           'git-репозиторий.',
                 'current': {'commit': '', 'date': '', 'subject': ''},
-                'mode': 'source', 'app_dir': ROOT}
+                'app_dir': ROOT}
 
     code, branch, _ = _git('rev-parse', '--abbrev-ref', 'HEAD')
     branch = branch if code == 0 else '?'
