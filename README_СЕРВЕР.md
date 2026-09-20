@@ -66,6 +66,22 @@ BOT_DATA_DIR=$PWD/bot_data venv/bin/python Live_Bot/doctor.py
 Панель: **http://localhost:8787** на самом сервере. Логи службы:
 `journalctl -u kraken-bot -f`.
 
+**Модель ИИ — отдельной службой.** Стратегия LLM спрашивает модель через
+`llama-server` (llama.cpp с MTP-ускорением), а не внутри бота:
+
+```bash
+git clone --depth 1 https://github.com/ggml-org/llama.cpp /opt/kraken/llama.cpp
+cd /opt/kraken/llama.cpp && cmake -B build -DGGML_NATIVE=ON -DLLAMA_CURL=OFF     && cmake --build build --config Release -j 6 --target llama-server
+cp /opt/kraken/code/Live_Bot/kraken-llm.service /etc/systemd/system/
+systemctl daemon-reload && systemctl enable --now kraken-llm
+```
+
+В `bot_data/.env` — `LLM_SERVER_URL=http://127.0.0.1:8788`. Модель — MTP-сборка
+`Qwen3.6-35B-A3B-MTP-UD-Q3_K_M.gguf` в `bot_data/models/` (unsloth). Живость
+сервера видна на вкладке «Разбор ИИ». Логи: `journalctl -u kraken-llm -f`.
+Без `LLM_SERVER_URL` бот поднимает модель сам (llama-cpp-python) — вдвое
+медленнее.
+
 Есть и вариант в Docker (`docker-compose.yml`, `./start_server.sh`) — он
 держит те же папки `Live_Bot/` и `bot_data/`; служба и Docker
 взаимозаменяемы, одновременно их не запускают.
