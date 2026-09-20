@@ -167,7 +167,7 @@ def extra_levels(market):
             out.append({'price': float(g['top']), 'kind': 'верх имбаланса', 'touches': 2, 'last': 0})
             out.append({'price': float(g['bottom']), 'kind': 'низ имбаланса', 'touches': 2, 'last': 0})
     # Свинги старших ТФ: за ними стоят стопы позиций, живущих днями.
-    for tf, name in (('4h', '4ч'), ('1d', 'дня')):
+    for tf, name in (('htf', '4ч'), ('bias', 'дня')):
         row = (market.get('htf') or {}).get(tf) or {}
         if row.get('swing_high'):
             out.append({'price': float(row['swing_high']), 'kind': f'свинг-максимум {name}', 'touches': 3, 'last': 0})
@@ -201,7 +201,14 @@ def _dedupe(found, span):
     """
     kept = []
     for lv in sorted(found, key=lambda lv: -lv['touches']):
-        twin = next((k for k in kept if abs(k['price'] - lv['price']) <= span), None)
+        # Пивоты между собой склеиваются в допуске скопления (доля ATR):
+        # так и определено скопление. Край зоны, экстремум дня, свинг
+        # старшего ТФ — точная цена: склейка с пивотом в 0.15% печатала бы
+        # «низ имбаланса 109.22», когда низ на 109.06, и модель ставила бы
+        # вход мимо зоны. Для них допуск — 0.1% цены.
+        def tol(a, b):
+            return min(span, a['price'] * 0.001) if (a.get('synthetic') or b.get('synthetic')) else span
+        twin = next((k for k in kept if abs(k['price'] - lv['price']) <= tol(k, lv)), None)
         if twin is None:
             kept.append(dict(lv))
             continue

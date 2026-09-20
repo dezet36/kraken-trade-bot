@@ -504,9 +504,19 @@ def _smc_from_context(context, price):
     if untapped:
         untapped = sorted(untapped,
                           key=lambda p: abs(float(p.get('price') or 0) - price))
-        out['untapped'] = [{'price': float(p['price']), 'side': p.get('side'),
-                            'source': p.get('source')}
-                           for p in untapped[:3] if p.get('price')]
+        # Один пул под двумя именами (свинг и вчерашний минимум на одной
+        # цене) печатался дважды — модели это читалось как два скопления.
+        seen, rows = set(), []
+        for p in untapped:
+            if not p.get('price'):
+                continue
+            key = (round(float(p['price']), 8), p.get('side'))
+            if key in seen:
+                continue
+            seen.add(key)
+            rows.append({'price': float(p['price']), 'side': p.get('side'),
+                         'source': p.get('source')})
+        out['untapped'] = rows[:3]
 
     return out or None
 
