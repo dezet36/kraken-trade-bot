@@ -67,7 +67,10 @@ MAX_TARGETS = 3
 # поля стоят минут, а не байтов. Лучшие живые разборы укладывались в 400-670
 # знаков, ужатие их не задевает.
 REGIME_CHARS = 160
-ANALYSIS_CHARS = 800
+# Разбор — шесть обязательных полей по шагам промта, каждое до этого предела.
+# Одной строкой в 800 знаков модель проходила два-три шага из шести.
+ANALYSIS_CHARS = 220
+ANALYSIS_PARTS = ('direction', 'liquidity', 'structure', 'flow', 'conflicts', 'plan')
 TRIGGER_CHARS = 160
 WHY_CHARS = 240
 RISK_CHARS = 180
@@ -88,6 +91,14 @@ def _alt(values):
 def _text(limit):
     """Правило строки с пределом длины."""
     return f'"\\"" ch{{1,{limit}}} "\\""'
+
+
+def _analysis_rule():
+    """Объект из шести полей разбора — все обязательны, порядок фиксирован."""
+    body = ' ws "," ws '.join(f'"\\"{name}\\":" ws part' for name in ANALYSIS_PARTS)
+    # Результат подставляется в готовую строку, а не в f-строку: скобки
+    # здесь одинарные. 20.09.2026 «{{» ушло в грамматику буквально.
+    return f'"{{" ws {body} ws "}}"'
 
 
 def build(level_ids, prices=None, min_stop_pct=0.0, min_rr=0.0, stop_buffer_pct=0.0):
@@ -144,7 +155,8 @@ bool     ::= "true" | "false"
 bias     ::= "\\"up\\"" | "\\"down\\"" | "\\"flat\\""
 prob     ::= "0." [0-9] [1-9] | "0." [1-9] [0-9]
 regime   ::= {_text(REGIME_CHARS)}
-analysis ::= {_text(ANALYSIS_CHARS)}
+analysis ::= {_analysis_rule()}
+part     ::= {_text(ANALYSIS_CHARS)}
 trigger  ::= "{{" ws "\\"when\\":" ws when ws "," ws "\\"note\\":" ws tnote ws "}}"
 when     ::= {when}
 lvl      ::= {_alt(level_ids)}
@@ -303,7 +315,8 @@ bias     ::= "\\"up\\"" | "\\"down\\"" | "\\"flat\\""
 cf       ::= "{{" ws "\\"poi\\":" ws bool ws "," ws "\\"vp\\":" ws bool ws "," ws "\\"der\\":" ws bool ws "," ws "\\"smc\\":" ws bool ws "," ws "\\"flow\\":" ws bool ws "}}"
 bool     ::= "true" | "false"
 regime   ::= {_text(REGIME_CHARS)}
-analysis ::= {_text(ANALYSIS_CHARS)}
+analysis ::= {_analysis_rule()}
+part     ::= {_text(ANALYSIS_CHARS)}
 why      ::= {_text(WHY_CHARS)}
 ch       ::= [^"\\\\\\x00-\\x1f]
 ws       ::= [ \\n]{{0,2}}

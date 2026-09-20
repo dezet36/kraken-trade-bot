@@ -148,6 +148,7 @@ def advance(pair, ts, high, low, close):
             if w['pair'] != pair or ts <= w['last_ts']:
                 continue
             w['last_ts'] = ts
+            w['last_close'] = close
             w['high'] = max(w['high'], high)
             w['low'] = min(w['low'], low)
             if w.get('side'):
@@ -172,6 +173,47 @@ def advance(pair, ts, high, low, close):
     if finished:
         write([row(w) for w in finished])
     return finished
+
+
+def recent(pair, limit=2):
+    """
+    Что случилось после последних вердиктов по паре — и идущие наблюдения,
+    и досмотренные из файла. Свежие впереди. Для разметки: модель видит,
+    подтвердил ли рынок её прошлую мысль.
+    """
+    out = []
+    with _lock:
+        for w in _load():
+            if w['pair'] != pair or w.get('last_close') is None or not w.get('price'):
+                continue
+            out.append({
+                'at': w.get('at', ''), 'side': w.get('side', ''), 'decision': w['decision'],
+                'pct': (w['last_close'] / w['price'] - 1) * 100,
+                'max_up': (w['high'] / w['price'] - 1) * 100,
+                'max_down': (w['low'] / w['price'] - 1) * 100,
+                'hit_tp1': bool(w.get('hit_tp1')), 'hit_sl': bool(w.get('hit_sl')),
+                'hours': (w['last_ts'] - w['start_ts']) / _MS_HOUR, 'done': False,
+            })
+    try:
+        import csv
+        with open(CSV_PATH, encoding='utf-8', newline='') as fh:
+            rows = [r for r in csv.DictReader(fh) if r.get('pair') == pair]
+        for r in rows[-limit:]:
+            pct = r.get('pct_24h') or r.get('pct_12h') or r.get('pct_4h') or ''
+            out.append({
+                'at': r.get('at', ''), 'side': r.get('side', ''), 'decision': r.get('decision', ''),
+                'pct': float(pct) if pct != '' else None,
+                'max_up': float(r['max_up_pct']) if r.get('max_up_pct') else None,
+                'max_down': float(r['max_down_pct']) if r.get('max_down_pct') else None,
+                'hit_tp1': r.get('hit_tp1') == '1', 'hit_sl': r.get('hit_sl') == '1',
+                'hours': float(r.get('observed_hours') or 0), 'done': True,
+            })
+    except FileNotFoundError:
+        pass
+    except Exception:                              # noqa: BLE001
+        pass
+    out.sort(key=lambda o: o['at'], reverse=True)
+    return out[:limit]
 
 
 def expire(now_ms):

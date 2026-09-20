@@ -130,7 +130,8 @@ def parse(answer, levels):
            # рассуждение вслух, и оно нужно и при отказе: по нему видно, что
            # именно она разглядела в данных, а не только чем кончила.
            'regime': data.get('regime', ''),
-           'analysis': data.get('analysis', ''),
+           'analysis': analysis_text(data.get('analysis', '')),
+           'analysis_parts': data.get('analysis') if isinstance(data.get('analysis'), dict) else None,
            # Куда рынок — обязательно и при отказе: по нему отказ становится
            # проверяемым (сказала up, цена ушла вниз — ошибка направления).
            'bias': data.get('bias') if data.get('bias') in ('up', 'down', 'flat') else '',
@@ -151,6 +152,19 @@ def parse(answer, levels):
     out['ids'] = {'entry': data.get('entry'), 'stop': data.get('stop'),
                   'tp': data.get('tp'), 'inval': data.get('inval')}
     return out
+
+
+ANALYSIS_TITLES = {'direction': 'Куда рынок', 'liquidity': 'Ликвидность',
+                   'structure': 'Структура и зоны', 'flow': 'Поток и деривативы',
+                   'conflicts': 'Противоречия', 'plan': 'План: за что и куда'}
+
+
+def analysis_text(raw):
+    """Разбор одной строкой: шесть полей — шестью пронумерованными абзацами."""
+    if isinstance(raw, dict):
+        return '\n'.join(f"{n}. {ANALYSIS_TITLES.get(k, k)}: {v}"
+                         for n, (k, v) in enumerate(raw.items(), 1) if v)
+    return raw or ''
 
 
 def _trigger(raw, levels):
@@ -266,6 +280,35 @@ def stop_in_liquidity(side, stop, market, atr_pct=None, stop_level=None):
             if gap <= threshold:
                 return (f'стоп {stop:.6g} на {gap:.2f}% выше скопления стопов '
                         f'шортов {price:.6g} ({source}) — снимут вместе с ними')
+    return ''
+
+
+# Подписи уровней, за которыми стоят чужие стопы. Вход на таком уровне без
+# условия «вынос и возврат» — продажа в дно выноса или покупка на его
+# вершине: 20.09.2026 BNB, шорт «на EQL, где стопы лонгов».
+POOL_KINDS = ('равные экстремумы', 'скопление', 'нетронутое скопление',
+              'максимум вчера', 'минимум вчера', 'максимум недели', 'минимум недели',
+              'максимум Азии', 'минимум Азии', 'край ликвидаций')
+# Подписи, при которых уровень — зона инициатора, и вход от него законен,
+# даже если рядом сошёлся пул.
+ZONE_KINDS = ('зоны', 'имбаланса', 'ордер-блок', 'брейкер', 'свинг', 'POC')
+
+
+def entry_on_pool(parsed, levels):
+    """Вход стоит на пуле чужих стопов без условия sweep_reclaim. Описание или ''."""
+    entry_id = (parsed.get('ids') or {}).get('entry')
+    level = next((lv for lv in (levels or []) if lv.get('id') == entry_id), None)
+    if not level:
+        return ''
+    if (parsed.get('trigger_when') or 'now') == 'sweep_reclaim':
+        return ''
+    names = [n.strip() for n in str(level.get('kind', '')).split('/')]
+    if any(any(z in n for z in ZONE_KINDS) for n in names):
+        return ''
+    if any(any(p in n for p in POOL_KINDS) for n in names):
+        return (f'вход {entry_id} {level.get("price"):.6g} — {level.get("kind")}: там чужие '
+                f'стопы, это цель или место выноса; вход — из зоны инициатора или '
+                f'после sweep_reclaim')
     return ''
 
 
@@ -408,6 +451,9 @@ def check(parsed, levels, answer=None, market=None, min_stop=None, atr_pct=None)
     inside = stop_inside_entry_zone(side, entry, stop_level, market)
     if inside:
         return _refusal('стоп внутри зоны входа', inside, base)
+    pooled = entry_on_pool(parsed, levels)
+    if pooled:
+        return _refusal('вход на пуле стопов', pooled, base)
 
     stop_pct = abs(entry - stop) / entry * 100
     floor = min_stop if min_stop is not None else llm_context.min_stop_pct(atr_pct)

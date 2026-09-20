@@ -337,7 +337,7 @@ class TestMarkup:
                      'ОТКРЫТЫЙ ИНТЕРЕС ПО СВЕЧАМ', 'КАРТА ЛИКВИДАЦИЙ',
                      'ЛИКВИДАЦИИ ПО ФАКТУ', 'ЭКСТРЕМУМЫ ДНЯ', 'НЕЗАКРЫТЫЕ ИМБАЛАНСЫ'):
             assert head in text, head
-        assert text.count('\n  —') == 12, 'каждый блок обязан стоять с прочерком'
+        assert text.count('\n  —') == 13, 'каждый блок обязан стоять с прочерком'
         # Без свечей BTC блока про BTC нет вовсе: для самого BTC он бессмыслен.
         assert 'BTC КАК ОРИЕНТИР' not in text
 
@@ -388,6 +388,8 @@ class TestMarkup:
             'delta_hours': [{'share_pct': 5.0, 'rows': 60}, {'share_pct': -12.0, 'rows': 20}],
             'funding_trend': [0.0001, 0.00012, 0.00015],
             'oi_week': 3.4,
+            'htf_zones': [{'kind': 'FVG', 'direction': 'BEARISH', 'top': 106.0, 'bottom': 104.5,
+                           'bars_ago': 5, 'inside': False}],
             'liq_fact': {'young_min': 20, 'events': 0},
         }
         text = llm_context.build('BTCUSDT', make_df(wavy(400)),
@@ -490,6 +492,8 @@ def _full_market():
         'delta_hours': [{'share_pct': 5.0, 'rows': 60}] * 6,
         'funding_trend': [0.0001, 0.00012, 0.00015],
         'oi_week': 3.4,
+        'htf_zones': [{'kind': 'ORDER_BLOCK', 'direction': 'BULLISH', 'top': 99.0, 'bottom': 97.5,
+                       'bars_ago': 3, 'inside': False}],
         'liq_fact': {'hours': 24,
                      'h24': {'long_n': 12, 'long_size': 3.5, 'short_n': 8, 'short_size': 2.1},
                      'h4': {'long_n': 2, 'long_size': 0.5, 'short_n': 1, 'short_size': 0.1},

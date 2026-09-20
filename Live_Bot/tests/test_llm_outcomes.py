@@ -114,3 +114,37 @@ class TestTheStateSurvivesARestart:
         stale = llm_outcomes.expire(start + 5 * 24 * H)
         assert len(stale) == 1 and llm_outcomes.pairs() == {}
         assert os.path.exists(llm_outcomes.CSV_PATH)
+
+
+class TestRecentOutcomesFeedTheMarkup:
+    """Модель видит, куда пошла цена после её прошлого вердикта — и пока
+    наблюдение идёт, и когда оно досмотрено."""
+
+    def test_a_running_watch_reports_the_move_so_far(self):
+        start = 1_700_000_000_000
+        llm_outcomes.watch('ETHUSDT', {'ok': True, 'gate': '', 'side': 'SHORT',
+                                       'entry': 100.0, 'stop': 102.0, 'targets': [95.0]},
+                           price=100.0, ts=start, at='2026-09-20T10:00:00+00:00')
+        run_bars('ETHUSDT', start, [(1, 101.0, 98.5, 99.0), (4, 99.5, 97.0, 97.5)])
+        rec = llm_outcomes.recent('ETHUSDT')
+        assert len(rec) == 1
+        r = rec[0]
+        assert r['done'] is False and r['side'] == 'SHORT'
+        assert r['pct'] == pytest.approx(-2.5, abs=1e-6)
+        assert r['max_down'] == pytest.approx(-3.0, abs=1e-6)
+        assert r['hit_tp1'] is False and r['hit_sl'] is False
+        assert r['hours'] == pytest.approx(4.0)
+
+    def test_finished_watches_come_from_the_file(self):
+        start = 1_700_000_000_000
+        llm_outcomes.watch('ETHUSDT', {'ok': True, 'gate': '', 'side': 'LONG',
+                                       'entry': 100.0, 'stop': 97.0, 'targets': [106.0]},
+                           price=100.0, ts=start, at='2026-09-19T10:00:00+00:00')
+        run_bars('ETHUSDT', start, [(1, 101, 99.5, 100.8), (4, 104, 101, 103.5),
+                                    (12, 106.5, 103, 106), (24, 107, 105, 106.5)])
+        rec = llm_outcomes.recent('ETHUSDT')
+        assert len(rec) == 1 and rec[0]['done'] is True
+        assert rec[0]['hit_tp1'] is True and rec[0]['pct'] == pytest.approx(6.5, abs=1e-3)
+
+    def test_nothing_known_gives_nothing(self):
+        assert llm_outcomes.recent('XRPUSDT') == []

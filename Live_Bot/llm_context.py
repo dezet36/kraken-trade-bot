@@ -166,6 +166,12 @@ def extra_levels(market):
         if g.get('top') and g.get('bottom'):
             out.append({'price': float(g['top']), 'kind': 'верх имбаланса', 'touches': 2, 'last': 0})
             out.append({'price': float(g['bottom']), 'kind': 'низ имбаланса', 'touches': 2, 'last': 0})
+    # Зоны 4ч — края с именем ТФ: стоп за низом ордер-блока 4ч держит дни.
+    for z in (market.get('htf_zones') or []):
+        if z.get('top') and z.get('bottom'):
+            name = 'имбаланса 4ч' if z.get('kind') == 'FVG' else f"{_ZONE.get(z.get('kind'), 'зоны')} 4ч"
+            out.append({'price': float(z['top']), 'kind': f'верх {name}', 'touches': 3, 'last': 0})
+            out.append({'price': float(z['bottom']), 'kind': f'низ {name}', 'touches': 3, 'last': 0})
     # Свинги старших ТФ: за ними стоят стопы позиций, живущих днями.
     for tf, name in (('htf', '4ч'), ('bias', 'дня')):
         row = (market.get('htf') or {}).get(tf) or {}
@@ -306,6 +312,44 @@ def levels(df, at=None, extra=None):
     return near, atr_now
 
 
+CANDLES_SHOWN = 12
+
+
+def _candle_lines(df, at, n=CANDLES_SHOWN):
+    """
+    Последние n часовых свечей: модель до 20.09.2026 не видела ни одной.
+
+    Уровни и зоны — это числа о прошлом; как цена подошла к уровню сейчас —
+    импульсом или сползанием, телами или тенями, на объёме или без — видно
+    только по самим свечам. Тело и тени — доли размаха свечи, объём — к
+    медиане за неделю. Последняя свеча ещё формируется, и это сказано.
+    """
+    if df is None or at < 2:
+        return []
+    start = max(0, at - n + 1)
+    vol = np.asarray(df['volume'].values, dtype=float)
+    med = float(np.median(vol[max(0, at - 167):at + 1])) if at >= 10 else 0.0
+    out = ['', f'ПОСЛЕДНИЕ {at - start + 1} ЧАСОВЫХ СВЕЧЕЙ (старые → новые; объём к медиане недели; '
+               'тело и тени ↑↓ — доли размаха; последняя ещё формируется)']
+    ts = df['timestamp']
+    for i in range(start, at + 1):
+        o, h, l, c = (float(df[k].iloc[i]) for k in ('open', 'high', 'low', 'close'))
+        span = h - l
+        body = abs(c - o) / span * 100 if span > 0 else 0.0
+        upper = (h - max(o, c)) / span * 100 if span > 0 else 0.0
+        lower = (min(o, c) - l) / span * 100 if span > 0 else 0.0
+        arrow = '▲' if c >= o else '▼'
+        try:
+            when = pd.Timestamp(ts.iloc[i]).strftime('%d.%m %H:%M')
+        except Exception:                          # noqa: BLE001
+            when = str(i)
+        vx = f'×{vol[i] / med:.1f}' if med > 0 else '—'
+        chg = (c / o - 1) * 100 if o else 0.0
+        out.append(f"  {when} {arrow}{chg:+.2f}%  O {o:.6g} H {h:.6g} L {l:.6g} C {c:.6g}"
+                   f"  объём {vx}  тело {body:.0f}% ↑{upper:.0f}% ↓{lower:.0f}%")
+    return out
+
+
 def _stop_buffer(atr_pct):
     """Отступ стопа за уровень — тот же, что применяет llm_decide."""
     import llm_decide
@@ -431,6 +475,8 @@ def build(pair, df, at=None, news=None, market=None, history=None):
         lines.append(f"  {level['id']:<4}{level['price']:>14.6g}   "
                      f"{level['dist_pct']:+6.2f}%   {level['kind']}{touches}{vol}")
 
+    lines += _candle_lines(df, at)
+
     lines += [
         '',
         'РАССТАНОВКА УЧАСТНИКОВ',
@@ -486,13 +532,32 @@ def _history_lines(pair, history):
     rows = [r for r in (history or []) if r.get('pair') == pair][:2]
     if not rows:
         return []
-    out = ['ПРОШЛЫЕ РАЗБОРЫ ЭТОЙ ПАРЫ']
+    # Исходы: куда пошла цена после вердикта. Без них модель каждый раз
+    # начинала пару заново и не могла ни подтвердить прошлую мысль, ни
+    # признать, что рынок её опроверг.
+    outcomes = []
+    try:
+        import llm_outcomes
+        outcomes = llm_outcomes.recent(pair, limit=4)
+    except Exception:                              # noqa: BLE001
+        outcomes = []
+    out = ['ПРОШЛЫЕ РАЗБОРЫ ЭТОЙ ПАРЫ (и что цена сделала после)']
     for r in rows:
         when = (r.get('at') or '')[11:16]
         decision = ('вход ' + (r.get('side') or '') if r.get('decision') == 'enter'
                     else 'отказ')
         why = (r.get('why') or r.get('detail') or '')[:160]
-        out.append(f"  {when} UTC: {decision} — {why}")
+        line = f"  {when} UTC: {decision} — {why}"
+        match = next((o for o in outcomes if (o.get('at') or '')[:16] == (r.get('at') or '')[:16]), None)
+        if match and match.get('pct') is not None:
+            tail = f"с тех пор {match['pct']:+.2f}% за {match['hours']:.0f}ч"
+            if match.get('max_up') is not None:
+                tail += f" (макс {match['max_up']:+.2f}% / мин {match['max_down']:+.2f}%)"
+            if match.get('side'):
+                tail += ('; цель достигнута' if match['hit_tp1'] else '; цели нет') + \
+                        ('; стоп снят' if match['hit_sl'] else '')
+            line += f"\n         → {tail}"
+        out.append(line)
     out.append('')
     return out
 
@@ -654,6 +719,18 @@ def _poi_lines(pois, price_now):
                    f"{_DIRECTION.get(z.get('direction'), '')} "
                    f"{_p(z.get('bottom'))}..{_p(z.get('top'))}   {where}   "
                    f"касаний {z.get('touches', 0)}, {z.get('bars_ago')} св. назад")
+    return out
+
+
+def _htf_zone_lines(zones, price_now):
+    if not zones:
+        return [_NONE]
+    out = []
+    for z in zones:
+        name = 'имбаланс' if z.get('kind') == 'FVG' else _ZONE.get(z.get('kind'), z.get('kind'))
+        where = 'цена внутри' if z.get('inside') else _pct((float(z['top']) + float(z['bottom'])) / 2, price_now)
+        out.append(f"  {name} {_DIRECTION.get(z.get('direction'), '')} "
+                   f"{_p(z.get('bottom'))}..{_p(z.get('top'))}   {where}   {z.get('bars_ago')} св. 4ч назад")
     return out
 
 
@@ -824,6 +901,8 @@ def market_lines(market, price_now):
     out += _poi_lines(market.get('pois'), price_now)
     out += ['', 'СТАРШИЕ ТАЙМФРЕЙМЫ (закрытые свечи)']
     out += _htf_lines(market.get('htf'), price_now)
+    out += ['', 'ЗОНЫ 4Ч (ордер-блоки и имбалансы старшего ТФ, живые; за ними стоп надёжнее)']
+    out += _htf_zone_lines(market.get('htf_zones'), price_now)
     out += ['', 'ОТКРЫТЫЙ ИНТЕРЕС ПО СВЕЧАМ (кто набирает, кто выходит)']
     out += _oi_flow_lines(market.get('oi_flow'))
     out += ['', 'КАРТА ЛИКВИДАЦИЙ (ОЦЕНКА по приросту ОИ и типичным плечам — '

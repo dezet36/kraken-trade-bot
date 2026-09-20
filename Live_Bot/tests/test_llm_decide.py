@@ -34,8 +34,8 @@ import llm_decide as dec
 #          (ход 7) -> R:R 3.0
 LEVELS = [
     {'id': 'L1', 'price': 109.0, 'touches': 3, 'kind': 'скопление максимумов'},
-    {'id': 'L2', 'price': 107.0, 'touches': 2, 'kind': 'скопление максимумов'},
-    {'id': 'L3', 'price': 100.0, 'touches': 4, 'kind': 'скопление минимумов'},
+    {'id': 'L2', 'price': 107.0, 'touches': 2, 'kind': 'верх зоны ордер-блок / скопление максимумов'},
+    {'id': 'L3', 'price': 100.0, 'touches': 4, 'kind': 'низ зоны ордер-блок / скопление минимумов'},
     {'id': 'L4', 'price': 98.0, 'touches': 5, 'kind': 'скопление минимумов'},
     {'id': 'L5', 'price': 94.0, 'touches': 2, 'kind': 'пивот-минимум'},
 ]
@@ -651,3 +651,47 @@ class TestDynamicBuffers:
         assert llm_context.min_stop_pct(4.0) == pytest.approx(2.0)
         out = dec.check(dec.parse(answer(), LEVELS), LEVELS, min_stop=4.0)
         assert out['gate'] == 'стоп теснее минимального'
+
+
+class TestEntryOnAPoolIsRefused:
+    """
+    20.09.2026 BNB: шорт «на EQL, где стопы лонгов». Пул по ходу сделки —
+    цель или место выноса, вход от него законен только после sweep_reclaim.
+    """
+
+    LEVELS = [
+        {'id': 'L1', 'price': 109.0, 'touches': 3, 'kind': 'скопление максимумов'},
+        {'id': 'L2', 'price': 107.0, 'touches': 2, 'kind': 'пивот-максимум'},
+        {'id': 'L3', 'price': 100.0, 'touches': 4, 'kind': 'равные экстремумы EQL / нетронутое скопление'},
+        {'id': 'L4', 'price': 98.0, 'touches': 5, 'kind': 'скопление минимумов'},
+        {'id': 'L5', 'price': 94.0, 'touches': 2, 'kind': 'пивот-минимум'},
+    ]
+
+    def test_a_short_from_equal_lows_is_refused(self):
+        out = dec.check(dec.parse(answer(side='SHORT', entry='L3', stop='L2', tp=['L5'], inval='L2'),
+                                  self.LEVELS), self.LEVELS)
+        assert out['ok'] is False and out['gate'] == 'вход на пуле стопов'
+        assert 'EQL' in out['detail']
+
+    def test_after_a_sweep_and_reclaim_the_pool_is_a_valid_entry(self):
+        out = dec.check(dec.parse(answer(side='SHORT', entry='L3', stop='L2', tp=['L5'], inval='L2',
+                                         trigger={'when': 'sweep_reclaim', 'level': 'L3', 'note': ''}),
+                                  self.LEVELS), self.LEVELS)
+        assert out['gate'] != 'вход на пуле стопов', out.get('detail')
+
+    def test_a_zone_edge_that_coincides_with_a_pool_is_fine(self):
+        out = verdict()                      # L3 — низ зоны ордер-блок / скопление
+        assert out['ok'], out.get('gate')
+
+
+class TestTheAnalysisIsSixFields:
+    def test_six_fields_become_numbered_paragraphs(self):
+        parts = {'direction': 'вверх', 'liquidity': 'стопы под 98', 'structure': 'ОБ 100',
+                 'flow': 'дельта плюс', 'conflicts': 'ОИ падает', 'plan': 'от 100 к 107'}
+        text = dec.analysis_text(parts)
+        assert text.startswith('1. Куда рынок: вверх') and '6. План: за что и куда: от 100 к 107' in text
+        out = dec.parse(answer(analysis=parts), LEVELS)
+        assert out['analysis_parts'] == parts and '3. Структура и зоны: ОБ 100' in out['analysis']
+
+    def test_a_plain_string_still_works(self):
+        assert dec.analysis_text('строкой') == 'строкой'

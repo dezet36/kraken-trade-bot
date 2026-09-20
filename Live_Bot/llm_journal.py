@@ -24,6 +24,7 @@
 одновременно работавших копий бота.
 """
 
+import json
 import os
 from datetime import datetime, timezone
 
@@ -41,6 +42,9 @@ COLUMNS = [
     # Что модель разглядела. Эти четыре колонки и есть смысл файла.
     'regime', 'analysis', 'bias', 'trigger', 'alt',
     'why', 'risk', 'stop_why', 'tp_why',
+    # Список уровней, из которого модель выбирала: [id, цена, подпись].
+    # Без него план из журнала не перерисовать: список живёт час.
+    'levels',
     # Решение в числах. Пусто, когда модель отказалась: числа появляются
     # только у сетапа, дошедшего до проверок.
     'side', 'entry', 'stop', 'tp1', 'inval',
@@ -103,6 +107,9 @@ def record(pair, donor, verdict, stats=None):
             'risk': verdict.get('risk', ''),
             'stop_why': verdict.get('stop_why', ''),
             'tp_why': verdict.get('tp_why', ''),
+            'levels': json.dumps([[lv.get('id'), lv.get('price'), lv.get('kind')]
+                                  for lv in (verdict.get('levels') or [])],
+                                 ensure_ascii=False),
             'side': verdict.get('side', ''),
             'entry': verdict.get('entry', ''),
             'stop': verdict.get('stop', ''),

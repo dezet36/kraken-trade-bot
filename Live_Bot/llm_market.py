@@ -572,6 +572,53 @@ def poi_facts(context, price, index, limit=4):
     } for z in active[:limit]]
 
 
+# ── Зоны старшего ТФ: ордер-блоки и имбалансы 4ч ─────────────────────────────
+
+def htf_zones(context, timestamp, price, limit=4):
+    """
+    Живые ордер-блоки и имбалансы на 4ч — ближайшие к цене.
+
+    Зоны с рабочего ТФ держат часы; зона 4ч — дни: за ней стоп надёжнее,
+    к ней цена возвращается охотнее. Считаются тем же пакетом smc по
+    закрытым свечам 4ч, индекс выровнен по закрытию, как в htf_facts.
+    """
+    import pandas as pd
+    from smc import imbalance, poi as poi_mod
+    from smc.signal import align_index
+
+    df = context.frames.get('htf')
+    struct = getattr(context, 'htf_structure', None)
+    if df is None or struct is None or not len(df):
+        return None
+    decision = pd.Timestamp(timestamp)
+    decision = (decision.tz_localize('UTC') if decision.tzinfo is None
+                else decision.tz_convert('UTC'))
+    decision += pd.Timedelta(context._durations.get('poi', 0), unit='ns')
+    idx = align_index(df, decision, duration_ns=context._durations.get('htf'))
+    if idx < 0:
+        return None
+
+    def dist(z):
+        if float(z['bottom']) <= price <= float(z['top']):
+            return 0.0
+        return min(abs(price - float(z['top'])), abs(price - float(z['bottom'])))
+
+    out = []
+    zones = poi_mod.active_pois(df, poi_mod.collect_pois(df, struct), idx) or []
+    for z in sorted(zones, key=dist)[:2]:
+        out.append({'kind': z.get('type'), 'direction': z.get('direction'),
+                    'top': _number(z['top']), 'bottom': _number(z['bottom']),
+                    'bars_ago': int(idx - int(z.get('confirmed_at', idx))),
+                    'inside': bool(float(z['bottom']) <= price <= float(z['top']))})
+    gaps = imbalance.active_fvgs(df, imbalance.find_fvg(df), idx) or []
+    for g in sorted(gaps, key=dist)[:2]:
+        out.append({'kind': 'FVG', 'direction': g.get('direction'),
+                    'top': _number(g['top']), 'bottom': _number(g['bottom']),
+                    'bars_ago': int(idx - int(g.get('index', idx))),
+                    'inside': bool(float(g['bottom']) <= price <= float(g['top']))})
+    return out[:limit] or None
+
+
 # ── Структура старших таймфреймов ────────────────────────────────────────────
 
 def htf_facts(context, timestamp):
@@ -1055,6 +1102,9 @@ def snapshot(pair, df, at=None, client=None, benchmark=None):
         'htf': (_safe('старшие ТФ', htf_facts, context,
                       context.frames['poi']['timestamp'].iloc[-1])
                 if context is not None else None),
+        'htf_zones': (_safe('зоны 4ч', htf_zones, context,
+                            context.frames['poi']['timestamp'].iloc[-1], price)
+                      if context is not None else None),
         'oi_flow': _safe('ОИ по свечам', oi_flow, pair, df, index, upto),
         'liquidations': _safe('оценка ликвидаций', liquidation_estimate,
                               pair, df, index, upto),

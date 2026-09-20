@@ -47,8 +47,13 @@ def words(n_chars):
     return out[:n_chars].strip()
 
 
-def skip_answer(n, bias='up', analysis_len=300):
-    return json.dumps({'regime': 'тренд вверх, по сломам', 'analysis': words(analysis_len),
+def analysis(part_len=150):
+    """Разбор — объект из шести обязательных полей."""
+    return {k: words(part_len) for k in gr.ANALYSIS_PARTS}
+
+
+def skip_answer(n, bias='up', analysis_len=150):
+    return json.dumps({'regime': 'тренд вверх, по сломам', 'analysis': analysis(analysis_len),
                        'bias': bias, 'd': 'skip',
                        'cf': {'poi': True, 'vp': False, 'der': True, 'smc': False, 'flow': False},
                        'why': 'нет уровня за что'}, ensure_ascii=False, separators=(',', ':'))
@@ -59,7 +64,7 @@ def enter_answer(n, side='LONG', entry='L3', stop='L4', tp=('L1',), inval=None,
     trigger = {'when': when, 'note': trig_note}
     if when != 'now':
         trigger = {'when': when, 'level': level, 'note': trig_note}
-    body = {'regime': 'тренд вверх', 'analysis': words(400), 'bias': bias, 'd': 'enter',
+    body = {'regime': 'тренд вверх', 'analysis': analysis(), 'bias': bias, 'd': 'enter',
             'side': side, 'entry': entry, 'stop': stop, 'tp': list(tp), 'inval': inval or stop,
             'trigger': trigger,
             'cf': {'poi': True, 'vp': True, 'der': True, 'smc': True, 'flow': False},
@@ -121,7 +126,7 @@ class TestValidAnswersAreAccepted:
 
     def test_fields_at_their_length_limits(self):
         g, _ = grammar(6)
-        text = json.dumps({'regime': words(gr.REGIME_CHARS), 'analysis': words(gr.ANALYSIS_CHARS),
+        text = json.dumps({'regime': words(gr.REGIME_CHARS), 'analysis': analysis(gr.ANALYSIS_CHARS),
                            'bias': 'flat', 'd': 'skip',
                            'cf': {'poi': False, 'vp': False, 'der': False, 'smc': False, 'flow': False},
                            'why': words(gr.WHY_CHARS)}, ensure_ascii=False, separators=(',', ':'))

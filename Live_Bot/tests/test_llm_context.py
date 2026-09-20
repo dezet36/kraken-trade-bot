@@ -418,3 +418,46 @@ class TestTheNearestLevelsAlwaysMakeTheList:
         assert prices == [92.0, 96.0, 99.5, 100.5, 101.0, 103.0, 104.0]
         assert any(e['kind'].startswith('равные экстремумы') for e in extra)
         assert llm_context.extra_levels(None) == []
+
+
+class TestTheModelSeesCandles:
+    def test_last_twelve_candles_are_printed_with_body_and_wicks(self):
+        df = make_df(wavy(300))
+        text = llm_context.build('BTCUSDT', df)['text']
+        assert 'ПОСЛЕДНИЕ 12 ЧАСОВЫХ СВЕЧЕЙ' in text
+        rows = [l for l in text.splitlines() if l.strip().startswith(('0', '1', '2', '3')) and ' O ' in l and 'тело' in l]
+        assert len(rows) == 12
+        assert '↑' in rows[-1] and 'объём ×' in rows[-1]
+
+    def test_a_short_history_prints_what_it_has(self):
+        df = make_df(wavy(120))
+        text = llm_context.build('BTCUSDT', df)['text']
+        assert 'ПОСЛЕДНИЕ 12 ЧАСОВЫХ СВЕЧЕЙ' in text
+
+
+class TestHtfZonesBecomeLevels:
+    def test_four_hour_zones_are_offered_with_their_timeframe_named(self):
+        market = {'htf_zones': [
+            {'kind': 'ORDER_BLOCK', 'direction': 'BULLISH', 'top': 99.0, 'bottom': 97.5, 'bars_ago': 3, 'inside': False},
+            {'kind': 'FVG', 'direction': 'BEARISH', 'top': 106.0, 'bottom': 104.5, 'bars_ago': 5, 'inside': False},
+        ]}
+        extra = llm_context.extra_levels(market)
+        kinds = {round(e['price'], 2): e['kind'] for e in extra}
+        assert kinds[97.5] == 'низ ордер-блок 4ч' and kinds[99.0] == 'верх ордер-блок 4ч'
+        assert kinds[104.5] == 'низ имбаланса 4ч' and kinds[106.0] == 'верх имбаланса 4ч'
+        lines = llm_context._htf_zone_lines(market['htf_zones'], 100.0)
+        assert 'ордер-блок вверх 97.5..99' in lines[0] and 'имбаланс вниз' in lines[1]
+
+
+class TestPastVerdictsCarryTheirOutcome:
+    def test_the_outcome_line_follows_the_verdict(self, monkeypatch):
+        import llm_outcomes
+        monkeypatch.setattr(llm_outcomes, 'recent', lambda pair, limit=2: [
+            {'at': '2026-09-20T10:11:00+00:00', 'side': 'SHORT', 'decision': 'enter', 'pct': -1.2,
+             'max_up': 0.4, 'max_down': -1.6, 'hit_tp1': False, 'hit_sl': False, 'hours': 4.0, 'done': False}])
+        history = [{'pair': 'BNBUSDT', 'at': '2026-09-20T10:11:47+00:00', 'decision': 'enter',
+                    'side': 'SHORT', 'why': 'вход на пуле'}]
+        lines = llm_context._history_lines('BNBUSDT', history)
+        joined = '\n'.join(lines)
+        assert '10:11 UTC: вход SHORT' in joined
+        assert 'с тех пор -1.20% за 4ч' in joined and 'цели нет' in joined and 'стоп снят' not in joined
