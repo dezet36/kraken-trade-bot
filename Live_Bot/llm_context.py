@@ -158,9 +158,9 @@ def extra_levels(market):
                         'touches': 2, 'last': 0})
     for z in (market.get('pois') or []):
         if z.get('top') and z.get('bottom'):
-            kind = _ZONE.get(z.get('type'), 'зона')
-            out.append({'price': float(z['top']), 'kind': f'верх зоны {kind}', 'touches': 2, 'last': 0})
-            out.append({'price': float(z['bottom']), 'kind': f'низ зоны {kind}', 'touches': 2, 'last': 0})
+            kind = 'зоны фитиля' if z.get('type') == 'WICK' else f"зоны {_ZONE.get(z.get('type'), 'интереса')}"
+            out.append({'price': float(z['top']), 'kind': f'верх {kind}', 'touches': 2, 'last': 0})
+            out.append({'price': float(z['bottom']), 'kind': f'низ {kind}', 'touches': 2, 'last': 0})
     # Края имбалансов: вход — у ближнего края, стоп — за дальним.
     for g in (market.get('fvgs') or []):
         if g.get('top') and g.get('bottom'):
