@@ -44,6 +44,7 @@
        отличается от оранжевого на 6.2 (нужно >= 8), фиолетовый от синего на
        5.9. Бирюзовый даёт худшую пару 13.2 — с запасом. */
     --levels:    #17a398;
+    --llm:       #8e5be8;
     /* Четвёртый — тем же расчётом, и он вскрыл две вещи. Первая: фиолетовый,
        напрашивавшийся на глаз (#8e44c9), при дейтеранопии отличается от синего
        на 2.4 — то есть сливается с фибо у 6% читателей. Вторая: тёмная тема НЕ
@@ -67,7 +68,7 @@
       --accent: #0a84ff; --accent-soft: rgba(10,132,255,.22);
       --good: #30d158; --bad: #ff453a; --warn: #ff9f0a; --ok-dot: #30d158;
       --grid: rgba(235,235,245,.10); --axis: rgba(235,235,245,.26);
-      --fibo: #3987e5; --smc: #d95926; --levels: #2bbfb2; --rsibb: #4c36be;
+      --fibo: #3987e5; --smc: #d95926; --levels: #2bbfb2; --rsibb: #4c36be; --llm: #a98cf0;
       --shadow: 0 1px 2px rgba(0,0,0,.5), 0 8px 28px -14px rgba(0,0,0,.8);
     }
   }
@@ -81,7 +82,7 @@
     --accent: #0a84ff; --accent-soft: rgba(10,132,255,.22);
     --good: #30d158; --bad: #ff453a; --warn: #ff9f0a; --ok-dot: #30d158;
     --grid: rgba(235,235,245,.10); --axis: rgba(235,235,245,.26);
-    --fibo: #3987e5; --smc: #d95926; --levels: #2bbfb2; --rsibb: #4c36be;
+    --fibo: #3987e5; --smc: #d95926; --levels: #2bbfb2; --rsibb: #4c36be; --llm: #a98cf0;
   }
 
   * { box-sizing: border-box; }
@@ -373,6 +374,21 @@
     border: 1px solid var(--hairline); border-radius: 999px; padding: 4px 11px;
   }
   .err-chip b { color: var(--ink-1); margin-left: 4px; }
+  .err-chip.code { border-style: dashed; color: var(--ink-3); }
+  .err-chip.enter { border-color: var(--good); color: var(--good); }
+  .ai-setups { display: grid; gap: 10px; }
+  .ai-setup { display: grid; grid-template-columns: 150px 1fr; gap: 4px 14px; padding: 10px 12px;
+    border: 1px solid var(--hairline); border-radius: var(--r-md); font-size: 12.5px; }
+  .ai-setup .nm { font-weight: 650; color: var(--ink-1); }
+  .ai-setup .row { color: var(--ink-2); }
+  .ai-setup .row b { color: var(--ink-1); font-weight: 600; }
+  .ai-setup .why { grid-column: 1 / -1; color: var(--ink-3); font-style: italic; }
+  .ai-outcomes { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+  .ai-outcome { padding: 10px 12px; border: 1px solid var(--hairline); border-radius: var(--r-md); }
+  .ai-outcome i { display: block; font-size: 11.5px; color: var(--ink-3); font-style: normal; }
+  .ai-outcome b { font-size: 20px; font-weight: 650; color: var(--ink-1); }
+  .ai-outcome small { color: var(--ink-3); }
+  @media (max-width: 560px) { .ai-setup { grid-template-columns: 1fr; } }
   .err-list { border: 1px solid var(--hairline); border-radius: var(--r-md);
               overflow: hidden; }
   .err-row + .err-row { border-top: 1px solid var(--hairline); }
@@ -1034,6 +1050,12 @@
           <div id="ai-state"></div>
         </div>
         <div class="panel-head bare" style="margin-top:22px">
+          <h2>Живые сетапы</h2><span class="hint">ждут условия · ждут цену · в позиции — то же, что кнопка «Сетапы ИИ» в Telegram</span></div>
+        <div class="panel card-pad"><div id="ai-setups" class="ai-setups"></div></div>
+        <div class="panel-head bare" style="margin-top:22px">
+          <h2>Исходы планов</h2><span class="hint" id="ai-outcomes-hint"></span></div>
+        <div class="panel card-pad"><div id="ai-outcomes" class="ai-outcomes"></div></div>
+        <div class="panel-head bare" style="margin-top:22px">
           <h2>Разборы</h2><span class="hint" id="ai-count"></span></div>
         <div id="ai-gates" class="err-chips"></div>
         <div id="ai-calls"></div>
@@ -1089,7 +1111,7 @@ const NAMES  = { FIBO: 'Фибоначчи', SMC: 'Smart Money', LEVELS: 'Уро
 // оставшаяся кривая не должна менять цвет — иначе читатель, запомнивший
 // «фибо синяя», будет введён в заблуждение.
 const COLOR  = { FIBO: 'var(--fibo)', SMC: 'var(--smc)', LEVELS: 'var(--levels)',
-                 RSIBB: 'var(--rsibb)' };
+                 RSIBB: 'var(--rsibb)', LLM: 'var(--llm)' };
 /* ── Описания стратегий ──────────────────────────────────────────────────
    Числа здесь — НЕ круглые примеры, а фактические значения из кода: пороги
    импульса, множитель полос, доли отката. Описание, разошедшееся с кодом,
@@ -3861,8 +3883,10 @@ function compareTable(byStrategy) {
   // higher: больше — лучше; null — не сравниваем (нечего выделять)
   const ROWS = [
     ['Сделок', k => byStrategy[k].stats.trades, v => v, null],
-    ['В месяц', k => months(k) ? byStrategy[k].stats.trades / months(k) : 0,
-     v => v.toFixed(1), true],
+    // Экстраполяция трёх дней на месяц («115 в месяц») врёт; пока истории
+    // меньше двух недель — прочерк.
+    ['В месяц', k => months(k) >= 0.46 ? byStrategy[k].stats.trades / months(k) : 0,
+     v => v ? v.toFixed(1) : '—', true],
     ['Винрейт', k => byStrategy[k].stats.winrate, v => v.toFixed(1) + '%', true],
     ['Средний R', k => byStrategy[k].stats.expectancy,
      v => fx(v, 3, true), true],
@@ -4159,7 +4183,10 @@ function renderControls() {
 
     const rows = FIELDS.filter(f => f.id !== 'deposit' || PAPER).map(f => {
       const lim = (LIMITS || {})[f.id] || [0, 1e9];
-      const note = f.id === 'deposit'
+      const llmStop = key === 'LLM' && f.id === 'min_stop_pct';
+      const note = llmStop
+        ? 'Не применяется: у ИИ минимальный стоп считается по издержкам (1.5% или половина ATR) и задаётся моделью за структурой — это поле ей не читается.'
+        : f.id === 'deposit'
         ? (started
           ? `Стратегия уже торгует: ${live.trades || 0} сделок, ${
              live.open || 0} позиций. Новый депозит применится только с
@@ -4177,7 +4204,7 @@ function renderControls() {
         <span class="unit">${f.unit}</span>
         <input type="number" id="f-${key}-${f.id}" data-s="${key}" data-f="${f.id}"
                value="${s[f.id]}" min="${lim[0]}" max="${lim[1]}" step="${f.step}"
-               ${WRITABLE ? '' : 'disabled'}>${extra}
+               ${(WRITABLE && !llmStop) ? '' : 'disabled'}>${extra}
       </div>${note ? `<div class="ctl-note">${note}</div>` : ''}`;
     }).join('');
 
@@ -4576,6 +4603,81 @@ function aiNum(label, value, suffix) {
   return `<span><i>${esc(label)}</i>${shown}${suffix || ''}</span>`;
 }
 
+const WHEN_TEXT = {
+  now: 'лимит стоит сразу, ждёт цену', close_above: 'закрытие часа выше', close_below: 'закрытие часа ниже',
+  close_above_with_volume: 'закрытие выше на объёме', close_below_with_volume: 'закрытие ниже на объёме',
+  retest: 'откат и удержание', sweep_reclaim: 'вынос и возврат',
+};
+
+function hoursText(min) {
+  min = Math.max(0, Math.round(min || 0));
+  return min >= 60 ? `${Math.floor(min / 60)}ч ${String(min % 60).padStart(2, '0')}м` : `${min}м`;
+}
+
+function renderAiSetups(setups) {
+  const box = el('ai-setups');
+  if (!box) return;
+  const st = setups || {};
+  const armed = st.armed || [], pending = st.pending || [], open = st.open || [];
+  if (!armed.length && !pending.length && !open.length) {
+    box.innerHTML = '<div class="empty">Живых сетапов нет: ни планов, ждущих условия, ни заявок, ни позиций.</div>';
+    return;
+  }
+  const pct = (a, b) => b ? `${(Math.abs(a - b) / b * 100).toFixed(2)}%` : '—';
+  const P = v => (v === null || v === undefined || v === '') ? '—' : (+(+v).toPrecision(6));
+  const card = (kind, pair, side, rows, why) => `<div class="ai-setup">
+    <div><span class="nm">${esc(pair)} ${esc(side || '')}</span><br><small style="color:var(--ink-3)">${kind}</small></div>
+    <div>${rows.map(r => `<div class="row">${r}</div>`).join('')}</div>
+    ${why ? `<div class="why">${esc(String(why).slice(0, 220))}</div>` : ''}</div>`;
+  const out = [];
+  armed.forEach(a => {
+    const tp = (a.targets || [])[0];
+    out.push(card('⏳ ждёт условия', a.pair, a.side, [
+      `вход <b>${P(a.entry)}</b> · стоп ${P(a.stop)} (−${pct(a.stop, a.entry)})${tp ? ` · цель ${P(tp)} (+${pct(tp, a.entry)})` : ''} · R:R <b>${a.rr || '—'}</b> · p ${a.p || '—'}`,
+      `условие: <b>${WHEN_TEXT[a.when] || esc(a.when || '')}</b> ${a.level ? P(a.level) : ''}`,
+      `ждёт ${hoursText(a.minutes)}, снимется через ${hoursText(a.left_min)}`,
+    ], a.why));
+  });
+  pending.forEach(o => {
+    out.push(card('📥 заявка стоит, ждёт цену', o.pair, o.direction, [
+      `лимит <b>${P(o.entry)}</b> · стоп ${P(o.stop)}${o.tp1 ? ` · цель ${P(o.tp1)}` : ''} · R:R <b>${o.rr || '—'}</b>`,
+      `ждёт ${hoursText(o.waiting_min)}${o.distance_pct !== null && o.distance_pct !== undefined ? ` · до лимита ${o.distance_pct}%` : ''}, снимется через ${hoursText(o.expires_in_min)}`,
+    ], o.why));
+  });
+  open.forEach(o => {
+    const r = o.unrealised_r;
+    out.push(card('📈 в позиции', o.pair, o.direction, [
+      `вход <b>${P(o.entry)}</b> · стоп ${P(o.stop)}${o.tp1 ? ` · цель ${P(o.tp1)}` : ''}${o.price ? ` · цена ${P(o.price)}` : ''}`,
+      r !== null && r !== undefined ? `сейчас <b style="color:${+r >= 0 ? 'var(--good)' : 'var(--bad)'}">${+r >= 0 ? '+' : ''}${(+r).toFixed(2)} R</b>` : '',
+    ].filter(Boolean), o.why));
+  });
+  box.innerHTML = out.join('');
+}
+
+/* Исходы планов за неделю: сколько принято, вошло, снято до входа, и что
+   цена сделала за 48 ч — цель или стоп первыми. Это та сводка, которую
+   иначе пришлось бы считать руками по трём файлам. */
+function renderAiOutcomes(o) {
+  const box = el('ai-outcomes');
+  if (!box) return;
+  if (!o) { box.innerHTML = '<div class="empty">Исходов пока нет.</div>'; return; }
+  setText('ai-outcomes-hint', `за ${o.days} дней · наблюдение 48 ч после вердикта · копится с 21.09.2026`);
+  const cell = (label, value, small) => `<div class="ai-outcome"><i>${label}</i><b>${value}</b>${small ? `<small> ${small}</small>` : ''}</div>`;
+  const missed = (o.target_without_entry || 0) + (o.overtaken || 0);
+  box.innerHTML = [
+    cell('планов принято', o.accepted || 0, ''),
+    cell('в позиции сейчас', o.entered || 0, ''),
+    cell('цель без входа', o.target_without_entry || 0, o.accepted ? `${Math.round(missed / o.accepted * 100)}% с «обогнал»` : ''),
+    cell('рынок обогнал план', o.overtaken || 0, ''),
+    cell('условие не наступило', o.expired || 0, ''),
+    cell('досмотрено 48 ч', o.observed || 0, ''),
+    cell('цель первой', o.tp_first || 0, o.observed ? `${Math.round(o.tp_first / o.observed * 100)}%` : ''),
+    cell('стоп первым', o.sl_first || 0, o.observed ? `${Math.round(o.sl_first / o.observed * 100)}%` : ''),
+    cell('отказы кода: цель бы дошла', o.refused_tp || 0, 'убитые победители'),
+    cell('отказы кода: стоп бы сняло', o.refused_sl || 0, 'спасённые стопы'),
+  ].join('');
+}
+
 /* Состояние отдаётся и тогда, когда модели нет: «не настроена», «настроена, но
    файла нет» и «работает, но молчит» — три разных положения, а пустая страница
    не отличает их друг от друга. На машине разработки модели нет законно, и
@@ -4641,7 +4743,7 @@ function renderLlmState(d) {
     + `<span>потоков <b>${d.threads}</b></span>`
     + `<span>окно <b>${d.ctx}</b></span>`
     + (last.seconds ? `<span>последний разбор <b>${last.seconds} с</b></span>` : '')
-    + (d.avg_seconds ? `<span>в среднем <b>${d.avg_seconds} с</b></span>` : '')
+    + (d.avg_seconds ? `<span>в среднем <b>${d.avg_seconds} с</b> за ${d.avg_over || '?'} разборов журнала</span>` : '')
     + `<span>вердикт годен <b>${d.stale_min} мин</b></span>`
     + `<span>повтор не чаще <b>${d.reask_min} мин</b></span>`
     + criticChip(d.critic !== false)
@@ -4649,7 +4751,8 @@ function renderLlmState(d) {
     + '<div class="ai-state" style="margin-top:6px">'
     + streamLine('лента сделок', streams.trades) + streamLine('ликвидации', streams.liquidations)
     + '</div>'
-    + (armed ? '<div class="ai-state" style="margin-top:6px"><span>взведённые планы:</span>' + armed + '</div>' : '');
+    + (armed ? '<div class="ai-state" style="margin-top:6px"><span>взведённые планы:</span>' + armed + '</div>' : '')
+    + macroLine(d.macro);
   const criticBtn = document.getElementById('ai-critic');
   if (criticBtn) criticBtn.onclick = () => toggleCritic(criticBtn);
 }
@@ -4657,6 +4760,28 @@ function renderLlmState(d) {
 /* Тумблер критика прямо здесь, а не только в настройках: человек смотрит
    на разборы модели на этой вкладке, и вопрос «а критик сейчас работает?»
    возникает именно тут. В настройках (карточка LLM) тот же переключатель. */
+/* Рынок в целом — то, что модель видит в разметке (USDT.D, BTC.D, ширина):
+   человеку он нужен так же, иначе «альты слабее BTC» в разборе не с чем
+   сверить. Старые данные — прочерк, как и у модели. */
+function macroLine(m) {
+  if (!m) return '';
+  if (m.stale) return `<div class="ai-state" style="margin-top:6px"><span>рынок в целом: <b>— (данные ${Math.round(m.age_min || 0)} мин назад)</b></span></div>`;
+  const pp = v => (v === null || v === undefined) ? '—' : `${v >= 0 ? '+' : ''}${(+v).toFixed(2)} п.п.`;
+  const parts = [`USDT.D <b>${(+m.usdt_d).toFixed(2)}%</b> (24ч ${pp(m.usdt_d_24h)})`,
+                 `BTC.D <b>${(+m.btc_d).toFixed(2)}%</b> (24ч ${pp(m.btc_d_24h)})`];
+  if (m.total2_24h !== undefined && m.total2_24h !== null && m.btc_24h !== undefined && m.btc_24h !== null) {
+    const t2 = +m.total2_24h, b = +m.btc_24h;
+    const verdict = t2 > b + 0.3 ? 'альты сильнее BTC' : (t2 < b - 0.3 ? 'альты слабее BTC' : 'альты вровень с BTC');
+    parts.push(`TOTAL2 24ч <b>${t2 >= 0 ? '+' : ''}${t2.toFixed(2)}%</b> при BTC ${b >= 0 ? '+' : ''}${b.toFixed(2)}% — <b>${verdict}</b>`);
+  }
+  if (m.counted_24h) {
+    const share = m.up_24h / m.counted_24h * 100;
+    parts.push(`ширина <b>${m.up_24h} из ${m.counted_24h}</b> в плюсе за 24ч (${share >= 70 ? 'широкий рост' : share <= 30 ? 'широкое падение' : 'смешанно'})`);
+  }
+  return '<div class="ai-state" style="margin-top:6px"><span>рынок в целом:</span>'
+    + parts.map(x => `<span>${x}</span>`).join('') + '</div>';
+}
+
 function criticChip(on) {
   // Пока общий опрос не пришёл, права неизвестны — кнопку показываем: при
   // запрете сервер ответит отказом, и он будет виден на самой кнопке.
@@ -4701,11 +4826,20 @@ function renderLlm() {
   /* Отказы по именам. Сто девятнадцать одинаковых подряд — это не свойство
      рынка, а неисправность, и здесь она читается с одного взгляда. */
   if (chips) {
+    /* Три вида ворот, три вида чипов: сделка — зелёный; отказ кода (проверки
+       плана, сторож) — серый пунктир; отказ модели и поломка — как есть. */
+    const codeGates = (d && d.code_gates) || [];
     chips.innerHTML = Object.entries((d && d.gates) || {})
       .sort((a, b) => b[1] - a[1])
-      .map(([name, n]) => `<span class="err-chip">${esc(name)} <b>${n}</b></span>`)
+      .map(([name, n]) => {
+        const cls = name === 'сделка' ? ' enter' : (codeGates.includes(name) ? ' code' : '');
+        const title = cls === ' code' ? ' title="отказ кода, не модели"' : '';
+        return `<span class="err-chip${cls}"${title}>${esc(name)} <b>${n}</b></span>`;
+      })
       .join('');
   }
+  renderAiSetups(d && d.setups);
+  renderAiOutcomes(d && d.outcomes);
   setText('ai-count', calls.length
     ? `последние ${calls.length} · свежие сверху`
     : '');

@@ -945,6 +945,18 @@ def _exchange_state(stored=None):
     }
 
 
+def _plural(n, one, few, many):
+    """«1 ордер», «2 ордера», «5 ордеров» — по правилам русского языка."""
+    n10, n100 = n % 10, n % 100
+    if n10 == 1 and n100 != 11:
+        form = one
+    elif 2 <= n10 <= 4 and not 12 <= n100 <= 14:
+        form = few
+    else:
+        form = many
+    return f'{n} {form}'
+
+
 def _errors_summary():
     """Короткая сводка по ошибкам — для значка в меню."""
     try:
@@ -1138,7 +1150,8 @@ def _attention(payload):
     if expiring:
         items.append({
             'level': 'warn',
-            'text': f'{len(expiring)} ордеров скоро истекут',
+            'text': _plural(len(expiring), 'ордер скоро истечёт', 'ордера скоро истекут',
+                            'ордеров скоро истекут'),
             'detail': ', '.join(f"{o['pair']} ({o['expires_in_min']} мин)"
                                 for o in expiring[:4]),
         })
@@ -1296,6 +1309,25 @@ def llm_payload(limit=40):
     except Exception:                                  # noqa: BLE001
         pass
 
+    # Живые сетапы ИИ — те же, что по кнопке в Telegram: планы, ждущие
+    # условия, заявки, ждущие цену, позиции.
+    setups = {'armed': [], 'pending': [], 'open': []}
+    try:
+        import strategy_llm
+        setups = strategy_llm.current_setups(_broker)
+    except Exception:                                  # noqa: BLE001
+        pass
+
+    # Рынок в целом — то, что модель видит в разметке; человеку тоже нужно.
+    macro = None
+    try:
+        import market_cap
+        macro = market_cap.facts()
+    except Exception:                                  # noqa: BLE001
+        pass
+
+    outcomes = _llm_outcomes_summary()
+
     critic = True
     try:
         critic = bool(llm_decide.critic_enabled())
@@ -1338,8 +1370,79 @@ def llm_payload(limit=40):
         # цвет обычного отказа, и она потерялась бы среди работы.
         'broken_gates': list(llm_decide.BROKEN_GATES),
         'avg_seconds': round(sum(seconds) / len(seconds), 1) if seconds else 0,
+        'avg_over': len(seconds),
+        # Какие отказы — проверки кода, а не решение модели: в списке ворот
+        # они подсвечиваются отдельно, чтобы видеть, кто останавливает планы.
+        'code_gates': list(llm_decide.CODE_GATES),
+        'setups': setups,
+        'macro': macro,
+        'outcomes': outcomes,
         'calls': rows,
     }
+
+
+def _llm_outcomes_summary(days=7):
+    """
+    Что стало с планами модели за последние days суток: сколько принято,
+    вошло, снято до входа (цель без нас, рынок обогнал), и по наблюдениям
+    48 ч — дошла ли цена до цели или до стопа первой. Сырьё копится с
+    21.09.2026; пока строк мало, числа маленькие, но честные.
+    """
+    import csv
+    from datetime import datetime, timedelta, timezone
+    since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat(timespec='seconds')
+    out = {'days': days, 'accepted': 0, 'entered': 0, 'target_without_entry': 0,
+           'overtaken': 0, 'expired': 0, 'observed': 0, 'tp_first': 0, 'sl_first': 0,
+           'neither': 0, 'refused_tp': 0, 'refused_sl': 0}
+    try:
+        import llm_journal
+        for row in llm_journal.last(400, mode=config.TRADING_MODE):
+            if (row.get('at') or '') >= since and row.get('decision') == 'enter' and not row.get('gate'):
+                out['accepted'] += 1
+    except Exception:                                  # noqa: BLE001
+        pass
+    try:
+        import refused
+        with open(refused.CSV_PATH, encoding='utf-8', newline='') as fh:
+            for r in csv.DictReader(fh):
+                if r.get('strategy') != 'LLM' or (r.get('at') or '') < since:
+                    continue
+                gate = r.get('gate') or ''
+                if 'цель достигнута без входа' in gate:
+                    out['target_without_entry'] += 1
+                elif 'рынок обогнал план' in gate:
+                    out['overtaken'] += 1
+                elif 'условие не наступило' in gate:
+                    out['expired'] += 1
+    except Exception:                                  # noqa: BLE001
+        pass
+    try:
+        import llm_outcomes
+        with open(llm_outcomes.CSV_PATH, encoding='utf-8', newline='') as fh:
+            for r in csv.DictReader(fh):
+                if (r.get('at') or '') < since or not r.get('side'):
+                    continue
+                tp, sl = r.get('hit_tp1') == '1', r.get('hit_sl') == '1'
+                tp_h = float(r['tp_hours']) if r.get('tp_hours') else None
+                sl_h = float(r['sl_hours']) if r.get('sl_hours') else None
+                first = ('tp' if tp and (not sl or (tp_h is not None and sl_h is not None and tp_h <= sl_h))
+                         else ('sl' if sl else 'none'))
+                if r.get('decision') == 'enter' and not r.get('gate'):
+                    out['observed'] += 1
+                    out['tp_first' if first == 'tp' else ('sl_first' if first == 'sl' else 'neither')] += 1
+                elif r.get('gate'):
+                    if first == 'tp':
+                        out['refused_tp'] += 1
+                    elif first == 'sl':
+                        out['refused_sl'] += 1
+    except Exception:                                  # noqa: BLE001
+        pass
+    try:
+        state = _broker.snapshot() if _broker is not None else {}
+        out['entered'] = sum(1 for o in (state.get('open') or []) if o.get('strategy') == 'LLM')
+    except Exception:                                  # noqa: BLE001
+        pass
+    return out
 
 
 def export_paths():
