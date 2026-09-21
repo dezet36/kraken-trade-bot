@@ -215,9 +215,15 @@ SYSTEM = """Ты — аналитик торговой системы своег
 # дороже английского по токенам. Родной язык рассуждения модели —
 # английский, качество от этого не страдает, а разбор в JSON остаётся
 # по-русски — его читает человек.
+# АРИФМЕТИКУ СТОПА И R:R В МЫСЛИ НЕ ДЕЛАТЬ. LTC 21.09 12:21: семьдесят строк
+# «0.42% от 59.20 это 0.25… 1.02 < 1.50… R:R = 1.14» — перебор пар вход/стоп
+# вручную, которую за модель делает грамматика: ей предлагаются только
+# допустимые сочетания. Мысль — про логику уровней, не про проценты.
 THINK_SEED = ('Data is in the question, I will not restate it. Reasoning about the market, '
               'looking for where the plan breaks. Levels: number with price as in the table, '
-              'e.g. L11 (2615) — never recompute numbers.' + chr(10)
+              'e.g. L11 (2615) — never recompute numbers. Minimum stop and R:R are enforced by '
+              'the answer format, so I do not compute percentages by hand: I choose levels by '
+              'structure and liquidity and let the format reject what does not fit.' + chr(10)
               + '1. Direction and where price sits in the last leg: ')
 
 

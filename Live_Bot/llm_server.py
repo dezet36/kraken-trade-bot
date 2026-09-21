@@ -196,6 +196,7 @@ def ask(prompt, grammar=None, max_tokens=None, timeout=None):
 
     # ── Фаза 1: мысль ──────────────────────────────────────────────────────
     thought, thought_ids, thought_tokens, think_finish = '', [], 0, ''
+    evaluated1 = None                              # сколько вопроса прочла фаза мысли
     think_limit = int(getattr(config, 'LLM_THINK_TOKENS', 0) or 0)
     if think_open and think_limit > 0:
         out1 = _completion({
@@ -210,6 +211,7 @@ def ask(prompt, grammar=None, max_tokens=None, timeout=None):
         thought_ids = list(out1.get('tokens') or [])
         t1 = out1.get('timings') or {}
         thought_tokens = int(t1.get('predicted_n') or out1.get('tokens_predicted') or 0)
+        evaluated1 = int(t1.get('prompt_n') or out1.get('tokens_evaluated') or 0)
         think_finish = 'stop' if (out1.get('stopping_word') or '') == '</think>' else 'length'
         if think_finish == 'length':
             log(f'   модель: мысль закрыта по пределу {think_limit} ток.')
@@ -248,7 +250,9 @@ def ask(prompt, grammar=None, max_tokens=None, timeout=None):
     evaluated = int(timings.get('prompt_n') or out.get('tokens_evaluated') or 0)
     answer_tokens = int(timings.get('predicted_n') or out.get('tokens_predicted') or 0) + thought_tokens
     total = len(prompt_ids) if prompt_ids else evaluated
-    cached = max(0, total - evaluated) if not think_open else max(0, total - (evaluated - min(evaluated, len(thought_ids) + 3)))
+    # Вопрос читала фаза мысли; фаза ответа дочитывает лишь «</think>».
+    read = evaluated1 if evaluated1 is not None else evaluated
+    cached = max(0, total - read)
     finish = 'length' if out.get('truncated') or (out.get('stop_type') == 'limit') else 'stop'
     stats = {
         'prompt_tokens': total,

@@ -54,7 +54,7 @@ class FakeLlamaServer(BaseHTTPRequestHandler):
             self._json({'content': thought, 'tokens': [ord(ch) for ch in thought],
                         'stopping_word': '</think>' if FakeLlamaServer.thought_closes else '',
                         'stop_type': 'word' if FakeLlamaServer.thought_closes else 'limit',
-                        'timings': {'predicted_n': len(thought)}}); return
+                        'timings': {'predicted_n': len(thought), 'prompt_n': 20}}); return
         # Как у настоящего llama-server: tokens_evaluated — весь вопрос,
         # посчитано заново — timings.prompt_n, tokens_cached — кэш после ответа.
         self._json({'content': FakeLlamaServer.answer, 'tokens_evaluated': len(body['prompt']),
@@ -120,6 +120,8 @@ def test_the_thought_is_its_own_phase_with_a_token_limit(server, monkeypatch):
     assert answer.endswith('{"d":"skip"}')
     assert stats['thought_tokens'] == len(FakeLlamaServer.thought)
     assert stats['answer_tokens'] == 9 + len(FakeLlamaServer.thought)
+    # Вопрос читала фаза мысли (20 токенов заново) — «из кэша» считается по ней.
+    assert stats['cached_tokens'] == stats['prompt_tokens'] - 20
 
 
 def test_a_thought_cut_by_the_limit_still_gets_an_answer(server, monkeypatch):

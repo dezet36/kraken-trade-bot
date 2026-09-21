@@ -160,5 +160,5 @@
 ПРЕДЕЛЫ: стоп не ближе минимального (в разметке: не меньше 1.50% по издержкам и половины ATR); факторов не меньше 4 из 5; отношение хода к риску по первой цели не меньше 2.5, стремись к 3. Не проходит — отказывайся сразу.
 
 Затравка мысли (первые слова блока <think>, модель продолжает с них):
-Data is in the question, I will not restate it. Reasoning about the market, looking for where the plan breaks. Levels: number with price as in the table, e.g. L11 (2615) — never recompute numbers.
+Data is in the question, I will not restate it. Reasoning about the market, looking for where the plan breaks. Levels: number with price as in the table, e.g. L11 (2615) — never recompute numbers. Minimum stop and R:R are enforced by the answer format, so I do not compute percentages by hand: I choose levels by structure and liquidity and let the format reject what does not fit.
 1. Direction and where price sits in the last leg: 
