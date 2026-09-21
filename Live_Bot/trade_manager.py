@@ -132,24 +132,55 @@ class LiveTradeManager:
         return used
 
     def _load_cooldown_state(self):
-        """Загружает время последней сделки по парам из файла (сохраняется между перезапусками)."""
+        """
+        Загружает время последней сделки по парам из файла (сохраняется между
+        перезапусками) и КТО её сделал — от этого зависит длина паузы.
+
+        Старый формат файла — {пара: iso}; новый — {пара: {"at": iso,
+        "strategy": имя}}. Старый читается как «стратегия неизвестна».
+        """
         state = defaultdict(lambda: None)
+        self.last_trade_strategy = {}
         try:
             if os.path.exists(self.cooldown_file):
                 with open(self.cooldown_file, 'r') as f:
                     data = json.load(f)
-                for pair, ts in data.items():
-                    state[pair] = datetime.fromisoformat(ts)
+                for pair, item in data.items():
+                    if isinstance(item, dict):
+                        state[pair] = datetime.fromisoformat(item['at'])
+                        if item.get('strategy'):
+                            self.last_trade_strategy[pair] = item['strategy']
+                    else:
+                        state[pair] = datetime.fromisoformat(item)
                 log(f"Кулдаун загружен: {len(data)} пар")
         except Exception as e:
             log(f"⚠️ Не удалось загрузить кулдаун: {e}")
         return state
 
+    def _stamp_cooldown(self, trading_pair, strategy):
+        """
+        Отмечает сделку по паре и стратегию, которая её сделала.
+
+        Пауза после сделки — у каждой стратегии своя (strategy_profile), а
+        pair_strategy очищается при закрытии позиции — то есть ровно тогда,
+        когда пауза и начинается. Поэтому стратегия запоминается здесь,
+        вместе с моментом, и переживает закрытие и перезапуск.
+        """
+        self.last_trade_time[trading_pair] = datetime.now()
+        if strategy:
+            self.last_trade_strategy[trading_pair] = strategy
+        self._save_cooldown_state()
+
+    def _cooldown_owner(self, trading_pair):
+        """Чья пауза действует по паре: кто последним торговал, иначе текущий владелец."""
+        return (self.last_trade_strategy.get(trading_pair)
+                or self.get_pair_strategy(trading_pair))
+
     def _save_cooldown_state(self):
-        """Сохраняет время последней сделки на диск."""
+        """Сохраняет время последней сделки и её стратегию на диск."""
         try:
             data = {
-                pair: ts.isoformat()
+                pair: {'at': ts.isoformat(), 'strategy': self.last_trade_strategy.get(pair)}
                 for pair, ts in self.last_trade_time.items()
                 if ts is not None
             }
@@ -384,7 +415,7 @@ class LiveTradeManager:
             return True
         hours_since_last = (datetime.now() - self.last_trade_time[trading_pair]).total_seconds() / 3600
         import strategy_profile
-        return hours_since_last >= strategy_profile.cooldown_hours(self.pair_strategy.get(trading_pair))
+        return hours_since_last >= strategy_profile.cooldown_hours(self._cooldown_owner(trading_pair))
 
     # ── Снимок реального состояния на бирже (источник истины) ────────────────
     def sync_exchange_state(self, max_age: float = 15.0):
@@ -796,8 +827,7 @@ class LiveTradeManager:
             self.set_pair_strategy(pair, signal.get('strategy'))
             self._save_position_state(pair, position, params)  # W7
 
-            self.last_trade_time[pair] = datetime.now()
-            self._save_cooldown_state()
+            self._stamp_cooldown(pair, signal.get('strategy'))
 
             # Удаляем из pending ДО Telegram (чтобы избежать двойной обработки)
             self._remove_pending_order(pair)
@@ -990,7 +1020,7 @@ class LiveTradeManager:
 
         if not self.check_cooldown(trading_pair):
             import strategy_profile
-            hours_left = strategy_profile.cooldown_hours(self.pair_strategy.get(trading_pair)) - (
+            hours_left = strategy_profile.cooldown_hours(self._cooldown_owner(trading_pair)) - (
                 datetime.now() - self.last_trade_time[trading_pair]
             ).total_seconds() / 3600
             log(f"⏳ Кулдаун для {trading_pair}. Осталось {hours_left:.1f} ч")
@@ -1184,8 +1214,7 @@ class LiveTradeManager:
                     # Защита от дублей: ставим кулдаун уже при ВЫСТАВЛЕНИИ лимита,
                     # а не только при заполнении — даже если pending-файл не сохранится,
                     # повторного входа по этой паре в этом окне не будет.
-                    self.last_trade_time[trading_pair] = datetime.now()
-                    self._save_cooldown_state()
+                    self._stamp_cooldown(trading_pair, signal.get('strategy'))
                     log(f"⏳ GTC LIMIT @ ${_fmt_p(limit_price)} | ID: {lim_order.get('id')} | "
                         f"Инвалидация @ ${_fmt_p(inv)}")
                     tg.limit_order_placed(trading_pair, side, limit_price,
@@ -1268,8 +1297,7 @@ class LiveTradeManager:
             # Кто открыл — нужно для раздельного учёта слотов и разбора итогов
             self.set_pair_strategy(trading_pair, signal.get('strategy'))
             self._save_position_state(trading_pair, position, params)  # W7: сохраняем для восстановления
-            self.last_trade_time[trading_pair] = datetime.now()
-            self._save_cooldown_state()
+            self._stamp_cooldown(trading_pair, signal.get('strategy'))
 
             # Уведомление с ФАКТИЧЕСКИМИ params (entry/SL могли скорректироваться из-за
             # проскальзывания рынка) — signal сам по себе всё ещё хранит плановые.

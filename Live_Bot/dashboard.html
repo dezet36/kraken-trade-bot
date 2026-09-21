@@ -4041,6 +4041,9 @@ let LOG_LOADED = false;
 let CONTROLS_BLIND = false;
 let LIMITS = null;
 let WRITABLE = false;
+// Чем стратегия живёт на самом деле (strategy_profile): min_stop_pct,
+// min_stop_knob — читает ли она ручку «минимальный стоп».
+let OWN = {};
 
 const FIELDS = [
   { id: 'risk_pct', label: 'Риск на сделку', unit: '%', step: 0.05,
@@ -4064,7 +4067,7 @@ const FIELDS = [
 async function loadSettings() {
   try {
     const d = await (await fetch('/api/settings', { cache: 'no-store' })).json();
-    SETTINGS = d.settings; LIMITS = d.limits; WRITABLE = !!d.writable;
+    SETTINGS = d.settings; LIMITS = d.limits; WRITABLE = !!d.writable; OWN = d.own || {};
     NOTIFY_SETTINGS = d.notify || {};
     EXCHANGE_STATE = d.exchange || null;
     renderControls();
@@ -4183,9 +4186,16 @@ function renderControls() {
 
     const rows = FIELDS.filter(f => f.id !== 'deposit' || PAPER).map(f => {
       const lim = (LIMITS || {})[f.id] || [0, 1e9];
-      const llmStop = key === 'LLM' && f.id === 'min_stop_pct';
+      // Ручку «минимальный стоп» читают только FIBO и SMC. Уровни и
+      // Боллинджер считают по своему параметру, ИИ — по издержкам; для них
+      // поле выключено и подписано их настоящим числом, а не рисует 0.8%.
+      const own = OWN[key] || {};
+      const llmStop = f.id === 'min_stop_pct' && own.min_stop_knob === false;
+      const ownStop = own.min_stop_pct != null ? `${Number(own.min_stop_pct).toFixed(2).replace(/\.?0+$/, '')}%` : '—';
       const note = llmStop
-        ? 'Не применяется: у ИИ минимальный стоп считается по издержкам (1.5% или половина ATR) и задаётся моделью за структурой — это поле ей не читается.'
+        ? (key === 'LLM'
+          ? `Не применяется: у ИИ минимальный стоп считается по издержкам (сейчас ${ownStop}) и половине ATR, а стоп ставит модель за структурой — это поле ей не читается.`
+          : `Не применяется: стратегия считает по своему параметру — сейчас ${ownStop} (${key === 'LEVELS' ? 'levels' : 'rsibb'}/params.MIN_STOP_PCT). Это поле ей не читается.`)
         : f.id === 'deposit'
         ? (started
           ? `Стратегия уже торгует: ${live.trades || 0} сделок, ${

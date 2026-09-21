@@ -324,10 +324,14 @@ def fetch_raw(ex, native, timeframe, since, limit):
 # прошлого (графики закрытых сделок, дозагрузка истории) идут мимо.
 CANDLE_CACHE_TTL_S = 90.0
 _candle_cache = {}          # (биржа, символ, ТФ) -> (момент, запрошено N, df)
+# Кэш читают два потока: цикл сканера и панель (графики). Замок держится
+# только на чтении/записи словаря, не на запросе к бирже.
+_candle_lock = __import__('threading').Lock()
 
 
 def clear_candle_cache():
-    _candle_cache.clear()
+    with _candle_lock:
+        _candle_cache.clear()
 
 
 def _cache_key(ex, symbol, timeframe):
@@ -335,7 +339,8 @@ def _cache_key(ex, symbol, timeframe):
 
 
 def _cached_candles(key, limit, now):
-    entry = _candle_cache.get(key)
+    with _candle_lock:
+        entry = _candle_cache.get(key)
     if not entry:
         return None
     at, had, df = entry
@@ -383,7 +388,8 @@ def fetch_ohlcv(timeframe, limit=500, symbol=None, client=None, since=None):
         df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
         df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
         if since is None:
-            _candle_cache[key] = (time.monotonic(), limit, df)
+            with _candle_lock:
+                _candle_cache[key] = (time.monotonic(), limit, df)
             return df.copy()
         return df
     except ccxt.NetworkError as e:

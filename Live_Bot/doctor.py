@@ -269,11 +269,15 @@ def check_limits():
     import risk_gate
     import settings_store as settings
     try:
-        import config
+        import strategy_profile
+        # Предел расхода на вход — у каждой стратегии свой (strategy_profile);
+        # выключен он, если выключен хотя бы у одной.
+        cost_limit = min(strategy_profile.cost_limit_pct(name)
+                         for name in ('FIBO', 'SMC', 'LEVELS', 'RSIBB', 'LLM'))
         off = risk_gate.disabled_limits(settings.portfolio_max_positions(),
                                         settings.portfolio_risk_pct(),
                                         settings.daily_loss_pct(),
-                                        config.MAX_ENTRY_COST_SHARE_PCT)
+                                        cost_limit)
     except Exception as exc:                       # noqa: BLE001
         return _result(WARN, 'Пределы портфеля не прочитаны', str(exc),
                        'проверьте настройки в панели')

@@ -123,5 +123,38 @@ class TestDescribeListsEverything:
         for name in ALL:
             d = sp.describe(name)
             assert set(d) == {'expiry_hours', 'cooldown_hours', 'cost_limit_pct',
-                              'limit_offset_pct', 'max_hold_hours'}
-            assert all(isinstance(v, float) for v in d.values())
+                              'limit_offset_pct', 'max_hold_hours', 'min_stop_pct',
+                              'min_stop_knob'}
+            assert all(isinstance(v, float) for k, v in d.items() if k != 'min_stop_knob')
+
+
+class TestTheMinStopKnobIsHonest:
+    """
+    Ручку «минимальный стоп» читают только FIBO и SMC; уровни и Боллинджер
+    живут своим params.MIN_STOP_PCT, ИИ — выводом из издержек. Панель обязана
+    показывать число, которым стратегия живёт, а не мёртвое поле с 0.8%.
+    """
+
+    def test_who_reads_the_knob(self):
+        assert set(sp.MIN_STOP_KNOB_READERS) == {'FIBO', 'SMC'}
+        for name in ALL:
+            assert sp.describe(name)['min_stop_knob'] is (name in sp.MIN_STOP_KNOB_READERS)
+
+    def test_levels_and_rsibb_report_their_own_parameter(self):
+        from levels import params as lv
+        from rsibb import params as rb
+        assert sp.min_stop_pct('LEVELS') == pytest.approx(lv.MIN_STOP_PCT)
+        assert sp.min_stop_pct('RSIBB') == pytest.approx(rb.MIN_STOP_PCT)
+
+    def test_llm_reports_the_cost_derived_floor(self):
+        import llm_context
+        assert sp.min_stop_pct('LLM') == pytest.approx(llm_context.min_stop_pct())
+
+    def test_fibo_and_smc_report_the_operator_knob(self, monkeypatch):
+        import settings_store
+        monkeypatch.setattr(settings_store, 'min_stop_pct', lambda s: 0.0123)
+        assert sp.min_stop_pct('FIBO') == pytest.approx(1.23)
+        assert sp.min_stop_pct('SMC') == pytest.approx(1.23)
+        # а чужие от ручки не зависят
+        from levels import params as lv
+        assert sp.min_stop_pct('LEVELS') == pytest.approx(lv.MIN_STOP_PCT)

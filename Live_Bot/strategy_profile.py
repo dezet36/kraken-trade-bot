@@ -130,6 +130,34 @@ def max_hold_hours(strategy):
     return _own(strategy, own, getattr(_config(), 'MAX_POSITION_HOLD_HOURS', 0.0) or 0.0)
 
 
+# Кто читает ручку оператора «минимальный стоп» (settings_store). Уровни и
+# Боллинджер считают по своему params.MIN_STOP_PCT, ИИ — по издержкам; для
+# них ручка мертва, и панель обязана это показывать, а не рисовать 0.8%.
+MIN_STOP_KNOB_READERS = ('FIBO', 'SMC')
+
+
+def min_stop_pct(strategy):
+    """
+    Минимальная дистанция стопа, % от цены, которой стратегия РЕАЛЬНО живёт.
+
+    FIBO и SMC берут ручку оператора (у SMC адаптер пишет её в MIN_SL_PCT
+    перед каждым разбором); уровни и Боллинджер — свой параметр; ИИ — вывод
+    из своего предела издержек и ATR (llm_context.min_stop_pct).
+    """
+    try:
+        if strategy == 'LEVELS':
+            return float(_levels().MIN_STOP_PCT)
+        if strategy == 'RSIBB':
+            return float(_rsibb().MIN_STOP_PCT)
+        if strategy == 'LLM':
+            import llm_context
+            return float(llm_context.min_stop_pct())
+        import settings_store
+        return float(settings_store.min_stop_pct(strategy)) * 100
+    except Exception:                              # noqa: BLE001
+        return float(getattr(_config(), 'MIN_SL_PERCENT', 0.008)) * 100
+
+
 def describe(strategy):
     """Все величины разом — для журнала при старте и для панели."""
     return {
@@ -138,4 +166,6 @@ def describe(strategy):
         'cost_limit_pct': cost_limit_pct(strategy),
         'limit_offset_pct': limit_offset_pct(strategy),
         'max_hold_hours': max_hold_hours(strategy),
+        'min_stop_pct': min_stop_pct(strategy),
+        'min_stop_knob': strategy in MIN_STOP_KNOB_READERS,
     }

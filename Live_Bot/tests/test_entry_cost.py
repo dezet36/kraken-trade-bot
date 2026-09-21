@@ -244,7 +244,12 @@ class TestTheDisabledLimitIsNamed:
         off = risk_gate.disabled_limits(0, 0, 0, 0)
         assert len(off) == 4 and 'предел расхода на вход' in off
 
-    def test_diagnostics_asks_about_it(self):
-        src = open(os.path.join(ROOT, 'doctor.py'), encoding='utf-8').read()
-        spot = src.index('disabled_limits(')
-        assert 'MAX_ENTRY_COST_SHARE_PCT' in src[spot:spot + 400]
+    def test_diagnostics_asks_about_it(self, monkeypatch):
+        # Предел — у каждой стратегии свой (strategy_profile); диагностика
+        # обязана заметить, если выключен хотя бы один.
+        import doctor
+        import strategy_profile
+        assert 'предел расхода на вход' not in (doctor.check_limits().get('detail') or '')
+        monkeypatch.setattr(strategy_profile, 'cost_limit_pct',
+                            lambda name: 0.0 if name == 'RSIBB' else 8.0)
+        assert 'предел расхода на вход' in (doctor.check_limits().get('detail') or '')

@@ -31,6 +31,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import config
 import scan_report
 import settings_store
+import strategy_profile
 from logger import log
 
 
@@ -1586,6 +1587,11 @@ class _Handler(BaseHTTPRequestHandler):
                 'portfolio': stored.get(settings_store.PORTFOLIO, {}),
                 'notify': stored.get(settings_store.NOTIFY, {}),
                 'limits': settings_store.LIMITS,
+                # Чем стратегия живёт на самом деле (strategy_profile): ручка
+                # «минимальный стоп» читается не всеми, и панель показывает
+                # своё число стратегии вместо мёртвого поля.
+                'own': {name: strategy_profile.describe(name)
+                        for name in settings_store.STRATEGIES},
                 'exchange': _exchange_state(stored),
                 'writable': _controls_allowed()})
         elif path in ('/', '/index.html'):
