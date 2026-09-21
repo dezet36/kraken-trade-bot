@@ -309,6 +309,43 @@ def fetch_raw(ex, native, timeframe, since, limit):
             time.sleep(pause)
 
 
+# ── Кэш свечей на цикл ───────────────────────────────────────────────────────
+#
+# Одни и те же свечи за один проход просили четыре-пять раз: SMC строит
+# контекст по 1D/4H/1H, ИИ берёт 1H и те же 1D/4H для разметки, уровни и
+# Боллинджер — свои 1H. Пятнадцать пар × пять запросов = ~75 обращений к
+# бирже за цикл ради ~30 разных наборов. Свечи — сырые данные общего слоя
+# (CLAUDE.md), и брать их с биржи один раз, а раздавать всем — это и есть
+# «один раз нашли». Срок жизни короче цикла (5 мин), чтобы следующий проход
+# видел свежую формирующуюся свечу; внутри цикла все стратегии видят ОДИН
+# снимок, что честнее, чем пять разных.
+#
+# Кэшируется только запрос «последние N свечей» (since=None): выборки из
+# прошлого (графики закрытых сделок, дозагрузка истории) идут мимо.
+CANDLE_CACHE_TTL_S = 90.0
+_candle_cache = {}          # (биржа, символ, ТФ) -> (момент, запрошено N, df)
+
+
+def clear_candle_cache():
+    _candle_cache.clear()
+
+
+def _cache_key(ex, symbol, timeframe):
+    return (getattr(ex, 'id', '?'), symbol, timeframe)
+
+
+def _cached_candles(key, limit, now):
+    entry = _candle_cache.get(key)
+    if not entry:
+        return None
+    at, had, df = entry
+    if now - at > CANDLE_CACHE_TTL_S or had < limit:
+        return None
+    # Копия: читатели дописывают колонки (ATR, EMA…) в полученный фрейм,
+    # и общий объект превратил бы одну стратегию в поставщика другой.
+    return df.tail(limit).reset_index(drop=True).copy()
+
+
 def fetch_ohlcv(timeframe, limit=500, symbol=None, client=None, since=None):
     """
     Загружает свечи. client=None -> legacy get_exchange() (одно-юзер).
@@ -319,11 +356,20 @@ def fetch_ohlcv(timeframe, limit=500, symbol=None, client=None, since=None):
     Именно поэтому у закрытых сделок не строился график: окно сделки лежало
     раньше отданного куска, фильтр по времени не находил ни одной свечи, и
     дашборд честно отвечал «свечей за этот период нет».
+
+    Запросы «последние N» кэшируются на CANDLE_CACHE_TTL_S (см. выше);
+    каждый вызывающий получает свою копию.
     """
+    import time
     if symbol is None:
         symbol = config.TRADING_PAIRS[0]
     try:
         ex = client if client is not None else get_exchange()
+        key = _cache_key(ex, symbol, timeframe)
+        if since is None:
+            hit = _cached_candles(key, limit, time.monotonic())
+            if hit is not None:
+                return hit
         # Приведение к записи ЭТОЙ биржи. Без него BingX отвечает BadSymbol на
         # каждый запрос: наш пул записан символами Bybit.
         native = market_symbol(symbol, ex)
@@ -336,6 +382,9 @@ def fetch_ohlcv(timeframe, limit=500, symbol=None, client=None, since=None):
             return None
         df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
         df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
+        if since is None:
+            _candle_cache[key] = (time.monotonic(), limit, df)
+            return df.copy()
         return df
     except ccxt.NetworkError as e:
         log(f"⚠️ Сетевая ошибка ({symbol} {timeframe}): {e}")
