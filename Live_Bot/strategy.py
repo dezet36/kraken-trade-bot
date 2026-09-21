@@ -236,21 +236,25 @@ def calculate_trade_params(setup, entry_price, balance, trading_pair=None, log_r
     if setup['type'] == 'LONG':
         # SL ниже: за уровнем SL_LEVEL_R коррекции от B (0.886 = инвалидация)
         sl_price = end_price - size * config.SL_LEVEL_R - (size * config.SL_BUFFER)
-        min_sl = entry_price * min_stop
-        if entry_price - sl_price < min_sl:
-            sl_price = entry_price - min_sl
         tp1 = end_price + size * config.TP1_LEVEL   # -25% расширение за B
         tp2 = end_price + size * config.TP2_LEVEL   # (мёртвое поле, совместимость)
     else:
         # SL выше: за уровнем SL_LEVEL_R коррекции от B
         sl_price = end_price + size * config.SL_LEVEL_R + (size * config.SL_BUFFER)
-        min_sl = entry_price * min_stop
-        if sl_price - entry_price < min_sl:
-            sl_price = entry_price + min_sl
         tp1 = end_price - size * config.TP1_LEVEL
         tp2 = end_price - size * config.TP2_LEVEL
 
     sl_distance = abs(entry_price - sl_price)
+    # Стоп стоит там, где сетап ломается (за 0.886), и никуда не двигается.
+    # Минимум — фильтр: тесный стоп не окупает шум и комиссии, и такой сетап
+    # не берётся. До 21.09.2026 стоп здесь ОТОДВИГАЛСЯ до минимума — то есть
+    # уезжал с уровня инвалидации на «просто расстояние от цены».
+    if sl_distance < entry_price * min_stop:
+        if log_reject:
+            tag = f"{trading_pair}: " if trading_pair else ""
+            log(f"   {tag}нет сигнала — стоп {sl_distance / entry_price * 100:.2f}% "
+                f"теснее минимума {min_stop * 100:.2f}% (структура слишком узкая)")
+        return None
     rr = abs(tp1 - entry_price) / sl_distance if sl_distance > 0 else 0
     if rr < config.MIN_RR:
         if log_reject:

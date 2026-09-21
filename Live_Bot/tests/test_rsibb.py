@@ -19,7 +19,7 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from rsibb import core  # noqa: E402
+from rsibb import core, params  # noqa: E402
 
 
 def series(n=400, seed=3):
@@ -158,13 +158,21 @@ class TestGeometry:
         assert trade['stop'] == pytest.approx(98.25)      # −0.5 полуширины
         assert trade['rr'] == pytest.approx(2.0)
 
-    def test_stop_floor_widens_and_lowers_rr(self):
-        """Пол по стопу — арифметика издержек, и он обязан менять RR."""
+    def test_a_stop_tighter_than_the_floor_skips_the_setup(self):
+        """
+        Пол по стопу — фильтр, а не место стопа (правило 21.09.2026): стоп
+        стоит за полосой, где идея ломается, и не двигается; тесный канал
+        не окупает шум и комиссии — сетап не берётся.
+        """
         setup, _ = core.evaluate(_at_lower_band(25), 30, rsi_mode='extreme')
+        assert core.build_trade(setup, stop_frac=0.5, min_stop_pct=2.0,
+                                min_rr=0.0) is None
+        # Явное 'widen' по-прежнему доступно параметром — но по умолчанию 'skip'.
         wide = core.build_trade(setup, stop_frac=0.5, min_stop_pct=2.0,
-                                min_rr=0.0)
+                                min_rr=0.0, thin_stop='widen')
         assert wide['stop'] == pytest.approx(99.0 - 99.0 * 0.02)
         assert wide['rr'] < 2.0
+        assert params.THIN_STOP == 'skip'
 
     def test_min_rr_rejects_instead_of_returning_bad_geometry(self):
         setup, _ = core.evaluate(_at_lower_band(25), 30, rsi_mode='extreme')

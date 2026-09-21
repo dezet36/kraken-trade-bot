@@ -340,9 +340,12 @@ class MarketContext:
             return None, f'confluence {score:.1f} < {threshold} (нет: {", ".join(missing)})'
 
         # 8) Геометрия сделки
+        # Причина несобравшейся геометрии — для воронки отказов: тесный стоп
+        # называется отдельно, иначе он тонет в общем «геометрия не собралась».
+        self._no_trade_reason = None
         trade = self._build_trade(best, leg, bias, swept, at_index, balance)
         if trade is None:
-            return None, 'геометрия не собралась'
+            return None, self._no_trade_reason or 'геометрия не собралась'
         if trade['rr'] < params.MIN_RR:
             return None, f'RR {trade["rr"]:.2f} < {params.MIN_RR}'
         # Слишком далёкая цель — нереалистичный сценарий, а не хорошая сделка:
@@ -443,15 +446,19 @@ class MarketContext:
         buffer_ = params.SL_BUFFER_PCT
         if direction == BULLISH:
             stop = far_edge * (1 - buffer_)
-            min_stop = entry * (1 - params.MIN_SL_PCT)
-            stop = min(stop, min_stop)
         else:
             stop = far_edge * (1 + buffer_)
-            min_stop = entry * (1 + params.MIN_SL_PCT)
-            stop = max(stop, min_stop)
 
         sl_distance = abs(entry - stop)
         if sl_distance <= 0:
+            return None
+        # Стоп — за границей зоны (§5.2/5.3), где сетап ломается, и он не
+        # двигается. MIN_SL_PCT — фильтр: зона теснее минимума не окупает шум
+        # и комиссии, сетап не берётся. До 21.09.2026 стоп здесь ОТОДВИГАЛСЯ
+        # до минимума, то есть уходил из-под структуры.
+        if sl_distance < entry * params.MIN_SL_PCT:
+            self._no_trade_reason = (f'стоп {sl_distance / entry * 100:.2f}% теснее минимума '
+                                     f'{params.MIN_SL_PCT * 100:.2f}% — зона слишком узкая')
             return None
 
         raw_targets = fib.targets(leg, entry=entry)

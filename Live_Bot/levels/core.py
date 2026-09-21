@@ -227,8 +227,14 @@ def evaluate(high, low, close, volume, at_index, levels=None, atr_values=None):
             continue
 
         entry = price
-        dist = max(abs(entry - extreme) + params.STOP_PAD_ATR * a[i],
-                   entry * params.MIN_STOP_PCT / 100)
+        # Стоп — за экстремумом прокола плюс отступ: там уровень не удержан
+        # и идея сломана. Минимум — фильтр, не место стопа: до 21.09.2026
+        # стоп здесь ОТОДВИГАЛСЯ до MIN_STOP_PCT, уходя от экстремума.
+        dist = abs(entry - extreme) + params.STOP_PAD_ATR * a[i]
+        if dist < entry * params.MIN_STOP_PCT / 100:
+            reason = (f'стоп {dist / entry * 100:.2f}% теснее минимума '
+                      f'{params.MIN_STOP_PCT}% — прокол слишком мелкий')
+            continue
         stop = entry - dist if side == LONG else entry + dist
 
         # Цель — следующий уровень по ходу сделки. Так выходит трейдер,
