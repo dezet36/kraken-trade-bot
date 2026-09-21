@@ -1176,6 +1176,13 @@ class PaperBroker:
         слот и держит кулдаун по паре.
         """
         try:
+            # ИИ: заявка живёт столько же, сколько ждёт условия план —
+            # LLM_TRIGGER_TTL_H. Без этого она получала 72 часа Фибоначчи:
+            # 20–21.09.2026 лимит AAVE SHORT, поставленный по плану от 06:50,
+            # налился через 18 часов в откат против тренда старшего ТФ — план
+            # к тому времени модель уже дважды сменила, а заявка жила.
+            if strategy == 'LLM':
+                return float(config.__dict__.get('LLM_TRIGGER_TTL_H', 0) or 12)
             if strategy == 'LEVELS':
                 from levels import params
                 return float(params.EXPIRY_HOURS)

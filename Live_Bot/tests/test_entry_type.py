@@ -161,6 +161,11 @@ class TestExpiryComesFromTheStrategy:
         assert broker.PaperBroker._expiry_hours('RSIBB') == pytest.approx(
             rsibb_params.EXPIRY_BARS * broker._bar_hours(rsibb_params.TIMEFRAME))
         # У Фибоначчи своего параметра нет — остаётся общий.
+        # ИИ живёт столько, сколько ждёт условия план: 20–21.09.2026 лимит
+        # AAVE налился через 18 часов по плану, который модель уже сменила.
+        assert broker.PaperBroker._expiry_hours('LLM') == pytest.approx(
+            float(config.LLM_TRIGGER_TTL_H))
+        assert broker.PaperBroker._expiry_hours('LLM') < 24
         assert broker.PaperBroker._expiry_hours('FIBO') == pytest.approx(
             config.PENDING_ORDER_MAX_HOURS)
 
