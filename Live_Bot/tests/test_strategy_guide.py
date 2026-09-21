@@ -73,6 +73,24 @@ class TestEveryStrategyIsDescribed:
             # описание не отвечает на вопрос «где точки входа и выхода».
             assert block.count("['") >= 3, f'{name}: слишком мало шагов'
 
+    def test_every_guide_says_where_the_stop_is_and_that_it_does_not_move(self):
+        """
+        Правило проекта (CLAUDE.md, «Стоп»): стоп стоит там, где ломается
+        идея, минимум — фильтр. Описание каждой стратегии обязано это
+        говорить, иначе оператор ждёт «стоп на 0.8%» и не понимает отказов
+        «стоп теснее минимума».
+        """
+        import sys
+        sys.path.insert(0, BOT)
+        import settings_store
+        for name in settings_store.STRATEGIES:
+            block = guide_block(name)
+            assert "['Где стоп'" in block, f'{name}: описание не говорит, где стоп'
+            stop_row = block[block.index("['Где стоп'"):]
+            stop_row = stop_row[:stop_row.index('`],') + 3]
+            assert 'не берётся' in stop_row or 'отклоняется' in stop_row, (
+                f'{name}: описание не говорит, что тесный стоп — отказ, а не сдвиг')
+
 
 def quoted_numbers(block):
     """Числа, названные в описании как <code>…</code>, в виде чисел."""
