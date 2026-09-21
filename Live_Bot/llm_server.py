@@ -30,6 +30,7 @@ import urllib.request
 
 import config
 import llm_grammar
+import llm_prompt
 from logger import log
 
 # Сколько ждём ответа: как у рабочего процесса — разбор с мыслью до 45 минут.
@@ -138,7 +139,8 @@ def ask(prompt, grammar=None, max_tokens=None, timeout=None):
     limit = int(max_tokens or config.LLM_MAX_TOKENS)
     # Мысль открывается в подсказке, а не грамматикой: на границе «<think>»
     # MTP-черновик с грамматикой выдавал пустую мысль (см. open_thinking).
-    grammar, think_open = llm_grammar.open_thinking(grammar) if grammar else (grammar, '')
+    grammar, think_open = (llm_grammar.open_thinking(grammar, llm_prompt.THINK_SEED)
+                           if grammar else (grammar, ''))
     text = _chatml(prompt + ('\n' + config.LLM_THINK_TAG if config.LLM_THINK_TAG else '')) + think_open
     # Вопрос уходит токенами, а не строкой: так префикс прогрева и начало
     # вопроса совпадают гарантированно, а не «обычно».

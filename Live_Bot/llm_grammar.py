@@ -157,12 +157,13 @@ _ROOT_OPTIONAL = 'root     ::= think answer | answer'
 _THINK_CLOSED = 'think    ::= "<think>" tchar{0,'
 
 
-def open_thinking(grammar):
+def open_thinking(grammar, seed=''):
     """
     Переносит открывающий «<think>» из грамматики в подсказку.
 
     -> (грамматика без «<think>», хвост подсказки) или (grammar, '') если
-    блока мысли в ней нет.
+    блока мысли в ней нет. seed — первые слова мысли, которые модель
+    продолжит (llm_prompt.THINK_SEED); в бюджет tchar они не входят.
 
     ЗАЧЕМ. llama-server с MTP-черновиком и грамматикой на границе «<think>»
     принимает от черновика «\n\n</think>» — мысль выходит пустой в 100%
@@ -177,7 +178,7 @@ def open_thinking(grammar):
         return grammar, ''
     grammar = grammar.replace(_ROOT_OPTIONAL, 'root     ::= think answer', 1)
     grammar = grammar.replace(_THINK_CLOSED, 'think    ::= tchar{0,', 1)
-    return grammar, THINK_OPEN
+    return grammar, THINK_OPEN + (seed or '')
 
 
 def _build_answer(level_ids, plans, rules):

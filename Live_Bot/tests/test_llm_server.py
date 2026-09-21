@@ -96,9 +96,12 @@ def test_the_thought_is_opened_in_the_prompt_not_by_the_grammar(server):
     answer, _stats = llm_server.ask('ВОПРОС', grammar=grammar, max_tokens=50)
     body = FakeLlamaServer.seen[-1]
     sent = ''.join(chr(t) for t in body['prompt'])
-    assert sent.endswith('assistant' + chr(10) + '<think>' + chr(10)), 'мысль открывается в подсказке'
+    import llm_prompt
+    assert sent.endswith('assistant' + chr(10) + '<think>' + chr(10) + llm_prompt.THINK_SEED), \
+        'мысль открывается в подсказке и начинается с затравки'
     assert '"<think>"' not in body['grammar'] and 'root     ::= think answer' + chr(10) in body['grammar']
-    assert answer.startswith('<think>' + chr(10)), 'тег возвращён в ответ — журнал и split_thought его ждут'
+    assert answer.startswith('<think>' + chr(10) + llm_prompt.THINK_SEED), \
+        'тег и затравка возвращены в ответ — журнал и split_thought их ждут'
 
 
 def test_without_a_thinking_rule_the_prompt_is_untouched(server):

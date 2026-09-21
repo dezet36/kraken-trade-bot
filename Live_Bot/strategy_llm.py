@@ -64,6 +64,11 @@ NAME = 'LLM'
 # двадцати парах круг длиннее часа и окно почти не срабатывает, но при пуле в
 # две-три пары оно не даёт разбирать одну и ту же разметку без конца.
 _asked = {}
+# Повод, с которым пару отдали модели, и отказ, которым это кончилось:
+# пара -> подпись повода (llm_urgency.signature) / {'at', 'sig'}.
+_asked_sig = {}
+_refused = {}
+_reasons = {}           # пара -> поводы из последнего построения очереди
 
 # Взведённые условия входа: пара -> план. Модель сказала «войти после
 # закрытия часа выше L3» — план лежит здесь, и каждый цикл код смотрит на
@@ -170,6 +175,8 @@ def _remember(pair, now=None):
     minutes = int(config.__dict__.get('LLM_REASK_AFTER_MIN', 0) or 0)
     now = now if now is not None else time.time()
     _asked[pair] = now
+    import llm_urgency
+    _asked_sig[pair] = llm_urgency.signature(_reasons.get(pair, ()))
     # Метки живут дольше окна повтора: по ним _stale решает, что пару
     # давно не разбирали. Выбрасываем только совсем старые.
     import llm_urgency
@@ -210,8 +217,20 @@ def _queue(pairs, context_of=_cached_context, skip=()):
     # короче. Считается кодом из кэша SMC и файлов, без запросов к бирже.
     import llm_urgency
     ranked = llm_urgency.rank(ring, context_of)
-    out, idle = [], []
-    for pair, points, _why in ranked:
+    out, idle, same = [], [], []
+    for pair, points, why in ranked:
+        _reasons[pair] = list(why or ())
+        # ТОТ ЖЕ ПОВОД ПОСЛЕ ОТКАЗА — НЕ ПОВОД. 21.09.2026 ETH разобрали пять
+        # раз за 2.5 часа: цена стояла у того же уровня, ответ был тот же
+        # («стоп в скоплении стопов»), и каждый раз это стоило 15 минут
+        # модели. Пара вернётся, как только повод станет новым (другой
+        # уровень, слом, всплеск) — или по плановому проходу через
+        # STALE_HOURS: отсеянной навсегда она стать не может.
+        last = _refused.get(pair)
+        if last and not _stale(pair) and llm_urgency.same_reason(
+                last['at'], last['sig'], why):
+            same.append(f"{pair} ({', '.join(why)})")
+            continue
         if points >= llm_urgency.URGENT:
             if not _asked_recently(pair, factor=0.5):
                 out.append(pair)
@@ -226,6 +245,8 @@ def _queue(pairs, context_of=_cached_context, skip=()):
             out.append(pair)
         else:
             idle.append(pair)
+    if same:
+        log(f'   {NAME}: тот же повод, что при отказе, ждут нового — {"; ".join(same)}')
     if idle:
         log(f'   {NAME}: без повода, ждут события — {", ".join(idle)}')
     return out
@@ -719,6 +740,10 @@ def _collect(finished):
             log(f'   {NAME} {pair}: отказ — {verdict["gate"]}'
                 + (f' ({verdict["detail"]})' if verdict.get('detail') else ''))
             _refuse(pair, verdict)
+            # Поломка — не отказ: повод не «отработан», спросим снова.
+            if verdict.get('gate') not in llm_decide.BROKEN_GATES:
+                _refused[pair] = {'at': time.time(),
+                                  'sig': _asked_sig.get(pair, frozenset())}
             # Модель ПРЕДЛОЖИЛА сетап (есть направление и вход), а отклонил
             # код или критик — человеку это интересно: видно, что модель
             # ищет, и что её останавливает.
@@ -734,6 +759,7 @@ def _collect(finished):
                                      f'пределе {limit // 60}'})
             continue
 
+        _refused.pop(pair, None)
         signal = _reshape(pair, verdict, df)
         _notify_setup(signal, df)
 

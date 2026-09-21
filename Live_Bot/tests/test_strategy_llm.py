@@ -16,6 +16,7 @@
 import os
 import sys
 
+import time
 import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -75,6 +76,9 @@ def _forget_previous_pairs(tmp_path):
     """
     strategy_llm.join(10)
     strategy_llm._asked.clear()
+    strategy_llm._asked_sig.clear()
+    strategy_llm._refused.clear()
+    strategy_llm._reasons.clear()
     strategy_llm._done.clear()
     strategy_llm._busy = None
     strategy_llm._cursor = 0
@@ -424,6 +428,72 @@ class TestThePairIsNotReExaminedEveryCycle:
                             lambda pairs, context_of, now_ms=None: [(p, 2, ['цена у L5']) for p in pairs])
         strategy_llm.scan_for_setups(['BTCUSDT'], gate=None, candles=lambda pair: [0] * 500)
         assert len(asked) == 2
+
+    def test_the_same_reason_after_a_refusal_is_not_asked_again(self, monkeypatch):
+        """
+        21.09.2026 ETH разобрали пять раз за 2.5 часа у одного уровня с
+        одним и тем же отказом. Тот же повод после отказа — ждём нового.
+        """
+        import llm_urgency
+        asked = []
+        monkeypatch.setattr(strategy_llm.llm_local, 'available', lambda: True)
+        monkeypatch.setattr(strategy_llm.llm_decide, 'decide', refusing_decide(asked))
+        monkeypatch.setattr(llm_urgency, 'rank',
+                            lambda pairs, context_of, now_ms=None:
+                            [(p, 2, ['цена у L10 2635 (+0.30%)']) for p in pairs])
+        strategy_llm.scan_for_setups(['ETHUSDT'], gate=None, candles=lambda pair: [0] * 500)
+        strategy_llm.join(15)
+        strategy_llm.scan_for_setups(['ETHUSDT'], gate=None, candles=lambda pair: [0] * 500)
+        assert len(asked) == 1, 'отказ получен'
+        for key in list(strategy_llm._asked):           # окно повтора прошло
+            strategy_llm._asked[key] -= strategy_llm.config.LLM_REASK_AFTER_MIN * 60 + 1
+        strategy_llm.scan_for_setups(['ETHUSDT'], gate=None, candles=lambda pair: [0] * 500)
+        strategy_llm.join(15)
+        assert len(asked) == 1, 'тот же уровень — тот же повод, не спрашиваем'
+
+        # Уровень перенумеровался, но цена та же — повод тот же.
+        monkeypatch.setattr(llm_urgency, 'rank',
+                            lambda pairs, context_of, now_ms=None:
+                            [(p, 2, ['цена у L11 2635 (-0.10%)']) for p in pairs])
+        strategy_llm.scan_for_setups(['ETHUSDT'], gate=None, candles=lambda pair: [0] * 500)
+        strategy_llm.join(15)
+        assert len(asked) == 1
+
+        # Новый повод — слом структуры — и пара идёт снова.
+        monkeypatch.setattr(llm_urgency, 'rank',
+                            lambda pairs, context_of, now_ms=None:
+                            [(p, 5, ['BOS 1 св. назад', 'цена у L11 2635 (-0.10%)']) for p in pairs])
+        strategy_llm.scan_for_setups(['ETHUSDT'], gate=None, candles=lambda pair: [0] * 500)
+        strategy_llm.join(15)
+        assert len(asked) == 2
+
+    def test_a_refused_pair_comes_back_on_the_scheduled_pass(self, monkeypatch):
+        """Отсеянной навсегда пара стать не может: через STALE_HOURS — плановый проход."""
+        import llm_urgency
+        asked = []
+        monkeypatch.setattr(strategy_llm.llm_local, 'available', lambda: True)
+        monkeypatch.setattr(strategy_llm.llm_decide, 'decide', refusing_decide(asked))
+        monkeypatch.setattr(llm_urgency, 'rank',
+                            lambda pairs, context_of, now_ms=None:
+                            [(p, 2, ['цена у L10 2635 (+0.30%)']) for p in pairs])
+        strategy_llm.scan_for_setups(['ETHUSDT'], gate=None, candles=lambda pair: [0] * 500)
+        strategy_llm.join(15)
+        for key in list(strategy_llm._asked):
+            strategy_llm._asked[key] -= llm_urgency.STALE_HOURS * 3600 + 1
+        strategy_llm.scan_for_setups(['ETHUSDT'], gate=None, candles=lambda pair: [0] * 500)
+        strategy_llm.join(15)
+        assert len(asked) == 2
+
+    def test_a_setup_clears_the_refusal_memory(self, monkeypatch):
+        asked = []
+        monkeypatch.setattr(strategy_llm.llm_local, 'available', lambda: True)
+        monkeypatch.setattr(strategy_llm.llm_decide, 'decide',
+                            lambda pair, *a, **k: asked.append(pair) or approving_verdict())
+        strategy_llm._refused['BTCUSDT'] = {'at': time.time(), 'sig': frozenset()}
+        strategy_llm.scan_for_setups(['BTCUSDT'], gate=None, candles=lambda pair: [0] * 500)
+        strategy_llm.join(15)
+        strategy_llm.scan_for_setups(['BTCUSDT'], gate=None, candles=lambda pair: [0] * 500)
+        assert 'BTCUSDT' not in strategy_llm._refused
 
     def test_the_round_continues_past_recently_asked_pairs(self, monkeypatch):
         """Разобранная пара уступает очередь неразобранной, а не блокирует круг."""

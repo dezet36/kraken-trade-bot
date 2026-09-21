@@ -109,3 +109,23 @@ class TestTheQueue:
         strategy_llm._cursor = 1
         assert strategy_llm._queue(['A', 'B', 'C'], context_of=lambda p: None) == ['B', 'C', 'A']
         strategy_llm._cursor = 0
+
+
+class TestTheSameReasonIsRecognised:
+    def test_the_level_is_matched_by_price_not_number(self):
+        sig = llm_urgency.signature(['цена у L10 2635 (+0.30%)'])
+        assert llm_urgency.same_reason(NOW / 1000, sig, ['цена у L11 2635 (-0.10%)'], now=NOW / 1000 + 600)
+        assert not llm_urgency.same_reason(NOW / 1000, sig, ['цена у L11 2700 (-0.10%)'], now=NOW / 1000 + 600)
+
+    def test_any_new_key_makes_the_reason_new(self):
+        sig = llm_urgency.signature(['цена у L10 2635 (+0.30%)'])
+        assert not llm_urgency.same_reason(NOW / 1000, sig, ['цена у L10 2635 (+0.30%)', 'ОИ +1.4% за час'],
+                                           now=NOW / 1000 + 600)
+
+    def test_a_burst_is_the_same_only_within_an_hour(self):
+        sig = llm_urgency.signature(['ликвидации ×2.5 к медиане часа'])
+        assert llm_urgency.same_reason(NOW / 1000, sig, ['ликвидации ×3.1 к медиане часа'], now=NOW / 1000 + 1800)
+        assert not llm_urgency.same_reason(NOW / 1000, sig, ['ликвидации ×3.1 к медиане часа'], now=NOW / 1000 + 3601)
+
+    def test_no_reason_at_all_is_never_the_same(self):
+        assert not llm_urgency.same_reason(NOW / 1000, frozenset(), [], now=NOW / 1000 + 1)
