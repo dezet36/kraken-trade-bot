@@ -804,3 +804,34 @@ class TestLabelledLevelsAreParsedToIds:
         assert out['trigger_level'] == 100.0 and out['trigger_id'] == 'L2'
         assert llm_context.level_id_of('L11 (2615)') == 'L11' and llm_context.level_id_of('L11') == 'L11'
         assert llm_context.label('L11', 2615) == 'L11 (2615)' and llm_context.label('L4', 2709.71) == 'L4 (2709.71)'
+
+
+class TestThePlanParagraphMustNameTheSameStop:
+    """
+    LTC 21.09.2026: разбор — «стоп за L5 (59.99)», план — L7 (грамматика не
+    пустила стоп в 0.2% от входа), stop_why задним числом объяснил L7.
+    Разбор пишется до решения — расхождение с ним и есть подмена.
+    """
+
+    def _levels(self):
+        return [{'id': 'L1', 'price': 63.294}, {'id': 'L4', 'price': 60.13}, {'id': 'L5', 'price': 59.99},
+                {'id': 'L7', 'price': 59.33}]
+
+    def test_a_stop_moved_by_the_grammar_is_caught_via_the_plan_paragraph(self):
+        parsed = {'ids': {'entry': 'L4', 'stop': 'L7', 'tp': ['L1']},
+                  'stop_why': 'За L7 (59.33) — максимум недели', 'tp_why': 'L1 (63.294) — ликвидации шортов',
+                  'analysis_parts': {'plan': 'Вход в зону имбаланса L4..L5 по ретесту. Стоп за L5 (59.99). Цель L1 (63.294).'}}
+        out = dec.justification_mismatch(parsed, self._levels())
+        assert out and 'analysis.plan' in out and 'L5' in out
+
+    def test_a_consistent_plan_passes(self):
+        parsed = {'ids': {'entry': 'L4', 'stop': 'L7', 'tp': ['L1']},
+                  'stop_why': 'За L7 (59.33)', 'tp_why': 'L1 (63.294)',
+                  'analysis_parts': {'plan': 'Вход L4, стоп за L7 (59.33), цель L1.'}}
+        assert dec.justification_mismatch(parsed, self._levels()) == ''
+
+    def test_a_plan_paragraph_without_a_stop_level_is_not_judged(self):
+        parsed = {'ids': {'entry': 'L4', 'stop': 'L7', 'tp': ['L1']},
+                  'stop_why': 'За L7', 'tp_why': 'L1',
+                  'analysis_parts': {'plan': 'Лонг от имбаланса к пулу шортов, стоп за структурой.'}}
+        assert dec.justification_mismatch(parsed, self._levels()) == ''

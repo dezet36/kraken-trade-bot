@@ -385,15 +385,26 @@ def justification_mismatch(parsed, levels):
     модель сама не верит, хуже отказа.
     """
     ids = parsed.get('ids') or {}
-    checks = (('stop_why', 'стоп', {ids.get('stop')}),
-              ('tp_why', 'цель', set(ids.get('tp') or [])))
-    for field, name, chosen in checks:
+    checks = [('stop_why', 'стоп', {ids.get('stop')}, parsed.get('stop_why', '')),
+              ('tp_why', 'цель', set(ids.get('tp') or []), parsed.get('tp_why', ''))]
+    # ПУНКТ «ПЛАН» РАЗБОРА — ТОЖЕ ОБОСНОВАНИЕ. LTC 21.09.2026: в разборе «стоп
+    # за L5 (59.99)» — 0.2% от входа, грамматика такой стоп не пустила, план
+    # получил L7, а stop_why задним числом объяснил L7. Обоснование, написанное
+    # под уже выбранный уровень, проверку по stop_why проходит; расхождение
+    # видно только между разбором (написан ДО решения) и планом.
+    plan_text = (parsed.get('analysis_parts') or {}).get('plan') or ''
+    if plan_text:
+        import re
+        said_stop = re.search(r'стоп[^.;]{0,60}?\b(L\d{1,2})\b', plan_text, re.I)
+        if said_stop:
+            checks.append(('analysis.plan', 'стоп', {ids.get('stop')}, said_stop.group(0)))
+    for field, name, chosen, text in checks:
         chosen = {c for c in chosen if c}
-        mentioned = _mentioned_levels(parsed.get(field, ''), levels)
+        mentioned = _mentioned_levels(text, levels)
         if not chosen or not mentioned:
             continue
         if not (mentioned & chosen):
-            return (f'{name} в плане — {", ".join(sorted(chosen))}, а обоснование говорит о '
+            return (f'{name} в плане — {", ".join(sorted(chosen))}, а обоснование ({field}) говорит о '
                     f'{", ".join(sorted(mentioned))}: модель выбрала не тот уровень, о котором думала')
     return ''
 
