@@ -87,9 +87,16 @@ def _load():
 
 
 def _save():
+    """
+    Через временный файл и атомарную замену: прямая запись оставляла окно,
+    в котором файл пуст — читатель (и перезапуск бота) в этот момент видел
+    ноль наблюдений вместо сорока (21.09.2026, поймано при проверке).
+    """
     try:
-        with open(STATE_PATH, 'w', encoding='utf-8') as fh:
+        tmp = STATE_PATH + '.tmp'
+        with open(tmp, 'w', encoding='utf-8') as fh:
             json.dump(_watches or [], fh, ensure_ascii=False)
+        os.replace(tmp, STATE_PATH)
     except OSError as exc:
         log(f'⚠️ Наблюдения за вердиктами не сохранены: {exc}')
 

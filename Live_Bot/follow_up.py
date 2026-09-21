@@ -190,9 +190,14 @@ def load_state(path=None):
 def save_state(watches, path=None):
     """Сохраняет наблюдения. Молча: это данные для разбора, а не для торговли."""
     import json
+    import os
+    target = path or STATE_PATH
     try:
-        with open(path or STATE_PATH, 'w', encoding='utf-8') as fh:
+        # Через временный файл: прямая запись оставляла окно с пустым файлом
+        # (см. llm_outcomes._save).
+        with open(target + '.tmp', 'w', encoding='utf-8') as fh:
             json.dump(watches, fh, ensure_ascii=False)
+        os.replace(target + '.tmp', target)
     except OSError as exc:
         log(f'⚠️ Наблюдения после выхода не сохранены: {exc}')
 
