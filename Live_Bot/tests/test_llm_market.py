@@ -704,3 +704,36 @@ class TestDayProfile:
             'volume': [2.0] * n})
         out = llm_market.day_profile(None, df, n - 1)
         assert out['vwap_today'] == pytest.approx((102 + 98 + 101) / 3) and 'poc_24h' not in out
+
+
+class TestUntappedPoolsAreCheckedAgainstCandles:
+    """
+    SHIB 21.09.2026: «нетронутое скопление 0.005786 (над ценой, стопы
+    шортов, −3.57%)» при цене 0.006 — цена прошла уровень насквозь без
+    выноса-возврата, и пул остался «нетронутым». Пробит — снят; сторона —
+    по нынешней цене.
+    """
+
+    def _df(self, highs, lows):
+        import pandas as pd
+        return pd.DataFrame({'high': highs, 'low': lows})
+
+    def test_a_pool_price_ran_through_is_gone(self):
+        pools = [{'price': 105.0, 'side': 'BSL', 'confirmed_at': 2, 'source': 'swing'}]
+        df = self._df([100, 101, 102, 103, 106, 108], [99, 100, 101, 102, 104, 107])
+        assert llm_market.still_untapped(pools, df, 5, 107.5) == []
+
+    def test_a_pool_on_the_wrong_side_is_gone(self):
+        pools = [{'price': 105.0, 'side': 'BSL', 'confirmed_at': 2, 'source': 'swing'},
+                 {'price': 95.0, 'side': 'SSL', 'confirmed_at': 2, 'source': 'swing'}]
+        df = self._df([100, 101, 102, 103, 104, 104], [99, 100, 101, 102, 103, 103])
+        # Цена 107 — выше BSL-пула 105: он не «над ценой», хотя свечи его не касались.
+        kept = llm_market.still_untapped(pools, df, 5, 107.0)
+        assert [p['price'] for p in kept] == [95.0]
+
+    def test_a_real_untapped_pool_stays(self):
+        pools = [{'price': 105.0, 'side': 'BSL', 'confirmed_at': 2, 'source': 'swing'},
+                 {'price': 95.0, 'side': 'SSL', 'confirmed_at': 1, 'source': 'swing'}]
+        df = self._df([100, 101, 102, 103, 104, 104.5], [99, 100, 101, 102, 103, 103])
+        kept = llm_market.still_untapped(pools, df, 5, 103.5)
+        assert [p['price'] for p in kept] == [105.0, 95.0]

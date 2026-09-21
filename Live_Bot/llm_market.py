@@ -503,6 +503,13 @@ def _smc_from_context(context, price):
     untapped = _safe('нетронутые пулы', smc_liquidity.untapped_pools,
                      context.pools, context.sweeps, index)
     if untapped:
+        # Снятым считался только пул с зарегистрированным выносом-возвратом.
+        # Пул, который цена прошла насквозь и ушла дальше, оставался
+        # «нетронутым над ценой», стоя под ней: SHIB 21.09.2026 — «0.005786
+        # (над ценой, стопы шортов, −3.57%)» при цене 0.006. Стопы там давно
+        # сработали. Проверяем по свечам: пробит — снят; сторона — по цене.
+        df_poi = context.frames.get('poi')
+        untapped = still_untapped(untapped, df_poi, index, price)
         untapped = sorted(untapped,
                           key=lambda p: abs(float(p.get('price') or 0) - price))
         # Один пул под двумя именами (свинг и вчерашний минимум на одной
@@ -525,6 +532,41 @@ def _smc_from_context(context, price):
 
 
 # ── Зоны интереса: ордер-блоки, брейкеры, mitigation ────────────────────────
+
+def still_untapped(pools, df, index, price):
+    """
+    Пулы, которые цена НЕ прошла после их подтверждения и которые стоят
+    с правильной стороны от неё: BSL (стопы шортов) — над ценой, SSL — под.
+    """
+    if df is None or not len(df):
+        return list(pools)
+    try:
+        highs = df['high'].values
+        lows = df['low'].values
+    except Exception:                              # noqa: BLE001
+        return list(pools)
+    out = []
+    for pool in pools:
+        try:
+            level = float(pool.get('price') or 0)
+            side = pool.get('side')
+            start = int(pool.get('confirmed_at', 0)) + 1
+            end = min(int(index), len(highs) - 1)
+            if side == 'BSL':
+                if level <= price:
+                    continue
+                if start <= end and float(highs[start:end + 1].max()) >= level:
+                    continue
+            elif side == 'SSL':
+                if level >= price:
+                    continue
+                if start <= end and float(lows[start:end + 1].min()) <= level:
+                    continue
+            out.append(pool)
+        except Exception:                          # noqa: BLE001
+            out.append(pool)
+    return out
+
 
 def poi_facts(context, price, index, limit=4):
     """
