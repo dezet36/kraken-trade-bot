@@ -217,3 +217,25 @@ class TestTheMarkupShowsItHonestly:
         text = chr(10).join(llm_context.market_lines({'macro': None}, 100.0))
         assert 'РЫНОК В ЦЕЛОМ' in text
         assert 'USDT.D' in llm_prompt.definitions()
+
+
+class TestTheSnapshotSeesTheCurrentHour:
+    def test_points_after_the_candle_open_are_included(self, monkeypatch):
+        """
+        Отсечка снимка — открытие последней свечи; точки ряда за текущий час
+        позже неё. С отсечкой «не позже открытия» блок был пустым при живом
+        ряде: первый разбор после выкатки 21.09.2026 его не получил.
+        """
+        import time
+        import llm_market
+        now = int(time.time() * 1000)
+        candle_open = now - now % 3_600_000
+        _seed([(now - 60_000, 6.4, 59.4, 2.86e12)])          # точка минуту назад
+        assert llm_market._macro_facts(candle_open) is not None
+        assert llm_market._macro_facts(candle_open)['usdt_d'] == pytest.approx(6.4)
+
+    def test_a_past_candle_does_not_see_the_future(self):
+        import llm_market
+        _seed([(10 * DAY + 5 * 3_600_000, 6.4, 59.4, 2.86e12)])   # точка в 05:00
+        assert llm_market._macro_facts(10 * DAY + 3 * 3_600_000) is None   # разбор свечи 03:00
+        assert llm_market._macro_facts(10 * DAY + 4 * 3_600_000) is not None   # свеча 04:00 закрывается в 05:00
