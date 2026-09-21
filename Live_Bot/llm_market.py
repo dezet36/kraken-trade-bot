@@ -406,12 +406,14 @@ def smc_facts(pair, price, client=None, context=None):
     описывают рынок, и считать их второй раз своим кодом значило бы завести
     второе определение имбаланса, которое однажды разойдётся с первым.
 
-    Контекст берётся из общего кэша: SMC строит его в том же цикле по тем же
-    парам, и обычно он уже готов — новых запросов к бирже не будет.
+    Контекст берётся из общего слоя (market_structure) — того же, что читает SMC
+    в том же цикле по тем же парам; обычно он уже готов, новых запросов к
+    бирже не будет. Стратегия SMC здесь не импортируется: её правки не
+    имеют права менять то, что видит модель.
     """
     if context is None:
-        import strategy_smc
-        context = strategy_smc.get_context(pair, client=client)
+        import market_structure
+        context = market_structure.get(pair, client=client)
     if context is None:
         return None
     return _smc_from_context(context, price)
@@ -1292,8 +1294,8 @@ def snapshot(pair, df, at=None, client=None, benchmark=None):
 
     context = None
     try:
-        import strategy_smc
-        context = strategy_smc.get_context(pair, client=client)
+        import market_structure
+        context = market_structure.get(pair, client=client)
     except Exception as exc:                           # noqa: BLE001
         log(f'   разметка: контекст SMC не собран — {exc}')
 

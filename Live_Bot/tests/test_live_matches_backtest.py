@@ -94,8 +94,9 @@ class TestLiveMatchesBacktest:
                               'close': 'last', 'volume': 'sum'})
                         .dropna().reset_index())
 
-            monkeypatch.setattr(strategy_smc, 'fetch_ohlcv', fake_fetch)
-            strategy_smc._context_cache.clear()
+            import market_structure
+            monkeypatch.setattr(market_structure, 'fetch_ohlcv', fake_fetch)
+            market_structure.clear()
 
             live_ctx = strategy_smc.get_context('TEST')
             live = None

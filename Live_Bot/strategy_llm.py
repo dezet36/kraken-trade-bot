@@ -198,8 +198,8 @@ def _remember(pair, now=None):
 
 def _cached_context(pair):
     try:
-        import strategy_smc
-        return strategy_smc.cached_context(pair)
+        import market_structure
+        return market_structure.cached(pair)
     except Exception:                              # noqa: BLE001
         return None
 

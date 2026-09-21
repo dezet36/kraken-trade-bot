@@ -14,12 +14,15 @@
 2. КЭШ КОНТЕКСТА. Построение структуры/зон/свипов — тяжёлая операция, а бот
    сканирует пул каждые 5 минут при часовом рабочем ТФ. Пересчитываем
    контекст только когда появилась новая закрытая часовая свеча.
+
+Обе вещи с 21.09.2026 живут в market_structure.py — общем слое структуры, который
+читают и ИИ, и панель. Здесь адаптер только ПРИНИМАЕТ РЕШЕНИЯ SMC по этому
+контексту и переводит их в сигнал брокера.
 """
 
 import config
 import scan_report as report
 import settings_store as settings
-from exchange import fetch_ohlcv
 from logger import log
 from smc import params as smc_params
 # Псевдоним обязателен: ниже определена функция market_regime(), и без
@@ -35,19 +38,29 @@ from smc import signal as smc_signal
 _last_reason = {}
 
 
+# Что оператор вправе менять из панели: только РЕШЕНИЯ SMC (часть II
+# smc/params). Структура рынка (часть I) — общий слой, её из панели не
+# трогают: правка там изменила бы разметку для ИИ и другие стратегии.
+_OPERATOR_SETTINGS = {
+    'RISK_PER_TRADE_PCT': lambda: settings.risk_pct('SMC'),
+    'MIN_SL_PCT': lambda: settings.min_stop_pct('SMC'),
+}
+
+
 def _apply_settings():
     """
-    Переносит настройки оператора в параметры ядра.
+    Переносит настройки оператора в параметры РЕШЕНИЙ ядра.
 
     Ядро `smc/` намеренно не знает ни про config, ни про настройки — оно
     считает по числам в своём модуле. Поэтому значения, меняемые из дашборда,
-    проставляются здесь, в адаптере, перед каждым разбором пары.
+    проставляются здесь, в адаптере, перед каждым разбором пары. Писать можно
+    только в имена из smc_params.DECISION — проверка стоит здесь, а не в
+    тесте, чтобы новая настройка не могла молча уйти в общий слой.
     """
-    smc_params.RISK_PER_TRADE_PCT = settings.risk_pct('SMC')
-    smc_params.MIN_SL_PCT = settings.min_stop_pct('SMC')
-
-# pair -> (последний timestamp закрытой свечи, контекст)
-_context_cache = {}
+    for name, read in _OPERATOR_SETTINGS.items():
+        if name not in smc_params.DECISION:
+            raise RuntimeError(f'{name}: настройка оператора лезет в структуру рынка (smc/params, часть I)')
+        setattr(smc_params, name, read())
 
 # (дата последней закрытой дневной свечи) -> (режим, er, порог, множитель).
 # Режим меняется раз в сутки, тянуть дневные свечи BTC на каждой паре
@@ -102,70 +115,17 @@ def market_regime(client=None):
         return regime_mod.UNKNOWN, 1.0, 'режим неизвестен (ошибка)'
 
 
-def _drop_forming_candle(df):
-    """Убирает последнюю (ещё не закрытую) свечу."""
-    if df is None or len(df) < 2:
-        return None
-    return df.iloc[:-1].reset_index(drop=True)
+# ── Структурный контекст — ОБЩИЙ СЛОЙ (market_structure.py) ───────────────
+# Свечи → закрытые свечи → MarketContext строит market_structure: его читают и
+# SMC, и ИИ, и панель. Здесь остались псевдонимы для старого кода и тестов;
+# правка адаптера SMC не может изменить то, что видит модель.
+import market_structure as _context
+from exchange import fetch_ohlcv
 
-
-def _load_frames(pair, client=None):
-    """
-    Грузит все нужные таймфреймы для пары.
-
-    Раскладка по решению пользователя: 1D задаёт bias, 4H уточняет структуру
-    старшего порядка, 1H — рабочий ТФ поиска зон.
-    """
-    frames = {}
-    for key, timeframe, limit in (
-        ('bias', smc_params.TF_BIAS, smc_params.LOOKBACK_BIAS),
-        ('htf', smc_params.TF_HTF, smc_params.LOOKBACK_HTF),
-        ('poi', smc_params.TF_POI, smc_params.LOOKBACK_POI),
-    ):
-        raw = fetch_ohlcv(timeframe, limit=limit + 5, symbol=pair, client=client)
-        closed = _drop_forming_candle(raw)
-        # Достаточность истории проверяет ЯДРО на момент решения
-        # (params.MIN_HTF_BARS в bias_at). Здесь только отсутствие данных:
-        # длина фрейма — не то же самое, что число закрытых свечей на свече
-        # решения, и дублировать правило по длине значит раздвоить его.
-        if closed is None or len(closed) < 2:
-            if key == 'poi':
-                return None
-            # Пропуск старшего ТФ не молчаливый: без него режим определения
-            # направления не может работать как задуман, и ядро вернёт
-            # NEUTRAL. Знать об этом надо — иначе пара просто «не торгуется»
-            # без объяснимой причины.
-            log(f"   {pair}: нет данных {timeframe} "
-                f"({len(closed) if closed is not None else 0} свечей) — "
-                f"направление старшего порядка определить нечем")
-            continue
-        frames[key] = closed
-    return frames if 'poi' in frames else None
-
-
-def cached_context(pair):
-    """Контекст из кэша без обращения к бирже. None — ещё не строился."""
-    cached = _context_cache.get(pair)
-    return cached[1] if cached else None
-
-
-def get_context(pair, client=None, force=False):
-    """
-    Контекст пары, пересобираемый только при появлении новой закрытой свечи
-    рабочего ТФ.
-    """
-    frames = _load_frames(pair, client=client)
-    if frames is None:
-        return None
-
-    last_ts = frames['poi']['timestamp'].iloc[-1]
-    cached = _context_cache.get(pair)
-    if cached and not force and cached[0] == last_ts:
-        return cached[1]
-
-    context = smc_signal.build_context(frames, pair=pair)
-    _context_cache[pair] = (last_ts, context)
-    return context
+_drop_forming_candle = _context.drop_forming_candle
+_load_frames = _context.load_frames
+cached_context = _context.cached
+get_context = _context.get
 
 
 def _to_bot_signal(setup, pair, balance, risk_scale=1.0):
@@ -328,7 +288,7 @@ def scan_for_setups(pairs, trade_manager, client=None, balance=None):
                                     risk_scale=risk_scale)
             report.record('SMC', pair, None if signal else _last_reason.get(pair))
             if signal:
-                context = _context_cache.get(pair)
+                context = _context.cached(pair)
                 candidates.append({
                     'pair': pair,
                     'signal': signal,
@@ -337,7 +297,7 @@ def scan_for_setups(pairs, trade_manager, client=None, balance=None):
                     'poi_type': signal['smc']['poi_type'],
                     # Свечи рабочего ТФ — для графика сделки в Telegram.
                     # Контекст уже загрузил их, повторный запрос к бирже не нужен.
-                    'df_1h': context[1].frames['poi'] if context else None,
+                    'df_1h': context.frames['poi'] if context else None,
                 })
         except Exception as exc:
             log(f"   {pair}: ошибка SMC-сканирования — {exc}")

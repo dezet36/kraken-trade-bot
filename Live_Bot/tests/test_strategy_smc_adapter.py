@@ -170,3 +170,40 @@ class TestFormingCandle:
         })
         assert strategy_smc._drop_forming_candle(df) is None
         assert strategy_smc._drop_forming_candle(None) is None
+
+
+class TestScanCarriesTheCandlesForTheChart:
+    """
+    Кандидат сканера несёт свечи рабочего ТФ для графика в Telegram — из
+    общего кэша структуры (market_structure.cached), без нового запроса.
+    После переноса контекста в общий слой сканер читал старую форму кэша
+    (кортеж) и упал бы на первом же сигнале; pyflakes поймал, тест держит.
+    """
+
+    def test_candidate_has_df_1h_from_the_shared_cache(self, monkeypatch):
+        import strategy_smc
+        import market_structure
+        import pandas as pd
+
+        class Ctx:
+            frames = {'poi': pd.DataFrame({'close': [1.0, 2.0]})}
+
+        market_structure.clear()
+        market_structure._cache['TEST'] = (0, Ctx())
+        monkeypatch.setattr(strategy_smc, 'market_regime', lambda client=None: ('RANGE', 1.0, 'тест'))
+        monkeypatch.setattr(strategy_smc, 'analyze_market', lambda pair, balance, client=None, risk_scale=None: {
+            'smc': {'confluence': 5.0, 'poi_type': 'ORDER_BLOCK'}, 'params': {'rr': 3.0}})
+
+        class TM:
+            def check_cooldown(self, pair):
+                return True
+
+            def has_position_or_order(self, pair):
+                return False
+
+        try:
+            out = strategy_smc.scan_for_setups(['TEST'], TM(), balance=1000.0)
+        finally:
+            market_structure.clear()
+        assert len(out) == 1
+        assert list(out[0]['df_1h']['close']) == [1.0, 2.0]

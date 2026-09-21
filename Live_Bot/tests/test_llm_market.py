@@ -268,8 +268,8 @@ class TestSmcFacts:
         json.dumps(out)
 
     def test_no_context_is_not_measured(self, monkeypatch):
-        import strategy_smc
-        monkeypatch.setattr(strategy_smc, 'get_context', lambda *a, **k: None)
+        import market_structure
+        monkeypatch.setattr(market_structure, 'get', lambda *a, **k: None)
         assert llm_market.smc_facts('BTCUSDT', 100.0) is None
 
 
@@ -279,8 +279,8 @@ class TestSnapshot:
 
     def test_one_broken_piece_does_not_take_the_others(self, monkeypatch):
         """Упавший стакан — прочерк в стакане, а не пустой снимок."""
-        import strategy_smc
-        monkeypatch.setattr(strategy_smc, 'get_context', lambda *a, **k: None)
+        import market_structure
+        monkeypatch.setattr(market_structure, 'get', lambda *a, **k: None)
         monkeypatch.setattr(llm_market.positioning, 'series', lambda *a, **k: [])
 
         def boom(*a, **k):
@@ -305,8 +305,8 @@ class TestSnapshot:
             seen['upto'] = upto
             return []
         monkeypatch.setattr(llm_market.positioning, 'series', series)
-        import strategy_smc
-        monkeypatch.setattr(strategy_smc, 'get_context', lambda *a, **k: None)
+        import market_structure
+        monkeypatch.setattr(market_structure, 'get', lambda *a, **k: None)
 
         df = make_df(wavy(300))
         llm_market.snapshot('BTCUSDT', df, at=200)
