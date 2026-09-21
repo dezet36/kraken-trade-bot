@@ -355,22 +355,32 @@ def _allowed(event: str) -> bool:
         return True                                # настройка недоступна — не молчим
 
 
-def llm_setup_found(signal: dict, df_1h=None, frames=None):
-    """
-    План модели принят (прошёл проверки кода и критика): монета, вход, стоп,
-    цели, условие и почему — с графиком, где это нарисовано.
+TRIGGER_TEXT = {
+    'now': 'лимит на вход стоит сразу, ждёт цену',
+    'close_above': 'закрытие часа выше {lvl}',
+    'close_below': 'закрытие часа ниже {lvl}',
+    'close_above_with_volume': 'закрытие часа выше {lvl} на объёме ≥ 1.5× медианы',
+    'close_below_with_volume': 'закрытие часа ниже {lvl} на объёме ≥ 1.5× медианы',
+    'retest': 'откат к {lvl} и закрытие, удержавшее его',
+    'sweep_reclaim': 'вынос за {lvl} и возврат не позже 3 свечей',
+}
 
-    Шлётся В МОМЕНТ ПРИНЯТИЯ ПЛАНА, а не при заполнении лимита: лимит может
-    ждать цену трое суток, а условие — двенадцать часов, и человеку важно
-    увидеть план тогда, когда он появился. О заполнении сообщит обычное
-    «вход в сделку».
 
-    frames(pair, tf, limit) -> df — откуда взять свечи другого таймфрейма.
-    Какой таймфрейм показать, решает chart_frame по геометрии плана; без
-    frames или при отказе биржи рисуются часовые, что на руках.
+def _level_kind(llm: dict, level_id):
+    """Вид уровня по номеру: «пивот дня», «край ликвидаций шортов»…"""
+    for lv in llm.get('levels') or []:
+        if lv.get('id') == level_id:
+            return (lv.get('kind') or '').split(' / ')[0]
+    return ''
+
+
+def llm_plan_caption(signal: dict, chart_span: str = '') -> str:
     """
-    if not _allowed('llm_setup'):
-        return False
+    Подпись к картинке плана: только цифры, которые нужны, чтобы поставить
+    сделку руками — вход, стоп, цели, условие. Всё «почему» — отдельным
+    сообщением следом (llm_plan_story): подпись к фото в Telegram не длиннее
+    1024 знаков, и объяснения в ней обрезались на полуслове.
+    """
     llm = signal.get('llm') or {}
     params = signal.get('params') or {}
     pair = signal.get('trading_pair', '?')
@@ -378,44 +388,92 @@ def llm_setup_found(signal: dict, df_1h=None, frames=None):
     entry = float(params.get('entry') or 0)
     stop = float(params.get('stop_loss') or 0)
     targets = [float(t) for t in (params.get('tp_targets') or []) if t]
+    ids = llm.get('ids') or {}
     arrow = "🟢" if direction == "LONG" else "🔴"
 
     def pct(p):
         return f"{abs(p - entry) / entry * 100:.2f}%" if entry else "—"
 
-    when = llm.get('trigger_when') or 'now'
-    trigger_level = llm.get('trigger_level')
-    condition = ('лимит на вход, ждёт цену до 72 ч' if when == 'now'
-                 else f"{when} {_fmt_p(trigger_level) if trigger_level else ''} — ждёт до 12 ч")
-    critic = llm.get('critic') or {}
-    critic_line = ''
-    if critic.get('verdict') == 'confirm':
-        critic_line = "\nКритик: подтвердил"
-        if critic.get('worst') and critic.get('worst') not in ('—', 'нет'):
-            critic_line += f" · главный риск: {critic['worst'][:160]}"
+    def tail(level_id):
+        kind = _level_kind(llm, level_id)
+        return f"  · {kind}" if kind else ''
 
     lines = [
-        f"{arrow} <b>ИИ нашла сетап</b> · {pair} {direction}",
+        f"{arrow} <b>ИИ: план {pair} {direction}</b>",
         "━━━━━━━━━━━━━━━━━━━━",
-        f"Вход:  <b>{_fmt_p(entry)}</b>",
-        f"Стоп:  {_fmt_p(stop)}  (−{pct(stop)})",
+        f"📍 Вход   <b>{_fmt_p(entry)}</b>{tail(ids.get('entry'))}",
+        f"🛑 Стоп   <b>{_fmt_p(stop)}</b>  (−{pct(stop)}){tail(ids.get('stop'))}",
     ]
+    tp_ids = ids.get('tp') or []
     for k, t in enumerate(targets, start=1):
-        lines.append(f"Цель {k}: {_fmt_p(t)}  (+{pct(t)})")
-    lines.append(f"R:R {llm.get('rr') or params.get('rr') or '—'}   "
-                 f"вероятность {llm.get('p') or '—'}   факторы {llm.get('votes') or '—'}/5")
-    lines.append(f"Условие: {condition}")
-    lines.append(f"Куда рынок: {llm.get('bias') or '—'}")
-    text = "\n".join(lines) + critic_line
-    if llm.get('why'):
-        text += f"\n<i>{llm.get('why', '')[:300]}</i>"
-    if llm.get('stop_why'):
-        text += f"\nСтоп за: {llm.get('stop_why', '')[:160]}"
-    if llm.get('tp_why'):
-        text += f"\nЦель там: {llm.get('tp_why', '')[:160]}"
-    if llm.get('risk'):
-        text += f"\nРиск: {llm.get('risk', '')[:200]}"
+        tid = tp_ids[k - 1] if k - 1 < len(tp_ids) else None
+        lines.append(f"🎯 Цель {k} <b>{_fmt_p(t)}</b>  (+{pct(t)}){tail(tid)}")
+    lines.append(f"R:R <b>{llm.get('rr') or params.get('rr') or '—'}</b> · вероятность "
+                 f"{llm.get('p') or '—'} · факторы {llm.get('votes') or '—'}/5")
+    when = llm.get('trigger_when') or 'now'
+    lvl = _fmt_p(float(llm['trigger_level'])) if llm.get('trigger_level') else ''
+    condition = TRIGGER_TEXT.get(when, when).format(lvl=lvl)
+    import config
+    ttl = int(getattr(config, 'LLM_TRIGGER_TTL_H', 12) or 12)
+    lines.append(f"⏳ Условие: {condition} — ждёт до {ttl} ч")
+    critic = llm.get('critic') or {}
+    if critic.get('verdict') == 'confirm':
+        lines.append("✅ Критик подтвердил" + (f" · риск: {critic['worst'][:120]}"
+                                              if critic.get('worst') and critic.get('worst') not in ('—', 'нет') else ''))
+    if chart_span:
+        lines.append(f"<i>График: {chart_span}</i>")
+    return chr(10).join(lines)
 
+
+def llm_plan_story(signal: dict) -> str:
+    """
+    Разбор плана по порядку, в котором его читает трейдер: куда рынок → где
+    ликвидность → почему вход здесь → почему стоп здесь → почему цель здесь
+    → что сломает идею. Каждый блок — своим полем ответа модели, без
+    склейки: раньше всё это шло одной серой строкой под цифрами.
+    """
+    llm = signal.get('llm') or {}
+    pair = signal.get('trading_pair', '?')
+    direction = (signal.get('setup') or {}).get('type', '?')
+    parts = llm.get('analysis_parts') or {}
+    bias = {'up': 'вверх', 'down': 'вниз', 'flat': 'флэт'}.get(llm.get('bias') or '', '')
+    blocks = [
+        ('📈 Куда рынок' + (f' — {bias}' if bias else ''), parts.get('direction') or llm.get('regime')),
+        ('💧 Где ликвидность', parts.get('liquidity')),
+        ('🧱 Структура и зоны', parts.get('structure')),
+        ('📍 Почему входим здесь', llm.get('why')),
+        ('🛑 Почему стоп здесь', llm.get('stop_why')),
+        ('🎯 Почему цель здесь', llm.get('tp_why')),
+        ('⚖️ Что против', parts.get('conflicts')),
+        ('⚠️ Что сломает идею', llm.get('risk')),
+    ]
+    out = [f"<b>{pair} {direction} — разбор плана</b>", "━━━━━━━━━━━━━━━━━━━━"]
+    for title, body in blocks:
+        body = (body or '').strip()
+        if not body:
+            continue
+        out.append(f"<b>{title}</b>")
+        out.append(body[:600])
+        out.append('')
+    return chr(10).join(out).rstrip()
+
+
+def llm_setup_found(signal: dict, df_1h=None, frames=None):
+    """
+    План модели принят (прошёл проверки кода и критика): два сообщения
+    подряд — картинка с цифрами плана в подписи и разбор «почему» по
+    порядку. Шлётся В МОМЕНТ ПРИНЯТИЯ ПЛАНА, а не при заполнении лимита:
+    лимит может ждать цену полсуток, и человеку важно увидеть план тогда,
+    когда он появился. О заполнении сообщит обычное «вход в сделку».
+
+    frames(pair, tf, limit) -> df — откуда взять свечи другого таймфрейма.
+    Какой таймфрейм показать, решает chart_frame по геометрии плана; без
+    frames или при отказе биржи рисуются часовые, что на руках.
+    """
+    if not _allowed('llm_setup'):
+        return False
+    pair = signal.get('trading_pair', '?')
+    sent = False
     if df_1h is not None:
         try:
             import chart_frame
@@ -430,13 +488,18 @@ def llm_setup_found(signal: dict, df_1h=None, frames=None):
                         df, shown = got, tf
                 except Exception as exc:               # noqa: BLE001
                     log(f"Telegram: свечи {tf} для графика не пришли — {exc}; рисую часовые")
-            text += f"\nГрафик: {chart_frame.SPAN_TEXT.get(shown, shown)}"
+            caption = llm_plan_caption(signal, chart_frame.SPAN_TEXT.get(shown, shown))
             chart_path = generate_trade_chart(signal, df, timeframe=shown)
-            if chart_path and _send_photo(chart_path, caption=text):
-                return True
+            if chart_path and _send_photo(chart_path, caption=caption):
+                sent = True
         except Exception as exc:                       # noqa: BLE001
             log(f"Telegram: график плана ИИ не собрался — {exc}")
-    return _send(text)
+    if not sent:
+        sent = _send(llm_plan_caption(signal))
+    story = llm_plan_story(signal)
+    if story:
+        _send(story)
+    return sent
 
 
 def llm_setup_rejected(pair: str, side: str, entry: float, gate: str, detail: str = ''):

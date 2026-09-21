@@ -53,6 +53,35 @@ def _strategy_of(signal: dict) -> str:
     return ''
 
 
+# Окно картинки плана ИИ в свечах и сколько пулов ликвидности подписывать.
+LLM_MAX_BARS = 90
+LLM_POOLS_PER_SIDE = 2
+LIQUIDITY_WORDS = ('ликвидац', 'скопление', 'EQH', 'EQL', 'максимум', 'минимум', 'стоп')
+
+
+def _liquidity_pools(llm: dict, used_ids, lo, hi, entry, per_side=LLM_POOLS_PER_SIDE):
+    """
+    Ближайшие пулы ликвидности из списка уровней модели: до per_side над
+    входом и под ним, внутри окна графика, не считая уровней самого плана.
+    Это то, о чём модель пишет в «где ликвидность», — на картинке их не было.
+    """
+    pools = []
+    for lv in llm.get('levels') or []:
+        kind = lv.get('kind') or ''
+        price = lv.get('price')
+        if not price or lv.get('id') in used_ids:
+            continue
+        if not any(w in kind for w in LIQUIDITY_WORDS):
+            continue
+        price = float(price)
+        if not (lo < price < hi):
+            continue
+        pools.append((price, lv.get('id'), kind.split(' / ')[0]))
+    above = sorted((p for p in pools if p[0] > entry), key=lambda p: p[0])[:per_side]
+    below = sorted((p for p in pools if p[0] < entry), key=lambda p: -p[0])[:per_side]
+    return above + below
+
+
 def generate_trade_chart(signal: dict, df_1h, timeframe: str = '1h') -> str:
     """
     График с уровнями Entry/SL/TP и панелью RSI. Возвращает путь к PNG или None.
@@ -108,13 +137,19 @@ def generate_trade_chart(signal: dict, df_1h, timeframe: str = '1h') -> str:
         # У плана модели импульса нет — окно по таймфрейму (chart_frame), и
         # оно ещё подрезается, пока размах свечей соразмерен плану: на трёх
         # неделях уровни плана сжимались в полоску у края.
-        if signal.get('llm'):
+        llm = signal.get('llm') or {}
+        if llm:
             import chart_frame
             window = chart_frame.FRAMES.get(timeframe, 120)
             if len(df) > window:
                 df = df.iloc[-window:]
             df = chart_frame.fit_window(
                 df, chart_frame.plan_points(signal, float(df['Close'].iloc[-1]))).copy()
+            # НЕ ДЛИННЕЕ LLM_MAX_BARS. Месяц четырёхчасовых свечей делал план
+            # тонкой полоской у верхнего края (SOL 21.09.2026): решение
+            # модели — про последние дни, а не про месяц.
+            if len(df) > LLM_MAX_BARS:
+                df = df.iloc[-LLM_MAX_BARS:].copy()
 
         rsi = _rsi(df['Close'])
 
@@ -158,11 +193,10 @@ def generate_trade_chart(signal: dict, df_1h, timeframe: str = '1h') -> str:
         htf_str  = f"  HTF: {htf}" if htf not in ('—', 'NEUTRAL', None) else ""
         tf_label = timeframe.upper() if timeframe else '1H'
         title    = f"{pair} · {tf_label}  {dir_icon}{htf_str}"
-        llm = signal.get('llm') or {}
         if llm:
             when = llm.get('trigger_when') or 'now'
-            title += ('  ·  план ИИ, лимит ждёт цену' if when == 'now'
-                      else f'  ·  план ИИ, условие {when}')
+            title = f"{pair} · {tf_label}  {dir_icon}  ·  план ИИ"
+            title += ('  ·  лимит ждёт цену' if when == 'now' else f'  ·  условие {when}')
 
         # RSI-панель (с уровнями 70/30)
         n = len(df)
@@ -177,11 +211,19 @@ def generate_trade_chart(signal: dict, df_1h, timeframe: str = '1h') -> str:
                              secondary_y=False),
         ]
 
-        fig, axes = mpf.plot(
-            df, type='candle', style=style, title=title, volume=False,
-            addplot=addplots, panel_ratios=(3, 1), returnfig=True,
-            figsize=(14, 8), tight_layout=True,
-        )
+        if llm:
+            # RSI модель не смотрит — панель только отнимала треть высоты
+            # у того, ради чего картинка: вход, стоп, цель и путь к ним.
+            fig, axes = mpf.plot(
+                df, type='candle', style=style, title=title, volume=False,
+                returnfig=True, figsize=(14, 7.5), tight_layout=True,
+            )
+        else:
+            fig, axes = mpf.plot(
+                df, type='candle', style=style, title=title, volume=False,
+                addplot=addplots, panel_ratios=(3, 1), returnfig=True,
+                figsize=(14, 8), tight_layout=True,
+            )
         ax = axes[0]
         ax.set_ylim(y_min, y_max)
         xlim  = ax.get_xlim()
@@ -223,42 +265,86 @@ def generate_trade_chart(signal: dict, df_1h, timeframe: str = '1h') -> str:
         # две строки печатались одна поверх другой.
         gap = (y_max - y_min) * 0.045
         taken = []
+        if llm:
+            # Уровни плана подписываются слева вместе с входом/стопом/целью
+            # (вид уровня — в той же подписи); справа остаются условие входа
+            # и ближайшие пулы ликвидности. Раньше каждая линия плана несла
+            # две подписи — «Entry» слева и «L6 · верх зоны брейкер · вход»
+            # справа, — и обе мелко.
+            ids = llm.get('ids') or {}
+            used = {ids.get('entry'), ids.get('stop'), ids.get('inval'), *(ids.get('tp') or [])}
+            geo_lines = [g for g in geo_lines if 'условие' in str(g.get('label', ''))]
+            for price, level_id, kind in _liquidity_pools(llm, used, y_min, y_max, entry):
+                geo_lines.append({'price': price, 'label': f"{level_id} · {kind}", 'pool': True})
         for guide in sorted(geo_lines, key=lambda g: -float(g['price'])):
             price = float(guide['price'])
             if not (y_min < price < y_max):
                 continue
             main = bool(guide.get('main'))
-            ax.axhline(y=price, color='#787B86',
-                       linewidth=1.2 if main else 0.8,
+            pool = bool(guide.get('pool'))
+            ax.axhline(y=price, color='#B39DDB' if pool else '#787B86',
+                       linewidth=1.2 if main else 0.9,
                        linestyle='-' if main else (0, (1, 4)),
-                       alpha=0.85 if main else 0.6, zorder=1)
+                       alpha=0.85 if main else 0.7, zorder=1)
             at = price
             while any(abs(at - used) < gap for used in taken):
                 at -= gap
             taken.append(at)
-            ax.text(xlim[1] - x_rng * 0.012, at, guide.get('label', ''),
-                    color='#9AA0AC', fontsize=8, va='bottom', ha='right',
+            # Пулы подписываются левее заливки риск/прибыль — у правого края
+            # они ложились на последние свечи и подпись «сейчас».
+            ax.text(xlim[0] + x_rng * (0.68 if pool else 0.988), at,
+                    ('◇ ' if pool else '') + guide.get('label', ''),
+                    color='#B39DDB' if pool else '#9AA0AC',
+                    fontsize=9.5 if llm else 8, va='bottom', ha='right',
                     zorder=11,
                     bbox=dict(boxstyle='round,pad=0.15', facecolor='#131722',
                               alpha=0.75, edgecolor='none'))
 
         # ── План: вход, стоп, цели — с процентами от входа ───────────────────
         sl_pct = abs(entry - sl) / entry * 100
-        levels = [
-            (entry, '#2196F3', '--', f"Entry  ${_fp(entry)}"),
-            (sl,    '#F44336', '-',  f"SL  ${_fp(sl)}  (-{sl_pct:.2f}%)"),
-        ]
+
+        def kind_of(level_id):
+            for lv in llm.get('levels') or []:
+                if lv.get('id') == level_id and lv.get('kind'):
+                    return '  ·  ' + lv['kind'].split(' / ')[0]
+            return ''
+
+        ids = llm.get('ids') or {}
+        tp_ids = ids.get('tp') or []
+        if llm:
+            levels = [
+                (entry, '#2196F3', '--', f"ВХОД  {_fp(entry)}{kind_of(ids.get('entry'))}"),
+                (sl,    '#F44336', '-',  f"СТОП  {_fp(sl)}  (−{sl_pct:.2f}%){kind_of(ids.get('stop'))}"),
+            ]
+        else:
+            levels = [
+                (entry, '#2196F3', '--', f"Entry  ${_fp(entry)}"),
+                (sl,    '#F44336', '-',  f"SL  ${_fp(sl)}  (-{sl_pct:.2f}%)"),
+            ]
         for k, t in enumerate(targets, start=1):
             tp_pct = abs(t - entry) / entry * 100
-            label = f"TP{k if len(targets) > 1 else ''}  ${_fp(t)}  (+{tp_pct:.2f}%)"
+            if llm:
+                tid = tp_ids[k - 1] if k - 1 < len(tp_ids) else None
+                label = f"ЦЕЛЬ {k if len(targets) > 1 else ''} {_fp(t)}  (+{tp_pct:.2f}%){kind_of(tid)}"
+            else:
+                label = f"TP{k if len(targets) > 1 else ''}  ${_fp(t)}  (+{tp_pct:.2f}%)"
             levels.append((t, '#4CAF50', '-', label))
+        if llm:
+            # ЗАЛИВКА РИСК/ПРИБЫЛЬ, как у инструмента «позиция» в TradingView:
+            # красным от входа до стопа, зелёным от входа до первой цели, в
+            # правой трети — там, куда цене идти. Одного взгляда хватает,
+            # чтобы увидеть и направление, и соотношение.
+            ax.axhspan(min(entry, sl), max(entry, sl), xmin=0.7, xmax=1.0,
+                       facecolor='#F44336', alpha=0.13, zorder=0)
+            ax.axhspan(min(entry, targets[0]), max(entry, targets[0]), xmin=0.7, xmax=1.0,
+                       facecolor='#4CAF50', alpha=0.11, zorder=0)
         for price, color, ls, label in levels:
-            ax.axhline(y=price, color=color, linestyle=ls, linewidth=1.5, alpha=0.95, zorder=5)
+            ax.axhline(y=price, color=color, linestyle=ls, linewidth=1.6, alpha=0.95, zorder=5)
             ax.text(xlim[0] + x_rng * 0.01, price, label,
-                    color=color, fontsize=9, va='bottom', ha='left',
+                    color=color, fontsize=10.5 if llm else 9, va='bottom', ha='left',
                     fontweight='bold', zorder=12,
                     bbox=dict(boxstyle='round,pad=0.2', facecolor='#131722',
-                              alpha=0.7, edgecolor='none'))
+                              alpha=0.75, edgecolor='none'))
 
         # У плана модели вход часто далеко от цены — отметка «сейчас»
         # показывает, откуда цене идти к входу.
@@ -266,15 +352,21 @@ def generate_trade_chart(signal: dict, df_1h, timeframe: str = '1h') -> str:
             now_price = float(df['Close'].iloc[-1])
             ax.axhline(y=now_price, color='#FFD54F', linestyle=(0, (2, 3)),
                        linewidth=1.0, alpha=0.9, zorder=6)
-            ax.text(xlim[1] - x_rng * 0.012, now_price, f"сейчас  ${_fp(now_price)}",
-                    color='#FFD54F', fontsize=8.5, va='bottom', ha='right',
+            ax.text(xlim[1] - x_rng * 0.012, now_price, f"сейчас  {_fp(now_price)}",
+                    color='#FFD54F', fontsize=10, va='bottom', ha='right',
                     fontweight='bold', zorder=12,
                     bbox=dict(boxstyle='round,pad=0.2', facecolor='#131722',
                               alpha=0.7, edgecolor='none'))
 
         if rr:
-            ax.text(0.99, 0.02, f"RR 1:{rr:.1f}", transform=ax.transAxes,
-                    color='#B2B5BE', fontsize=8, ha='right', va='bottom')
+            note = f"R:R 1:{float(rr):.1f}"
+            if llm and llm.get('p'):
+                note += f"   ·   вероятность {llm.get('p')}   ·   факторы {llm.get('votes') or '—'}/5"
+            ax.text(0.99, 0.02, note, transform=ax.transAxes,
+                    color='#D1D4DC' if llm else '#B2B5BE', fontsize=10 if llm else 8,
+                    ha='right', va='bottom',
+                    bbox=dict(boxstyle='round,pad=0.25', facecolor='#131722',
+                              alpha=0.75, edgecolor='none'))
 
         tmp_path = os.path.join(tempfile.gettempdir(), f"chart_{pair}_{int(time.time())}.png")
         plt.savefig(tmp_path, dpi=120, bbox_inches='tight', facecolor='#131722', edgecolor='none')

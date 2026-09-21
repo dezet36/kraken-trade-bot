@@ -863,19 +863,33 @@ class TestTheSetupIsAnnounced:
 
     def test_an_accepted_plan_is_announced_with_the_numbers(self, monkeypatch):
         import telegram_notify as tg
-        sent = {}
+        sent = []
         monkeypatch.setattr(tg, '_allowed', lambda e: True)
-        monkeypatch.setattr(tg, '_send', lambda text, chat_id=None: (sent.setdefault('text', text), True)[1])
+        monkeypatch.setattr(tg, '_send', lambda text, chat_id=None: sent.append(text) or True)
         verdict = approving_verdict(trigger_when='close_above', trigger_level=103.0, trigger_id='L2',
                                     bias='up', critic={'verdict': 'confirm', 'worst': 'плита у цели'},
                                     levels=[{'id': 'L5', 'price': 100.0, 'kind': 'пивот'}])
+        verdict['analysis_parts'] = {'direction': 'тренд вверх по 4ч', 'liquidity': 'стопы шортов над 107',
+                                     'structure': 'ордер-блок 99-100', 'flow': 'дельта +', 'conflicts': 'фандинг',
+                                     'plan': 'лонг от блока'}
+        verdict['ids'] = {'entry': 'L5', 'stop': 'L6', 'tp': ['L2', 'L1'], 'inval': 'L6'}
+        verdict['stop_why'] = 'за низом ордер-блока'
+        verdict['tp_why'] = 'кластер ликвидаций шортов'
         signal = strategy_llm._reshape('BTCUSDT', verdict)
         assert tg.llm_setup_found(signal, None) is True
-        text = sent['text']
-        for piece in ('BTCUSDT LONG', 'Вход:', '100', 'Стоп:', '97', '3.00%', 'Цель 1', '107',
-                      'Цель 2', '109', 'R:R 2.33', 'вероятность 0.58', '4/5',
-                      'close_above 103', 'Куда рынок: up', 'Критик: подтвердил', 'плита у цели'):
-            assert piece in text, piece
+        assert len(sent) == 2, 'два сообщения: цифры плана и разбор'
+        caption, story = sent
+        # Первое — цифры, чтобы поставить сделку руками.
+        for piece in ('BTCUSDT LONG', 'Вход', '100', 'пивот', 'Стоп', '97', '3.00%', 'Цель 1', '107',
+                      'Цель 2', '109', 'R:R', '2.33', 'вероятность 0.58', '4/5',
+                      'закрытие часа выше 103', 'Критик подтвердил', 'плита у цели'):
+            assert piece in caption, piece
+        # Второе — «почему», в порядке чтения: рынок → ликвидность → вход → стоп → цель → риск.
+        order = ['Куда рынок — вверх', 'тренд вверх по 4ч', 'Где ликвидность', 'стопы шортов над 107',
+                 'Почему входим здесь', 'Почему стоп здесь', 'Почему цель здесь', 'Что против', 'фандинг',
+                 'Что сломает идею']
+        positions = [story.index(piece) for piece in order]
+        assert positions == sorted(positions), 'разделы разбора идут по порядку'
 
     def test_a_rejected_plan_is_announced_briefly(self, monkeypatch):
         import telegram_notify as tg

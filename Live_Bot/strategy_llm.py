@@ -578,6 +578,7 @@ def _reshape(pair, verdict, df=None):
             'donor': '',
             'regime': verdict.get('regime', ''),
             'analysis': verdict.get('analysis', ''),
+            'analysis_parts': verdict.get('analysis_parts'),
             'trigger': verdict.get('trigger', ''),
             'why': verdict.get('why', ''),
             'stop_why': verdict.get('stop_why', ''),

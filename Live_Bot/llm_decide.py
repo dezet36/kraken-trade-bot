@@ -499,6 +499,7 @@ def check(parsed, levels, answer=None, market=None, min_stop=None, atr_pct=None)
             'stop_why': parsed.get('stop_why', ''), 'tp_why': parsed.get('tp_why', ''),
             'regime': parsed.get('regime', ''),
             'analysis': parsed.get('analysis', ''),
+            'analysis_parts': parsed.get('analysis_parts'),
             'bias': parsed.get('bias', ''),
             'trigger': parsed.get('trigger', ''),
             'trigger_when': parsed.get('trigger_when', 'now'),
