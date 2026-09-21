@@ -179,11 +179,14 @@ def ask(prompt, grammar=None, max_tokens=None, timeout=None):
 
     answer = out.get('content') or ''
     timings = out.get('timings') or {}
-    evaluated = int(out.get('tokens_evaluated') or timings.get('prompt_n') or 0)
-    answer_tokens = int(out.get('tokens_predicted') or timings.get('predicted_n') or 0)
+    # Что сервер действительно считал — timings.prompt_n. tokens_evaluated,
+    # вопреки имени, — это весь вопрос, а tokens_cached — размер кэша после
+    # ответа: первая версия брала первое и печатала «7962 вход, 8690 из
+    # кэша», вторая — второе и печатала «0 из кэша» при 3 000 из кэша.
+    evaluated = int(timings.get('prompt_n') or out.get('tokens_evaluated') or 0)
+    answer_tokens = int(timings.get('predicted_n') or out.get('tokens_predicted') or 0)
     # Вопрос целиком — сколько токенов ушло; из кэша — сколько из них сервер
-    # не пересчитывал. tokens_cached сервера — это размер кэша после ответа,
-    # не то же самое (первая версия печатала «7962 вход, 8690 из кэша»).
+    # не пересчитывал.
     total = len(prompt_ids) if prompt_ids else evaluated
     cached = max(0, total - evaluated)
     finish = 'length' if out.get('truncated') or (out.get('stop_type') == 'limit') else 'stop'

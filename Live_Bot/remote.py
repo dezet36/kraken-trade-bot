@@ -31,11 +31,13 @@ _controls_allowed() выключает ВСЁ управление, когда �
 читает и не копирует.
 """
 
+import collections
 import json
 import os
 import socket
 import subprocess
 import sys
+import threading
 import time
 
 APP_TITLE = 'Kraken — сервер'
@@ -132,7 +134,9 @@ def tunnel_command(cfg, ssh):
          этого ssh остаётся жить, окно открывается и показывает пустоту, а
          причина теряется.
     ServerAliveInterval — рвать зависшее соединение, а не держать мёртвый
-         туннель, за которым окно показывает устаревшие числа.
+         туннель, за которым окно показывает устаревшие числа. Ловит только
+         обрыв сети: ssh, вставший на записи в stderr, keep-alive не шлёт и
+         не ждёт — его ловит сторож в remote_app по отсутствию ответа.
     """
     remote_port = int(cfg.get('remote_port') or 8787)
     args = [ssh, '-N', '-T',
@@ -298,6 +302,50 @@ def explain(error):
     return error or 'причина неизвестна'
 
 
+# Сколько последних строк stderr ssh держим для объяснения обрыва.
+STDERR_TAIL = 30
+
+
+def drain_stderr(process):
+    """
+    Читает stderr ssh в фоне, пока тот жив, и хранит последние строки.
+
+    ЭТО НЕ УДОБСТВО, А УСЛОВИЕ РАБОТЫ ТУННЕЛЯ. ssh запущен со stderr=PIPE,
+    чтобы при неудачном старте показать причину. Но после старта канал
+    оставался неоткрытым, а ssh пишет в него каждый отказ проброса:
+    «channel N: open failed» — по строке на каждое соединение, которое
+    сервер не принял. Панель на сервере перезапускается — окно опрашивает её
+    каждые несколько секунд — за минуты набегает 4 КБ буфера канала, и ssh
+    встаёт на записи. Соединение с сервером при этом живое, процесс жив,
+    keep-alive ходят, а ни одно новое соединение через туннель не проходит:
+    окно показывает пустоту, и ни один сторож по признаку «процесс умер»
+    этого не видит. 20–21 сентября 2026 так и было: 38 минут простоя
+    панели — и 8 часов мёртвого туннеля при живом ssh. Воспроизводится на
+    пустом порту: 61 отказ — и ssh стоит.
+
+    Последние строки хранятся на процессе (process.stderr_tail): когда он
+    умрёт, сторож покажет, что ssh сказал перед смертью.
+    """
+    tail = collections.deque(maxlen=STDERR_TAIL)
+    process.stderr_tail = tail
+    stream = getattr(process, 'stderr', None)
+    if stream is None:
+        return None
+
+    def pump():
+        try:
+            for raw in iter(stream.readline, b''):
+                line = raw.decode('utf-8', 'replace').rstrip()
+                if line:
+                    tail.append(line)
+        except Exception:                          # noqa: BLE001
+            pass
+
+    thread = threading.Thread(target=pump, daemon=True, name='ssh-stderr')
+    thread.start()
+    return thread
+
+
 def open_tunnel(cfg):
     """
     Поднимает туннель. Возвращает (процесс, ошибка).
@@ -342,6 +390,7 @@ def open_tunnel(cfg):
     # переменной: местная переменная исчезнет при выходе из функции, задание
     # закроется, и ssh будет убит сразу после успешного подключения.
     process._job = tie_to_parent(process)
+    drain_stderr(process)
     return process, ''
 
 

@@ -30,6 +30,35 @@ import remote
 
 WINDOW_TITLE = 'Kraken — сервер'
 
+LOG_NAME = 'remote.log'
+LOG_LIMIT = 512 * 1024
+
+
+def log(message):
+    """
+    Пишет строку в remote.log рядом с настройками и в консоль, если она есть.
+
+    У собранной программы консоли нет (--windowed), и всё, что сторож
+    говорил через print, пропадало: «соединение разорвано — переподключаюсь»
+    не видел никто. Когда окно в очередной раз показало пустоту, причину
+    пришлось восстанавливать по netstat. Файл переживает и окно, и перезапуск;
+    растёт до LOG_LIMIT, потом начинается заново.
+    """
+    line = f'{time.strftime("%Y-%m-%d %H:%M:%S")} {message}'
+    try:
+        print(line)
+    except Exception:                              # noqa: BLE001
+        pass
+    path = os.path.join(os.path.dirname(remote.settings_path()), LOG_NAME)
+    try:
+        mode = 'a'
+        if os.path.exists(path) and os.path.getsize(path) > LOG_LIMIT:
+            mode = 'w'
+        with open(path, mode, encoding='utf-8') as fh:
+            fh.write(line + chr(10))
+    except OSError:
+        pass
+
 
 # ── Окно настроек соединения ─────────────────────────────────────────────────
 
@@ -354,7 +383,7 @@ def open_native_window(url, on_close):
         webview.start(gui=gui)          # блокирует до закрытия окна
         return True
     except Exception as exc:            # noqa: BLE001
-        print(f'Своё окно не открылось ({exc})')
+        log(f'Своё окно не открылось ({exc})')
         return False
 
 
@@ -391,7 +420,7 @@ def show_dashboard(url, attempts=2):
             return None                  # браузера нет — пусть решает вызвавший
         if painted(url, before):
             return window
-        print(f'Окно не показало панель (попытка {attempt} из {attempts}).')
+        log(f'Окно не показало панель (попытка {attempt} из {attempts}).')
         close_windows()
         try:
             window.terminate()
@@ -402,7 +431,7 @@ def show_dashboard(url, attempts=2):
 
 def fail(message):
     """Показывает отказ окном, а не строкой в консоли, которой нет у .exe."""
-    print(message)
+    log(message)
     try:
         import tkinter as tk
         from tkinter import messagebox
@@ -495,26 +524,93 @@ def tunnel_already_up():
     return remote.port_open(remote.LOCAL_PORT) and views(remote.url()) is not None
 
 
-def keep_alive(cfg, link, sleep=time.sleep, log=print):
-    """
-    Держит туннель живым, пока окно открыто.
+# Как часто сторож щупает туннель и сколько подряд неответов считает зависанием.
+# 3 × (15 с + 5 с ожидания) — около минуты: столько окно показывает старые
+# числа, прежде чем туннель пересоберут. Одиночный неответ не в счёт — он
+# бывает, когда сервер занят разбором модели.
+PROBE_EVERY = float(os.getenv('REMOTE_PROBE_EVERY', 15))
+PROBE_FAILS = int(os.getenv('REMOTE_PROBE_FAILS', 3))
 
-    Ждёт смерти ssh, потом поднимает его заново с нарастающей паузой
-    (3 с → 60 с): сервер мог перезагружаться, сеть — пропасть на минуту.
-    Останавливается, когда программа закрывается (link['closed']).
+
+def tunnel_hung(url, timeout=5.0):
     """
-    delay = 3
+    True, когда туннель ПРИНИМАЕТ соединение, но ответа через него нет.
+
+    ЭТО ДРУГОЙ ПРИЗНАК, ЧЕМ «ПАНЕЛЬ НЕ ОТВЕТИЛА». Если панель на сервере
+    лежит (бот перезапускается), ssh закрывает канал сразу — соединение
+    сбрасывается за миллисекунды, и туннель тут ни при чём: перезапускать
+    его было бы вредно, он поднимется, а панель — нет. Зависший же ssh
+    (см. remote.drain_stderr) соединение принимает — порт слушает система, —
+    а дальше молчит: запрос висит до истечения времени. Только это и есть
+    признак мёртвого туннеля при живом процессе.
+    """
+    import socket
+    import urllib.error
+    import urllib.request
+
+    try:
+        with urllib.request.urlopen(url + 'api/whoami', timeout=timeout):
+            return False
+    except socket.timeout:
+        return True
+    except urllib.error.URLError as error:
+        return isinstance(error.reason, socket.timeout)
+    except Exception:                              # noqa: BLE001
+        return False                               # сброс, отказ, HTTP-ошибка — ссылка жива
+
+
+def watch_tunnel(link, sleep=time.sleep, hung=None):
+    """
+    Ждёт, пока туннель умрёт или зависнет. Возвращает причину словами.
+
+    Два признака вместо одного. Первая версия ждала только смерти ssh
+    (process.wait()) — и не увидела туннель, который восемь часов стоял с
+    живым процессом и живым соединением, не пропуская ни одного запроса.
+    Теперь раз в PROBE_EVERY секунд сторож сам просит у панели ответ; если
+    соединение принято, а ответа нет PROBE_FAILS раз подряд — ssh снимается
+    и поднимается заново, как после обрыва.
+    """
+    hung = hung or (lambda: tunnel_hung(remote.url()))
+    fails = 0
     while not link['closed']:
         process = link['process']
         if process is not None:
-            process.wait()
-        else:
+            if process.poll() is not None:
+                said = ' | '.join(getattr(process, 'stderr_tail', None) or ())
+                return 'разорвано' + (f' (ssh: {said[-300:]})' if said else '')
+        elif not remote.port_open(remote.LOCAL_PORT):
             # Чужой (осиротевший) туннель: процесса у нас нет, следим за портом.
-            while not link['closed'] and remote.port_open(remote.LOCAL_PORT):
-                sleep(15)
+            return 'разорвано'
+        if hung():
+            fails += 1
+            if fails >= PROBE_FAILS:
+                if process is not None:
+                    try:
+                        process.terminate()
+                    except Exception:              # noqa: BLE001
+                        pass
+                return f'зависло: туннель принимает соединения, но не отвечает {fails} раза подряд'
+        else:
+            fails = 0
+        sleep(PROBE_EVERY)
+    return ''
+
+
+def keep_alive(cfg, link, sleep=time.sleep, log=log, hung=None):
+    """
+    Держит туннель живым, пока окно открыто.
+
+    Ждёт смерти или зависания ssh (watch_tunnel), потом поднимает его заново
+    с нарастающей паузой (3 с → 60 с): сервер мог перезагружаться, сеть —
+    пропасть на минуту. Останавливается, когда программа закрывается
+    (link['closed']).
+    """
+    delay = 3
+    while not link['closed']:
+        reason = watch_tunnel(link, sleep=sleep, hung=hung)
         if link['closed']:
             return
-        log('Соединение с сервером разорвано — переподключаюсь.')
+        log(f'Соединение с сервером {reason} — переподключаюсь.')
         while not link['closed']:
             sleep(delay)
             if link['closed']:
@@ -548,7 +644,7 @@ def main():
     if tunnel_already_up():
         # Осиротевший туннель прошлой копии: используем, ssh не поднимаем.
         # Сторож ниже следит за портом и переподключится, если он закроется.
-        print('Туннель уже поднят — использую его.')
+        log('Туннель уже поднят — использую его.')
     else:
         # Спрашиваем, пока не получим рабочие настройки или пока не закроют
         # окно. Один проход был бы хуже: ошибся в адресе — и запускай заново.
@@ -560,6 +656,7 @@ def main():
                 remote.save_settings(cfg)
             process, error = remote.open_tunnel(cfg)
             if process:
+                log(f'Туннель поднят: {cfg.get("user") or "root"}@{cfg.get("host")}')
                 break
 
     link = {'process': process, 'closed': False}

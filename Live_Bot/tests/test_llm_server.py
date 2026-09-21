@@ -47,9 +47,13 @@ class FakeLlamaServer(BaseHTTPRequestHandler):
         time.sleep(FakeLlamaServer.delay)
         if FakeLlamaServer.status != 200:
             self.send_response(FakeLlamaServer.status); self.end_headers(); self.wfile.write(b'boom'); return
-        self._json({'content': FakeLlamaServer.answer, 'tokens_evaluated': 20, 'tokens_predicted': 9,
-                    'tokens_cached': 3000, 'truncated': False, 'stop_type': 'eos', 'n_ctx': 12288,
-                    'timings': {'predicted_per_second': 3.1, 'draft_n': 10, 'draft_n_accepted': 7}})
+        # Как у настоящего llama-server: tokens_evaluated — весь вопрос,
+        # посчитано заново — timings.prompt_n, tokens_cached — кэш после ответа.
+        self._json({'content': FakeLlamaServer.answer, 'tokens_evaluated': len(body['prompt']),
+                    'tokens_predicted': 9, 'tokens_cached': len(body['prompt']) + 9,
+                    'truncated': False, 'stop_type': 'eos', 'n_ctx': 12288,
+                    'timings': {'prompt_n': 20, 'predicted_n': 9, 'predicted_per_second': 3.1,
+                                'draft_n': 10, 'draft_n_accepted': 7}})
 
     def _json(self, obj):
         data = json.dumps(obj).encode()

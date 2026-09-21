@@ -701,13 +701,12 @@ class TestTheTunnelComesBackByItself:
             self.dies = dies
             self.terminated = False
 
-        def wait(self):
-            if not self.dies:
-                import time as real_time
-                real_time.sleep(0.05)
+        def poll(self):
+            return 1 if self.dies else None
 
         def terminate(self):
             self.terminated = True
+            self.dies = True
 
     def test_a_dead_tunnel_is_reopened(self, monkeypatch):
         import remote
@@ -731,7 +730,8 @@ class TestTheTunnelComesBackByItself:
             if len(calls) >= 3:
                 link['closed'] = True          # окно закрыли — сторож уходит
 
-        remote_app.keep_alive({'host': 'x'}, link, sleep=sleep, log=logged.append)
+        remote_app.keep_alive({'host': 'x'}, link, sleep=sleep, log=logged.append,
+                              hung=lambda: False)
         assert len(calls) == 3, 'переподключение не повторялось до успеха'
         assert link['process'] is replacement
         assert slept[:3] == [3, 6, 12], 'пауза обязана расти'
@@ -744,7 +744,8 @@ class TestTheTunnelComesBackByItself:
         monkeypatch.setattr(remote, 'open_tunnel',
                             lambda cfg: (_ for _ in ()).throw(AssertionError('не должно звать')))
         link = {'process': self._Proc(dies=True), 'closed': True}
-        remote_app.keep_alive({'host': 'x'}, link, sleep=lambda s: None, log=lambda m: None)
+        remote_app.keep_alive({'host': 'x'}, link, sleep=lambda s: None, log=lambda m: None,
+                              hung=lambda: False)
 
 
 class TestOnlyOneCopyRuns:
@@ -796,8 +797,9 @@ class TestOnlyOneCopyRuns:
         monkeypatch.setattr(remote_app.remote, 'port_open',
                             lambda port, host='127.0.0.1': next(ports, False))
         class Replacement:
-            def wait(self):
+            def poll(self):
                 link['closed'] = True             # окно закрыли — сторож уходит
+                return None
         replacement = Replacement()
         monkeypatch.setattr(remote_app.remote, 'open_tunnel', lambda cfg: (replacement, ''))
         link = {'process': None, 'closed': False}
@@ -805,6 +807,127 @@ class TestOnlyOneCopyRuns:
 
         def sleep(seconds):
             slept.append(seconds)
-        remote_app.keep_alive({'host': 'x'}, link, sleep=sleep, log=lambda m: None)
+        remote_app.keep_alive({'host': 'x'}, link, sleep=sleep, log=lambda m: None,
+                              hung=lambda: False)
         assert link['process'] is replacement
-        assert 15 in slept
+        assert remote_app.PROBE_EVERY in slept
+
+
+class TestAHungTunnelIsNoticedAndRebuilt:
+    """
+    20–21 сентября 2026 туннель восемь часов стоял с живым процессом ssh и
+    живым соединением, не пропуская ни одного запроса: ssh встал на записи в
+    stderr, который после старта никто не читал. Сторож, ждавший только
+    смерти процесса, этого не видел, и окно показывало пустоту.
+    """
+
+    class _Proc:
+        def __init__(self):
+            self.terminated = False
+            self.stderr_tail = ['channel 2: open failed: connect failed: Connection refused']
+
+        def poll(self):
+            return 1 if self.terminated else None
+
+        def terminate(self):
+            self.terminated = True
+
+    def test_no_answer_three_times_in_a_row_restarts_ssh(self, monkeypatch):
+        import remote_app
+
+        stuck = self._Proc()
+        fresh = self._Proc()
+        monkeypatch.setattr(remote_app.remote, 'open_tunnel', lambda cfg: (fresh, ''))
+        link = {'process': stuck, 'closed': False}
+        answers = iter([False, True, False, True, True, True])   # обрыв серии не в счёт
+        logged = []
+
+        def sleep(seconds):
+            if link['process'] is fresh:
+                link['closed'] = True
+
+        remote_app.keep_alive({'host': 'x'}, link, sleep=sleep, log=logged.append,
+                              hung=lambda: next(answers, True))
+        assert stuck.terminated, 'зависший ssh обязан быть снят'
+        assert link['process'] is fresh
+        assert any('зависло' in m for m in logged)
+
+    def test_a_single_missed_answer_is_forgiven(self, monkeypatch):
+        """Сервер занят разбором модели — один неответ не повод рвать туннель."""
+        import remote_app
+
+        proc = self._Proc()
+        link = {'process': proc, 'closed': False}
+        answers = iter([True, False, True, False, True, False])
+        ticks = []
+
+        def sleep(seconds):
+            ticks.append(seconds)
+            if len(ticks) >= 6:
+                link['closed'] = True
+
+        reason = remote_app.watch_tunnel(link, sleep=sleep, hung=lambda: next(answers, False))
+        assert reason == ''
+        assert not proc.terminated
+
+    def test_a_dead_process_reports_what_ssh_said(self):
+        import remote_app
+
+        proc = self._Proc()
+        proc.terminated = True
+        reason = remote_app.watch_tunnel({'process': proc, 'closed': False},
+                                         sleep=lambda s: None, hung=lambda: False)
+        assert reason.startswith('разорвано') and 'Connection refused' in reason
+
+    def test_a_refused_forward_is_not_a_hang(self, monkeypatch):
+        """
+        Панель на сервере лежит: ssh сбрасывает соединение сразу. Туннель тут
+        ни при чём, и перезапускать его нельзя — поднимется он, а панель нет.
+        """
+        import urllib.request
+        import remote_app
+
+        def refuse(*a, **k):
+            raise ConnectionResetError(10054, 'сброшено')
+        monkeypatch.setattr(urllib.request, 'urlopen', refuse)
+        assert remote_app.tunnel_hung('http://127.0.0.1:1/') is False
+
+    def test_silence_after_connect_is_a_hang(self, monkeypatch):
+        import socket
+        import urllib.request
+        import remote_app
+
+        def hang(*a, **k):
+            raise socket.timeout('timed out')
+        monkeypatch.setattr(urllib.request, 'urlopen', hang)
+        assert remote_app.tunnel_hung('http://127.0.0.1:1/') is True
+
+    def test_stderr_of_ssh_is_drained_after_start(self, monkeypatch):
+        """
+        Без читателя канал заполняется на 61-м отказе проброса (4 КБ), и ssh
+        встаёт на записи. Читатель обязан стартовать вместе с туннелем.
+        """
+        import io
+        import threading
+        import remote
+
+        monkeypatch.setattr(remote, 'ssh_exe', lambda: 'ssh')
+        monkeypatch.setattr(remote, 'port_open', lambda port, host='127.0.0.1': False)
+        monkeypatch.setattr(remote, 'wait_for_tunnel', lambda process, timeout=None: (True, ''))
+        monkeypatch.setattr(remote, 'tie_to_parent', lambda p: None)
+
+        class Fake:
+            pid = 7
+            stderr = io.BytesIO(b'channel 2: open failed: connect failed: Connection refused\r\n' * 100)
+
+            def terminate(self):
+                pass
+        monkeypatch.setattr(remote.subprocess, 'Popen', lambda *a, **k: Fake())
+
+        process, error = remote.open_tunnel({'host': 'srv'})
+        assert process is not None, error
+        for thread in threading.enumerate():
+            if thread.name == 'ssh-stderr':
+                thread.join(timeout=2)
+        assert len(process.stderr_tail) == remote.STDERR_TAIL
+        assert 'Connection refused' in process.stderr_tail[-1]
