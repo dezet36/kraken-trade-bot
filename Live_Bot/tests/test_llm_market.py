@@ -335,9 +335,10 @@ class TestMarkup:
         for head in ('ПРОФИЛЬ ОБЪЁМА', 'ПОГЛОЩЕНИЕ', 'ДЕЛЬТА АГРЕССОРА',
                      'СТАКАН', 'СТРУКТУРА', 'ЗОНЫ ИНТЕРЕСА', 'СТАРШИЕ ТАЙМФРЕЙМЫ',
                      'ОТКРЫТЫЙ ИНТЕРЕС ПО СВЕЧАМ', 'КАРТА ЛИКВИДАЦИЙ',
-                     'ЛИКВИДАЦИИ ПО ФАКТУ', 'ЭКСТРЕМУМЫ ДНЯ', 'НЕЗАКРЫТЫЕ ИМБАЛАНСЫ'):
+                     'ЛИКВИДАЦИИ ПО ФАКТУ', 'ЭКСТРЕМУМЫ ДНЯ', 'НЕЗАКРЫТЫЕ ИМБАЛАНСЫ',
+                     'РЫНОК В ЦЕЛОМ'):
             assert head in text, head
-        assert text.count('\n  —') == 14, 'каждый блок обязан стоять с прочерком'
+        assert text.count('\n  —') == 15, 'каждый блок обязан стоять с прочерком'
         # Без свечей BTC блока про BTC нет вовсе: для самого BTC он бессмыслен.
         assert 'BTC КАК ОРИЕНТИР' not in text
 
@@ -388,6 +389,9 @@ class TestMarkup:
             'delta_hours': [{'share_pct': 5.0, 'rows': 60}, {'share_pct': -12.0, 'rows': 20}],
             'funding_trend': [0.0001, 0.00012, 0.00015],
             'oi_week': 3.4,
+            'macro': {'usdt_d': 4.82, 'btc_d': 58.1, 'usdt_d_24h': 0.31, 'usdt_d_7d': 0.9, 'btc_d_24h': 0.4,
+                      'usdt_d_streak_days': 3, 'total2_24h': -2.3, 'btc_24h': -0.8, 'up_24h': 31,
+                      'counted_24h': 118, 'age_min': 2, 'supply_age_min': 34, 'stale': False},
             'htf_zones': [{'kind': 'FVG', 'direction': 'BEARISH', 'top': 106.0, 'bottom': 104.5,
                            'bars_ago': 5, 'inside': False}],
             'day_profile': {'vwap_today': 100.4, 'vwap_yesterday': 99.1, 'poc_24h': 100.2,
@@ -420,6 +424,7 @@ class TestMarkup:
         assert '+5% → -12%?' in text
         assert 'последние выплаты: 0.000100 → 0.000120 → 0.000150' in text
         assert 'за 7д 3.40%' in text
+        assert 'USDT.D 4.82%' in text and 'альты слабее BTC' in text
         assert '\n  —' not in text, 'снимок полный — прочерков быть не должно'
 
     def test_the_markup_still_fits_the_context_window(self):
