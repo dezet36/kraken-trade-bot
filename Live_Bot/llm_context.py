@@ -948,7 +948,39 @@ def market_lines(market, price_now):
     if market.get('benchmark') is not None:
         out += ['', 'BTC КАК ОРИЕНТИР']
         out += _benchmark_lines(market.get('benchmark'))
+    out += ['', 'РЫНОК В ЦЕЛОМ (топ-125 монет по капитализации, методика TradingView: '
+                'цены спота Bybit × предложение; фон, не сигнал)']
+    out += _macro_lines(market.get('macro'))
     out.append('')
+    return out
+
+
+def _macro_lines(m):
+    """USDT.D, BTC.D, TOTAL2 с изменениями и возрастом. Старое — прочерк."""
+    if not m:
+        return [_NONE]
+    if m.get('stale'):
+        return [f"  — (последняя точка {m.get('age_min', 0):.0f} мин назад, не измерено)"]
+
+    def pp(key):
+        v = m.get(key)
+        return f"{v:+.2f} п.п." if v is not None else '—'
+
+    streak = int(m.get('usdt_d_streak_days') or 0)
+    streak_text = ''
+    if abs(streak) >= 2:
+        streak_text = f", {'растёт' if streak > 0 else 'падает'} {abs(streak)}-й день"
+    out = [f"  USDT.D {m['usdt_d']:.2f}% (за 24ч {pp('usdt_d_24h')}, за 7д {pp('usdt_d_7d')}{streak_text})"
+           f"   BTC.D {m['btc_d']:.2f}% (за 24ч {pp('btc_d_24h')})"]
+    if m.get('total2_24h') is not None and m.get('btc_24h') is not None:
+        t2, b = m['total2_24h'], m['btc_24h']
+        verdict = 'альты сильнее BTC' if t2 > b + 0.3 else ('альты слабее BTC' if t2 < b - 0.3 else 'альты вровень с BTC')
+        line = f"  TOTAL2 (капа без BTC) за 24ч {t2:+.2f}% при BTC {b:+.2f}% — {verdict}"
+        if m.get('counted_24h'):
+            line += f"   ширина: {m.get('up_24h', 0)} из {m['counted_24h']} монет в плюсе за 24ч"
+        out.append(line)
+    out.append(f"  данные: цены {m.get('age_min', 0):.0f} мин назад, предложение монет "
+               f"{m.get('supply_age_min', 0) / 60:.1f} ч назад")
     return out
 
 

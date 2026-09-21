@@ -1198,6 +1198,11 @@ def benchmark_facts(df_pair, df_btc, index):
 
 # ── Снимок целиком ───────────────────────────────────────────────────────────
 
+def _macro_facts(upto=None):
+    import market_cap
+    return market_cap.facts(upto)
+
+
 def snapshot(pair, df, at=None, client=None, benchmark=None):
     """
     Всё сразу. Зовётся В ЦИКЛЕ: внутри есть запросы к бирже.
@@ -1271,6 +1276,9 @@ def snapshot(pair, df, at=None, client=None, benchmark=None):
         'delta_hours': _safe('дельта по часам', delta_hours, pair, upto),
         'funding_trend': _safe('фандинг', funding_trend, pair, upto),
         'oi_week': _safe('ОИ за неделю', oi_week, pair, upto),
+        # Рынок в целом — из ряда на диске (market_cap.collect пишет его в
+        # цикле); здесь запросов нет.
+        'macro': _safe('рынок в целом', _macro_facts, upto),
     }
     out['day_profile'] = _safe('суточный профиль', day_profile, out.get('tape'), df, index)
     _mark_realized(out.get('liquidations'), pair, price, upto)

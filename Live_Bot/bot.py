@@ -11,6 +11,7 @@ from exchange import get_exchange, make_market_client
 import dashboard
 import error_log
 import positioning
+import market_cap
 import strategy_levels
 import strategy_llm
 import strategy_rsibb
@@ -284,6 +285,7 @@ def _paper_cycle():
         # Сбор позиционирования идёт и на паузе: пауза останавливает
         # сделки, а не наблюдение за рынком.
         positioning.collect_if_due(broker.client)
+        market_cap.collect_if_due(broker.client)
         return
 
     client = broker.client
@@ -406,6 +408,8 @@ def _paper_cycle():
     # в цикле, что приходится на начало часа, он шёл прямо перед сканерами
     # — те упирались в предел запросов, и пары выпадали из просмотра.
     positioning.collect_if_due(broker.client)
+    # Рынок в целом (USDT.D, BTC.D, TOTAL2): один запрос тикеров спота.
+    market_cap.collect_if_due(broker.client)
 
 
 _CYCLE_STAMP = os.path.join(config.DATA_DIR, 'last_cycle.json')
