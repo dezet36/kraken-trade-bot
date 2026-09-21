@@ -47,6 +47,14 @@ class FakeLlamaServer(BaseHTTPRequestHandler):
         time.sleep(FakeLlamaServer.delay)
         if FakeLlamaServer.status != 200:
             self.send_response(FakeLlamaServer.status); self.end_headers(); self.wfile.write(b'boom'); return
+        if body.get('return_tokens'):
+            # Фаза мысли: без грамматики, стоп по «</think>», токены обратно.
+            assert 'grammar' not in body and '</think>' in body['stop']
+            thought = FakeLlamaServer.thought
+            self._json({'content': thought, 'tokens': [ord(ch) for ch in thought],
+                        'stopping_word': '</think>' if FakeLlamaServer.thought_closes else '',
+                        'stop_type': 'word' if FakeLlamaServer.thought_closes else 'limit',
+                        'timings': {'predicted_n': len(thought)}}); return
         # Как у настоящего llama-server: tokens_evaluated — весь вопрос,
         # посчитано заново — timings.prompt_n, tokens_cached — кэш после ответа.
         self._json({'content': FakeLlamaServer.answer, 'tokens_evaluated': len(body['prompt']),
@@ -68,6 +76,7 @@ def server(monkeypatch):
     monkeypatch.setattr(config, 'LLM_SERVER_URL', f'http://127.0.0.1:{srv.server_port}')
     monkeypatch.setattr(config, 'LLM_THINK_TAG', '')
     FakeLlamaServer.seen = []; FakeLlamaServer.status = 200; FakeLlamaServer.delay = 0.0
+    FakeLlamaServer.thought = 'the leg is up, price in premium'; FakeLlamaServer.thought_closes = True
     yield srv
     srv.shutdown()
 
@@ -84,24 +93,45 @@ def test_the_question_goes_as_chatml_with_grammar(server):
     assert stats['draft_accepted'] == 7 and stats['tok_s'] == 3.1
 
 
-def test_the_thought_is_opened_in_the_prompt_not_by_the_grammar(server):
+def test_the_thought_is_its_own_phase_with_a_token_limit(server, monkeypatch):
     """
-    21.09.2026: 23 разбора подряд с пустой мыслью. llama-server с
-    MTP-черновиком на границе «<think>» принимал «\n\n</think>» — без
-    черновика или без грамматики модель думала. Открытый в подсказке
-    «<think>\n» (как в родном шаблоне Qwen) чинит: мысль 1800 знаков.
+    21.09.2026: предел мысли в знаках стоял в грамматике, а llama-server с
+    MTP-черновиком его не считал — ETH и LTC ушли в мысль на все 3000 токенов,
+    JSON не случился. Теперь мысль — отдельная фаза без грамматики с пределом
+    в токенах и стоп-словом «</think>»; ответ — вторая фаза по грамматике,
+    подсказка продолжена мыслью. Журнал видит один текст, как раньше.
     """
     import llm_grammar
-    grammar = llm_grammar.with_thinking('root     ::= "{" "}"', 1800)
-    answer, _stats = llm_server.ask('ВОПРОС', grammar=grammar, max_tokens=50)
-    body = FakeLlamaServer.seen[-1]
-    sent = ''.join(chr(t) for t in body['prompt'])
     import llm_prompt
-    assert sent.endswith('assistant' + chr(10) + '<think>' + chr(10) + llm_prompt.THINK_SEED), \
-        'мысль открывается в подсказке и начинается с затравки'
-    assert '"<think>"' not in body['grammar'] and 'root     ::= think answer' + chr(10) in body['grammar']
-    assert answer.startswith('<think>' + chr(10) + llm_prompt.THINK_SEED), \
-        'тег и затравка возвращены в ответ — журнал и split_thought их ждут'
+    monkeypatch.setattr(config, 'LLM_THINK_TOKENS', 700)
+    grammar = llm_grammar.with_thinking('root     ::= "{" "}"', 1800)
+    answer, stats = llm_server.ask('ВОПРОС', grammar=grammar, max_tokens=900)
+    phases = [b for b in FakeLlamaServer.seen if b.get('n_predict', 0) > 0]
+    assert len(phases) == 2, 'мысль и ответ — два запроса'
+    think, reply = phases
+    sent = ''.join(chr(t) for t in think['prompt'])
+    assert sent.endswith('assistant' + chr(10) + '<think>' + chr(10) + llm_prompt.THINK_SEED)
+    assert 'grammar' not in think and think['n_predict'] == 700 and '</think>' in think['stop']
+    sent2 = ''.join(chr(t) for t in reply['prompt'])
+    assert sent2.endswith(llm_prompt.THINK_SEED + FakeLlamaServer.thought + '</think>' + chr(10) + chr(10)),         'ответ продолжает подсказку мыслью и закрытым тегом'
+    assert reply['grammar'].startswith('root     ::= answer') and '"<think>"' not in reply['grammar']
+    assert reply['n_predict'] == 900 - len(FakeLlamaServer.thought)
+    assert answer.startswith('<think>' + chr(10) + llm_prompt.THINK_SEED + FakeLlamaServer.thought + '</think>')
+    assert answer.endswith('{"d":"skip"}')
+    assert stats['thought_tokens'] == len(FakeLlamaServer.thought)
+    assert stats['answer_tokens'] == 9 + len(FakeLlamaServer.thought)
+
+
+def test_a_thought_cut_by_the_limit_still_gets_an_answer(server, monkeypatch):
+    """Мысль не закрылась сама — закрываем здесь; JSON обязан прийти."""
+    import llm_grammar
+    monkeypatch.setattr(config, 'LLM_THINK_TOKENS', 700)
+    FakeLlamaServer.thought = 'x' * 700
+    FakeLlamaServer.thought_closes = False
+    grammar = llm_grammar.with_thinking('root     ::= "{" "}"', 1800)
+    answer, stats = llm_server.ask('ВОПРОС', grammar=grammar, max_tokens=3000)
+    assert answer.endswith('{"d":"skip"}') and '</think>' in answer
+    assert stats['finish'] == 'stop'
 
 
 def test_without_a_thinking_rule_the_prompt_is_untouched(server):

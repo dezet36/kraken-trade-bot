@@ -129,44 +129,14 @@ def _warm_prefix(full_text, full_ids):
     return n
 
 
-def ask(prompt, grammar=None, max_tokens=None, timeout=None):
-    """
-    Один вопрос серверу. -> (текст ответа, статистика) как у llm_worker.ask.
-
-    Бросает RuntimeError с llm_gate: «модель недоступна», «модель зависла»,
-    «модель упала».
-    """
-    limit = int(max_tokens or config.LLM_MAX_TOKENS)
-    # Мысль открывается в подсказке, а не грамматикой: на границе «<think>»
-    # MTP-черновик с грамматикой выдавал пустую мысль (см. open_thinking).
-    grammar, think_open = (llm_grammar.open_thinking(grammar, llm_prompt.THINK_SEED)
-                           if grammar else (grammar, ''))
-    text = _chatml(prompt + ('\n' + config.LLM_THINK_TAG if config.LLM_THINK_TAG else '')) + think_open
-    # Вопрос уходит токенами, а не строкой: так префикс прогрева и начало
-    # вопроса совпадают гарантированно, а не «обычно».
-    prompt_ids = None
-    try:
-        prompt_ids = _tokenize(text)
-        _warm_prefix(text, prompt_ids)
-    except Exception as exc:                       # noqa: BLE001
-        log(f'   модель: токенизация не удалась, шлю строкой — {exc}')
-        prompt_ids = None
-    body = {
-        'prompt': prompt_ids if prompt_ids else text,
-        'n_predict': limit,
-        'temperature': float(getattr(config, 'LLM_TEMPERATURE', 0.3)),
-        'cache_prompt': True,
-        'stop': ['<|im_end|>'],
-    }
-    if grammar:
-        body['grammar'] = grammar
+def _completion(body, timeout):
+    """POST /completion с именованными поломками. -> словарь ответа сервера."""
     data = json.dumps(body).encode('utf-8')
     req = urllib.request.Request(f'{url()}/completion', data=data,
                                  headers={'Content-Type': 'application/json'})
-    started = time.time()
     try:
-        with urllib.request.urlopen(req, timeout=timeout or CALL_TIMEOUT_SEC) as resp:
-            out = json.loads(resp.read().decode('utf-8'))
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return json.loads(resp.read().decode('utf-8'))
     except urllib.error.HTTPError as exc:
         detail = ''
         try:
@@ -177,28 +147,113 @@ def ask(prompt, grammar=None, max_tokens=None, timeout=None):
     except urllib.error.URLError as exc:
         reason = getattr(exc, 'reason', exc)
         if isinstance(reason, TimeoutError) or 'timed out' in str(reason):
-            _raise('модель зависла', f'llama-server не ответил за {(timeout or CALL_TIMEOUT_SEC) // 60} мин')
+            _raise('модель зависла', f'llama-server не ответил за {timeout // 60} мин')
         _raise('модель недоступна', f'llama-server не отвечает: {reason}')
     except TimeoutError:
-        _raise('модель зависла', f'llama-server не ответил за {(timeout or CALL_TIMEOUT_SEC) // 60} мин')
+        _raise('модель зависла', f'llama-server не ответил за {timeout // 60} мин')
+
+
+THINK_CLOSE = '</think>' + chr(10) + chr(10)
+
+
+def ask(prompt, grammar=None, max_tokens=None, timeout=None):
+    """
+    Один вопрос серверу — в две фазы. -> (текст ответа, статистика).
+
+    ФАЗА МЫСЛИ — без грамматики, с пределом LLM_THINK_TOKENS и стоп-словом
+    «</think>». ФАЗА ОТВЕТА — грамматика ответа, подсказка продолжена
+    мыслью и «</think>»; кэш сервера держит и вопрос, и мысль, так что
+    вторая фаза читает только несколько токенов.
+
+    ЗАЧЕМ ДВЕ. Предел мысли в знаках стоял в грамматике, а llama-server с
+    MTP-черновиком не продвигает грамматику на принятых черновых токенах:
+    при 77% принятых мысль ETH 21.09.2026 прошла 6000 знаков при пределе
+    2400, съела все 3000 токенов ответа, и JSON не случился — «ответ
+    обрезан», 37 минут. Предел в токенах на стороне сервера обойти нельзя.
+    Мысль, не закрывшаяся сама, закрывается здесь — ответ будет всегда.
+
+    Бросает RuntimeError с llm_gate: «модель недоступна», «модель зависла»,
+    «модель упала».
+    """
+    limit = int(max_tokens or config.LLM_MAX_TOKENS)
+    timeout = timeout or CALL_TIMEOUT_SEC
+    temperature = float(getattr(config, 'LLM_TEMPERATURE', 0.3))
+    answer_grammar, think_open = (llm_grammar.open_thinking(grammar, llm_prompt.THINK_SEED)
+                                  if grammar else (grammar, ''))
+    if think_open:
+        answer_grammar = llm_grammar.answer_only(grammar)
+    text = _chatml(prompt + ('\n' + config.LLM_THINK_TAG if config.LLM_THINK_TAG else '')) + think_open
+    # Вопрос уходит токенами, а не строкой: так префикс прогрева и начало
+    # вопроса совпадают гарантированно, а не «обычно».
+    prompt_ids = None
+    try:
+        prompt_ids = _tokenize(text)
+        _warm_prefix(text, prompt_ids)
+    except Exception as exc:                       # noqa: BLE001
+        log(f'   модель: токенизация не удалась, шлю строкой — {exc}')
+        prompt_ids = None
+    started = time.time()
+
+    # ── Фаза 1: мысль ──────────────────────────────────────────────────────
+    thought, thought_ids, thought_tokens, think_finish = '', [], 0, ''
+    think_limit = int(getattr(config, 'LLM_THINK_TOKENS', 0) or 0)
+    if think_open and think_limit > 0:
+        out1 = _completion({
+            'prompt': prompt_ids if prompt_ids else text,
+            'n_predict': min(think_limit, limit),
+            'temperature': temperature,
+            'cache_prompt': True,
+            'stop': ['</think>', '<|im_end|>'],
+            'return_tokens': True,
+        }, timeout)
+        thought = out1.get('content') or ''
+        thought_ids = list(out1.get('tokens') or [])
+        t1 = out1.get('timings') or {}
+        thought_tokens = int(t1.get('predicted_n') or out1.get('tokens_predicted') or 0)
+        think_finish = 'stop' if (out1.get('stopping_word') or '') == '</think>' else 'length'
+        if think_finish == 'length':
+            log(f'   модель: мысль закрыта по пределу {think_limit} ток.')
+
+    # ── Фаза 2: ответ ──────────────────────────────────────────────────────
+    if think_open:
+        tail = THINK_CLOSE
+        if prompt_ids and thought_ids:
+            try:
+                answer_prompt = prompt_ids + thought_ids + _tokenize(tail)
+            except Exception:                      # noqa: BLE001
+                answer_prompt = text + thought + tail
+        else:
+            answer_prompt = text + thought + tail
+    else:
+        answer_prompt = prompt_ids if prompt_ids else text
+    body = {
+        'prompt': answer_prompt,
+        'n_predict': max(min(limit, 256), limit - thought_tokens),
+        'temperature': temperature,
+        'cache_prompt': True,
+        'stop': ['<|im_end|>'],
+    }
+    if answer_grammar:
+        body['grammar'] = answer_grammar
+    out = _completion(body, timeout)
     spent = time.time() - started
 
-    answer = think_open + (out.get('content') or '')
+    content = out.get('content') or ''
+    answer = (think_open + thought + THINK_CLOSE + content) if think_open else content
     timings = out.get('timings') or {}
     # Что сервер действительно считал — timings.prompt_n. tokens_evaluated,
     # вопреки имени, — это весь вопрос, а tokens_cached — размер кэша после
     # ответа: первая версия брала первое и печатала «7962 вход, 8690 из
     # кэша», вторая — второе и печатала «0 из кэша» при 3 000 из кэша.
     evaluated = int(timings.get('prompt_n') or out.get('tokens_evaluated') or 0)
-    answer_tokens = int(timings.get('predicted_n') or out.get('tokens_predicted') or 0)
-    # Вопрос целиком — сколько токенов ушло; из кэша — сколько из них сервер
-    # не пересчитывал.
+    answer_tokens = int(timings.get('predicted_n') or out.get('tokens_predicted') or 0) + thought_tokens
     total = len(prompt_ids) if prompt_ids else evaluated
-    cached = max(0, total - evaluated)
+    cached = max(0, total - evaluated) if not think_open else max(0, total - (evaluated - min(evaluated, len(thought_ids) + 3)))
     finish = 'length' if out.get('truncated') or (out.get('stop_type') == 'limit') else 'stop'
     stats = {
         'prompt_tokens': total,
         'answer_tokens': answer_tokens,
+        'thought_tokens': thought_tokens,
         'limit': limit,
         'ctx': int(out.get('n_ctx') or getattr(config, 'LLM_CTX', 0)),
         'seconds': round(spent, 1),
@@ -209,8 +264,9 @@ def ask(prompt, grammar=None, max_tokens=None, timeout=None):
         'draft_accepted': int(timings.get('draft_n_accepted') or 0),
         'draft_n': int(timings.get('draft_n') or 0),
     }
-    log(f'   модель: {stats["prompt_tokens"]} вход ({cached} из кэша), {answer_tokens} выход '
-        f'за {spent:.1f} с = {stats["tok_s"]} ток/с'
+    log(f'   модель: {stats["prompt_tokens"]} вход ({cached} из кэша), {answer_tokens} выход'
+        + (f' (мысль {thought_tokens}{", по пределу" if think_finish == "length" else ""})' if think_open else '')
+        + f' за {spent:.1f} с = {stats["tok_s"]} ток/с'
         + (f', черновик принят {stats["draft_accepted"]}/{stats["draft_n"]}' if stats['draft_n'] else '')
         + (' — упёрлось в предел' if finish == 'length' else ''))
     return answer, stats

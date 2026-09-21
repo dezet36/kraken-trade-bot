@@ -201,6 +201,20 @@ def open_thinking(grammar, seed=''):
     return grammar, THINK_OPEN + (seed or '')
 
 
+def answer_only(grammar):
+    """
+    Грамматика без блока мысли: root ::= answer. Для второй фазы вопроса
+    в llama-server, когда мысль уже написана и в подсказке закрыта
+    «</think>». Без блока мысли — как есть.
+    """
+    if _ROOT_OPTIONAL not in grammar:
+        return grammar
+    grammar = grammar.replace(_ROOT_OPTIONAL, 'root     ::= answer', 1)
+    keep = [ln for ln in grammar.split(chr(10))
+            if not ln.startswith(('think    ::=', 'tchar    ::=', 'nl       ::='))]
+    return chr(10).join(keep)
+
+
 def _build_answer(level_ids, plans, rules):
     """Грамматика ответа: вход или отказ, без блока размышления."""
 
