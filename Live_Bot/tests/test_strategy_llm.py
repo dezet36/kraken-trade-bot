@@ -803,6 +803,68 @@ class TestSevenEntryConditionsAreCode:
         assert len(out) == 1 and strategy_llm.armed() == []
 
 
+class TestAPlanOvertakenByTheMarketIsNotArmed:
+    """
+    LTC 21.09.2026: разбор шёл 24 минуты, за это время цена прошла цель.
+    Вердикт сверяется со свежими свечами: цель достигнута или стоп пробит —
+    план не взводится, отказ «рынок обогнал план».
+    """
+
+    def _frame(self, highs, lows):
+        """500 свечей (сканеру нужно ≥ 100), последние — заданные."""
+        import numpy as np
+        import pandas as pd
+        pad = 500 - len(highs)
+        highs = [100.5] * pad + list(highs)
+        lows = [99.8] * pad + list(lows)
+        n = len(highs)
+        return pd.DataFrame({
+            'timestamp': pd.to_datetime(np.arange(n) * 3_600_000, unit='ms'),
+            'open': [100.0] * n, 'high': highs, 'low': lows,
+            'close': [(h + l) / 2 for h, l in zip(highs, lows)], 'volume': [1.0] * n})
+
+    def test_a_target_already_reached_is_refused(self, monkeypatch):
+        written = []
+        import refused
+        monkeypatch.setattr(refused, 'record', lambda *a, **k: written.append(a))
+        monkeypatch.setattr(strategy_llm.llm_local, 'available', lambda: True)
+        monkeypatch.setattr(strategy_llm.llm_decide, 'decide',
+                            lambda *a, **k: approving_verdict(trigger_when='retest',
+                                                              trigger_level=100.0, trigger_id='L5'))
+        stale = self._frame([100.5] * 5, [99.8] * 5)
+        strategy_llm.scan_for_setups(['LTCUSDT'], gate=None, candles=lambda pair: stale)
+        strategy_llm.join(15)
+        fresh = self._frame([100.5, 100.5, 100.5, 106.0, 108.0], [99.8, 99.8, 99.8, 100.4, 105.0])  # цель 107 пройдена
+        out = strategy_llm.scan_for_setups([], gate=None, candles=lambda pair: fresh)
+        assert out == [] and strategy_llm.armed() == []
+        assert any('рынок обогнал план' in str(a) for a in written)
+        assert 'LTCUSDT' in strategy_llm._refused
+
+    def test_a_stop_already_broken_is_refused(self, monkeypatch):
+        written = []
+        import refused
+        monkeypatch.setattr(refused, 'record', lambda *a, **k: written.append(a))
+        monkeypatch.setattr(strategy_llm.llm_local, 'available', lambda: True)
+        monkeypatch.setattr(strategy_llm.llm_decide, 'decide', lambda *a, **k: approving_verdict())
+        stale = self._frame([100.5] * 5, [99.8] * 5)
+        strategy_llm.scan_for_setups(['LTCUSDT'], gate=None, candles=lambda pair: stale)
+        strategy_llm.join(15)
+        fresh = self._frame([100.5] * 4 + [99.0], [99.8] * 4 + [96.5])                       # стоп 97 пробит
+        out = strategy_llm.scan_for_setups([], gate=None, candles=lambda pair: fresh)
+        assert out == [] and any('стоп' in str(a) for a in written)
+
+    def test_an_untouched_plan_is_armed_as_before(self, monkeypatch):
+        monkeypatch.setattr(strategy_llm.llm_local, 'available', lambda: True)
+        monkeypatch.setattr(strategy_llm.llm_decide, 'decide',
+                            lambda *a, **k: approving_verdict(trigger_when='retest',
+                                                              trigger_level=100.0, trigger_id='L5'))
+        frame = self._frame([100.5] * 5, [99.8] * 5)
+        strategy_llm.scan_for_setups(['LTCUSDT'], gate=None, candles=lambda pair: frame)
+        strategy_llm.join(15)
+        strategy_llm.scan_for_setups([], gate=None, candles=lambda pair: frame)
+        assert len(strategy_llm.armed()) == 1
+
+
 class TestATargetReachedBeforeEntryDropsThePlan:
     """
     21.09.2026 SUI: LONG от 0.93988 по retest, цена без отката ушла выше
@@ -840,6 +902,24 @@ class TestATargetReachedBeforeEntryDropsThePlan:
         assert out == [] and strategy_llm.armed() == []
         assert any('цель достигнута без входа' in t for t in sent)
         assert 'BTCUSDT' in strategy_llm._refused, 'пара не переспрашивается по тому же поводу'
+
+    def test_the_live_candle_counts_for_the_target(self, monkeypatch):
+        """LTC 21.09: цель пройдена внутри часа взведения — ждать закрытия свечи незачем."""
+        monkeypatch.setattr(strategy_llm.llm_local, 'available', lambda: True)
+        monkeypatch.setattr(strategy_llm.llm_decide, 'decide',
+                            lambda *a, **k: approving_verdict(trigger_when='retest',
+                                                              trigger_level=101.0, trigger_id='L3'))
+        strategy_llm.scan_for_setups(['BTCUSDT'], gate=None, candles=lambda pair: [0] * 500)
+        strategy_llm.join(15)
+        strategy_llm.scan_for_setups([], gate=None, candles=lambda pair: [0] * 500)
+        targets = strategy_llm._armed['BTCUSDT']['verdict']['targets']
+        # Ни одной закрытой свечи после взведения; текущая — уже выше цели.
+        df = self._armed_frame(highs=[100.5, targets[0] + 1], lows=[100.2, 100.2])
+        import pandas as pd
+        armed_ms = int(strategy_llm._armed['BTCUSDT']['armed_at'] * 1000)
+        df['timestamp'] = pd.to_datetime([armed_ms - 7_200_000, armed_ms - 600_000], unit='ms')
+        strategy_llm.scan_for_setups([], gate=None, candles=lambda pair: df)
+        assert strategy_llm.armed() == []
 
     def test_a_plan_whose_target_is_untouched_keeps_waiting(self, monkeypatch):
         monkeypatch.setattr(strategy_llm.llm_local, 'available', lambda: True)

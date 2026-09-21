@@ -346,6 +346,38 @@ def _load_armed():
         log(f'   {NAME}: взведённые планы не прочитаны — {exc}')
 
 
+def _overtaken(verdict, df):
+    """
+    Рынок обогнал план, пока модель думала: цель уже достигнута или стоп
+    уже пробит — по свежим свечам, включая текущую. -> причина или ''.
+
+    LTC 21.09.2026: разбор начался при 61.18 (план LONG от 60.13 к 63.29),
+    шёл 24 минуты; к взведению цена стояла на 63.5, цель была пройдена ещё
+    до взведения — а код проверял только возраст вердикта. Входить на 5%
+    ниже рынка к уже достигнутой цели — не план, а память о нём.
+    """
+    try:
+        if df is None or not hasattr(df, 'columns') or not len(df):
+            return ''
+        targets = verdict.get('targets') or []
+        stop = verdict.get('stop')
+        is_long = verdict.get('side') == 'LONG'
+        recent = df.iloc[-3:]
+        high, low = float(recent['high'].max()), float(recent['low'].min())
+        price = float(df['close'].iloc[-1])
+        if targets:
+            target = float(targets[0])
+            if (is_long and high >= target) or (not is_long and low <= target):
+                return f'цель {target:.6g} уже достигнута (цена {price:.6g})'
+        if stop:
+            stop = float(stop)
+            if (is_long and low <= stop) or (not is_long and high >= stop):
+                return f'стоп {stop:.6g} уже пробит (цена {price:.6g})'
+    except Exception:                              # noqa: BLE001
+        return ''
+    return ''
+
+
 def _target_reached(verdict, bars):
     """
     Дошла ли цена до первой цели по закрытым свечам после взведения.
@@ -361,6 +393,18 @@ def _target_reached(verdict, bars):
             extreme = high if is_long else low
             return f'цена дошла до цели {target:.6g} ({"максимум" if is_long else "минимум"} {extreme:.6g})'
     return ''
+
+
+def _live_bar(df):
+    """Текущая свеча в том же виде, что у _closed_bars (закрыта_в_мс = 0)."""
+    try:
+        if df is None or not hasattr(df, 'columns') or not len(df):
+            return []
+        row = df.iloc[-1]
+        return [(0, float(row['open']), float(row['high']), float(row['low']),
+                 float(row['close']), float(row['volume']))]
+    except Exception:                              # noqa: BLE001
+        return []
 
 
 def _closed_bars(df, since_ms):
@@ -502,14 +546,16 @@ def _check_armed(candles):
             log(f'   {NAME} {pair}: свечи для условия не получены — {exc}')
             continue
         bars = _closed_bars(df, plan['armed_at'] * 1000)
-        if not bars:
-            continue
         # ЦЕЛЬ ДОСТИГНУТА ДО ВХОДА — ПЛАН СНИМАЕТСЯ. 21.09.2026 SUI: LONG от
         # 0.93988 по retest, цена без отката ушла с 0.96 на 1.02 — выше первой
         # цели 1.015, а план висел взведённым и ждал бы откат ещё 10 часов.
         # Входить у цели поздно; и это исход, который надо считать: условие
-        # модели оказалось строже рынка.
-        missed = _target_reached(verdict, bars)
+        # модели оказалось строже рынка. Текущая, ещё идущая свеча тоже в
+        # счёт: LTC 21.09 прошёл цель внутри часа взведения, и ждать закрытия
+        # свечи значило бы час держать план, у которого цели уже нет.
+        missed = _target_reached(verdict, bars + _live_bar(df))
+        if not bars and not missed:
+            continue
         if missed:
             _armed.pop(pair, None)
             _save_armed()
@@ -699,7 +745,7 @@ def scan_for_setups(pairs, gate, client=None, balance=None, candles=None,
                                             client=client)
     _frames = frames
 
-    out = _collect(_harvest())
+    out = _collect(_harvest(), candles)
     out += _check_armed(candles)
 
     if market is None:
@@ -788,7 +834,7 @@ def _observe(pair, df, verdict):
         pass                                       # свечи не DataFrame — так в проверках
 
 
-def _collect(finished):
+def _collect(finished, candles=None):
     """
     Превращает готовые вердикты в сигналы. Отказы пишет в журнал отказов.
 
@@ -832,6 +878,25 @@ def _collect(finished):
             _refuse(pair, {'gate': 'вердикт устарел',
                            'detail': f'ответ пришёл через {age / 60:.0f} мин при '
                                      f'пределе {limit // 60}'})
+            continue
+
+        # СВЕРКА С РЫНКОМ СЕЙЧАС, а не с разметкой на момент отправки:
+        # свечи берутся заново, и если цель уже достигнута или стоп уже
+        # пробит — план не взводится и не торгуется.
+        fresh = df
+        if candles is not None:
+            try:
+                got = candles(pair)
+                if got is not None and hasattr(got, 'columns') and len(got):
+                    fresh = got
+            except Exception as exc:               # noqa: BLE001
+                log(f'   {NAME} {pair}: свежие свечи для сверки не получены — {exc}')
+        gone = _overtaken(verdict, fresh)
+        if gone:
+            log(f'   {NAME} {pair}: рынок обогнал план — {gone}; не беру')
+            _refuse(pair, {'gate': 'рынок обогнал план', 'detail': gone})
+            _refused[pair] = {'at': time.time(), 'sig': _asked_sig.get(pair, frozenset())}
+            _notify_rejected(pair, {**verdict, 'gate': 'рынок обогнал план', 'detail': gone})
             continue
 
         _refused.pop(pair, None)
