@@ -38,8 +38,10 @@ from logger import log
 CSV_PATH = os.path.join(config.DATA_DIR, 'llm_outcomes.csv')
 STATE_PATH = os.path.join(config.DATA_DIR, 'llm_outcomes_state.json')
 
-HORIZONS = (1, 4, 12, 24)
+HORIZONS = (1, 4, 12, 24, 48)
 _MS_HOUR = 3_600_000
+# Касание уровня — цена в этой доле процента от него; реакция считается в ATR.
+LEVEL_TOUCH_PCT = 0.1
 
 COLUMNS = [
     'mode', 'at', 'pair',
@@ -56,6 +58,15 @@ COLUMNS = [
     # В долях риска плана — только когда план был: сколько R дала бы идея
     # в лучшем и худшем случае, дошла ли до первой цели, задела ли стоп.
     'best_r', 'worst_r', 'hit_tp1', 'hit_sl',
+    # Глубже: КОГДА дошла до цели и до стопа (часы от разбора); коснулась
+    # ли цена входа и когда; ближе всего к входу (в % входа, >0 — не дошла);
+    # ход к цели без нас (в R), пока вход не дан; когда наступило бы
+    # условие модели по закрытым часовым свечам.
+    'tp_hours', 'sl_hours', 'entry_touched', 'entry_hours', 'min_dist_entry_pct',
+    'missed_move_r', 'trigger_when', 'cond_hours',
+    # Каждый уровень списка: коснулась ли цена и на сколько ATR отошла
+    # после касания — оценка генератора уровней, не модели. JSON.
+    'levels_hit',
     'observed_hours',
 ]
 
@@ -98,6 +109,7 @@ def watch(pair, verdict, price, ts, at=''):
         entry = verdict.get('entry') if side else None
         stop = verdict.get('stop') if side else None
         targets = verdict.get('targets') or []
+        atr_pct = float(verdict.get('atr_pct') or 0)
         w = {
             'pair': pair,
             'at': at,
@@ -117,6 +129,19 @@ def watch(pair, verdict, price, ts, at=''):
             'marks': {},
             'hit_tp1': 0,
             'hit_sl': 0,
+            'tp_hours': None, 'sl_hours': None,
+            'entry_touched': 0, 'entry_hours': None,
+            'min_dist_entry_pct': None, 'missed_move_r': None,
+            'trigger_when': (verdict.get('trigger_when') or 'now') if side else '',
+            'trigger_level': float(verdict['trigger_level']) if side and verdict.get('trigger_level') else None,
+            'cond_hours': None,
+            # Часовые свечи после разбора — из пятиминуток брокера; по ним
+            # считается условие модели.
+            'hour_bars': [], 'cur_hour': None,
+            'atr': float(price) * atr_pct / 100 if atr_pct else None,
+            'levels': [{'id': lv.get('id'), 'price': float(lv.get('price')), 'kind': lv.get('kind', ''),
+                        'touched_h': None, 'react_atr': None, 'from_above': None}
+                       for lv in (verdict.get('levels') or []) if lv.get('price')],
         }
         with _lock:
             _load().append(w)
@@ -151,15 +176,10 @@ def advance(pair, ts, high, low, close):
             w['last_close'] = close
             w['high'] = max(w['high'], high)
             w['low'] = min(w['low'], low)
-            if w.get('side'):
-                is_long = w['side'] == 'LONG'
-                if w.get('tp1') is not None:
-                    if (high >= w['tp1']) if is_long else (low <= w['tp1']):
-                        w['hit_tp1'] = 1
-                if w.get('stop') is not None:
-                    if (low <= w['stop']) if is_long else (high >= w['stop']):
-                        w['hit_sl'] = 1
             hours = (ts - w['start_ts']) / _MS_HOUR
+            if w.get('side'):
+                _advance_plan(w, ts, high, low, close, hours)
+            _advance_levels(w, high, low, close)
             for h in HORIZONS:
                 if hours >= h and str(h) not in w['marks']:
                     w['marks'][str(h)] = close
@@ -173,6 +193,80 @@ def advance(pair, ts, high, low, close):
     if finished:
         write([row(w) for w in finished])
     return finished
+
+
+def _advance_plan(w, ts, high, low, close, hours):
+    """Цель, стоп, вход и условие плана — по одной свече."""
+    is_long = w['side'] == 'LONG'
+    entry, stop, tp1 = w.get('entry'), w.get('stop'), w.get('tp1')
+    if tp1 is not None and not w['hit_tp1']:
+        if (high >= tp1) if is_long else (low <= tp1):
+            w['hit_tp1'] = 1
+            w['tp_hours'] = round(hours, 2)
+    if stop is not None and not w['hit_sl']:
+        if (low <= stop) if is_long else (high >= stop):
+            w['hit_sl'] = 1
+            w['sl_hours'] = round(hours, 2)
+    if entry:
+        # Ближе всего к входу: для лонга — насколько минимум выше входа.
+        gap = ((low - entry) if is_long else (entry - high)) / entry * 100
+        if w.get('min_dist_entry_pct') is None or gap < w['min_dist_entry_pct']:
+            w['min_dist_entry_pct'] = round(gap, 4)
+        if not w.get('entry_touched'):
+            if gap <= 0:
+                w['entry_touched'] = 1
+                w['entry_hours'] = round(hours, 2)
+            elif stop is not None and abs(entry - stop):
+                # Ход к цели БЕЗ нас — в R от входа: сколько движения ушло,
+                # пока вход не был дан (SUI и LTC 21.09: цель без входа).
+                favorable = ((high - entry) if is_long else (entry - low)) / abs(entry - stop)
+                w['missed_move_r'] = round(max(w.get('missed_move_r') or 0.0, favorable), 3)
+    # Часовые свечи для условия: пятиминутки складываются по часу UTC.
+    if w.get('trigger_when') and w['trigger_when'] != 'now' and w.get('cond_hours') is None:
+        hour = ts - ts % _MS_HOUR
+        cur = w.get('cur_hour')
+        if cur is None or cur['ts'] != hour:
+            if cur is not None:
+                w['hour_bars'].append(cur)
+                w['hour_bars'] = w['hour_bars'][-72:]
+                _try_condition(w, hours)
+            w['cur_hour'] = {'ts': hour, 'o': close, 'h': high, 'l': low, 'c': close, 'v': 0.0}
+        else:
+            cur['h'] = max(cur['h'], high)
+            cur['l'] = min(cur['l'], low)
+            cur['c'] = close
+
+
+def _try_condition(w, hours):
+    """Наступило ли условие модели по накопленным часовым свечам."""
+    try:
+        import strategy_llm
+        bars = [(b['ts'] + _MS_HOUR, b['o'], b['h'], b['l'], b['c'], b['v']) for b in w['hour_bars']]
+        if not bars or w.get('trigger_level') is None:
+            return
+        met = strategy_llm.condition_met(w['trigger_when'], w['trigger_level'], w['side'], bars, 0.0)
+        if met:
+            w['cond_hours'] = round(hours, 2)
+    except Exception:                              # noqa: BLE001
+        pass
+
+
+def _advance_levels(w, high, low, close):
+    """Каждый уровень: первое касание и отход после него в ATR."""
+    atr = w.get('atr')
+    for lv in w.get('levels') or ():
+        price = lv['price']
+        tol = price * LEVEL_TOUCH_PCT / 100
+        if lv['touched_h'] is None:
+            if low - tol <= price <= high + tol:
+                lv['touched_h'] = round((w['last_ts'] - w['start_ts']) / _MS_HOUR, 2)
+                lv['from_above'] = bool(w['price'] > price)
+                lv['react_atr'] = 0.0
+            continue
+        if atr:
+            # Отход в сторону, откуда пришли: подошли сверху — отскок вверх.
+            away = (high - price) if lv['from_above'] else (price - low)
+            lv['react_atr'] = round(max(lv['react_atr'] or 0.0, away / atr), 2)
 
 
 def recent(pair, limit=2):
@@ -258,6 +352,17 @@ def row(w):
         'worst_r': _r(w, w['low'] if w['side'] == 'LONG' else w['high']),
         'hit_tp1': w['hit_tp1'] if w.get('side') else '',
         'hit_sl': w['hit_sl'] if w.get('side') else '',
+        'tp_hours': w.get('tp_hours') if w.get('tp_hours') is not None else '',
+        'sl_hours': w.get('sl_hours') if w.get('sl_hours') is not None else '',
+        'entry_touched': w.get('entry_touched', 0) if w.get('side') else '',
+        'entry_hours': w.get('entry_hours') if w.get('entry_hours') is not None else '',
+        'min_dist_entry_pct': w.get('min_dist_entry_pct') if w.get('min_dist_entry_pct') is not None else '',
+        'missed_move_r': (w['missed_move_r'] if w.get('missed_move_r') is not None and not w.get('entry_touched') else ''),
+        'trigger_when': w.get('trigger_when', ''),
+        'cond_hours': w.get('cond_hours') if w.get('cond_hours') is not None else '',
+        'levels_hit': json.dumps([{'id': lv['id'], 'kind': lv['kind'].split(' / ')[0], 'p': lv['price'],
+                                   'touched_h': lv['touched_h'], 'react_atr': lv['react_atr']}
+                                  for lv in (w.get('levels') or [])], ensure_ascii=False),
         'observed_hours': round(hours, 1),
     }
     for h in HORIZONS:

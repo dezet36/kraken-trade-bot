@@ -663,6 +663,13 @@ def decide(pair, df, ask, news=None, at=None, max_tokens=None, market=None,
     verdict['levels'] = levels
     verdict['raw'] = answer
     verdict['data_gap_bars'] = int(facts.get('data_gap_bars') or 0)
+    verdict['atr_pct'] = facts.get('atr_pct')
+    # Что модель видела — для записи признаков и разметки (llm_record);
+    # поток разбора снимает эти ключи после записи, чтобы не тащить снимок
+    # в файл взведённых планов.
+    verdict['markup'] = context['text']
+    verdict['facts'] = {k: v for k, v in facts.items() if k != 'market'}
+    verdict['market_snapshot'] = facts.get('market')
     if verdict.get('ok') and critic_enabled():
         verdict = review(verdict, context['text'], ask)
     return verdict

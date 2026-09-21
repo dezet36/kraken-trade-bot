@@ -87,6 +87,7 @@ def record(pair, donor, verdict, stats=None):
     что нужно было увидеть: сто девятнадцать одинаковых отказов подряд — это
     не свойство рынка, а неисправность, и в журнале она должна быть видна
     строкой, а не выводиться из отсутствия строк.
+        -> отметка времени строки (та же уходит в llm_record), None при отказе.
     """
     try:
         verdict = verdict or {}
@@ -141,6 +142,7 @@ def record(pair, donor, verdict, stats=None):
             'seconds': stats.get('seconds', ''),
         }
         csv_journal.append(CSV_PATH, COLUMNS, [row], 'журнал разборов ИИ')
+        return row['at']
     except Exception as exc:                       # noqa: BLE001
         log(f'⚠️ Разбор ИИ не записан: {exc}')
 

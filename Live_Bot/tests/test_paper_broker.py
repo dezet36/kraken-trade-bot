@@ -208,6 +208,33 @@ class TestExit:
         assert rows[0]['exit_reason'] == 'TP1'
         assert float(rows[0]['pnl_r']) == pytest.approx(3.0, abs=0.01)
 
+    def test_the_breakeven_counterfactual_is_recorded(self, broker_env):
+        """
+        Сделка была в +1R и вернулась к стопу: журнал говорит, когда был +1R
+        и каким был бы итог с безубытком — ноль минус издержки, а не −1R.
+        Спор о сопровождении решают эти числа, а не память.
+        """
+        broker, client, pb, _cfg = broker_env
+        pb._now_ms = lambda: 1_700_000_000_000
+        broker.open('FIBO', signal(entry=100.0, stop=90.0, tp1=130.0, breakeven=False))
+        feed(broker, client, 'BTCUSDT', [(100, 100, 100), (105, 99, 104), (112, 103, 111),
+                                         (110, 100, 101), (100, 89, 90)],
+             now=1_700_000_000_000 + 8 * BAR_MS)
+        rows = pb.read_journal()
+        assert rows[0]['exit_reason'] == 'SL' and float(rows[0]['pnl_r']) == pytest.approx(-1.0, abs=0.01)
+        assert float(rows[0]['mfe_r']) == pytest.approx(1.2, abs=0.01)
+        assert int(rows[0]['first_1r_min']) == 2 * BAR_MS // 60000, '+1R был на третьей свече'
+        assert float(rows[0]['r_if_be_1r']) == pytest.approx(0.0, abs=0.01), 'с безубытком стоп стал бы нулём'
+
+    def test_without_1r_the_counterfactual_equals_the_result(self, broker_env):
+        broker, client, pb, _cfg = broker_env
+        pb._now_ms = lambda: 1_700_000_000_000
+        broker.open('FIBO', signal(entry=100.0, stop=90.0, tp1=130.0))
+        feed(broker, client, 'BTCUSDT', [(100, 100, 100), (104, 89, 90)],
+             now=1_700_000_000_000 + 5 * BAR_MS)
+        rows = pb.read_journal()
+        assert rows[0]['first_1r_min'] == '' and float(rows[0]['r_if_be_1r']) == float(rows[0]['pnl_r'])
+
     def test_short_stops_on_high(self, broker_env):
         broker, client, pb, _cfg = broker_env
         pb._now_ms = lambda: 1_700_000_000_000

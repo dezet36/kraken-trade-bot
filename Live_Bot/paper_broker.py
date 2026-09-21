@@ -103,7 +103,7 @@ COLUMNS = [
     # до цели и закрылась в ноль по безубытку, а восстановить порядок
     # событий — сначала рост или сначала просадка — было нечем.
     # Вопрос «безубыток спасает или режет» остался без ответа.
-    'mfe_min', 'mae_min',
+    'mfe_min', 'mae_min', 'first_1r_min', 'r_if_be_1r',
     # ОБСТАНОВКА НА МОМЕНТ ВХОДА. Без неё нельзя спросить, в каком рынке
     # стратегия работает: разбор 29 августа упёрся ровно в это. Лонги дали
     # +0.20R, шорты -0.33R, и объяснить это удалось только прикидкой, что
@@ -1377,6 +1377,12 @@ class PaperBroker:
         worst = min(pos['mae_price'], low) if is_long else max(pos['mae_price'], high)
         if worst != pos['mae_price']:
             pos['mae_price'], pos['mae_ts'] = worst, ts
+        # КОГДА сделка впервые дала +1R — для вопроса о безубытке: сколько
+        # стопов случилось ПОСЛЕ того, как +1R уже был на столе.
+        if not pos.get('r1_ts'):
+            dist = abs(pos['entry_price'] - pos['initial_stop'])
+            if dist and ((best - pos['entry_price']) if is_long else (pos['entry_price'] - best)) >= dist:
+                pos['r1_ts'] = ts
 
         max_hold = getattr(config, 'MAX_POSITION_HOLD_HOURS', 0)
         if max_hold and (ts - pos['opened_ts']) / 3_600_000 > max_hold:
@@ -1563,6 +1569,14 @@ class PaperBroker:
             'mae_r': round(sign * (pos['mae_price'] - pos['entry_price']) / sl_dist, 3) if sl_dist else '',
             'mfe_min': int((pos.get('mfe_ts', pos['opened_ts']) - pos['opened_ts']) / 60000),
             'mae_min': int((pos.get('mae_ts', pos['opened_ts']) - pos['opened_ts']) / 60000),
+            # Через сколько минут был +1R (пусто — не было) и каким был бы
+            # итог с безубытком при +1R: стоп после +1R стал бы нулём минус
+            # издержки; остальное — как есть. Виртуальный исход, чтобы
+            # спор о сопровождении решали числа.
+            'first_1r_min': (int((pos['r1_ts'] - pos['opened_ts']) / 60000) if pos.get('r1_ts') else ''),
+            'r_if_be_1r': (round(-(fees + funding) / pos['risk_amount'], 3)
+                           if pos.get('r1_ts') and reason == 'SL' and pos['risk_amount']
+                           else (round(net / pos['risk_amount'], 3) if pos['risk_amount'] else '')),
             'atr_pct': pos.get('atr_pct', ''),
             'hour_utc': pos.get('hour_utc', ''),
             'breakeven_set': pos['breakeven_set'],

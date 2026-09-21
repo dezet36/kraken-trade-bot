@@ -126,7 +126,17 @@ def _run(pair, df, market, submitted):
         history = llm_journal.last(80)
         verdict = llm_decide.decide(pair, df, llm_local.ask, market=market,
                                     history=history)
-        llm_journal.record(pair, '', verdict, llm_local.last_stats())
+        stats = llm_local.last_stats()
+        at = llm_journal.record(pair, '', verdict, stats)
+        # Что модель видела — признаки и разметка, тем же ключом (pair, at),
+        # что и строка журнала. Снимок после записи из вердикта снимается.
+        try:
+            import llm_record
+            llm_record.record(pair, df, verdict, stats, at=at or '')
+        except Exception as exc:                   # noqa: BLE001
+            log(f'   {NAME} {pair}: признаки разбора не записаны — {exc}')
+        for heavy in ('market_snapshot', 'facts', 'markup'):
+            verdict.pop(heavy, None)
     except Exception as exc:                       # noqa: BLE001
         # Поток не имеет права унести с собой причину: без этой строки
         # стратегия молча перестала бы отвечать, и выглядело бы это как
