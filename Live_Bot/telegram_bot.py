@@ -120,6 +120,8 @@ class BotController:
             self._send(chat_id, "▶️ <b>Бот возобновлён</b>\nСканирование и новые входы активны.")
         elif cmd == "/positions":
             self._send_positions(chat_id)
+        elif cmd == "/setups":
+            self._send_setups(chat_id)
         elif cmd == "/stats":
             self._send_stats(chat_id)
         elif cmd == "/close":
@@ -204,9 +206,20 @@ class BotController:
              {"text": mute_btn,  "callback_data": mute_cmd}],
             [{"text": "📋 Позиции",   "callback_data": "/positions"},
              {"text": "📊 Статистика","callback_data": "/stats"}],
-            [{"text": "🔄 Обновить",  "callback_data": "/status"}],
+            [{"text": "🤖 Сетапы ИИ", "callback_data": "/setups"},
+             {"text": "🔄 Обновить",  "callback_data": "/status"}],
         ]}
         self._send(chat_id, text, reply_markup=keyboard)
+
+    def _send_setups(self, chat_id: str):
+        """Живые сетапы ИИ: планы, ждущие условия, заявки и позиции."""
+        try:
+            import strategy_llm
+            import telegram_notify as tg
+            text = tg.llm_setups_text(strategy_llm.current_setups(self.trade_manager))
+        except Exception as e:                      # noqa: BLE001
+            text = f"⚠️ Список сетапов не собран: {e}"
+        self._send(chat_id, text)
 
     def _send_positions(self, chat_id: str):
         tm = self.trade_manager
@@ -371,6 +384,7 @@ class BotController:
             "━━━━━━━━━━━━━━━━━━━━\n"
             "/status         — баланс и состояние\n"
             "/positions      — позиции с live PnL\n"
+            "/setups         — живые сетапы ИИ: ждут условия, ждут цену, в позиции\n"
             "/stats          — полная статистика\n"
             "/close BTCUSDT  — закрыть позицию вручную\n"
             "/pause          — остановить новые входы\n"
@@ -436,6 +450,7 @@ class BotController:
         commands = [
             {"command": "status",    "description": "Баланс, позиции, дневной PnL"},
             {"command": "positions", "description": "Открытые позиции с live PnL"},
+            {"command": "setups",    "description": "Живые сетапы ИИ: планы, заявки, позиции"},
             {"command": "stats",     "description": "Полная статистика торговли"},
             {"command": "close",     "description": "Закрыть позицию: /close BTCUSDT"},
             {"command": "pause",     "description": "Остановить новые входы"},

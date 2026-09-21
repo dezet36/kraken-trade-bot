@@ -515,6 +515,70 @@ def llm_setup_found(signal: dict, df_1h=None, frames=None):
     return _send(llm_plan_message(signal))
 
 
+def llm_setups_text(setups: dict) -> str:
+    """
+    Список живых сетапов ИИ по кнопке: ждут условия → ждут цену → в позиции.
+    Каждый — вход, стоп, цель, R:R, условие и сколько ещё живёт; «почему»
+    одной строкой. Пусто — так и сказано.
+    """
+    armed, pending, open_ = setups.get('armed') or [], setups.get('pending') or [], setups.get('open') or []
+    if not (armed or pending or open_):
+        return ("🤖 <b>Живых сетапов ИИ нет</b>" + chr(10)
+                + "Ни планов, ждущих условия, ни заявок, ни позиций.")
+
+    def hours(minutes):
+        minutes = int(minutes or 0)
+        return f"{minutes // 60}ч {minutes % 60:02d}м" if minutes >= 60 else f"{minutes}м"
+
+    def pct(a, b):
+        return f"{abs(a - b) / b * 100:.2f}%" if b else '—'
+
+    out = [f"🤖 <b>Живые сетапы ИИ</b> · {len(armed) + len(pending) + len(open_)}", "━━━━━━━━━━━━━━━━━━━━"]
+    if armed:
+        out.append(f"<b>⏳ Ждут условия ({len(armed)})</b>")
+        for a in armed:
+            icon = "🟢" if a.get('side') == 'LONG' else "🔴"
+            entry, stop = float(a.get('entry') or 0), float(a.get('stop') or 0)
+            targets = [float(t) for t in (a.get('targets') or []) if t]
+            lvl = _fmt_p(float(a['level'])) if a.get('level') else ''
+            cond = TRIGGER_TEXT.get(a.get('when') or 'now', a.get('when') or '').format(lvl=lvl)
+            out.append(f"{icon} <b>{a['pair']} {a.get('side', '')}</b> · R:R {a.get('rr') or '—'} · p {a.get('p') or '—'}")
+            out.append(f"   вход <b>{_fmt_p(entry)}</b> · стоп {_fmt_p(stop)} (−{pct(stop, entry)})"
+                       + (f" · цель {_fmt_p(targets[0])} (+{pct(targets[0], entry)})" if targets else ''))
+            out.append(f"   условие: {cond}")
+            out.append(f"   ждёт {hours(a.get('minutes'))}, снимется через {hours(a.get('left_min'))}")
+            if a.get('why'):
+                out.append(f"   <i>{a['why'][:160]}</i>")
+        out.append('')
+    if pending:
+        out.append(f"<b>📥 Заявка стоит, ждёт цену ({len(pending)})</b>")
+        for o in pending:
+            icon = "🟢" if o.get('direction') == 'LONG' else "🔴"
+            entry = float(o.get('entry') or 0)
+            out.append(f"{icon} <b>{o['pair']} {o.get('direction', '')}</b> · R:R {o.get('rr') or '—'}")
+            out.append(f"   лимит <b>{_fmt_p(entry)}</b> · стоп {_fmt_p(float(o.get('stop') or 0))}"
+                       + (f" · цель {_fmt_p(float(o['tp1']))}" if o.get('tp1') else ''))
+            dist = f" · до лимита {o['distance_pct']}%" if o.get('distance_pct') is not None else ''
+            out.append(f"   ждёт {hours(o.get('waiting_min'))}{dist}, снимется через {hours(o.get('expires_in_min'))}")
+            if o.get('why'):
+                out.append(f"   <i>{str(o['why'])[:160]}</i>")
+        out.append('')
+    if open_:
+        out.append(f"<b>📈 В позиции ({len(open_)})</b>")
+        for o in open_:
+            icon = "🟢" if o.get('direction') == 'LONG' else "🔴"
+            entry = float(o.get('entry') or 0)
+            r = o.get('unrealised_r')
+            out.append(f"{icon} <b>{o['pair']} {o.get('direction', '')}</b>"
+                       + (f" · сейчас <b>{float(r):+.2f} R</b>" if r is not None else ''))
+            out.append(f"   вход {_fmt_p(entry)} · стоп {_fmt_p(float(o.get('stop') or 0))}"
+                       + (f" · цель {_fmt_p(float(o['tp1']))}" if o.get('tp1') else '')
+                       + (f" · цена {_fmt_p(float(o['price']))}" if o.get('price') else ''))
+            if o.get('why'):
+                out.append(f"   <i>{str(o['why'])[:160]}</i>")
+    return chr(10).join(out).rstrip()
+
+
 def llm_setup_rejected(pair: str, side: str, entry: float, gate: str, detail: str = ''):
     """Модель предложила сетап, но его отклонил код или критик — коротко, без картинки."""
     if not _allowed('llm_setup'):

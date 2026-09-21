@@ -270,6 +270,40 @@ def armed():
             for pair, p in _armed.items()]
 
 
+def current_setups(broker=None, now=None):
+    """
+    Живые сетапы ИИ для человека — то, что ещё может сбыться:
+      armed   — планы, ждущие условия (снимаются по TTL или по цели без входа);
+      pending — лимитные заявки, ждущие цену (живут LLM_TRIGGER_TTL_H);
+      open    — открытые позиции.
+    broker — фантомный брокер со snapshot(); без него — только планы.
+    """
+    now = now if now is not None else time.time()
+    _load_armed()
+    ttl_min = int(config.__dict__.get('LLM_TRIGGER_TTL_H', 0) or 12) * 60
+    out = {'armed': [], 'pending': [], 'open': []}
+    for pair, plan in sorted(_armed.items()):
+        v = plan['verdict']
+        minutes = int((now - plan['armed_at']) / 60)
+        out['armed'].append({
+            'pair': pair, 'side': v.get('side'), 'entry': v.get('entry'), 'stop': v.get('stop'),
+            'targets': list(v.get('targets') or []), 'rr': v.get('rr'), 'p': v.get('p'),
+            'when': v.get('trigger_when'), 'level': v.get('trigger_level'),
+            'minutes': minutes, 'left_min': max(0, ttl_min - minutes),
+            'why': v.get('why', ''), 'stop_why': v.get('stop_why', ''), 'tp_why': v.get('tp_why', ''),
+            'bias': v.get('bias', ''),
+        })
+    snap = {}
+    if broker is not None and hasattr(broker, 'snapshot'):
+        try:
+            snap = broker.snapshot() or {}
+        except Exception as exc:                   # noqa: BLE001
+            log(f'   {NAME}: состояние брокера для списка сетапов не прочитано — {exc}')
+    out['pending'] = [o for o in snap.get('pending') or [] if o.get('strategy') == NAME]
+    out['open'] = [o for o in snap.get('open') or [] if o.get('strategy') == NAME]
+    return out
+
+
 def _arm(pair, verdict):
     """Откладывает вход до условия. Новый план по паре сменяет старый."""
     _armed[pair] = {'verdict': verdict, 'armed_at': time.time()}
