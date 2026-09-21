@@ -87,9 +87,11 @@ def features(pair, df, facts, market, verdict, stats=None, now=None, at=''):
         high, low = df['high'], df['low']
         tr = (high - low) / close * 100
         atr_series = tr.rolling(14).mean().dropna()
-        if len(atr_series) > 50 and out['atr_pct'] is not None:
+        if len(atr_series) > 50:
+            # Перцентиль внутри одного и того же ряда: последний ATR против
+            # своих 30 суток, а не против ATR другого определения из facts.
             window = atr_series.iloc[-720:]
-            out['atr_percentile_30d'] = round(float((window <= out['atr_pct']).mean() * 100), 1)
+            out['atr_percentile_30d'] = round(float((window <= float(window.iloc[-1])).mean() * 100), 1)
         window_h, window_l = high.iloc[-720:], low.iloc[-720:]
         span = float(window_h.max() - window_l.min())
         out['range_pos_30d_pct'] = round((price - float(window_l.min())) / span * 100, 1) if span else None

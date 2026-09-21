@@ -1574,7 +1574,7 @@ class PaperBroker:
             # издержки; остальное — как есть. Виртуальный исход, чтобы
             # спор о сопровождении решали числа.
             'first_1r_min': (int((pos['r1_ts'] - pos['opened_ts']) / 60000) if pos.get('r1_ts') else ''),
-            'r_if_be_1r': (round(-(fees + funding) / pos['risk_amount'], 3)
+            'r_if_be_1r': (round((pos.get('realized_pnl', 0.0) - fees - funding) / pos['risk_amount'], 3)
                            if pos.get('r1_ts') and reason == 'SL' and pos['risk_amount']
                            else (round(net / pos['risk_amount'], 3) if pos['risk_amount'] else '')),
             'atr_pct': pos.get('atr_pct', ''),

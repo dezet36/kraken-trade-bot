@@ -228,7 +228,7 @@ def _advance_plan(w, ts, high, low, close, hours):
         if cur is None or cur['ts'] != hour:
             if cur is not None:
                 w['hour_bars'].append(cur)
-                w['hour_bars'] = w['hour_bars'][-72:]
+                w['hour_bars'] = w['hour_bars'][-50:]      # 48 ч наблюдения + запас
                 _try_condition(w, hours)
             w['cur_hour'] = {'ts': hour, 'o': close, 'h': high, 'l': low, 'c': close, 'v': 0.0}
         else:
@@ -244,6 +244,8 @@ def _try_condition(w, hours):
         bars = [(b['ts'] + _MS_HOUR, b['o'], b['h'], b['l'], b['c'], b['v']) for b in w['hour_bars']]
         if not bars or w.get('trigger_level') is None:
             return
+        # Объёма у собранных из пятиминуток свечей нет: условия «с объёмом»
+        # считаются здесь как без объёма — медиана 0 делает порог нулевым.
         met = strategy_llm.condition_met(w['trigger_when'], w['trigger_level'], w['side'], bars, 0.0)
         if met:
             w['cond_hours'] = round(hours, 2)
