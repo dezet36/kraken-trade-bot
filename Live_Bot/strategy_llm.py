@@ -312,6 +312,23 @@ def _load_armed():
         log(f'   {NAME}: взведённые планы не прочитаны — {exc}')
 
 
+def _target_reached(verdict, bars):
+    """
+    Дошла ли цена до первой цели по закрытым свечам после взведения.
+    -> строка «цена дошла до цели 1.015 (максимум 1.0212)» или ''.
+    """
+    targets = verdict.get('targets') or []
+    if not targets:
+        return ''
+    target = float(targets[0])
+    is_long = verdict.get('side') == 'LONG'
+    for _closed_at, _o, high, low, _c, _v in bars:
+        if (is_long and high >= target) or (not is_long and low <= target):
+            extreme = high if is_long else low
+            return f'цена дошла до цели {target:.6g} ({"максимум" if is_long else "минимум"} {extreme:.6g})'
+    return ''
+
+
 def _closed_bars(df, since_ms):
     """
     Закрытые часовые свечи, закрывшиеся ПОСЛЕ момента since_ms, старые → новые.
@@ -452,6 +469,29 @@ def _check_armed(candles):
             continue
         bars = _closed_bars(df, plan['armed_at'] * 1000)
         if not bars:
+            continue
+        # ЦЕЛЬ ДОСТИГНУТА ДО ВХОДА — ПЛАН СНИМАЕТСЯ. 21.09.2026 SUI: LONG от
+        # 0.93988 по retest, цена без отката ушла с 0.96 на 1.02 — выше первой
+        # цели 1.015, а план висел взведённым и ждал бы откат ещё 10 часов.
+        # Входить у цели поздно; и это исход, который надо считать: условие
+        # модели оказалось строже рынка.
+        missed = _target_reached(verdict, bars)
+        if missed:
+            _armed.pop(pair, None)
+            _save_armed()
+            log(f'   {NAME} {pair}: цель достигнута без входа — {missed}; план снят')
+            _refuse(pair, {'gate': 'цель достигнута без входа',
+                           'detail': f'{verdict.get("trigger_when")} '
+                                     f'{verdict.get("trigger_level")} не наступило, а {missed}'})
+            _refused[pair] = {'at': time.time(), 'sig': frozenset()}
+            try:
+                import telegram_notify as tg
+                tg.llm_setup_rejected(pair, verdict.get('side', ''), float(verdict.get('entry') or 0),
+                                      'цель достигнута без входа',
+                                      f'условие {verdict.get("trigger_when")} '
+                                      f'{verdict.get("trigger_level")} не наступило, а {missed}')
+            except Exception:                      # noqa: BLE001
+                pass
             continue
         met = condition_met(verdict['trigger_when'], verdict['trigger_level'],
                             verdict['side'], bars, _median_volume(df))
