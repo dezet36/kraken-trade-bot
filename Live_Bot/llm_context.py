@@ -50,6 +50,12 @@ from liquidity import core as liq
 # Сколько уровней максимум уходит в модель. Больше — не лучше: список на сорок
 # позиций модель разбирает хуже, чем на десять, а грамматика вырастает линейно.
 MAX_LEVELS = 20
+# Пояса расстояния от цены (в % цены) для отбора уровней: ближний пояс
+# заполняется раньше дальнего, внутри пояса — по силе (см. levels.pick).
+BANDS_PCT = (1.5, 3.0, 6.0)
+# Синтетические точки (края зон, VWAP, POC, экстремумы сессий) ближе этого
+# друг к другу — одна строка: 2649.28 / 2645.31 / 2642.48 занимали три места.
+SYNTHETIC_MERGE_PCT = 0.25
 
 _ZONE = {'ORDER_BLOCK': 'ордер-блок', 'BREAKER': 'брейкер',
          'MITIGATION': 'mitigation-блок', 'WICK': 'зона фитиля'}
@@ -218,6 +224,8 @@ def _dedupe(found, span):
         # «низ имбаланса 109.22», когда низ на 109.06, и модель ставила бы
         # вход мимо зоны. Для них допуск — 0.1% цены.
         def tol(a, b):
+            if a.get('synthetic') and b.get('synthetic'):
+                return a['price'] * SYNTHETIC_MERGE_PCT / 100      # два края зон рядом — одна строка
             return min(span, a['price'] * 0.001) if (a.get('synthetic') or b.get('synthetic')) else span
         twin = next((k for k in kept if abs(k['price'] - lv['price']) <= tol(k, lv)), None)
         if twin is None:
@@ -281,20 +289,40 @@ def levels(df, at=None, extra=None, extra_market=None):
     #    было не на что, кроме уровня в 4.7%, и план умер на R:R. Три
     #    ближайших уровня с каждой стороны входят вне конкурса, остальные
     #    места — по силе.
+    #
+    # 4. Пояса расстояния вперёд силы. Отбор «по силе» на живом ETH 21.09.2026
+    #    отдал семь мест ниже цены скоплениям на −7…−12% (2534…2380, по 4–5
+    #    касаний), а низ ордер-блока 2605.88, брейкер 2630, POC 2657 и минимум
+    #    Азии 2642 — то, за чем ставят стоп, — выпали: между 2645 и 2534 в
+    #    списке была дыра, и модель выбирала стоп либо в 0.2%, либо в 7%.
+    #    Сначала всё в пределах BANDS_PCT ближайшего пояса, потом следующего;
+    #    внутри пояса — по силе. Далёкие сильные скопления остаются целями,
+    #    если места хватит.
     half = max(1, MAX_LEVELS // 2)
     nearest_keep = 3
 
-    def pick(candidates, distance):
+    def pick(candidates, distance, quota):
         by_distance = sorted(candidates, key=distance)
         kept = by_distance[:nearest_keep]
-        rest = sorted((lv for lv in candidates if lv not in kept),
-                      key=lambda lv: (-lv['touches'], distance(lv)))
-        return kept + rest[:max(0, half - len(kept))]
 
-    above = pick([lv for lv in near if lv['price'] > price_now],
-                 lambda lv: lv['price'] - price_now)
-    below = pick([lv for lv in near if lv['price'] <= price_now],
-                 lambda lv: price_now - lv['price'])
+        def band(lv):
+            pct = distance(lv) / price_now * 100 if price_now else 0
+            return next((i for i, edge in enumerate(BANDS_PCT) if pct <= edge), len(BANDS_PCT))
+        rest = sorted((lv for lv in candidates if lv not in kept),
+                      key=lambda lv: (band(lv), -lv['touches'], distance(lv)))
+        return kept + rest[:max(0, quota - len(kept))]
+
+    up = [lv for lv in near if lv['price'] > price_now]
+    down = [lv for lv in near if lv['price'] <= price_now]
+    dist_up = lambda lv: lv['price'] - price_now          # noqa: E731
+    dist_down = lambda lv: price_now - lv['price']        # noqa: E731
+    # Половина мест каждой стороне; чего одной стороне не хватило
+    # кандидатов, достаётся другой: у цены на максимуме месяца сверху три
+    # уровня, а снизу — вся структура, и шесть мест пропадали.
+    above = pick(up, dist_up, half)
+    below = pick(down, dist_down, MAX_LEVELS - len(above))
+    if len(below) < MAX_LEVELS - len(above):
+        above = pick(up, dist_up, MAX_LEVELS - len(below))
     near = sorted(above + below, key=lambda lv: -lv['price'])
 
     # ОБЪЁМ У УРОВНЯ. Уровень, у которого торговали втрое больше обычного, и
