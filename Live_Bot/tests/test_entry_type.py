@@ -150,6 +150,32 @@ class TestFeeFollowsTheEntryType:
         assert position['fees_paid'] == pytest.approx(expected)
 
 
+class TestTheCostLimitComesFromTheStrategy:
+    """
+    Уровни со стопом 1.2% при общем пределе издержек 5% не торговали три дня:
+    доля 5.3–6.2% всегда выше. Предел — параметр стратегии, общий — запасной.
+    """
+
+    def test_levels_have_their_own_limit_others_the_common_one(self, broker):
+        import config
+        from levels import params as levels_params
+        assert broker.PaperBroker._cost_limit('LEVELS') == pytest.approx(levels_params.MAX_ENTRY_COST_SHARE_PCT)
+        assert broker.PaperBroker._cost_limit('LEVELS') > config.MAX_ENTRY_COST_SHARE_PCT
+        for name in ('FIBO', 'SMC', 'RSIBB', 'LLM'):
+            assert broker.PaperBroker._cost_limit(name) == pytest.approx(config.MAX_ENTRY_COST_SHARE_PCT)
+
+    def test_a_levels_entry_with_a_1_2_percent_stop_is_not_refused(self, broker, monkeypatch):
+        import config
+        import risk_gate
+        monkeypatch.setattr(config, 'MAX_ENTRY_COST_SHARE_PCT', 5.0)
+        share = risk_gate.entry_cost_share(100.0, 1.2, 0.00075) * 100
+        assert 5.0 < share < 8.0, 'типичный сетап уровней — между общим и своим пределом'
+        pricey, _, _ = risk_gate.cost_too_high(100.0, 1.2, 0.00075, broker.PaperBroker._cost_limit('LEVELS'))
+        assert pricey is False
+        pricey, _, _ = risk_gate.cost_too_high(100.0, 1.2, 0.00075, broker.PaperBroker._cost_limit('FIBO'))
+        assert pricey is True, 'у остальных общий предел как был'
+
+
 class TestExpiryComesFromTheStrategy:
     def test_each_strategy_gets_its_own(self, broker):
         import config

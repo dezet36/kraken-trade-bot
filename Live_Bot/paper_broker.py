@@ -746,7 +746,7 @@ class PaperBroker:
         import risk_gate
         pricey, cost_share, why = risk_gate.cost_too_high(
             limit_price, sl_dist, config.ENTRY_COST_ROUND_TRIP,
-            config.MAX_ENTRY_COST_SHARE_PCT)
+            self._cost_limit(strategy))
         if pricey:
             log(f"   [{strategy}] {pair}: {why}")
             _refuse(strategy, signal, 'предел издержек', why,
@@ -1163,6 +1163,23 @@ class PaperBroker:
                                     if id(w) not in done]
             log(f'   наблюдений после выхода досмотрено: {len(finished)}')
         return touched
+
+    @staticmethod
+    def _cost_limit(strategy):
+        """
+        Предел доли издержек в риске — у стратегии свой, если объявлен.
+
+        Общий config.MAX_ENTRY_COST_SHARE_PCT — запасной. Правило проекта:
+        общий параметр не имеет права запирать одну стратегию — уровни со
+        стопом 1.2% при общем пределе 5% не торговали три дня (21.09.2026).
+        """
+        try:
+            if strategy == 'LEVELS':
+                from levels import params
+                return float(params.MAX_ENTRY_COST_SHARE_PCT)
+        except Exception:                          # noqa: BLE001
+            pass
+        return float(config.MAX_ENTRY_COST_SHARE_PCT)
 
     @staticmethod
     def _expiry_hours(strategy):
