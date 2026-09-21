@@ -421,50 +421,69 @@ def llm_plan_caption(signal: dict, chart_span: str = '') -> str:
         lines.append("✅ Критик подтвердил" + (f" · риск: {critic['worst'][:120]}"
                                               if critic.get('worst') and critic.get('worst') not in ('—', 'нет') else ''))
     if chart_span:
-        lines.append(f"<i>График: {chart_span}</i>")
+        lines[0] += f"  <i>· {chart_span}</i>"
     return chr(10).join(lines)
 
 
-def llm_plan_story(signal: dict) -> str:
+# Предел подписи к фото в Telegram Bot API. Всё сообщение о плане живёт в
+# ней — одно сообщение, а не картинка и текст порознь.
+CAPTION_LIMIT = 1024
+
+
+def _plain_len(text: str) -> int:
+    """Длина без HTML-тегов: Telegram считает предел по видимому тексту."""
+    import re
+    return len(re.sub(r'<[^>]+>', '', text))
+
+
+def llm_plan_story(signal: dict, budget: int = CAPTION_LIMIT) -> str:
     """
-    Разбор плана по порядку, в котором его читает трейдер: куда рынок → где
-    ликвидность → почему вход здесь → почему стоп здесь → почему цель здесь
-    → что сломает идею. Каждый блок — своим полем ответа модели, без
-    склейки: раньше всё это шло одной серой строкой под цифрами.
+    Разбор плана по порядку чтения трейдера, ужатый в budget знаков:
+    почему вход здесь → почему стоп здесь → почему цель здесь → где
+    ликвидность → куда рынок → что сломает идею. Блоки идут по важности:
+    когда не влезает, сначала пропадает риск, потом «куда рынок», потом
+    ликвидность; вход, стоп и цель — всегда.
     """
     llm = signal.get('llm') or {}
-    pair = signal.get('trading_pair', '?')
-    direction = (signal.get('setup') or {}).get('type', '?')
     parts = llm.get('analysis_parts') or {}
     bias = {'up': 'вверх', 'down': 'вниз', 'flat': 'флэт'}.get(llm.get('bias') or '', '')
+    # (заголовок, текст, предел знаков) — в порядке чтения; приоритет
+    # отбрасывания — с конца.
     blocks = [
-        ('📈 Куда рынок' + (f' — {bias}' if bias else ''), parts.get('direction') or llm.get('regime')),
-        ('💧 Где ликвидность', parts.get('liquidity')),
-        ('🧱 Структура и зоны', parts.get('structure')),
-        ('📍 Почему входим здесь', llm.get('why')),
-        ('🛑 Почему стоп здесь', llm.get('stop_why')),
-        ('🎯 Почему цель здесь', llm.get('tp_why')),
-        ('⚖️ Что против', parts.get('conflicts')),
-        ('⚠️ Что сломает идею', llm.get('risk')),
+        ('📍 Почему вход здесь', llm.get('why'), 220),
+        ('🛑 Почему стоп здесь', llm.get('stop_why'), 140),
+        ('🎯 Почему цель здесь', llm.get('tp_why'), 140),
+        ('💧 Где ликвидность', parts.get('liquidity'), 200),
+        ('📈 Куда рынок' + (f' — {bias}' if bias else ''), parts.get('direction'), 160),
+        ('⚠️ Что сломает идею', llm.get('risk'), 140),
     ]
-    out = [f"<b>{pair} {direction} — разбор плана</b>", "━━━━━━━━━━━━━━━━━━━━"]
-    for title, body in blocks:
-        body = (body or '').strip()
+    rendered = []
+    for title, body, limit in blocks:
+        body = ' '.join((body or '').split())
         if not body:
             continue
-        out.append(f"<b>{title}</b>")
-        out.append(body[:600])
-        out.append('')
-    return chr(10).join(out).rstrip()
+        if len(body) > limit:
+            body = body[:limit - 1].rstrip() + '…'
+        rendered.append(f"<b>{title}</b>" + chr(10) + body)
+    while rendered and _plain_len(chr(10).join(rendered)) > budget:
+        rendered.pop()
+    return chr(10).join(rendered)
+
+
+def llm_plan_message(signal: dict, chart_span: str = '') -> str:
+    """Одно сообщение о плане: цифры, условие и разбор — в предел подписи к фото."""
+    head = llm_plan_caption(signal, chart_span)
+    story = llm_plan_story(signal, CAPTION_LIMIT - _plain_len(head) - 2)
+    return head + (chr(10) + chr(10) + story if story else '')
 
 
 def llm_setup_found(signal: dict, df_1h=None, frames=None):
     """
-    План модели принят (прошёл проверки кода и критика): два сообщения
-    подряд — картинка с цифрами плана в подписи и разбор «почему» по
-    порядку. Шлётся В МОМЕНТ ПРИНЯТИЯ ПЛАНА, а не при заполнении лимита:
-    лимит может ждать цену полсуток, и человеку важно увидеть план тогда,
-    когда он появился. О заполнении сообщит обычное «вход в сделку».
+    План модели принят (прошёл проверки кода и критика): ОДНО сообщение —
+    картинка, а в подписи цифры плана, условие и разбор «почему» по
+    порядку чтения. Шлётся В МОМЕНТ ПРИНЯТИЯ ПЛАНА, а не при заполнении
+    лимита: лимит может ждать цену полсуток, и человеку важно увидеть план
+    тогда, когда он появился. О заполнении сообщит обычное «вход в сделку».
 
     frames(pair, tf, limit) -> df — откуда взять свечи другого таймфрейма.
     Какой таймфрейм показать, решает chart_frame по геометрии плана; без
@@ -473,7 +492,6 @@ def llm_setup_found(signal: dict, df_1h=None, frames=None):
     if not _allowed('llm_setup'):
         return False
     pair = signal.get('trading_pair', '?')
-    sent = False
     if df_1h is not None:
         try:
             import chart_frame
@@ -488,18 +506,13 @@ def llm_setup_found(signal: dict, df_1h=None, frames=None):
                         df, shown = got, tf
                 except Exception as exc:               # noqa: BLE001
                     log(f"Telegram: свечи {tf} для графика не пришли — {exc}; рисую часовые")
-            caption = llm_plan_caption(signal, chart_frame.SPAN_TEXT.get(shown, shown))
+            text = llm_plan_message(signal, chart_frame.SPAN_TEXT.get(shown, shown))
             chart_path = generate_trade_chart(signal, df, timeframe=shown)
-            if chart_path and _send_photo(chart_path, caption=caption):
-                sent = True
+            if chart_path and _send_photo(chart_path, caption=text):
+                return True
         except Exception as exc:                       # noqa: BLE001
             log(f"Telegram: график плана ИИ не собрался — {exc}")
-    if not sent:
-        sent = _send(llm_plan_caption(signal))
-    story = llm_plan_story(signal)
-    if story:
-        _send(story)
-    return sent
+    return _send(llm_plan_message(signal))
 
 
 def llm_setup_rejected(pair: str, side: str, entry: float, gate: str, detail: str = ''):

@@ -877,19 +877,34 @@ class TestTheSetupIsAnnounced:
         verdict['tp_why'] = 'кластер ликвидаций шортов'
         signal = strategy_llm._reshape('BTCUSDT', verdict)
         assert tg.llm_setup_found(signal, None) is True
-        assert len(sent) == 2, 'два сообщения: цифры плана и разбор'
-        caption, story = sent
-        # Первое — цифры, чтобы поставить сделку руками.
+        assert len(sent) == 1, 'одно сообщение: цифры плана и разбор вместе'
+        text = sent[0]
+        # Цифры, чтобы поставить сделку руками.
         for piece in ('BTCUSDT LONG', 'Вход', '100', 'пивот', 'Стоп', '97', '3.00%', 'Цель 1', '107',
                       'Цель 2', '109', 'R:R', '2.33', 'вероятность 0.58', '4/5',
                       'закрытие часа выше 103', 'Критик подтвердил', 'плита у цели'):
-            assert piece in caption, piece
-        # Второе — «почему», в порядке чтения: рынок → ликвидность → вход → стоп → цель → риск.
-        order = ['Куда рынок — вверх', 'тренд вверх по 4ч', 'Где ликвидность', 'стопы шортов над 107',
-                 'Почему входим здесь', 'Почему стоп здесь', 'Почему цель здесь', 'Что против', 'фандинг',
+            assert piece in text, piece
+        # «Почему» — в порядке чтения: вход → стоп → цель → ликвидность → рынок → риск.
+        order = ['Почему вход здесь', 'Почему стоп здесь', 'за низом ордер-блока', 'Почему цель здесь',
+                 'Где ликвидность', 'стопы шортов над 107', 'Куда рынок — вверх', 'тренд вверх по 4ч',
                  'Что сломает идею']
-        positions = [story.index(piece) for piece in order]
+        positions = [text.index(piece) for piece in order]
         assert positions == sorted(positions), 'разделы разбора идут по порядку'
+        assert tg._plain_len(text) <= tg.CAPTION_LIMIT
+
+    def test_the_message_never_exceeds_the_caption_limit(self, monkeypatch):
+        """Не влезает — уходит второстепенное (риск, рынок), а вход/стоп/цель остаются."""
+        import telegram_notify as tg
+        verdict = approving_verdict(trigger_when='close_above', trigger_level=103.0, trigger_id='L2', bias='up')
+        verdict['why'] = 'п' * 400
+        verdict['stop_why'] = 'с' * 300
+        verdict['tp_why'] = 'ц' * 300
+        verdict['risk'] = 'р' * 300
+        verdict['analysis_parts'] = {'direction': 'н' * 300, 'liquidity': 'л' * 300}
+        text = tg.llm_plan_message(strategy_llm._reshape('BTCUSDT', verdict), '4-часовые свечи')
+        assert tg._plain_len(text) <= tg.CAPTION_LIMIT
+        for piece in ('Вход', 'Стоп', 'Цель 1', 'Почему вход здесь', 'Почему стоп здесь', 'Почему цель здесь'):
+            assert piece in text, piece
 
     def test_a_rejected_plan_is_announced_briefly(self, monkeypatch):
         import telegram_notify as tg
