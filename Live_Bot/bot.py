@@ -743,6 +743,14 @@ def _start_paper():
         f"тейкер {config.PAPER_FEE_TAKER * 100:.3f}%  |  "
         f"проскальзывание {config.PAPER_SLIPPAGE_PCT * 100:.3f}%")
     log(f"   Фандинг: {'учитывается' if config.PAPER_FUNDING else 'выключен'}")
+    # Величины исполнения — у каждой стратегии свои (strategy_profile): в
+    # журнале видно, чем живёт заявка, сколько пауза и где предел издержек.
+    import strategy_profile
+    for name in broker.strategies:
+        d = strategy_profile.describe(name)
+        log(f"   {name}: заявка {d['expiry_hours']:.0f} ч | кулдаун {d['cooldown_hours']:.0f} ч | "
+            f"издержки ≤ {d['cost_limit_pct']:.0f}% риска | смещение лимита {d['limit_offset_pct'] * 100:.2f}% | "
+            f"держать ≤ {d['max_hold_hours']:.0f} ч")
     if getattr(config, 'PAPER_EXCLUSIVE_PAIRS', True):
         log("   Одна пара — одна позиция на все стратегии, как на бирже")
     else:
@@ -788,7 +796,7 @@ def main():
         log(f"HTF таймфрейм: {config.HTF_TIMEFRAME}  "
             f"EMA {config.HTF_EMA_FAST}/{config.HTF_EMA_SLOW}")
         log(f"Трейлинг:      после TP{config.TRAIL_AFTER_TP}")
-    log(f"Кулдаун:       {config.COOLDOWN_HOURS} ч")
+    log(f"Кулдаун:       {config.COOLDOWN_HOURS} ч (общий; у стратегий — свой, см. ниже)")
 
     if config.PAPER_MODE:
         _start_paper()

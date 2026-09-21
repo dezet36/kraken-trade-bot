@@ -383,7 +383,8 @@ class LiveTradeManager:
         if self.last_trade_time[trading_pair] is None:
             return True
         hours_since_last = (datetime.now() - self.last_trade_time[trading_pair]).total_seconds() / 3600
-        return hours_since_last >= config.COOLDOWN_HOURS
+        import strategy_profile
+        return hours_since_last >= strategy_profile.cooldown_hours(self.pair_strategy.get(trading_pair))
 
     # ── Снимок реального состояния на бирже (источник истины) ────────────────
     def sync_exchange_state(self, max_age: float = 15.0):
@@ -604,7 +605,8 @@ class LiveTradeManager:
         from datetime import timedelta
         try:
             pending = self._load_pending_orders()
-            max_valid = datetime.now() + timedelta(hours=config.PENDING_ORDER_MAX_HOURS)
+            import strategy_profile
+            max_valid = datetime.now() + timedelta(hours=strategy_profile.expiry_hours(signal.get('strategy')))
             pending[pair] = {
                 'order_id':           order_id,
                 'pair':               pair,
@@ -833,7 +835,8 @@ class LiveTradeManager:
                 # 1. Проверяем срок действия
                 max_valid = datetime.fromisoformat(po['max_valid_until'])
                 if now > max_valid:
-                    log(f"   {pair}: pending истёк (>{config.PENDING_ORDER_MAX_HOURS:.0f}ч) — отменяем")
+                    import strategy_profile
+                    log(f"   {pair}: pending истёк (>{strategy_profile.expiry_hours((po.get('signal') or {}).get('strategy') or self.get_pair_strategy(pair)):.0f}ч) — отменяем")
                     self._cancel_pending_order(pair, order_id)
                     continue
 
@@ -986,7 +989,8 @@ class LiveTradeManager:
                 signal['atr_pct'] = None               # без обстановки, но со сделкой
 
         if not self.check_cooldown(trading_pair):
-            hours_left = config.COOLDOWN_HOURS - (
+            import strategy_profile
+            hours_left = strategy_profile.cooldown_hours(self.pair_strategy.get(trading_pair)) - (
                 datetime.now() - self.last_trade_time[trading_pair]
             ).total_seconds() / 3600
             log(f"⏳ Кулдаун для {trading_pair}. Осталось {hours_left:.1f} ч")
@@ -1041,7 +1045,8 @@ class LiveTradeManager:
         # и стоп окажется дальше, чем считала стратегия. Размер поэтому берём
         # от цены заполнения: пока считали от расчётной, настройка «риск 0.5%»
         # рисковала 0.5625% — смещение 0.1% при стопе 0.8% даёт 12.5% сверху.
-        _entry_offset = config.LIMIT_ENTRY_OFFSET_PCT if config.USE_LIMIT_ENTRY else 0.0
+        import strategy_profile
+        _entry_offset = strategy_profile.limit_offset_pct(signal.get('strategy'))
         sizing_entry = (signal['params']['entry'] * (1 + _entry_offset)
                         if setup['type'] == 'LONG'
                         else signal['params']['entry'] * (1 - _entry_offset))
@@ -1055,7 +1060,7 @@ class LiveTradeManager:
         import risk_gate
         pricey, cost_share, why = risk_gate.cost_too_high(
             sizing_entry, sig_sl_dist, config.ENTRY_COST_ROUND_TRIP,
-            config.MAX_ENTRY_COST_SHARE_PCT)
+            strategy_profile.cost_limit_pct(signal.get('strategy')))
         if pricey:
             log(f"⛔ {trading_pair}: {why}")
             _refuse(signal, 'предел издержек', why, round(cost_share, 3))
@@ -1128,7 +1133,7 @@ class LiveTradeManager:
 
             # W9+/W11: GTC лимитный ордер на границе зоны A (вход = params['entry'])
             if config.USE_LIMIT_ENTRY:
-                offset = config.LIMIT_ENTRY_OFFSET_PCT
+                offset = _entry_offset                 # то же смещение, что в размере
 
                 # Вход уже равен 38.2%-границе зоны A. Небольшой offset гарантирует касание.
                 if side == 'buy':
@@ -1184,7 +1189,7 @@ class LiveTradeManager:
                     log(f"⏳ GTC LIMIT @ ${_fmt_p(limit_price)} | ID: {lim_order.get('id')} | "
                         f"Инвалидация @ ${_fmt_p(inv)}")
                     tg.limit_order_placed(trading_pair, side, limit_price,
-                                          params['stop_loss'], config.PENDING_ORDER_MAX_HOURS,
+                                          params['stop_loss'], strategy_profile.expiry_hours(signal.get('strategy')),
                                           signal=signal, df_1h=df_1h)
                     return True
                 except Exception as e:
@@ -1492,7 +1497,8 @@ class LiveTradeManager:
 
         # ── Тайм-стоп (v3): позиция старше лимита -> рыночное закрытие ────────
         # (широкий стоп v2 без лимита может держать пару заблокированной месяцами)
-        max_hold = getattr(config, 'MAX_POSITION_HOLD_HOURS', 0)
+        import strategy_profile
+        max_hold = strategy_profile.max_hold_hours(self.pair_strategy.get(trading_pair))
         if max_hold:
             age_h = (datetime.now() - position['entry_time']).total_seconds() / 3600
             if age_h > max_hold:

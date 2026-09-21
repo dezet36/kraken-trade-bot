@@ -164,12 +164,6 @@ def _llm_columns(llm):
     }
 
 
-def _bar_hours(timeframe: str) -> float:
-    """Длина свечи в часах. Незнакомый шаг считаем часовым."""
-    return {'1m': 1 / 60, '5m': 1 / 12, '15m': 0.25, '30m': 0.5,
-            '1h': 1.0, '4h': 4.0, '1d': 24.0}.get(timeframe, 1.0)
-
-
 def _fmt_p(price: float) -> str:
     """Цена с разумным числом знаков: BTC и SHIB в одном логе."""
     if price >= 1000:   return f"{price:.2f}"
@@ -732,7 +726,8 @@ class PaperBroker:
         # 0.5625%: смещение 0.1% при стопе 0.8% — это 12.5% сверху. Ошибка
         # уезжала и в отчётность — стоп-лосс выходил −1.09R вместо −1.0R,
         # потому что делили на риск, которого не было.
-        offset = config.LIMIT_ENTRY_OFFSET_PCT if config.USE_LIMIT_ENTRY else 0.0
+        import strategy_profile
+        offset = strategy_profile.limit_offset_pct(strategy)
         limit_price = entry * (1 + offset) if is_long else entry * (1 - offset)
 
         sl_dist = abs(limit_price - stop)
@@ -1166,49 +1161,20 @@ class PaperBroker:
 
     @staticmethod
     def _cost_limit(strategy):
-        """
-        Предел доли издержек в риске — у стратегии свой, если объявлен.
-
-        Общий config.MAX_ENTRY_COST_SHARE_PCT — запасной. Правило проекта:
-        общий параметр не имеет права запирать одну стратегию — уровни со
-        стопом 1.2% при общем пределе 5% не торговали три дня (21.09.2026).
-        """
-        try:
-            if strategy == 'LEVELS':
-                from levels import params
-                return float(params.MAX_ENTRY_COST_SHARE_PCT)
-        except Exception:                          # noqa: BLE001
-            pass
-        return float(config.MAX_ENTRY_COST_SHARE_PCT)
+        """Предел доли издержек в риске — свой у стратегии, общий — запасной (strategy_profile)."""
+        import strategy_profile
+        return strategy_profile.cost_limit_pct(strategy)
 
     @staticmethod
     def _expiry_hours(strategy):
         """
-        Сколько живёт неналитая заявка. У КАЖДОЙ стратегии своё.
-
-        Здесь стояло config.PENDING_ORDER_MAX_HOURS — 72 часа, параметр
-        Фибоначчи, — и применялся ко всем. Уровни при этом мерились на 24
-        часах, а Боллинджер на шести: их заявки жили втрое и вдвенадцатеро
-        дольше, чем в замере. Долгая жизнь заявки не безобидна — она занимает
-        слот и держит кулдаун по паре.
+        Сколько живёт неналитая заявка. У КАЖДОЙ стратегии своё — см.
+        strategy_profile: там же лежит причина, почему одно общее число
+        обслуживало всех неверно (уровни жили по сроку Фибоначчи, ИИ — тоже,
+        и заявка AAVE налилась через 18 часов в чужой план).
         """
-        try:
-            # ИИ: заявка живёт столько же, сколько ждёт условия план —
-            # LLM_TRIGGER_TTL_H. Без этого она получала 72 часа Фибоначчи:
-            # 20–21.09.2026 лимит AAVE SHORT, поставленный по плану от 06:50,
-            # налился через 18 часов в откат против тренда старшего ТФ — план
-            # к тому времени модель уже дважды сменила, а заявка жила.
-            if strategy == 'LLM':
-                return float(config.__dict__.get('LLM_TRIGGER_TTL_H', 0) or 12)
-            if strategy == 'LEVELS':
-                from levels import params
-                return float(params.EXPIRY_HOURS)
-            if strategy == 'RSIBB':
-                from rsibb import params
-                return float(params.EXPIRY_BARS) * _bar_hours(params.TIMEFRAME)
-        except Exception:                          # noqa: BLE001
-            pass
-        return float(config.PENDING_ORDER_MAX_HOURS)
+        import strategy_profile
+        return strategy_profile.expiry_hours(strategy)
 
     def _process_pending(self, strategy, pair, order, ts, high, low,
                          open_price=None):
@@ -1401,7 +1367,8 @@ class PaperBroker:
             if dist and ((best - pos['entry_price']) if is_long else (pos['entry_price'] - best)) >= dist:
                 pos['r1_ts'] = ts
 
-        max_hold = getattr(config, 'MAX_POSITION_HOLD_HOURS', 0)
+        import strategy_profile
+        max_hold = strategy_profile.max_hold_hours(strategy)
         if max_hold and (ts - pos['opened_ts']) / 3_600_000 > max_hold:
             self._close(strategy, pair, pos, ts, close, 'TIME', slip=True)
             return

@@ -175,14 +175,17 @@ class TestTheReasonNamesTheRightNumber:
         верно, а причину писали чужую, и в журнале это выглядело ошибкой.
         """
         assert broker.PaperBroker._expiry_hours('LEVELS') == 24.0
-        assert broker.PaperBroker._expiry_hours('SMC') == 72.0
+        # SMC объявляет свои 48 ч в smc/params — до 21.09.2026 брокер их не
+        # читал и держал её заявки 72 часа Фибоначчи.
+        assert broker.PaperBroker._expiry_hours('SMC') == 48.0
+        assert broker.PaperBroker._expiry_hours('FIBO') == 72.0
 
     def test_the_message_carries_that_number(self, broker):
         inst = make(broker)
         said = []
         inst._drop_pending = lambda s, p, why: said.append(why)
-        order = an_order(expires_ts=72 * HOUR)
+        order = an_order(expires_ts=48 * HOUR)
         inst.state['pending']['SMC']['BTCUSDT'] = order
         inst._process_pending('SMC', 'BTCUSDT', order, 152 * HOUR,
                               high=101.0, low=95.0, open_price=101.0)
-        assert said and '72' in said[0], said
+        assert said and '48' in said[0] and '72' not in said[0], said

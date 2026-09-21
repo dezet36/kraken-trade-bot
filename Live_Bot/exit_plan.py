@@ -90,19 +90,13 @@ def cooldown_hours(strategy):
     """
     Пауза по паре после выхода — настройка СТРАТЕГИИ, а не бота.
 
-    Книги у стратегий раздельные, горизонты разные: уровни держат позицию
-    часы и переоценивают ситуацию быстро, SMC тянет до дальних целей. Общее
-    число обслуживало обе плохо, а после появления третьей стратегии стало
-    просто неверным: замер уровней делался на шести часах, живой бот брал
-    двенадцать из конфига, и торговал бы не то, что измерено.
+    Число берёт strategy_profile: у уровней 6 ч, у Боллинджера 2 ч, у SMC
+    12 ч — свои, из их же params; ИИ — свой; общий из config — запасной для
+    Фибоначчи. Пока это решалось здесь, Боллинджер жил по 12 ч из config при
+    своих 2 ч в params.
     """
-    if strategy == 'LEVELS':
-        try:
-            from levels import params as levels_params
-            return float(levels_params.COOLDOWN_HOURS)
-        except Exception:                          # noqa: BLE001
-            pass
-    return float(getattr(config, 'COOLDOWN_HOURS', 12))
+    import strategy_profile
+    return strategy_profile.cooldown_hours(strategy)
 
 
 def tps_completed(remaining_size, original_size, fractions, tolerance=0.01):

@@ -95,8 +95,12 @@ def min_stop_pct(atr_pct=None):
     STOP_ATR_SHARE × ATR%. Берётся большее.
 
     Ноль в пределе означает «не проверять» — тогда минимум только по ATR.
+
+    Предел — СВОЙ у ИИ (strategy_profile), тот же, по которому брокер потом
+    проверяет план: минимум в разметке и проверка при входе — одно число.
     """
-    limit = getattr(config, 'MAX_ENTRY_COST_SHARE_PCT', 0) or 0
+    import strategy_profile
+    limit = strategy_profile.cost_limit_pct('LLM') or 0
     floor = 0.0 if limit <= 0 else config.ENTRY_COST_ROUND_TRIP / (limit / 100) * 100
     if atr_pct:
         floor = max(floor, STOP_ATR_SHARE * float(atr_pct))

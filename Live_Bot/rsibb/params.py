@@ -150,6 +150,9 @@ MIN_RR = _f('MIN_RR', 1.0)
 # на возврат, не сработавшая быстро, — это и есть начавшийся тренд.
 MAX_HOLD_BARS = _i('MAX_HOLD_BARS', 48)
 EXPIRY_BARS = _i('EXPIRY_BARS', 6)
+# Предел доли издержек в риске — свой (см. strategy_profile): общие 5%
+# из config считались для Фибоначчи со стопами 2.6–4.6%.
+MAX_ENTRY_COST_SHARE_PCT = _f('MAX_ENTRY_COST_SHARE_PCT', 8.0)
 
 # ── Портфель ─────────────────────────────────────────────────────────────────
 RISK_PCT = _f('RISK_PCT', 0.5)

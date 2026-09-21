@@ -173,25 +173,43 @@ class TestTheMenuIsUsable:
         assert 0 < len(found) <= llm_context.MAX_LEVELS
 
 
+def _set(monkeypatch, **values):
+    """
+    Правим настройку и в config, что держит llm_context, и в том, что сейчас
+    в sys.modules: другие наборы перезагружают config, и предел ИИ читается
+    через strategy_profile из свежего экземпляра.
+    """
+    targets = {id(llm_context.config): llm_context.config}
+    targets.setdefault(id(sys.modules['config']), sys.modules['config'])
+    for cfg in targets.values():
+        for key, value in values.items():
+            monkeypatch.setattr(cfg, key, value, raising=False)
+
+
 class TestTheCostFloorIsArithmetic:
     """
-    Минимальный стоп выводится из предела расхода, а не назначается.
-    Ошибка здесь тихо разрешит сделки, которые не окупают комиссию.
+    Минимальный стоп выводится из предела расхода ИИ (своего, не общего),
+    а не назначается. Ошибка здесь тихо разрешит сделки, которые не окупают
+    комиссию.
     """
 
     def test_it_follows_the_limit(self, monkeypatch):
-        monkeypatch.setattr(llm_context.config, 'ENTRY_COST_ROUND_TRIP', 0.00075)
-        monkeypatch.setattr(llm_context.config, 'MAX_ENTRY_COST_SHARE_PCT', 5.0)
+        _set(monkeypatch, ENTRY_COST_ROUND_TRIP=0.00075, LLM_MAX_ENTRY_COST_SHARE_PCT=5.0)
         assert llm_context.min_stop_pct() == pytest.approx(1.5)
 
     def test_a_tighter_limit_demands_a_wider_stop(self, monkeypatch):
-        monkeypatch.setattr(llm_context.config, 'ENTRY_COST_ROUND_TRIP', 0.00075)
-        monkeypatch.setattr(llm_context.config, 'MAX_ENTRY_COST_SHARE_PCT', 2.5)
+        _set(monkeypatch, ENTRY_COST_ROUND_TRIP=0.00075, LLM_MAX_ENTRY_COST_SHARE_PCT=2.5)
         assert llm_context.min_stop_pct() == pytest.approx(3.0)
 
     def test_a_disabled_limit_means_no_floor(self, monkeypatch):
-        monkeypatch.setattr(llm_context.config, 'MAX_ENTRY_COST_SHARE_PCT', 0)
+        _set(monkeypatch, LLM_MAX_ENTRY_COST_SHARE_PCT=0)
         assert llm_context.min_stop_pct() == 0.0
+
+    def test_the_common_limit_does_not_move_the_llm_floor(self, monkeypatch):
+        # Правило проекта: общий параметр не меняет чужую стратегию.
+        before = llm_context.min_stop_pct()
+        _set(monkeypatch, MAX_ENTRY_COST_SHARE_PCT=1.0)
+        assert llm_context.min_stop_pct() == pytest.approx(before)
 
 
 class TestWhatTheModelActuallyReads:

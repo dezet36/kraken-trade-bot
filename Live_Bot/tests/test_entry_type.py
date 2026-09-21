@@ -156,13 +156,30 @@ class TestTheCostLimitComesFromTheStrategy:
     доля 5.3–6.2% всегда выше. Предел — параметр стратегии, общий — запасной.
     """
 
-    def test_levels_have_their_own_limit_others_the_common_one(self, broker):
+    def test_each_strategy_has_its_own_limit_fibo_the_common_one(self, broker):
         import config
         from levels import params as levels_params
+        from smc import params as smc_params
+        from rsibb import params as rsibb_params
         assert broker.PaperBroker._cost_limit('LEVELS') == pytest.approx(levels_params.MAX_ENTRY_COST_SHARE_PCT)
-        assert broker.PaperBroker._cost_limit('LEVELS') > config.MAX_ENTRY_COST_SHARE_PCT
-        for name in ('FIBO', 'SMC', 'RSIBB', 'LLM'):
-            assert broker.PaperBroker._cost_limit(name) == pytest.approx(config.MAX_ENTRY_COST_SHARE_PCT)
+        assert broker.PaperBroker._cost_limit('SMC') == pytest.approx(smc_params.MAX_ENTRY_COST_SHARE_PCT)
+        assert broker.PaperBroker._cost_limit('RSIBB') == pytest.approx(rsibb_params.MAX_ENTRY_COST_SHARE_PCT)
+        assert broker.PaperBroker._cost_limit('LLM') == pytest.approx(config.LLM_MAX_ENTRY_COST_SHARE_PCT)
+        for name in ('LEVELS', 'SMC', 'RSIBB'):
+            assert broker.PaperBroker._cost_limit(name) > config.MAX_ENTRY_COST_SHARE_PCT
+        # Общий — это то, с чем считался Фибоначчи; только ему он и достаётся.
+        assert broker.PaperBroker._cost_limit('FIBO') == pytest.approx(config.MAX_ENTRY_COST_SHARE_PCT)
+
+    def test_an_smc_entry_with_a_1_percent_stop_is_not_refused(self, broker):
+        # 19–21.09.2026: девять сетапов SMC ушли в «предел издержек» при
+        # стопе 0.8–1.2% (доля 6–9%) — общий предел 5% запирал стратегию.
+        import risk_gate
+        for stop in (0.8, 1.0, 1.2):
+            pricey, share, _ = risk_gate.cost_too_high(100.0, stop, 0.00075, broker.PaperBroker._cost_limit('SMC'))
+            assert pricey is False, f'стоп {stop}%: доля {share:.1f}%'
+        # А стоп теснее её же минимума (0.5%) — сбой, его и отсекаем.
+        pricey, _, _ = risk_gate.cost_too_high(100.0, 0.4, 0.00075, broker.PaperBroker._cost_limit('SMC'))
+        assert pricey is True
 
     def test_a_levels_entry_with_a_1_2_percent_stop_is_not_refused(self, broker, monkeypatch):
         import config
@@ -179,13 +196,17 @@ class TestTheCostLimitComesFromTheStrategy:
 class TestExpiryComesFromTheStrategy:
     def test_each_strategy_gets_its_own(self, broker):
         import config
+        import strategy_profile
+        from smc import params as smc_params
+        assert broker.PaperBroker._expiry_hours('SMC') == pytest.approx(
+            smc_params.PENDING_ORDER_MAX_HOURS)
         from levels import params as levels_params
         from rsibb import params as rsibb_params
 
         assert broker.PaperBroker._expiry_hours('LEVELS') == pytest.approx(
             levels_params.EXPIRY_HOURS)
         assert broker.PaperBroker._expiry_hours('RSIBB') == pytest.approx(
-            rsibb_params.EXPIRY_BARS * broker._bar_hours(rsibb_params.TIMEFRAME))
+            rsibb_params.EXPIRY_BARS * strategy_profile._bar_hours(rsibb_params.TIMEFRAME))
         # У Фибоначчи своего параметра нет — остаётся общий.
         # ИИ живёт столько, сколько ждёт условия план: 20–21.09.2026 лимит
         # AAVE налился через 18 часов по плану, который модель уже сменила.

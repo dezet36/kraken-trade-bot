@@ -1,5 +1,17 @@
 """
-Параметры SMC-стратегии.
+Параметры пакета smc/: две части.
+
+ЧАСТЬ I — СТРУКТУРА РЫНКА (общий слой): как находятся свинги, сломы, пулы,
+имбалансы, зоны, сетка Фибоначчи, направление старшего порядка. Их читает
+построение MarketContext, а контекст читают все: SMC, ИИ, панель.
+
+ЧАСТЬ II — РЕШЕНИЯ СТРАТЕГИИ SMC: что из найденного торговать, при каких
+подтверждениях, где стоп и цели, сколько рисковать. Читает только
+evaluate() и адаптер strategy_smc. Только эти имена можно менять из панели
+(strategy_smc._apply_settings) — и тест test_strategy_isolation следит,
+чтобы записи извне не попадали в часть I.
+
+Границу держат множества STRUCTURAL и DECISION в конце файла.
 
 Осознанно отделены от Live_Bot/config.py: config.py грузит .env, пишет в лог и
 тянет ключи биржи — импортировать его из бэктеста и тестов нельзя. Здесь только
@@ -19,6 +31,19 @@ import params_env
 
 _f, _i, _b, _s = params_env.reader('SMC')
 
+
+# ════════════════════════════════════════════════════════════════════════════
+# ЧАСТЬ I. СТРУКТУРА РЫНКА — ОБЩИЙ СЛОЙ.
+#
+# Как находятся и обозначаются свинги, сломы, пулы ликвидности, имбалансы,
+# зоны интереса, сетка Фибоначчи, сессии, направление старшего порядка.
+# Это ОПРЕДЕЛЕНИЯ, а не решения: их читает market_structure при построении
+# MarketContext, а контекст — и стратегия SMC, и ИИ (разметка для модели),
+# и панель. Правка любого числа здесь меняет то, что видят ВСЕ читатели,
+# и по правилу проекта (CLAUDE.md) требует проверки каждого из них.
+# Ничто в этой части не пишется извне: оператор настраивает стратегию,
+# а не рынок.
+# ════════════════════════════════════════════════════════════════════════════
 
 # ── Таймфреймы (§2.6: анализ сверху вниз) ────────────────────────────────────
 # Решение пользователя: 1D bias → 4H/1H поиск POI → 15m/5m уточнение и вход.
@@ -110,26 +135,6 @@ OB_MIN_IMPULSE_PCT = _f('OB_MIN_IMPULSE_PCT', 0.008)   # 0.8% хода от бл
 # §5: «ранее протестированные POI, как правило, не дают повторной реакции».
 POI_MAX_TOUCHES = _i('POI_MAX_TOUCHES', 0)   # 0 = торгуем только нетронутые
 POI_MAX_AGE_BARS = _i('POI_MAX_AGE_BARS', 80)
-# Точки входа внутри POI: 0.0 = ближняя граница (первая триггерная точка §5.1),
-# 0.5 = середина блока (вторая триггерная точка).
-POI_ENTRY_DEPTH = _f('POI_ENTRY_DEPTH', 0.0)
-
-# Отступ входа НАРУЖУ от зоны, долей её высоты. Половина сетапов не
-# исполняется: цена разворачивается, не дойдя до границы зоны. Небольшой
-# отступ навстречу цене повышает долю налива ценой чуть худшего входа.
-# Отрицательное значение = глубже в зону (лучше цена, реже налив).
-POI_ENTRY_OFFSET = _f('POI_ENTRY_OFFSET', 0.0)
-
-# Какие типы зон торгуем. Пустой кортеж = все.
-# Отбор по бэктесту, а не по вкусу: WICK и BREAKER на 1H устойчиво убыточны
-# (с ними просадка растёт с 22.3% до 41.2%), MITIGATION даёт единицы сделок
-# и отрицательный вклад (−$711 на 3 сделках при прогоне полного пула).
-# Вся прибыль системы приходит с ORDER_BLOCK.
-POI_TYPES_ENABLED = tuple(
-    t.strip() for t in os.getenv('SMC_POI_TYPES', 'ORDER_BLOCK').split(',')
-    if t.strip()
-)
-
 # Приоритет типов POI при выборе лучшей зоны (больше = важнее).
 POI_TYPE_PRIORITY = {
     'ORDER_BLOCK': 1.00,
@@ -150,8 +155,6 @@ FIB_DEEP_RETRACE_HI = 0.886  # инвалидация сетапа за этим
 FIB_OTE = (0.620, 0.705, 0.790)
 # Цели по расширениям §10.2 (отрицательные уровни сетки).
 FIB_TARGETS = (0.270, 0.620, 1.000)
-# Требовать, чтобы POI лежал в discount (для лонга) / premium (для шорта) §10.1.
-REQUIRE_PREMIUM_DISCOUNT = _b('REQUIRE_PREMIUM_DISCOUNT', True)
 
 # ── Сессии / killzones (§11.2), время в UTC ──────────────────────────────────
 # Методичка даёт время в UTC+2; здесь пересчитано в UTC (−2 часа).
@@ -161,6 +164,46 @@ KILLZONES = {
     'NY': (12, 15),      # 14:00-17:00 UTC+2
     'LONDON_CLOSE': (15, 17),  # 17:00-19:00 UTC+2
 }
+KILLZONES_ENABLED = tuple(
+    z.strip() for z in os.getenv('SMC_KILLZONES_ENABLED', 'LONDON,NY').split(',') if z.strip()
+)
+# Открытие дня по методичке — 02:00 UTC+2 = 00:00 UTC.
+DAY_OPEN_HOUR_UTC = _i('DAY_OPEN_HOUR_UTC', 0)
+
+# ════════════════════════════════════════════════════════════════════════════
+# ЧАСТЬ II. РЕШЕНИЯ СТРАТЕГИИ SMC.
+#
+# Всё ниже читает только MarketContext.evaluate() и адаптер strategy_smc:
+# какие зоны торговать, сколько подтверждений требовать, где стоп и цели,
+# сколько рисковать, сколько живёт заявка. Эти числа меняют СДЕЛКИ SMC и
+# ничего больше: ИИ, панель и другие стратегии их не видят. Их можно
+# править (и оператор правит из панели — см. strategy_smc._apply_settings),
+# не проверяя остальных.
+# ════════════════════════════════════════════════════════════════════════════
+
+# ── Какие зоны торгуем и где в них вход ──────────────────────────────────────
+# Точки входа внутри POI: 0.0 = ближняя граница (первая триггерная точка §5.1),
+# 0.5 = середина блока (вторая триггерная точка).
+POI_ENTRY_DEPTH = _f('POI_ENTRY_DEPTH', 0.0)
+
+# Отступ входа НАРУЖУ от зоны, долей её высоты. Половина сетапов не
+# исполняется: цена разворачивается, не дойдя до границы зоны. Небольшой
+# отступ навстречу цене повышает долю налива ценой чуть худшего входа.
+# Отрицательное значение = глубже в зону (лучше цена, реже налив).
+POI_ENTRY_OFFSET = _f('POI_ENTRY_OFFSET', 0.0)
+
+# Какие типы зон торгуем. Пустой кортеж = все.
+# Отбор по бэктесту, а не по вкусу: WICK и BREAKER на 1H устойчиво убыточны
+# (с ними просадка растёт с 22.3% до 41.2%), MITIGATION даёт единицы сделок
+# и отрицательный вклад (−$711 на 3 сделках при прогоне полного пула).
+# Вся прибыль системы приходит с ORDER_BLOCK.
+POI_TYPES_ENABLED = tuple(
+    t.strip() for t in os.getenv('SMC_POI_TYPES', 'ORDER_BLOCK').split(',')
+    if t.strip()
+)
+
+# Требовать, чтобы POI лежал в discount (для лонга) / premium (для шорта) §10.1.
+REQUIRE_PREMIUM_DISCOUNT = _b('REQUIRE_PREMIUM_DISCOUNT', True)
 # §11.2: «все сделки рекомендуется открывать во время killzone».
 # REQUIRE_KILLZONE влияет на in_killzone() (живой бот), KILLZONE_AS_GATE —
 # на генератор сигналов: True = жёсткий запрет входа вне сессии,
@@ -173,11 +216,6 @@ REQUIRE_KILLZONE = _b('REQUIRE_KILLZONE', True)
 # проблемы нет, а часть хороших зон тестируется вне лондонской и нью-йоркской
 # сессий. Killzone остаётся фактором confluence, но не запретом.
 KILLZONE_AS_GATE = _b('KILLZONE_AS_GATE', False)
-KILLZONES_ENABLED = tuple(
-    z.strip() for z in os.getenv('SMC_KILLZONES_ENABLED', 'LONDON,NY').split(',') if z.strip()
-)
-# Открытие дня по методичке — 02:00 UTC+2 = 00:00 UTC.
-DAY_OPEN_HOUR_UTC = _i('DAY_OPEN_HOUR_UTC', 0)
 
 # ── Confluence: минимальный набор подтверждений (§23, итоговый чек-лист) ──────
 # Каждый фактор даёт вес; сетап торгуется, если сумма >= порога.
@@ -388,6 +426,11 @@ BREAKEVEN_AFTER_TP1 = _b('BREAKEVEN_AFTER_TP1', False)
 # ── Лимитный ордер на вход (агрессивный режим, выбор пользователя) ───────────
 ENTRY_MODE = os.getenv('SMC_ENTRY_MODE', 'POI_LIMIT')  # POI_LIMIT | CONFIRMATION
 PENDING_ORDER_MAX_HOURS = _f('PENDING_ORDER_MAX_HOURS', 48.0)
+# Предел доли издержек в риске — свой. Общие 5% из config резали SMC:
+# при стопе 0.8–1.2% доля 7–9%, и 19–21.09.2026 девять сетапов ушли в
+# отказ «предел издержек» при одной сделке за трое суток. 10% отсекает
+# только стопы теснее её же MIN_SL_PCT (0.5% → 15%), то есть сбои.
+MAX_ENTRY_COST_SHARE_PCT = _f('MAX_ENTRY_COST_SHARE_PCT', 10.0)
 # Тайм-стоп позиции: не даём сделке висеть вечно.
 MAX_POSITION_HOLD_HOURS = _f('MAX_POSITION_HOLD_HOURS', 336.0)
 
@@ -421,3 +464,40 @@ RANKED_POOL = tuple(
         'BCHUSDT', 'UNIUSDT', '1000BONKUSDT', 'OPUSDT', 'APTUSDT', 'XLMUSDT',
     ])).split(',') if p.strip()
 )
+
+
+# ── Граница частей — по именам, чтобы её мог проверить тест ──────────────────
+STRUCTURAL = frozenset((
+    'TF_BIAS', 'TF_HTF', 'TF_POI', 'TF_LTF', 'TF_EXEC',
+    'BIAS_MODE', 'BIAS_REQUIRE_CONFIRMED', 'MIN_HTF_BARS',
+    'LOOKBACK_BIAS', 'LOOKBACK_HTF', 'LOOKBACK_POI', 'LOOKBACK_LTF',
+    'SWING_N_STRUCT', 'SWING_N_MINOR', 'SWING_SOFT_RIGHT',
+    'BREAK_ON_CLOSE', 'TREND_CONFIRM_LEGS',
+    'EQ_TOLERANCE_PCT', 'EQ_MIN_BARS_APART', 'EQ_MAX_BARS_APART',
+    'SWEEP_MIN_PENETRATION_PCT', 'SWEEP_RECLAIM_BARS', 'SWEEP_FRESH_BARS',
+    'FVG_MIN_SIZE_PCT', 'FVG_MITIGATED_AT', 'FVG_MAX_AGE_BARS',
+    'OB_LOOKBACK_BARS', 'OB_MIN_IMPULSE_PCT', 'POI_MAX_TOUCHES', 'POI_MAX_AGE_BARS',
+    'POI_TYPE_PRIORITY',
+    'FIB_EQUILIBRIUM', 'FIB_ZONE_SHALLOW', 'FIB_ZONE_DEEP', 'FIB_DEEP_RETRACE_LO',
+    'FIB_DEEP_RETRACE_HI', 'FIB_OTE', 'FIB_TARGETS',
+    'KILLZONES', 'KILLZONES_ENABLED', 'DAY_OPEN_HOUR_UTC',
+))
+
+DECISION = frozenset((
+    'POI_ENTRY_DEPTH', 'POI_ENTRY_OFFSET', 'POI_TYPES_ENABLED',
+    'REQUIRE_PREMIUM_DISCOUNT', 'REQUIRE_KILLZONE', 'KILLZONE_AS_GATE',
+    'CONFLUENCE_WEIGHTS', 'MIN_CONFLUENCE_SCORE', 'LONG_CONFLUENCE_PREMIUM',
+    'REGIME_RISK_SCALE',
+    'RISK_PER_TRADE_PCT', 'MAX_TOTAL_RISK_PCT', 'MIN_RR', 'MAX_RR', 'REQUIRE_OTE',
+    'LEG_BARS_MIN', 'LEG_BARS_MAX', 'SL_BUFFER_PCT', 'MIN_SL_PCT', 'SL_MODE',
+    'TP_MODE', 'LIQ_MIN_R', 'LIQ_MERGE_PCT', 'LIQ_MIN_WEIGHT', 'TP_CLOSE_FRACTIONS',
+    'ENTRY_MODE', 'PENDING_ORDER_MAX_HOURS', 'MAX_ENTRY_COST_SHARE_PCT',
+    'MAX_POSITION_HOLD_HOURS', 'MAX_CONCURRENT_POSITIONS', 'COOLDOWN_HOURS',
+    'MAX_SAME_DIRECTION', 'RANKED_POOL', 'MIN_VOLUME_24H_USD',
+    'BREAKEVEN_AFTER_TP1', 'TP1_R_MULTIPLE',
+))
+
+
+def structural_snapshot():
+    """Значения части I — слепок, по которому тест ловит запись извне."""
+    return {name: globals()[name] for name in sorted(STRUCTURAL)}
