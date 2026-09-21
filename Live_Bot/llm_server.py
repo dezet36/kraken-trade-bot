@@ -29,6 +29,7 @@ import urllib.error
 import urllib.request
 
 import config
+import llm_grammar
 from logger import log
 
 # Сколько ждём ответа: как у рабочего процесса — разбор с мыслью до 45 минут.
@@ -135,7 +136,10 @@ def ask(prompt, grammar=None, max_tokens=None, timeout=None):
     «модель упала».
     """
     limit = int(max_tokens or config.LLM_MAX_TOKENS)
-    text = _chatml(prompt + ('\n' + config.LLM_THINK_TAG if config.LLM_THINK_TAG else ''))
+    # Мысль открывается в подсказке, а не грамматикой: на границе «<think>»
+    # MTP-черновик с грамматикой выдавал пустую мысль (см. open_thinking).
+    grammar, think_open = llm_grammar.open_thinking(grammar) if grammar else (grammar, '')
+    text = _chatml(prompt + ('\n' + config.LLM_THINK_TAG if config.LLM_THINK_TAG else '')) + think_open
     # Вопрос уходит токенами, а не строкой: так префикс прогрева и начало
     # вопроса совпадают гарантированно, а не «обычно».
     prompt_ids = None
@@ -177,7 +181,7 @@ def ask(prompt, grammar=None, max_tokens=None, timeout=None):
         _raise('модель зависла', f'llama-server не ответил за {(timeout or CALL_TIMEOUT_SEC) // 60} мин')
     spent = time.time() - started
 
-    answer = out.get('content') or ''
+    answer = think_open + (out.get('content') or '')
     timings = out.get('timings') or {}
     # Что сервер действительно считал — timings.prompt_n. tokens_evaluated,
     # вопреки имени, — это весь вопрос, а tokens_cached — размер кэша после

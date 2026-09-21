@@ -84,6 +84,29 @@ def test_the_question_goes_as_chatml_with_grammar(server):
     assert stats['draft_accepted'] == 7 and stats['tok_s'] == 3.1
 
 
+def test_the_thought_is_opened_in_the_prompt_not_by_the_grammar(server):
+    """
+    21.09.2026: 23 разбора подряд с пустой мыслью. llama-server с
+    MTP-черновиком на границе «<think>» принимал «\n\n</think>» — без
+    черновика или без грамматики модель думала. Открытый в подсказке
+    «<think>\n» (как в родном шаблоне Qwen) чинит: мысль 1800 знаков.
+    """
+    import llm_grammar
+    grammar = llm_grammar.with_thinking('root     ::= "{" "}"', 1800)
+    answer, _stats = llm_server.ask('ВОПРОС', grammar=grammar, max_tokens=50)
+    body = FakeLlamaServer.seen[-1]
+    sent = ''.join(chr(t) for t in body['prompt'])
+    assert sent.endswith('assistant' + chr(10) + '<think>' + chr(10)), 'мысль открывается в подсказке'
+    assert '"<think>"' not in body['grammar'] and 'root     ::= think answer' + chr(10) in body['grammar']
+    assert answer.startswith('<think>' + chr(10)), 'тег возвращён в ответ — журнал и split_thought его ждут'
+
+
+def test_without_a_thinking_rule_the_prompt_is_untouched(server):
+    llm_server.ask('ВОПРОС', grammar='root ::= "x"', max_tokens=5)
+    sent = ''.join(chr(t) for t in FakeLlamaServer.seen[-1]['prompt'])
+    assert sent.endswith('assistant' + chr(10))
+
+
 def test_llm_local_routes_to_the_server_and_reports_it(server):
     assert llm_local.available() is True
     out = llm_local.ask('ВОПРОС', grammar=None, max_tokens=10)

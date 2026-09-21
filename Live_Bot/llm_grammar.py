@@ -152,6 +152,34 @@ def with_thinking(grammar, think_chars):
     return think + 'answer   ::=' + grammar[len(head):]
 
 
+THINK_OPEN = '<think>' + chr(10)
+_ROOT_OPTIONAL = 'root     ::= think answer | answer'
+_THINK_CLOSED = 'think    ::= "<think>" tchar{0,'
+
+
+def open_thinking(grammar):
+    """
+    Переносит открывающий «<think>» из грамматики в подсказку.
+
+    -> (грамматика без «<think>», хвост подсказки) или (grammar, '') если
+    блока мысли в ней нет.
+
+    ЗАЧЕМ. llama-server с MTP-черновиком и грамматикой на границе «<think>»
+    принимает от черновика «\n\n</think>» — мысль выходит пустой в 100%
+    ответов (21.09.2026: 23 разбора подряд, 0 знаков; без черновика или
+    без грамматики модель думает). Родной шаблон Qwen в режиме
+    размышления сам открывает «<think>\n» в подсказке — делаем так же:
+    модель начинает уже внутри мысли, грамматика требует только закрыть её.
+    Ответ модели после этого не содержит «<think>», вызывающий приписывает
+    THINK_OPEN обратно, чтобы split_thought и журнал ничего не заметили.
+    """
+    if _ROOT_OPTIONAL not in grammar or _THINK_CLOSED not in grammar:
+        return grammar, ''
+    grammar = grammar.replace(_ROOT_OPTIONAL, 'root     ::= think answer', 1)
+    grammar = grammar.replace(_THINK_CLOSED, 'think    ::= tchar{0,', 1)
+    return grammar, THINK_OPEN
+
+
 def _build_answer(level_ids, plans, rules):
     """Грамматика ответа: вход или отказ, без блока размышления."""
 
