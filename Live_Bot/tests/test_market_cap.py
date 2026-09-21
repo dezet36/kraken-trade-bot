@@ -199,7 +199,7 @@ class TestTheMarkupShowsItHonestly:
         lines = llm_context._macro_lines(m)
         text = chr(10).join(lines)
         assert 'USDT.D 4.82%' in text and '+0.31 п.п.' in text and 'растёт 3-й день' in text
-        assert 'BTC.D 58.10%' in text and 'альты слабее BTC' in text and '31 из 118' in text
+        assert 'BTC.D 58.10%' in text and 'альты слабее BTC' in text and '31 из 118' in text and 'широкое падение' in text
         assert 'цены 2 мин назад' in text and 'предложение монет 0.6 ч назад' in text
 
     def test_stale_facts_are_a_dash_with_the_age(self):

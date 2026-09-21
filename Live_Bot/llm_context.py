@@ -975,10 +975,13 @@ def _macro_lines(m):
     if m.get('total2_24h') is not None and m.get('btc_24h') is not None:
         t2, b = m['total2_24h'], m['btc_24h']
         verdict = 'альты сильнее BTC' if t2 > b + 0.3 else ('альты слабее BTC' if t2 < b - 0.3 else 'альты вровень с BTC')
-        line = f"  TOTAL2 (капа без BTC) за 24ч {t2:+.2f}% при BTC {b:+.2f}% — {verdict}"
-        if m.get('counted_24h'):
-            line += f"   ширина: {m.get('up_24h', 0)} из {m['counted_24h']} монет в плюсе за 24ч"
-        out.append(line)
+        out.append(f"  TOTAL2 (капа без BTC) за 24ч {t2:+.2f}% при BTC {b:+.2f}% — {verdict}")
+    if m.get('counted_24h'):
+        # Ширина — по суточному ходу тикеров Bybit, есть с первой точки ряда.
+        up, n = int(m.get('up_24h') or 0), int(m['counted_24h'])
+        share = up / n * 100 if n else 0
+        mood = 'широкий рост' if share >= 70 else ('широкое падение' if share <= 30 else 'смешанно')
+        out.append(f"  ширина рынка: {up} из {n} топ-монет в плюсе за 24ч — {mood}")
     out.append(f"  данные: цены {m.get('age_min', 0):.0f} мин назад, предложение монет "
                f"{m.get('supply_age_min', 0) / 60:.1f} ч назад")
     return out
