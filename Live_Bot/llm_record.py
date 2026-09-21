@@ -123,7 +123,7 @@ def features(pair, df, facts, market, verdict, stats=None, now=None, at=''):
     for name in ('h1', 'h4', 'h24'):
         win = delta.get(name) or {}
         out[f'delta_{name}_share_pct'] = _num(win.get('share_pct') if isinstance(win, dict) else None)
-        out[f'delta_{name}_cover_min'] = _num(win.get('minutes') if isinstance(win, dict) else None, 0)
+        out[f'delta_{name}_cover_min'] = _num(win.get('rows') if isinstance(win, dict) else None, 0)   # минут ленты в окне
     out['delta_divergence'] = delta.get('divergence') if delta else None
     oi_flow = market.get('oi_flow') or {}
     out['oi_change_pct_6b'] = _num(oi_flow.get('change_pct'))
