@@ -130,7 +130,27 @@ def build(level_ids, prices=None, min_stop_pct=0.0, min_rr=0.0, stop_buffer_pct=
         # быть разными уровнями. Разрешить вход здесь значило бы разрешить
         # стоп на цене входа.
         return with_thinking(_skip_only(), think_chars)
-    return with_thinking(_build_answer(level_ids, plans, rules), think_chars)
+    labels = _labels(level_ids, prices)
+    return with_thinking(_build_answer([labels[i] for i in level_ids], plans, rules), think_chars)
+
+
+def _labels(level_ids, prices):
+    """
+    Как уровень пишется в ответе: «L11 (2615)» — номер с ценой из таблицы.
+
+    ЗАЧЕМ. 21.09.2026 ETH: модель хотела стоп под 2605.88 и цель 2709.71
+    (L4), в мысли полстраницы перебирала «L11? нет, L11 это 2615…», в ответ
+    написала стоп L12 (2534) — и грамматика, честно считая R:R от этого
+    стопа, не пустила L4 и подставила L1/L2. Код отказал («обоснование не о
+    том плане»), но план был потерян из-за арифметики номеров, а не рынка.
+    Когда номер и цена печатаются вместе, связь фиксируется в момент
+    генерации: написав «L12 (», модель обязана дописать 2534 — и видит,
+    что это не 2605. Разбор ответа (llm_context.level_id_of) берёт номер.
+    """
+    if not prices:
+        return {i: i for i in level_ids}
+    import llm_context
+    return {i: llm_context.label(i, p) for i, p in zip(level_ids, prices)}
 
 
 def with_thinking(grammar, think_chars):
@@ -284,6 +304,7 @@ def _plans(level_ids, prices=None, min_stop_pct=0.0, min_rr=0.0, stop_buffer_pct
     # стопа — это дистанция до уровня плюс отступ, и обе проверки здесь
     # считают именно так, иначе грамматика и код разошлись бы на отступе.
     price_of = dict(zip(level_ids, prices)) if prices else {}
+    labels = _labels(level_ids, prices)
     buffer = float(stop_buffer_pct or 0.0)
 
     def far_enough(a, b, pct):
@@ -331,14 +352,14 @@ def _plans(level_ids, prices=None, min_stop_pct=0.0, min_rr=0.0, stop_buffer_pct
                 name = f'{side.lower()}-{entry.lower()}-{stop.lower()}'
                 rules.append(
                     f'{name} ::= "\\"side\\":" ws {_alt([side])} ws "," ws '
-                    f'"\\"entry\\":" ws {_alt([entry])} ws "," ws '
-                    f'"\\"stop\\":" ws {_alt([stop])} ws "," ws '
+                    f'"\\"entry\\":" ws {_alt([labels[entry]])} ws "," ws '
+                    f'"\\"stop\\":" ws {_alt([labels[stop]])} ws "," ws '
                     f'"\\"tp\\":" ws tp-{name} ws "," ws '
                     # Уровень инвалидации — тот же стоп: идея лонга умирает
                     # ПОД входом, а не над ним.
-                    f'"\\"inval\\":" ws {_alt([stop])}')
+                    f'"\\"inval\\":" ws {_alt([labels[stop]])}')
                 rules.append(f'tp-{name} ::= {_targets_rule(f"t-{name}")}')
-                rules.append(f't-{name} ::= {_alt(ok_targets)}')
+                rules.append(f't-{name} ::= {_alt([labels[t] for t in ok_targets])}')
                 plans.append(name)
     return plans, rules
 

@@ -161,8 +161,12 @@ def parse(answer, levels):
     out['inval'] = llm_context.price_of(levels, data.get('inval'))
     out['targets'] = [llm_context.price_of(levels, t)
                       for t in (data.get('tp') or [])]
-    out['ids'] = {'entry': data.get('entry'), 'stop': data.get('stop'),
-                  'tp': data.get('tp'), 'inval': data.get('inval')}
+    # В ответе уровень — «L11 (2615)»; коду нужен номер, цена сверена
+    # грамматикой (см. llm_grammar._labels).
+    ident = llm_context.level_id_of
+    out['ids'] = {'entry': ident(data.get('entry')), 'stop': ident(data.get('stop')),
+                  'tp': [ident(t) for t in (data.get('tp') or [])],
+                  'inval': ident(data.get('inval'))}
     return out
 
 
@@ -189,7 +193,7 @@ def _trigger(raw, levels):
     """
     if isinstance(raw, dict):
         when = raw.get('when') or 'now'
-        level_id = raw.get('level')
+        level_id = llm_context.level_id_of(raw.get('level'))
         note = raw.get('note') or ''
     else:
         when, level_id, note = 'now', None, (raw or '')

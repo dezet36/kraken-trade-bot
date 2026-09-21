@@ -952,8 +952,26 @@ def market_lines(market, price_now):
     return out
 
 
+def label(level_id, price):
+    """
+    Уровень так, как модель пишет его в ответе: «L11 (2615)».
+
+    Цена — тем же форматом, что в таблице уровней (6 значащих), чтобы
+    строка в ответе совпадала со строкой в разметке буква в букву.
+    """
+    return f'{level_id} ({float(price):.6g})'
+
+
+def level_id_of(value):
+    """«L11 (2615)» -> «L11»; «L11» -> «L11»; иное -> как есть."""
+    if not isinstance(value, str):
+        return value
+    return value.split(' ', 1)[0].split('(', 1)[0].strip()
+
+
 def price_of(found, level_id):
-    """Цена по идентификатору. None, если такого уровня в списке не было."""
+    """Цена по идентификатору или подписи «L11 (2615)». None, если уровня нет."""
+    level_id = level_id_of(level_id)
     for level in found or []:
         if level.get('id') == level_id:
             return level['price']

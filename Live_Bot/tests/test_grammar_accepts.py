@@ -64,8 +64,19 @@ def enter_answer(n, side='LONG', entry='L3', stop='L4', tp=('L1',), inval=None,
     trigger = {'when': when, 'note': trig_note}
     if when != 'now':
         trigger = {'when': when, 'level': level, 'note': trig_note}
+    # Уровень в ответе — номером с ценой из таблицы: «L3 (106)».
+    import llm_context
+
+    def lab(level_id):
+        index = int(level_id[1:]) - 1
+        if index >= len(PRICES[n]):
+            return level_id                        # уровня нет в списке — как есть
+        return llm_context.label(level_id, PRICES[n][index])
+    if when != 'now':
+        trigger['level'] = lab(level)
     body = {'regime': 'тренд вверх', 'analysis': analysis(), 'bias': bias, 'd': 'enter',
-            'side': side, 'entry': entry, 'stop': stop, 'tp': list(tp), 'inval': inval or stop,
+            'side': side, 'entry': lab(entry), 'stop': lab(stop), 'tp': [lab(t) for t in tp],
+            'inval': lab(inval or stop),
             'trigger': trigger,
             'cf': {'poi': True, 'vp': True, 'der': True, 'smc': True, 'flow': False},
             'p': float(p), 'why': 'за скоплением, к экстремуму дня',
@@ -140,6 +151,19 @@ class TestValidAnswersAreAccepted:
 
 
 class TestInvalidAnswersAreRejected:
+
+    def test_a_level_with_the_wrong_price_is_rejected(self):
+        """
+        21.09.2026 ETH: модель держала в голове L12 = 2605.88, а L12 был
+        2534. Номер с ценой в одной строке: написав «L12 (», она обязана
+        дописать 2534 — и чужую цену грамматика не примет.
+        """
+        g, text = grammar(6)
+        assert '"L3 (106)"' in text.replace(chr(92) + '"', '"')
+        good = enter_answer(6, 'LONG', 'L3', 'L4', ('L1',))
+        assert g.accepts(good)
+        assert not g.accepts(good.replace('L3 (106)', 'L3 (105)'))
+        assert not g.accepts(good.replace('L3 (106)', 'L3'))
 
     def test_a_price_outside_the_list(self):
         g, _ = grammar(6)

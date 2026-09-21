@@ -272,7 +272,8 @@ class TestTheWholePass:
         out = dec.decide('BTCUSDT', self.make_df(), ask)
         assert 'УРОВНИ' in seen['prompt']
         for level in out['levels']:
-            assert f'"\\"{level["id"]}\\""' in seen['grammar']
+            # Уровень в грамматике — номером с ценой из таблицы.
+            assert dec.llm_context.label(level['id'], level['price']) in seen['grammar']
 
     def test_a_failing_model_does_not_raise(self):
         def boom(prompt, grammar, max_tokens):
@@ -582,13 +583,16 @@ class TestDistancesAreInTheGrammar:
         # Лонг от L3 (100) со стопом L4 (97, 3%): цель должна быть дальше 6% —
         # L2 (102) не годится, L1 (104) годится.
         line = next(l for l in text.splitlines() if l.startswith('t-long-l3-l4'))
-        assert 'L2' not in line and 'L1' in line
+        assert 'L2' not in line and 'L1 (115)' in line, 'цель пишется номером с ценой'
 
     def test_without_prices_nothing_is_restricted(self):
         import llm_grammar
         a = llm_grammar.build(['L1', 'L2', 'L3'])
         b = llm_grammar.build(['L1', 'L2', 'L3'], prices=[100, 99, 98], min_stop_pct=0)
-        assert a == b
+        # Без цен уровни пишутся голым номером, с ценами — «L1 (100)»;
+        # набор планов при этом одинаков.
+        strip = lambda t: t.replace(' (100)', '').replace(' (99)', '').replace(' (98)', '')
+        assert a == strip(b) and 'L1 (100)' in b
 
 
 class TestATriggerAgainstTheIdeaIsRefused:
@@ -783,3 +787,20 @@ class TestTheGrammarAdmitsAThought:
         text = g.build(['L1', 'L2', 'L3', 'L4', 'L5', 'L6'], prices=[120, 112, 106, 100, 95, 90],
                        min_stop_pct=1.5, min_rr=2.0, think_chars=0)
         assert text.startswith('root     ::= enter | skip')
+
+
+class TestLabelledLevelsAreParsedToIds:
+    def test_ids_lose_the_price_and_prices_resolve(self):
+        import json
+        import llm_context
+        levels = [{'id': 'L1', 'price': 110.0}, {'id': 'L2', 'price': 100.0}, {'id': 'L3', 'price': 95.0}]
+        answer = json.dumps({'regime': 'r', 'analysis': 'a', 'bias': 'up', 'd': 'enter', 'side': 'LONG',
+                             'entry': 'L2 (100)', 'stop': 'L3 (95)', 'tp': ['L1 (110)'], 'inval': 'L3 (95)',
+                             'trigger': {'when': 'close_above', 'level': 'L2 (100)', 'note': 'n'},
+                             'cf': {}, 'p': 0.6, 'why': 'w'})
+        out = dec.parse(answer, levels)
+        assert out['ids'] == {'entry': 'L2', 'stop': 'L3', 'tp': ['L1'], 'inval': 'L3'}
+        assert out['entry'] == 100.0 and out['stop'] == 95.0 and out['targets'] == [110.0]
+        assert out['trigger_level'] == 100.0 and out['trigger_id'] == 'L2'
+        assert llm_context.level_id_of('L11 (2615)') == 'L11' and llm_context.level_id_of('L11') == 'L11'
+        assert llm_context.label('L11', 2615) == 'L11 (2615)' and llm_context.label('L4', 2709.71) == 'L4 (2709.71)'
