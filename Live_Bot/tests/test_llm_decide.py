@@ -946,10 +946,36 @@ class TestARefusedPlanGoesBackToTheModel:
         good = answer()
         out, asked = self._decide([bad, good])
         assert len(asked) == 2, 'модель не спросили второй раз'
-        assert 'ТВОЙ ПРЕДЫДУЩИЙ ОТВЕТ' in asked[1]
+        assert 'ТВОЙ ПРЕДЫДУЩИЙ ПЛАН' in asked[1]
         assert 'КОД ОТВЕРГ ЭТОТ ПЛАН' in asked[1]
         assert out.get('revised_from', '').startswith('геометрия неверна')
         assert out['raw'] == good
+
+    def test_the_thought_does_not_come_back_in_the_second_question(self):
+        """
+        В переделку уходит ПЛАН, а не ответ целиком.
+
+        ОТКУДА. Окно 12288 токенов. Замер 23.09.2026: вопрос 8662–9244,
+        ответ 1781–2235, из них мысль ровно 900. Вернув ответ целиком, мы
+        клали на вход ~11050 и оставляли плану ~340 токенов при нужных
+        880–1335 — XLMUSDT 23.09 11:51 оборвался на 344. Проверка ловит
+        возврат мысли обратно в вопрос: он делает переделку невозможной.
+        """
+        reasoning = 'РАССУЖДЕНИЕ КОТОРОЕ НЕ ДОЛЖНО ВЕРНУТЬСЯ ' * 20
+        plan = answer(stop='L2')                   # стоп выше входа у лонга
+        bad = f'<think>{reasoning}</think>{plan}'
+        out, asked = self._decide([bad, answer()])
+        assert len(asked) == 2, 'модель не спросили второй раз'
+        assert reasoning.strip() not in asked[1], 'мысль вернулась в вопрос'
+        assert plan in asked[1], 'план не дошёл до переделки'
+        assert out['rejected_raw'] == bad, 'в журнале должен остаться ответ целиком'
+
+    def test_an_answer_without_a_thought_goes_whole(self):
+        """Без блока <think> отдавать нечего отрезать — план идёт как есть."""
+        plan = answer(stop='L2')
+        text = dec.revision_request('ВОПРОС', plan, 'геометрия неверна', 'стоп выше входа')
+        assert plan in text
+        assert 'геометрия неверна' in text
 
     def test_the_second_answer_is_the_one_that_counts(self):
         """В вердикт идёт второй ответ, а первый остаётся только в пометке."""
