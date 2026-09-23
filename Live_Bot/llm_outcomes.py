@@ -38,7 +38,17 @@ from logger import log
 CSV_PATH = os.path.join(config.DATA_DIR, 'llm_outcomes.csv')
 STATE_PATH = os.path.join(config.DATA_DIR, 'llm_outcomes_state.json')
 
-HORIZONS = (1, 4, 12, 24, 48)
+# Отсечки, на которых записывается цена, И горизонт наблюдения: последняя
+# отсечка закрывает наблюдение.
+#
+# 168 часов (неделя), а не 48, с 23.09.2026. Наблюдение обязано быть НЕ
+# КОРОЧЕ жизни позиции: держать ИИ может до 336 часов, а прибор закрывал
+# план через двое суток — и «цель не достигнута» у медленных планов
+# означало «мы не досмотрели», а не «не дошла». По этим числам принимаются
+# решения о правилах, поэтому короткий горизонт портил не отчёт, а выводы.
+# Неделя — компромисс: 336 ч держало бы в памяти вдвое больше наблюдений
+# ради хвоста, в который попадает малая часть сделок.
+HORIZONS = (1, 4, 12, 24, 48, 72, 168)
 _MS_HOUR = 3_600_000
 # Касание уровня — цена в этой доле процента от него; реакция считается в ATR.
 LEVEL_TOUCH_PCT = 0.1
@@ -53,7 +63,7 @@ COLUMNS = [
     # Цена в момент разбора и план, если он был.
     'price', 'entry', 'stop', 'tp1',
     # Ход цены от момента разбора, в процентах, на каждом горизонте.
-    'pct_1h', 'pct_4h', 'pct_12h', 'pct_24h',
+    'pct_1h', 'pct_4h', 'pct_12h', 'pct_24h', 'pct_48h', 'pct_72h', 'pct_168h',
     'max_up_pct', 'max_down_pct',
     # В долях риска плана — только когда план был: сколько R дала бы идея
     # в лучшем и худшем случае, дошла ли до первой цели, задела ли стоп.
@@ -235,7 +245,7 @@ def _advance_plan(w, ts, high, low, close, hours):
         if cur is None or cur['ts'] != hour:
             if cur is not None:
                 w['hour_bars'].append(cur)
-                w['hour_bars'] = w['hour_bars'][-50:]      # 48 ч наблюдения + запас
+                w['hour_bars'] = w['hour_bars'][-50:]      # условию хватает двух суток
                 _try_condition(w, hours)
             w['cur_hour'] = {'ts': hour, 'o': close, 'h': high, 'l': low, 'c': close, 'v': 0.0}
         else:
@@ -321,7 +331,7 @@ def recent(pair, limit=2):
 
 def expire(now_ms):
     """Заброшенные наблюдения (пара выпала из пула) закрываются по времени."""
-    cutoff = now_ms - HORIZONS[-1] * 4 * _MS_HOUR
+    cutoff = now_ms - (HORIZONS[-1] + 24) * _MS_HOUR
     with _lock:
         watches = _load()
         stale = [w for w in watches if w['start_ts'] < cutoff]

@@ -1,4 +1,7 @@
 """
+Наблюдение закрывается на последней отсечке HORIZONS — с 23.09.2026 это
+168 часов, поэтому ряды баров здесь оканчиваются свечой на 168-м часе.
+
 Исходы вердиктов: куда пошла цена после каждого разбора.
 
 Разбор читается убедительно при любом решении. Различить верное от
@@ -45,7 +48,7 @@ class TestAnEntryIsMeasuredInR:
         assert llm_outcomes.pairs() == {'BTCUSDT': start}
         done = run_bars('BTCUSDT', start, [
             (0.5, 101, 99.5, 100.8), (1, 102, 100, 101.5), (4, 104, 101, 103.5),
-            (12, 106.5, 103, 106), (24, 107, 105, 106.5), (48, 107, 105, 106.5)])
+            (12, 106.5, 103, 106), (24, 107, 105, 106.5), (48, 107, 105, 106.5), (168, 107, 105, 106.5)])
         assert len(done) == 1
         row = llm_outcomes.row(done[0])
         assert row['decision'] == 'enter' and row['side'] == 'LONG'
@@ -61,7 +64,7 @@ class TestAnEntryIsMeasuredInR:
         llm_outcomes.watch('ETHUSDT', {'ok': False, 'gate': 'критик отклонил',
                                        'side': 'SHORT', 'entry': 100.0, 'stop': 102.0,
                                        'targets': [95.0]}, price=100.0, ts=start)
-        done = run_bars('ETHUSDT', start, [(2, 102.5, 99, 101), (24, 103, 100, 102), (48, 103, 100, 102)])
+        done = run_bars('ETHUSDT', start, [(2, 102.5, 99, 101), (24, 103, 100, 102), (48, 103, 100, 102), (168, 103, 100, 102)])
         row = llm_outcomes.row(done[0])
         assert row['decision'] == 'skip' and row['gate'] == 'критик отклонил'
         assert row['hit_sl'] == 1 and row['hit_tp1'] == 0
@@ -74,7 +77,7 @@ class TestASkipIsMeasuredInPercent:
         start = 1_700_000_000_000
         llm_outcomes.watch('SOLUSDT', {'ok': False, 'gate': 'модель пропустила'},
                            price=100.0, ts=start)
-        done = run_bars('SOLUSDT', start, [(4, 103, 98, 102), (24, 104, 97, 99), (48, 104, 97, 99)])
+        done = run_bars('SOLUSDT', start, [(4, 103, 98, 102), (24, 104, 97, 99), (48, 104, 97, 99), (168, 104, 97, 99)])
         row = llm_outcomes.row(done[0])
         assert row['side'] == '' and row['best_r'] == '' and row['hit_tp1'] == ''
         assert row['max_up_pct'] == pytest.approx(4.0)
@@ -142,7 +145,7 @@ class TestRecentOutcomesFeedTheMarkup:
                                        'entry': 100.0, 'stop': 97.0, 'targets': [106.0]},
                            price=100.0, ts=start, at='2026-09-19T10:00:00+00:00')
         run_bars('ETHUSDT', start, [(1, 101, 99.5, 100.8), (4, 104, 101, 103.5),
-                                    (12, 106.5, 103, 106), (24, 107, 105, 106.5), (48, 107, 105, 106.5)])
+                                    (12, 106.5, 103, 106), (24, 107, 105, 106.5), (48, 107, 105, 106.5), (168, 107, 105, 106.5)])
         rec = llm_outcomes.recent('ETHUSDT')
         assert len(rec) == 1 and rec[0]['done'] is True
         assert rec[0]['hit_tp1'] is True and rec[0]['pct'] == pytest.approx(6.5, abs=1e-3)
@@ -164,7 +167,7 @@ class TestTheDeeperOutcomeFields:
                            price=101.0, ts=start)
         # Цена ни разу не дошла до 100: минимум 100.4, ушла к цели за 6 ч.
         done = run_bars('SUIUSDT', start, [(1, 102, 100.4, 101.5), (3, 104, 101, 103.5),
-                                           (6, 106.5, 103, 106), (24, 108, 105, 107), (48, 108, 105, 107)])
+                                           (6, 106.5, 103, 106), (24, 108, 105, 107), (48, 108, 105, 107), (168, 108, 105, 107)])
         row = llm_outcomes.row(done[0])
         assert row['hit_tp1'] == 1 and row['tp_hours'] == pytest.approx(6.0)
         assert row['hit_sl'] == 0 and row['sl_hours'] == ''
@@ -183,7 +186,7 @@ class TestTheDeeperOutcomeFields:
         llm_outcomes.watch('ETHUSDT', {'ok': True, 'gate': '', 'side': 'LONG', 'entry': 100.0, 'stop': 97.0,
                                        'targets': [106.0], 'trigger_when': 'now'}, price=101.0, ts=start)
         done = run_bars('ETHUSDT', start, [(2, 101, 99.8, 100.2), (5, 100.5, 96.8, 97.2),
-                                           (24, 99, 97, 98), (48, 99, 97, 98)])
+                                           (24, 99, 97, 98), (48, 99, 97, 98), (168, 99, 97, 98)])
         row = llm_outcomes.row(done[0])
         assert row['entry_touched'] == 1 and row['entry_hours'] == pytest.approx(2.0)
         assert row['hit_sl'] == 1 and row['sl_hours'] == pytest.approx(5.0)
@@ -199,7 +202,7 @@ class TestTheDeeperOutcomeFields:
         llm_outcomes.watch('XRPUSDT', {'ok': True, 'gate': '', 'side': 'LONG', 'entry': 100.0, 'stop': 97.0,
                                        'targets': [106.0], 'trigger_when': 'close_above', 'trigger_level': 101.0},
                            price=100.0, ts=start)
-        bars = [(h / 12, 100.5, 99.5, 100.2) for h in range(1, 12 * 4)] + [(24, 101, 99, 100), (48, 101, 99, 100)]
+        bars = [(h / 12, 100.5, 99.5, 100.2) for h in range(1, 12 * 4)] + [(24, 101, 99, 100), (48, 101, 99, 100), (168, 101, 99, 100)]
         done = run_bars('XRPUSDT', start, bars)
         row = llm_outcomes.row(done[0])
         assert seen and max(seen) >= 2, 'условие проверялось по часовым свечам'

@@ -83,8 +83,9 @@ class TestTheGoodSetupPasses:
         assert out['rr'] == pytest.approx(7 / RISK, abs=0.01)
         assert out['cost_r'] == pytest.approx(
             config.ENTRY_COST_ROUND_TRIP / (RISK / 100), abs=1e-4)
-        assert out['ev'] == pytest.approx(
-            0.6 * (7 / RISK) - 0.4 - out['cost_r'], abs=0.01)
+        # EV считается по НАШЕЙ доле дошедших до цели, и пока своих исходов
+        # мало — не считается вовсе (см. TestExpectedValueUsesOurOwnStatistics).
+        assert out['ev'] in ('', None) or isinstance(out['ev'], float)
 
 
 class TestGeometryTheGrammarCannotSee:
@@ -141,14 +142,21 @@ class TestCostsDecide:
 
 class TestExpectedValue:
 
-    def test_a_losing_setup_is_refused(self):
+    def test_a_losing_setup_is_refused(self, monkeypatch):
         """
-        Тот же сетап, что проходит при вероятности 0.6, при 0.20 обязан
-        отсеяться: 0.20 x 3.05 - 0.80 - 0.033 = -0.22.
+        Сетап, который при нашей доле цели 0.20 не окупается:
+        0.20 x 3.05 - 0.80 - 0.033 = -0.22. Доля берётся из наших исходов,
+        а не из числа модели — её p с 23.09.2026 на решение не влияет.
         """
-        out = verdict(p=0.20)
+        monkeypatch.setattr(dec, 'empirical_p', lambda *a, **k: (0.20, 40))
+        out = verdict()
         assert not out['ok']
         assert out['gate'] == 'ожидание не положительно'
+
+    def test_the_model_probability_no_longer_decides(self, monkeypatch):
+        """Модель может назвать хоть 0.20, хоть 0.75 — ворота смотрят на своё."""
+        monkeypatch.setattr(dec, 'empirical_p', lambda *a, **k: (0.60, 40))
+        assert verdict(p=0.20)['ok'], 'решает наша доля, а не слово модели'
 
     def test_costs_are_subtracted(self):
         """Ожидание без вычета издержек было бы систематически завышено."""
@@ -156,12 +164,13 @@ class TestExpectedValue:
         without = dec.expected_value(0.5, 2.0, 0.0)
         assert without - with_costs == pytest.approx(0.25)
 
-    def test_the_refusal_keeps_the_numbers(self):
+    def test_the_refusal_keeps_the_numbers(self, monkeypatch):
         """
         Отказ по ожиданию обязан сохранить числа: без них нельзя потом
         проверить, правильно ли предохранитель отсекал.
         """
-        out = verdict(p=0.20)
+        monkeypatch.setattr(dec, 'empirical_p', lambda *a, **k: (0.20, 40))
+        out = verdict()
         assert out['gate'] == 'ожидание не положительно'
         assert 'ev' in out and 'rr' in out and 'cost_r' in out
 
@@ -835,3 +844,65 @@ class TestThePlanParagraphMustNameTheSameStop:
                   'stop_why': 'За L7', 'tp_why': 'L1',
                   'analysis_parts': {'plan': 'Лонг от имбаланса к пулу шортов, стоп за структурой.'}}
         assert dec.justification_mismatch(parsed, self._levels()) == ''
+
+
+class TestExpectedValueUsesOurOwnStatistics:
+    """
+    Вероятность берётся из НАШИХ исходов, а не из числа, которое назвала
+    модель. Модель ставила 0.65 в 41 плане из 68 — это константа, и ворота
+    «ожидание не положительно» с ней не сработали ни разу за 179 разборов
+    (при p ≥ 0.55 и R:R ≥ 2.5 EV всегда ≥ 0.7). По факту доля планов,
+    дошедших до цели раньше стопа, — 0.19 на 47 наблюдениях.
+    """
+
+    def _file(self, tmp_path, rows):
+        import csv
+        path = tmp_path / 'out.csv'
+        cols = ['at', 'gate', 'side', 'hit_tp1', 'hit_sl', 'tp_hours', 'sl_hours']
+        with open(path, 'w', encoding='utf-8', newline='') as fh:
+            w = csv.DictWriter(fh, fieldnames=cols)
+            w.writeheader()
+            for r in rows:
+                w.writerow({c: r.get(c, '') for c in cols})
+        return str(path)
+
+    def test_too_few_outcomes_means_no_probability(self, tmp_path, monkeypatch):
+        rows = [{'at': '2026-09-24', 'side': 'LONG', 'hit_tp1': '1', 'tp_hours': '3'}] * 5
+        monkeypatch.setattr(dec, 'llm_outcomes_path', lambda: self._file(tmp_path, rows))
+        p, n = dec.empirical_p(since='2026-09-01')
+        assert p is None and n == 5, 'на пяти исходах доля — шум, а не оценка'
+
+    def test_it_counts_only_targets_reached_before_the_stop(self, tmp_path, monkeypatch):
+        rows = ([{'at': '2026-09-24', 'side': 'LONG', 'hit_tp1': '1', 'hit_sl': '0', 'tp_hours': '3'}] * 10
+                + [{'at': '2026-09-24', 'side': 'LONG', 'hit_tp1': '1', 'hit_sl': '1',
+                    'tp_hours': '9', 'sl_hours': '4'}] * 10        # стоп был раньше — не в зачёт
+                + [{'at': '2026-09-24', 'side': 'LONG', 'hit_tp1': '0', 'hit_sl': '1', 'sl_hours': '2'}] * 20)
+        monkeypatch.setattr(dec, 'llm_outcomes_path', lambda: self._file(tmp_path, rows))
+        p, n = dec.empirical_p(since='2026-09-01')
+        assert n == 40 and p == pytest.approx(0.25)
+
+    def test_plans_from_the_old_rules_do_not_count(self, tmp_path, monkeypatch):
+        rows = [{'at': '2026-09-20', 'side': 'SHORT', 'hit_tp1': '0', 'hit_sl': '1'}] * 50
+        monkeypatch.setattr(dec, 'llm_outcomes_path', lambda: self._file(tmp_path, rows))
+        p, n = dec.empirical_p(since='2026-09-23')
+        assert (p, n) == (None, 0), 'та геометрия к этой отношения не имеет'
+
+    def test_refusals_and_plans_without_a_side_are_skipped(self, tmp_path, monkeypatch):
+        rows = ([{'at': '2026-09-24', 'gate': 'мало конфлюенса', 'hit_tp1': '1'}] * 40
+                + [{'at': '2026-09-24', 'side': '', 'hit_tp1': '1'}] * 40)
+        monkeypatch.setattr(dec, 'llm_outcomes_path', lambda: self._file(tmp_path, rows))
+        assert dec.empirical_p(since='2026-09-01') == (None, 0)
+
+    def test_without_a_probability_the_gate_cannot_fire(self, tmp_path, monkeypatch):
+        """Нет своих наблюдений — нет и приговора: ворота молчат, EV пуст."""
+        monkeypatch.setattr(dec, 'empirical_p', lambda *a, **k: (None, 3))
+        out = verdict()
+        assert out['gate'] != 'ожидание не положительно'
+        assert out.get('ev') in ('', None)
+        assert out.get('p_n') == 3
+
+    def test_with_a_bad_probability_the_gate_fires(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(dec, 'empirical_p', lambda *a, **k: (0.10, 44))
+        out = verdict()
+        assert out['gate'] == 'ожидание не положительно'
+        assert '0.10' in out['detail'] and '44' in out['detail']

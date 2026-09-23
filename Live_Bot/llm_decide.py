@@ -103,6 +103,58 @@ def expected_value(probability, rr, cost_r):
     return probability * rr - (1 - probability) * 1.0 - cost_r
 
 
+# С какого дня планы строятся по нынешним правилам: стоп за сломом
+# структуры, вход по живую сторону, лимит сразу. Исходы прежних планов для
+# оценки вероятности не годятся — та геометрия к этой отношения не имеет.
+RULES_SINCE = '2026-09-23'
+
+# Меньше этого числа наблюдений вероятность не считается: на двадцати
+# исходах доля — это шум, а не оценка.
+MIN_OUTCOMES = 30
+
+
+def empirical_p(since=None, min_n=None):
+    """
+    Доля планов, дошедших до цели РАНЬШЕ стопа, по нашим же наблюдениям.
+
+    Возвращает (p, n). p = None, пока наблюдений меньше min_n — тогда
+    ожидание не считается и ворота по нему не работают.
+
+    ЗАЧЕМ ЭТО ВМЕСТО p ОТ МОДЕЛИ. Модель ставила 0.65 в 41 плане из 68 —
+    это не оценка, а константа. С ней EV = p·RR − (1−p) − издержки всегда
+    выходил положительным (при p ≥ 0.55 и R:R ≥ 2.5 меньше 0.7 не бывает),
+    и отказ «ожидание не положительно» не сработал НИ РАЗУ за 179 разборов.
+    Мёртвые ворота хуже отсутствующих: они показывают человеку число,
+    которому он верит. Считаем по своим исходам или не считаем вовсе.
+    """
+    import csv
+    since = since or RULES_SINCE
+    min_n = MIN_OUTCOMES if min_n is None else min_n
+    tp = n = 0
+    try:
+        with open(llm_outcomes_path(), encoding='utf-8', newline='') as fh:
+            for row in csv.DictReader(fh):
+                if (row.get('at') or '') < since or row.get('gate') or not row.get('side'):
+                    continue
+                if row.get('hit_tp1') not in ('0', '1'):
+                    continue
+                n += 1
+                tp_h = row.get('tp_hours')
+                sl_h = row.get('sl_hours')
+                if row.get('hit_tp1') == '1' and (not sl_h or (tp_h and float(tp_h) <= float(sl_h))):
+                    tp += 1
+    except Exception:                                  # noqa: BLE001
+        return None, 0
+    if n < min_n:
+        return None, n
+    return tp / n, n
+
+
+def llm_outcomes_path():
+    import llm_outcomes
+    return llm_outcomes.CSV_PATH
+
+
 def _geometry_ok(side, entry, stop, targets):
     """
     Стоп с нужной стороны, цели с противоположной.
@@ -723,17 +775,23 @@ def check(parsed, levels, answer=None, market=None, min_stop=None, atr_pct=None)
     base['obstacles'] = obstacles_to_target(side, entry, targets[0], market)
 
     cost_r = cost_in_r(entry, stop)
-    ev = expected_value(parsed['p'], rr, cost_r)
+    # Ожидание считаем по СВОЕЙ доле дошедших до цели, а не по числу, которое
+    # назвала модель: её p — константа 0.65, и ворота с ней не работали.
+    p_real, n_real = empirical_p()
+    ev = expected_value(p_real, rr, cost_r) if p_real is not None else None
     numbers = {'side': side, 'entry': entry, 'stop': stop, 'stop_level': stop_level,
                'stop_buffer_pct': round(buffer, 3), 'targets': targets,
                'inval': parsed.get('inval'), 'p': parsed['p'],
+               'p_real': round(p_real, 3) if p_real is not None else '',
+               'p_n': n_real,
                'rr': round(rr, 2), 'cost_r': round(cost_r, 4),
-               'ev': round(ev, 4), 'stop_pct': round(stop_pct, 2),
+               'ev': round(ev, 4) if ev is not None else '',
+               'stop_pct': round(stop_pct, 2),
                'ids': parsed.get('ids', {})}
-    if ev <= 0:
+    if ev is not None and ev <= 0:
         return _refusal('ожидание не положительно',
-                        f'EV {ev:.3f} при вероятности {parsed["p"]:.2f}, '
-                        f'R:R {rr:.2f}, издержках {cost_r:.3f}R',
+                        f'EV {ev:.3f} при нашей доле цели {p_real:.2f} по {n_real} '
+                        f'наблюдениям, R:R {rr:.2f}, издержках {cost_r:.3f}R',
                         {**base, **numbers})
 
     return {'ok': True, 'gate': '', 'detail': '', **base, **numbers}
@@ -839,7 +897,12 @@ def plan_text(verdict):
         f"Инвалидация: {verdict.get('inval'):.6g}" if verdict.get('inval') else '',
         f"Условие входа: {verdict.get('trigger') or 'сейчас'}",
         f"Вероятность по аналитику: {verdict.get('p')}   R:R {verdict.get('rr')}   "
-        f"EV {verdict.get('ev')}R   факторы {verdict.get('votes')}/5",
+        + (f"EV {verdict.get('ev')}R (по нашим {verdict.get('p_n')} исходам, "
+           f"доля цели {verdict.get('p_real')})   "
+           if verdict.get('ev') not in ('', None)
+           else f"EV не считается: своих исходов {verdict.get('p_n', 0)} из "
+                f"{MIN_OUTCOMES}   ")
+        + f"факторы {verdict.get('votes')}/5",
         ('Между входом и первой целью (посчитано кодом): '
          + '; '.join(verdict['obstacles'])) if verdict.get('obstacles') else
         'Между входом и первой целью код препятствий не нашёл',
