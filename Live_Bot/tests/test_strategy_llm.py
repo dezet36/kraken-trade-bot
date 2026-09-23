@@ -924,6 +924,36 @@ class TestATargetReachedBeforeEntryDropsThePlan:
         assert any('цель достигнута без входа' in t for t in sent)
         assert 'BTCUSDT' in strategy_llm._refused, 'пара не переспрашивается по тому же поводу'
 
+    def test_an_expired_plan_says_so(self, monkeypatch):
+        """
+        Условие не наступило за отведённые часы — план снимается И об этом
+        сообщают.
+
+        ОТКУДА. 23.09.2026 SUIUSDT провисел взведённым одиннадцать часов и
+        исчез из списка живых сетапов без единого слова: владелец видел
+        четыре плана, потом три, и никакого объяснения. Остальные исходы
+        (нашёлся, отклонён, цель без входа, открыт, закрыт) сообщались все.
+        """
+        import telegram_notify as tg
+        sent = []
+        monkeypatch.setattr(tg, '_allowed', lambda e: True)
+        monkeypatch.setattr(tg, '_send', lambda text, chat_id=None: sent.append(text) or True)
+        monkeypatch.setattr(strategy_llm.llm_local, 'available', lambda: True)
+        monkeypatch.setattr(strategy_llm.llm_decide, 'decide',
+                            lambda *a, **k: approving_verdict(trigger_when='retest',
+                                                              trigger_level=101.0, trigger_id='L3'))
+        strategy_llm.scan_for_setups(['BTCUSDT'], gate=None, candles=lambda pair: [0] * 500)
+        strategy_llm.join(15)
+        strategy_llm.scan_for_setups([], gate=None, candles=lambda pair: [0] * 500)
+        assert strategy_llm.armed(), 'план должен быть взведён'
+
+        strategy_llm._armed['BTCUSDT']['armed_at'] = 0      # как будто висит вечность
+        df = self._armed_frame(highs=[100.5, 100.5], lows=[100.2, 100.2])
+        strategy_llm.scan_for_setups([], gate=None, candles=lambda pair: df)
+
+        assert strategy_llm.armed() == [], 'план должен быть снят по сроку'
+        assert any('Сетап снят' in t and 'BTCUSDT' in t for t in sent), sent
+
     def test_the_live_candle_counts_for_the_target(self, monkeypatch):
         """LTC 21.09: цель пройдена внутри часа взведения — ждать закрытия свечи незачем."""
         monkeypatch.setattr(strategy_llm.llm_local, 'available', lambda: True)

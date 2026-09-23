@@ -1258,8 +1258,22 @@ class PaperBroker:
             self._drop_pending(strategy, pair, "цена дошла до цели без нас")
 
     def _drop_pending(self, strategy, pair, reason):
-        self.state['pending'][strategy].pop(pair, None)
+        """
+        Снять заявку и СКАЗАТЬ ОБ ЭТОМ. Молчала она до 23.09.2026: за четверо
+        суток так тихо умерли 47 заявок (FIBO 23, SMC 18, ИИ 4, остальные 2).
+        Событие общее для всех стратегий — это отчётность, а не решение, и
+        правила изоляции оно не касается; выключается настройкой
+        `plan_dropped`.
+        """
+        order = self.state['pending'][strategy].pop(pair, None) or {}
         log(f"   👻 [{strategy}] {pair}: ордер снят — {reason}")
+        try:
+            import telegram_notify as tg
+            tg.plan_dropped(strategy, pair, order.get('direction', ''),
+                            float(order.get('limit_price') or 0), reason,
+                            (order.get('context') or {}).get('why', ''))
+        except Exception:                              # noqa: BLE001
+            pass
 
     def _fill(self, strategy, pair, order, ts, price, taker=False):
         """

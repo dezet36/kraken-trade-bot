@@ -176,6 +176,44 @@ class TestFill:
         assert not broker.pending('FIBO')
         assert not broker.positions('FIBO')
 
+    def test_a_dropped_order_is_announced(self, broker_env, monkeypatch):
+        """
+        Заявка умерла — об этом СООБЩАЮТ.
+
+        До 23.09.2026 снятие уходило только в журнал: за четверо суток так
+        тихо исчезли 47 заявок, и со стороны сетап выглядел растворившимся.
+        Проверка стоит здесь, у брокера, потому что снимает заявку он — и
+        одинаково для всех пяти стратегий.
+        """
+        broker, client, pb, cfg = broker_env
+        import telegram_notify as tg
+        sent = []
+        monkeypatch.setattr(tg, '_allowed', lambda e: True)
+        monkeypatch.setattr(tg, '_send', lambda text, chat_id=None: sent.append(text) or True)
+
+        pb._now_ms = lambda: 1_700_000_000_000
+        broker.open('FIBO', signal(entry=100.0))
+        broker.pending('FIBO')['BTCUSDT']['expires_ts'] = 1_700_000_000_000 + BAR_MS
+        feed(broker, client, 'BTCUSDT', [(105, 101, 104), (105, 101, 104)])
+
+        assert sent, 'о снятой заявке не сообщили'
+        assert any('Сетап снят' in t and 'BTCUSDT' in t for t in sent), sent
+
+    def test_the_announcement_can_be_switched_off(self, broker_env, monkeypatch):
+        """Настройка `plan_dropped` гасит сообщение — 12 снятий в сутки не всем нужны."""
+        broker, client, pb, cfg = broker_env
+        import telegram_notify as tg
+        sent = []
+        monkeypatch.setattr(tg, '_allowed', lambda e: e != 'plan_dropped')
+        monkeypatch.setattr(tg, '_send', lambda text, chat_id=None: sent.append(text) or True)
+
+        pb._now_ms = lambda: 1_700_000_000_000
+        broker.open('FIBO', signal(entry=100.0))
+        broker.pending('FIBO')['BTCUSDT']['expires_ts'] = 1_700_000_000_000 + BAR_MS
+        feed(broker, client, 'BTCUSDT', [(105, 101, 104), (105, 101, 104)])
+
+        assert not any('Сетап снят' in t for t in sent), sent
+
 
 class TestExit:
     def test_stop_wins_over_take_inside_one_candle(self, broker_env):

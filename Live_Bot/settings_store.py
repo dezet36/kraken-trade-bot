@@ -78,7 +78,8 @@ EXCHANGES = ('bybit', 'bingx')
 # настройки. Молча выключить часть сообщений значило бы, что человек
 # перестанет что-то получать и не поймёт почему.
 NOTIFY = 'NOTIFY'
-NOTIFY_EVENTS = ('trade_opened', 'trade_closed', 'error', 'daily', 'llm_setup')
+NOTIFY_EVENTS = ('trade_opened', 'trade_closed', 'error', 'daily', 'llm_setup',
+                 'plan_dropped')
 NOTIFY_CHANNELS = ('telegram',)
 
 _lock = threading.Lock()

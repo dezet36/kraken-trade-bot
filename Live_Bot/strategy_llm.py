@@ -549,6 +549,17 @@ def _check_armed(candles):
             _refuse(pair, {'gate': 'условие не наступило',
                            'detail': f'{verdict.get("trigger_when")} '
                                      f'{verdict.get("trigger_level")} за {ttl // 3600} ч'})
+            # Сказать об этом вслух: план висел в списке живых сетапов, и его
+            # исчезновение без объяснения читается как сбой, а не как исход.
+            try:
+                import telegram_notify as tg
+                tg.plan_dropped(NAME, pair, verdict.get('side', ''),
+                                float(verdict.get('entry') or 0),
+                                f'условие входа не наступило за {ttl // 3600} ч',
+                                f'{verdict.get("trigger_when")} '
+                                f'{verdict.get("trigger_level")}')
+            except Exception:                      # noqa: BLE001
+                pass
             continue
         try:
             df = candles(pair)

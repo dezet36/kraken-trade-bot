@@ -590,6 +590,32 @@ def llm_setup_rejected(pair: str, side: str, entry: float, gate: str, detail: st
     )
 
 
+def plan_dropped(strategy: str, pair: str, side: str, entry: float,
+                 reason: str, detail: str = ''):
+    """
+    План или заявка умерли, не став сделкой.
+
+    ЗАЧЕМ. Это единственное событие жизненного цикла, о котором не сообщали
+    никому. План находился — приходило сообщение; план отклоняли — приходило;
+    сделка открывалась и закрывалась — приходило. А «взведённый план не
+    дождался условия за 12 часов» и «лимит не заполнен» уходили только в
+    журнал. Со стороны это выглядело так, будто сетап растворился: 23.09.2026
+    SUIUSDT висел одиннадцать часов и исчез из списка без единого слова.
+    За четверо суток так умерли 47 заявок — то есть картина «что стало с
+    планом» была неполной у каждой второй.
+    """
+    if not _allowed('plan_dropped'):
+        return False
+    arrow = "🟢" if str(side).upper() == "LONG" else "🔴"
+    head = f"{arrow} <b>{pair} {side}</b>" if side else f"<b>{pair}</b>"
+    return _send(
+        f"⌛ <b>Сетап снят, сделки не было</b> · {strategy}\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"{head}" + (f" от {_fmt_p(entry)}" if entry else '') + "\n"
+        f"{reason}" + (f"\n<i>{str(detail)[:300]}</i>" if detail else '')
+    )
+
+
 def paper_trade_opened(strategy: str, pair: str, direction: str, entry: float,
                        stop: float, target: float, rr: float, risk: float,
                        why: str = ''):

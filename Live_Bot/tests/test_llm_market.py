@@ -554,6 +554,8 @@ class TestOiFlow:
                 'pair': 'BTCUSDT'}]
         monkeypatch.setattr(llm_market.positioning, 'series', lambda *a, **k: old)
         assert llm_market.oi_flow('BTCUSDT', df, 49) is None
+        # Карта по устаревшему ряду — своя проверка, см.
+        # TestLiquidationEstimate.test_a_stale_series_gives_no_map_even_with_turnover
         assert llm_market.liquidation_estimate('BTCUSDT', df, 49) is None
 
 
@@ -561,39 +563,94 @@ class TestLiquidationEstimate:
 
     def test_new_longs_put_a_cluster_below_the_price(self, monkeypatch):
         """
-        Лонги, набранные на 100 при плече 10, ликвидируются у 90; при 25 — у
-        96. Цена туда не ходила — уровни живы и лежат ниже цены.
+        Лонги, набранные около 100 при плече 10, ликвидируются у 90; при
+        25 — у 96. Цена туда не ходила — уровни живы и лежат ниже цены.
+
+        Все свечи растущие, поэтому весь набранный объём — лонги, и кластеры
+        обязаны лежать ТОЛЬКО ниже цены.
         """
         n = 30
-        closes = np.full(n, 100.0)
-        closes[10] = 100.0
-        df = make_df(closes, spread=np.full(n, 0.1))
-        oi = [1000.0] * n
-        oi[10:] = [2000.0] * (n - 10)                 # прирост ОИ на свече 10
-        df.loc[10, 'close'] = 100.5                   # свеча вверх → лонги
-        df.loc[10, 'open'] = 100.0
+        closes = 100.0 + np.arange(n) * 0.01          # каждая свеча вверх
+        df = make_df(closes, spread=np.full(n, 0.02))
+        oi = [1000.0] * n                             # ОИ стоит: вес даёт оборот
         monkeypatch.setattr(llm_market.positioning, 'series',
                             lambda *a, **k: oi_rows(df, oi))
         out = llm_market.liquidation_estimate('BTCUSDT', df, n - 1, bars=n)
         assert out['above'] == []
         levels = [c['from'] for c in out['below']]
-        assert any(abs(l - 100.5 * 0.96) < 0.2 for l in levels), levels
-        assert any(abs(l - 100.5 * 0.9) < 0.2 for l in levels), levels
+        assert any(abs(l - 100 * 0.96) < 0.4 for l in levels), levels
+        assert any(abs(l - 100 * 0.9) < 0.4 for l in levels), levels
         assert all(c['dist_pct'] < 0 for c in out['below'])
+
+    def test_a_flat_open_interest_no_longer_hides_the_map(self, monkeypatch):
+        """
+        СУТЬ ПРАВКИ 23.09.2026: вес — оборот свечи, а не прирост ОИ.
+
+        Здесь ОИ не растёт НИ РАЗУ. По прежнему правилу карты не было бы
+        вовсе — и ровно поэтому она молчала в 61% замеров. Теперь свечи
+        считаются по обороту, и карта есть.
+        """
+        n = 30
+        closes = 100.0 + np.arange(n) * 0.01
+        df = make_df(closes, spread=np.full(n, 0.02))
+        monkeypatch.setattr(llm_market.positioning, 'series',
+                            lambda *a, **k: oi_rows(df, [1000.0] * n))
+        assert llm_market.liquidation_estimate('BTCUSDT', df, n - 1, bars=n)
+
+    def test_a_bar_without_turnover_does_not_vote(self, monkeypatch):
+        """
+        Свеча с нулевым оборотом веса не даёт: торговли не было — позиций
+        не набрали. Проверка держит смысл веса, а не только его наличие.
+        """
+        n = 30
+        closes = 100.0 + np.arange(n) * 0.01
+        vol = np.full(n, 100.0)
+        vol[:20] = 0.0                                # первые двадцать — пустые
+        df = make_df(closes, spread=np.full(n, 0.02), volume=vol)
+        monkeypatch.setattr(llm_market.positioning, 'series',
+                            lambda *a, **k: oi_rows(df, [1000.0] * n))
+        out = llm_market.liquidation_estimate('BTCUSDT', df, n - 1, bars=n)
+        # Считаются только свечи 20..29 — их цена выше, значит и уровни выше,
+        # чем дали бы пустые свечи начала ряда.
+        assert out, 'карта должна быть: девяти свечей с оборотом хватает'
+        assert min(c['from'] for c in out['below']) > 100.15 * 0.9 - 0.4
+
+    def test_a_stale_series_gives_no_map_even_with_turnover(self, monkeypatch):
+        """
+        Ряд ОИ устарел — прочерк, а не карта по одним свечам.
+
+        Оборот есть у каждой свечи, поэтому без отдельного порога карта
+        построилась бы из одной-двух записей, которые сборщик успел сделать
+        до простоя. Правило проекта: внешнее число старше предела — прочерк,
+        не последнее известное.
+        """
+        n = 30
+        df = make_df(100.0 + np.arange(n) * 0.01, spread=np.full(n, 0.02))
+        one = [{'ts': int(df['timestamp'].iloc[0].timestamp() * 1000) + 3_599_999,
+                'value': 1000.0, 'pair': 'BTCUSDT'}]
+        monkeypatch.setattr(llm_market.positioning, 'series', lambda *a, **k: one)
+        assert llm_market.liquidation_estimate('BTCUSDT', df, n - 1, bars=n) is None
 
     def test_levels_the_price_already_visited_are_gone(self, monkeypatch):
         """Ликвидированное не ликвидируется второй раз."""
         n = 30
         closes = np.full(n, 100.0)
-        df = make_df(closes, spread=np.full(n, 0.1))
+        vol = np.full(n, 100.0)
+        vol[-1] = 0.0            # последняя свеча веса не даёт — только ходит
+        df = make_df(closes, spread=np.full(n, 0.1), volume=vol)
         oi = [1000.0] * 10 + [2000.0] * 20
-        df.loc[10, 'close'] = 100.5
-        df.loc[20, 'low'] = 85.0                      # цена сходила к 85: 10× и 25× сняты
+        # Цена сходила к 95 ПОСЛЕ всех считаемых свечей. Для лонгов уровень
+        # лежит НИЖЕ цены, и пройденными оказываются БЛИЖНИЕ — те, что выше 95:
+        # 100× (99), 50× (98) и 25× (96). Дальний 10× (90) цена не достала —
+        # эти позиции живы. Прежняя проверка ждала обратного и проходила
+        # только потому, что список был пуст: all([]) — истина.
+        df.loc[n - 1, 'low'] = 95.0
         monkeypatch.setattr(llm_market.positioning, 'series',
                             lambda *a, **k: oi_rows(df, oi))
         out = llm_market.liquidation_estimate('BTCUSDT', df, n - 1, bars=n)
         levels = [c['from'] for c in (out or {}).get('below', [])]
-        assert all(l > 99 for l in levels), levels   # остались только 50× и 100×
+        assert levels, 'дальний кластер 10× должен остаться'
+        assert all(l < 95 for l in levels), levels
 
 
 class TestBenchmark:
