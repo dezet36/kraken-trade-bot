@@ -619,6 +619,38 @@ def poi_facts(context, price, index, limit=4):
 
 # ── Зоны старшего ТФ: ордер-блоки и имбалансы 4ч ─────────────────────────────
 
+# Окно и история для режима по ЧАСОВЫМ свечам. Значения market_regime
+# подобраны под дневные (окно 30 дней, история 180 дней) и на часовом ряду
+# в 300 баров дают «мало истории» всегда. Здесь свои: окно — сутки,
+# история — примерно две недели часовых значений.
+REGIME_WINDOW_H = 24
+REGIME_MIN_HISTORY_H = 200
+
+
+def regime_fact(df, index=None):
+    """
+    Тренд или боковик на рабочем ТФ — СЧИТАЕТ КОД.
+
+    До 23.09.2026 поле «режим» заполняла сама модель: мы спрашивали её о
+    том, что считается формулой (коэффициент эффективности Кауфмана —
+    отношение пройденного расстояния к длине пути). Такой ответ нечем
+    проверить, и он занимал место в ответе вместо разбора.
+
+    Это ФАКТ, а не запрет: боковик не означает «не торгуй», он означает
+    «цель дальше края диапазона маловероятна». Решает по-прежнему модель.
+    """
+    import market_regime
+    if df is None or 'close' not in getattr(df, 'columns', ()):
+        return None
+    closes = df['close'].values if index is None else df['close'].values[:index + 1]
+    if len(closes) < REGIME_WINDOW_H + 30:
+        return None
+    name, er, threshold = market_regime.classify(
+        closes, window=REGIME_WINDOW_H, min_history=REGIME_MIN_HISTORY_H)
+    return {'regime': name or 'неизвестен', 'er': _number(er),
+            'threshold': _number(threshold), 'window_h': REGIME_WINDOW_H}
+
+
 def day_range_pct(df, index, days=7):
     """
     Средний ДНЕВНОЙ размах за неделю, % от цены — по тем же часовым свечам.
@@ -1401,6 +1433,7 @@ def snapshot(pair, df, at=None, client=None, benchmark=None):
         # кодом значило бы завести второе определение «сегодняшней цены».
         'price': _number(price),
         'atr_day_pct': _safe('дневной размах', day_range_pct, df, index),
+        'regime': _safe('режим рабочего ТФ', regime_fact, df, index),
     }
     out['day_profile'] = _safe('суточный профиль', day_profile, out.get('tape'), df, index)
     _mark_realized(out.get('liquidations'), pair, price, upto)

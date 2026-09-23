@@ -522,6 +522,7 @@ def build(pair, df, at=None, news=None, market=None, history=None):
         f'за 24ч {_signed(facts["change_24h"])}   за 7д {_signed(facts["change_7d"])}   '
         f'в диапазоне 30д: {_fmt(facts["range_30d_pos"], 0, "%")} от низа',
         _activity_line((market or {}).get('activity')),
+        _regime_line((market or {}).get('regime')),
         f'Минимальный стоп: {facts["min_stop_pct"]:.2f}% '
         f'(издержки {min_stop_pct():.2f}%, половина ATR {STOP_ATR_SHARE * (atr_pct or 0):.2f}%)'
         f'   Отступ стопа за уровень: {_stop_buffer(atr_pct):.2f}% (ставит код)',
@@ -1049,6 +1050,23 @@ def market_lines(market, price_now):
     out += _macro_lines(market.get('macro'))
     out.append('')
     return out
+
+
+def _regime_line(r):
+    """
+    Режим рабочего ТФ одной строкой: тренд или боковик и чем измерено.
+
+    Факт, а не запрет. В боковике дальняя цель за краем диапазона
+    маловероятна; в тренде — наоборот, откат к зоне вероятнее, чем разворот.
+    Считает код (market_regime), модель это читает, а не угадывает.
+    """
+    if not r:
+        return 'Режим рабочего ТФ: — (не измерен)'
+    if r.get('er') is None or r.get('regime') == 'неизвестен':
+        return 'Режим рабочего ТФ: не определён (мало истории)'
+    return (f"Режим рабочего ТФ: {r['regime']} (эффективность хода "
+            f"{r['er']:.2f} при пороге {r['threshold']:.2f} за {r['window_h']}ч) — "
+            f"в боковике дальняя цель за краем диапазона маловероятна")
 
 
 def _macro_verdict(m):
