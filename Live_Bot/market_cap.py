@@ -304,6 +304,7 @@ def facts(upto=None):
            'age_min': round(age_min, 1),
            'supply_age_min': round((upto - int(last.get('supply_at') or last['ts'])) / 60_000, 1),
            'coins': last.get('coins'), 'priced_on_bybit': last.get('priced_on_bybit'),
+           'usdt_cap': last.get('usdt_cap'),
            'up_24h': last.get('up_24h'), 'counted_24h': last.get('counted_24h'),
            'stale': age_min > STALE_MIN}
     for name, ms in (('24h', 86_400_000), ('7d', 7 * 86_400_000)):
@@ -314,6 +315,12 @@ def facts(upto=None):
         out[f'btc_d_{name}'] = last['btc_d'] - prev['btc_d']
         if prev.get('total2'):
             out[f'total2_{name}'] = (last['total2'] / prev['total2'] - 1) * 100
+        # Ход капитализации USDT отдельно от доли: доля растёт и когда
+        # печатают новые стейблы (деньги ПРИШЛИ на рынок), и когда падают
+        # альты (деньги НИКУДА не пришли, просто подешевело остальное).
+        # Это разные вещи, и по одной доле их не отличить.
+        if prev.get('usdt_cap'):
+            out[f'usdt_cap_{name}'] = (last.get('usdt_cap', 0) / prev['usdt_cap'] - 1) * 100
         if prev.get('total'):
             btc_prev = prev['total'] * prev['btc_d'] / 100
             btc_now = last['total'] * last['btc_d'] / 100
