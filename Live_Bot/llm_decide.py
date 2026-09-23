@@ -36,14 +36,23 @@ from logger import log
 # отдельно; число намеренно не пять, иначе сделок не будет вовсе.
 MIN_CONFLUENCE = 4
 
-# Ниже этого отношения сделка не берётся. При винрейте около трети меньшее
-# отношение не окупает даже без комиссий.
-MIN_RR = 2.5
+# Ниже этого отношения сделка не берётся.
+#
+# 2.0, а не 2.5, с 23.09.2026 — и это не послабление, а следствие честного
+# стопа. Пока стоп стоял за ближним краем зоны (треть дневного размаха),
+# 2.5 достигалось легко: тесный стоп сам делал отношение. Со стопом за
+# сломом структуры замер по 21 паре показал, что порог 2.5 требует цели
+# ДАЛЬШЕ дневного размаха у 15 пар из 21 — то есть недостижимой за часы.
+# При 2.0 цель остаётся внутри размаха. Отношение теперь — следствие
+# геометрии, а не рычаг, которым её подгоняют.
+MIN_RR = 2.0
 
 # Отказы, которые выносит код (проверки плана) или сторож стратегии, а не
 # сама модель: панель подсвечивает их отдельно — видно, кто останавливает.
 CODE_GATES = ('геометрия неверна', 'стоп теснее минимального', 'низкое отношение',
-              'стоп внутри зоны входа', 'стоп в скоплении стопов', 'условие противоречит входу',
+              'стоп внутри зоны входа', 'стоп внутри живой зоны', 'план против структуры',
+              'цель недостижима',
+              'стоп в скоплении стопов', 'условие противоречит входу',
               'вход на пуле стопов', 'обоснование не о том плане', 'мало конфлюенса',
               'ожидание не положительно', 'уровень не найден', 'критик отклонил',
               'вердикт устарел', 'рынок обогнал план', 'цель достигнута без входа',
@@ -448,6 +457,114 @@ def stop_inside_entry_zone(side, entry, stop_level, market):
     return ''
 
 
+def structure_break_price(market, tf='poi', side=None):
+    """
+    Цена слома структуры из снимка (общий слой), или None.
+
+    side задан — берётся уровень ТОЙ ЖЕ стороны: лонг умирает под последним
+    подтверждённым HL, шорт — над последним LH. Без этого план сверялся бы с
+    уровнем текущего тренда, и лонг в медвежьей структуре мерился бы по
+    медвежьему уровню.
+    """
+    row = ((market or {}).get('structure_break') or {}).get(tf) or {}
+    key = {'LONG': 'long', 'SHORT': 'short'}.get(side or '')
+    price = row.get(key) if key and row.get(key) else row.get('price')
+    return float(price) if price else None
+
+
+def plan_against_structure(side, entry, stop, market, tf='poi'):
+    """
+    Вход по мёртвую сторону слома структуры или стоп, не доходящий до него.
+
+    Слом структуры — цена, после которой идея кончилась (последний
+    подтверждённый HL в восходящей, LH в нисходящей). Из этого следуют две
+    вещи, и обе проверяются здесь:
+
+      вход обязан стоять по ЖИВУЮ сторону: покупать ниже уровня, ниже
+      которого тренд уже сломан, — это вход в другую идею, а не откат;
+
+      стоп обязан стоять ЗА ним: стоп между входом и сломом снимается
+      обычным тестом структуры, который идею не отменяет.
+
+    Аудит 22.09.2026: из 14 планов у 10 вход был по мёртвую сторону, ещё у
+    двух стоп не доходил до слома. Совпало и то и другое лишь у двух.
+    """
+    level = structure_break_price(market, tf, side)
+    if not level or not entry or not stop:
+        return ''
+    name = 'слом структуры ' + (((market or {}).get('structure_break') or {})
+                                .get(tf, {}).get('tf', ''))
+    if side == 'LONG':
+        if entry <= level:
+            return (f'вход {entry:.6g} ниже {name} {level:.6g}: цена придёт туда, '
+                    f'только сломав тренд, ради которого входим')
+        if stop >= level:
+            return (f'стоп {stop:.6g} не доходит до {name} {level:.6g}: '
+                    f'снимается обычным тестом структуры')
+    else:
+        if entry >= level:
+            return (f'вход {entry:.6g} выше {name} {level:.6g}: цена придёт туда, '
+                    f'только сломав тренд, ради которого входим')
+        if stop <= level:
+            return (f'стоп {stop:.6g} не доходит до {name} {level:.6g}: '
+                    f'снимается обычным тестом структуры')
+    return ''
+
+
+def stop_inside_live_zone(side, stop, market):
+    """
+    Стоп внутри живой зоны — часовой ИЛИ четырёхчасовой. Описание или ''.
+
+    Отдельно от `stop_inside_entry_zone`: та смотрит только зону, из которой
+    вход. Но незакрытый имбаланс — магнит, куда цена приходит его заполнять,
+    и стоп внутри него снимается этим заполнением, где бы вход ни стоял.
+    Проверка 22.09.2026 показала дыру: ворота читали только часовые зоны
+    (`fvgs`, `pois`), а промт отправляет модель к зонам 4ч (`htf_zones`),
+    и стоп внутри имбаланса 4ч проходил — так было у четырёх планов из
+    шестнадцати (SHIB 21.09, SOL, DOGE, XLM 22.09).
+    """
+    if not market or not stop:
+        return ''
+    zones = []
+    for g in (market.get('fvgs') or []):
+        if g.get('top') and g.get('bottom'):
+            zones.append((float(g['bottom']), float(g['top']), 'имбаланса 1ч'))
+    for z in (market.get('htf_zones') or []):
+        if z.get('top') and z.get('bottom'):
+            name = 'имбаланса 4ч' if z.get('kind') == 'FVG' else 'зоны 4ч'
+            zones.append((float(z['bottom']), float(z['top']), name))
+    for bottom, top, name in zones:
+        if bottom <= stop <= top:
+            edge = bottom if side == 'LONG' else top
+            return (f'стоп {stop:.6g} внутри незакрытого {name} {bottom:.6g}..{top:.6g}: '
+                    f'заполнение зоны снимет его — ставить за {edge:.6g}')
+    return ''
+
+
+def target_out_of_reach(side, entry, target, price, atr_day_pct=None):
+    """
+    Цель ближе входа или дальше дневного размаха. Описание или ''.
+
+    Часовой план живёт часы. Цель, до которой от текущей цены ближе, чем до
+    входа, рынок возьмёт раньше, чем даст войти (LTC 21.09: до цели 0.92%,
+    до входа 4.13%, цель взята в первый час, вход — через 21). Цель дальше
+    дневного размаха за часы не достаётся.
+    """
+    if not (entry and target and price):
+        return ''
+    to_entry = abs(price - entry) / price * 100
+    to_target = abs(target - price) / price * 100
+    if to_entry > 0.05 and to_target < to_entry:
+        return (f'до цели {to_target:.2f}% от цены, а до входа {to_entry:.2f}%: '
+                f'рынок возьмёт цель раньше, чем даст войти')
+    if atr_day_pct:
+        span = abs(target - entry) / entry * 100
+        if span > atr_day_pct:
+            return (f'цель в {span:.1f}% от входа при дневном размахе '
+                    f'{atr_day_pct:.1f}% — за часы не достаётся')
+    return ''
+
+
 def obstacles_to_target(side, entry, target, market):
     """
     Что стоит между входом и первой целью: плиты, встречные зоны, пулы.
@@ -559,6 +676,12 @@ def check(parsed, levels, answer=None, market=None, min_stop=None, atr_pct=None)
     inside = stop_inside_entry_zone(side, entry, stop_level, market)
     if inside:
         return _refusal('стоп внутри зоны входа', inside, base)
+    in_zone = stop_inside_live_zone(side, stop, market)
+    if in_zone:
+        return _refusal('стоп внутри живой зоны', in_zone, base)
+    broken = plan_against_structure(side, entry, stop, market)
+    if broken:
+        return _refusal('план против структуры', broken, base)
     pooled = entry_on_pool(parsed, levels)
     if pooled:
         return _refusal('вход на пуле стопов', pooled, base)
@@ -592,6 +715,11 @@ def check(parsed, levels, answer=None, market=None, min_stop=None, atr_pct=None)
     against = trigger_against_idea(side, entry, parsed)
     if against:
         return _refusal('условие противоречит входу', against, base)
+    reach = target_out_of_reach(side, entry, targets[0],
+                                (market or {}).get('price'),
+                                (market or {}).get('atr_day_pct'))
+    if reach:
+        return _refusal('цель недостижима', reach, base)
     base['obstacles'] = obstacles_to_target(side, entry, targets[0], market)
 
     cost_r = cost_in_r(entry, stop)

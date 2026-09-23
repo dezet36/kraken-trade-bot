@@ -266,3 +266,48 @@ def last_leg(structure, index=None):
         'end': end,
         'size': size,
     }
+
+
+def invalidation_level(structure, index=None, direction=None):
+    """
+    Цена, за которой структура МЕНЯЕТ ХАРАКТЕР, — та самая точка CHoCH.
+
+    Для бычьей структуры это последний подтверждённый HL: пока цена выше,
+    последовательность «выше низы, выше верхи» цела; закрытие ниже — и это
+    уже не коррекция, а смена характера движения. Для медвежьей —
+    зеркально, последний LH.
+
+    ЗАЧЕМ ОТДЕЛЬНАЯ ФУНКЦИЯ. Место стопа — это не «край ближайшей зоны», а
+    цена, после которой идея сделки перестаёт существовать. Аудит 22.09.2026
+    показал, чем оборачивается подмена: у 10 планов ИИ из 14 вход стоял ПО ТУ
+    СТОРОНУ этого уровня — то есть покупка назначалась туда, куда цена может
+    прийти, только сломав тренд, ради которого покупали. Стоп при этом
+    ставился за ближний край имбаланса — в треть дневного размаха.
+
+    Уровень считается по подтверждённым свингам: неподтверждённый экстремум
+    ещё может перерисоваться, и стоп за ним пришлось бы двигать.
+
+    direction — BULLISH или BEARISH; None = взять текущий тренд структуры.
+    Возвращает {'price', 'label', 'index', 'direction', 'broken'} или None.
+    'broken' = True, если последнее событие структуры уже CHoCH: характер
+    сменился, и прежняя идея держаться не на чем.
+    """
+    if direction is None:
+        direction = state_at(structure, index if index is not None
+                             else len(structure.get('_event_index') or []) - 1)['trend']
+    if direction not in (BULLISH, BEARISH):
+        return None
+    want = 'HL' if direction == BULLISH else 'LH'
+    pool = structure['points'] if index is None else visible_points(structure, index)
+    for point in reversed(pool):
+        if point.get('label') == want:
+            state = state_at(structure, index if index is not None else point['index'])
+            last = (state or {}).get('last_event') or {}
+            return {
+                'price': float(point['price']),
+                'label': want,
+                'index': int(point['index']),
+                'direction': direction,
+                'broken': str(last.get('type', '')).endswith('CHOCH'),
+            }
+    return None

@@ -226,14 +226,35 @@ class TestTheSignalIsItsOwn:
         assert len(params['tp_fractions']) == len(params['tp_targets'])
         assert sum(params['tp_fractions']) == pytest.approx(1.0)
 
-    def test_breakeven_is_off(self):
+    def test_breakeven_arms_at_one_r(self):
         """
-        Модель сама называет уровень инвалидации. Подтянутый стоп выбивал бы
-        позицию раньше, чем идея опровергнута.
+        Безубыток при +1R — с 22.09.2026 включён.
+
+        Довод «модель сама называет инвалидацию, подтянутый стоп выбьёт
+        раньше времени» не выдержал замера: четыре убыточные сделки из десяти
+        побывали в плюсе на 1.2–2.7R и вернулись к стопу, частичной фиксации
+        не было ни разу. Те же сделки с безубытком дают −3.30R вместо −7.55R.
         """
         params = strategy_llm._reshape('BTCUSDT', approving_verdict())['params']
-        assert params['breakeven_after_tp'] is False
+        assert params['breakeven_after_tp'] is True
+        risk = abs(params['entry'] - params['stop_loss'])
+        assert params['be_level'] == pytest.approx(params['entry'] + risk)
         assert params['invalidation'] == 97.0
+
+    def test_breakeven_mirrors_for_a_short(self):
+        verdict = approving_verdict()
+        verdict['side'] = 'SHORT'
+        verdict['stop'] = verdict['entry'] + 3.0
+        verdict['targets'] = [verdict['entry'] - 9.0]
+        params = strategy_llm._reshape('BTCUSDT', verdict)['params']
+        assert params['be_level'] == pytest.approx(verdict['entry'] - 3.0)
+
+    def test_half_is_taken_at_the_first_target(self):
+        """Ближняя цель надёжнее дальней — половина позиции снимается на ней."""
+        params = strategy_llm._reshape('BTCUSDT', approving_verdict())['params']
+        if len(params['tp_targets']) == 2:
+            assert params['tp_fractions'] == [0.5, 0.5]
+        assert params['tp_fractions'][0] >= 0.5
 
     def test_the_analysis_reaches_the_signal(self):
         """

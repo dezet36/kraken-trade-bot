@@ -187,6 +187,16 @@ def extra_levels(market):
             name = 'имбаланса 4ч' if z.get('kind') == 'FVG' else f"{_ZONE.get(z.get('kind'), 'зоны')} 4ч"
             out.append({'price': float(z['top']), 'kind': f'верх {name}', 'touches': 3, 'last': 0})
             out.append({'price': float(z['bottom']), 'kind': f'низ {name}', 'touches': 3, 'last': 0})
+    # Слом структуры — МЕСТО СТОПА, а не просто уровень: за ним идея сделки
+    # перестаёт существовать. Вес максимальный: этот уровень обязан попасть
+    # в таблицу, иначе модель физически не сможет назвать его стопом —
+    # грамматика принимает только идентификаторы из таблицы.
+    for row in (market.get('structure_break') or {}).values():
+        if row.get('price'):
+            out.append({'price': float(row['price']),
+                        'kind': f"слом структуры {row.get('tf', '')}".strip(),
+                        'touches': 4, 'last': 0})
+
     # Свинги старших ТФ: за ними стоят стопы позиций, живущих днями.
     for tf, name in (('htf', '4ч'), ('bias', 'дня')):
         row = (market.get('htf') or {}).get(tf) or {}

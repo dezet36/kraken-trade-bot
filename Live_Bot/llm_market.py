@@ -619,6 +619,65 @@ def poi_facts(context, price, index, limit=4):
 
 # ── Зоны старшего ТФ: ордер-блоки и имбалансы 4ч ─────────────────────────────
 
+def day_range_pct(df, index, days=7):
+    """
+    Средний ДНЕВНОЙ размах за неделю, % от цены — по тем же часовым свечам.
+
+    Нужен как мера «что рынок проходит за сутки»: цель часового плана дальше
+    этого за часы не достаётся. Считается здесь, в общем слое, один раз.
+    """
+    if df is None or index is None or index < 24:
+        return None
+    window = df.iloc[max(0, index - days * 24 + 1):index + 1]
+    if len(window) < 24:
+        return None
+    spans = []
+    for start in range(0, len(window) - 23, 24):
+        day = window.iloc[start:start + 24]
+        spans.append(float(day['high'].max()) - float(day['low'].min()))
+    price = float(df['close'].iloc[index])
+    if not spans or price <= 0:
+        return None
+    return _number(sum(spans) / len(spans) / price * 100)
+
+
+def structure_break(context, index=None):
+    """
+    Где структура меняет характер: последний подтверждённый HL (в бычьей) или
+    LH (в медвежьей) — отдельно для рабочего ТФ и для 4ч.
+
+    ЭТО МЕСТО СТОПА, а не «край ближайшей зоны». Аудит 22.09.2026: у 10
+    планов из 14 вход стоял по ту сторону этого уровня — цена могла прийти
+    туда, только сломав тренд, ради которого входили; стоп при этом жил за
+    краем имбаланса, в треть дневного размаха. Считается общим слоем один
+    раз и одинаково для всех читателей.
+    """
+    from smc import structure as structure_mod
+    out = {}
+    for key, name in (('poi', '1ч'), ('htf', '4ч')):
+        df = context.frames.get(key)
+        struct = (context.structure if key == 'poi'
+                  else getattr(context, 'htf_structure', None))
+        if df is None or struct is None or not len(df):
+            continue
+        at = (len(df) - 1) if (index is None or key == 'htf') else index
+        found = structure_mod.invalidation_level(struct, at)
+        if not found:
+            continue
+        # Уровень СВОЙ У КАЖДОЙ СТОРОНЫ: лонг умирает под последним HL, шорт —
+        # над последним LH. Проверка плана обязана брать тот, что отвечает
+        # его стороне, иначе лонг сверяется с медвежьим уровнем и наоборот.
+        up = structure_mod.invalidation_level(struct, at, structure_mod.BULLISH)
+        down = structure_mod.invalidation_level(struct, at, structure_mod.BEARISH)
+        out[key] = {'tf': name, 'price': _number(found['price']),
+                    'label': found['label'], 'direction': found['direction'],
+                    'broken': bool(found['broken']),
+                    'bars_ago': int(at - found['index']),
+                    'long': _number(up['price']) if up else None,
+                    'short': _number(down['price']) if down else None}
+    return out or None
+
+
 def htf_zones(context, timestamp, price, limit=4):
     """
     Живые ордер-блоки и имбалансы на 4ч — ближайшие к цене.
@@ -1315,6 +1374,9 @@ def snapshot(pair, df, at=None, client=None, benchmark=None):
         'htf_zones': (_safe('зоны 4ч', htf_zones, context,
                             context.frames['poi']['timestamp'].iloc[-1], price)
                       if context is not None else None),
+        # Уровень, за которым структура меняет характер, — место стопа.
+        'structure_break': (_safe('слом структуры', structure_break, context)
+                            if context is not None else None),
         'oi_flow': _safe('ОИ по свечам', oi_flow, pair, df, index, upto),
         'liquidations': _safe('оценка ликвидаций', liquidation_estimate,
                               pair, df, index, upto),
@@ -1334,6 +1396,11 @@ def snapshot(pair, df, at=None, client=None, benchmark=None):
         # Рынок в целом — из ряда на диске (market_cap.collect пишет его в
         # цикле); здесь запросов нет.
         'macro': _safe('рынок в целом', _macro_facts, upto),
+        # Цена на баре решения и дневной размах — для проверок кода:
+        # достижимость цели считается от них, и брать их второй раз своим
+        # кодом значило бы завести второе определение «сегодняшней цены».
+        'price': _number(price),
+        'atr_day_pct': _safe('дневной размах', day_range_pct, df, index),
     }
     out['day_profile'] = _safe('суточный профиль', day_profile, out.get('tape'), df, index)
     _mark_realized(out.get('liquidations'), pair, price, upto)
