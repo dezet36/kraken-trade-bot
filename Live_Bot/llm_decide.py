@@ -901,8 +901,15 @@ def decide(pair, df, ask, news=None, at=None, max_tokens=None, market=None,
                          grammar, max_tokens)
             retry = judge(second)
             retry['revised_from'] = f'{first_gate}: {first_detail}'[:300]
+            # ОТВЕРГНУТЫЙ ОТВЕТ СОХРАНЯЕМ ЦЕЛИКОМ. Пара «что модель написала
+            # сперва» + «что после замечания» — это и есть материал для
+            # обучения предпочтениям: не «вот правильный ответ», а «вот этот
+            # лучше того». Сейчас пара распадается: второй ответ уходит в
+            # журнал, первый исчезает. Правило проекта: что не записано
+            # сегодня, потеряно навсегда.
             log(f"   {pair}: план отвергнут ({first_gate}) — отдал модели переделать; "
                 f"второй ответ: {retry.get('gate') or 'принят'}")
+            retry['rejected_raw'] = answer
             verdict, answer = retry, second
         except Exception as exc:                       # noqa: BLE001
             log(f'⚠️ {pair}: переделка плана не удалась — {exc}')

@@ -64,6 +64,11 @@ COLUMNS = [
     # обрезанный ответ «войти» нельзя было разобрать: журнал хранил только
     # хвост в 80 знаков, и куда ушли 1200 токенов, оставалось гадать.
     'raw',
+    # ПЕРВЫЙ, ОТВЕРГНУТЫЙ ответ и причина отказа — когда код вернул план
+    # модели на переделку. Пара «до/после замечания» нужна дважды: по ней
+    # видно, умеет ли модель исправляться, и из неё потом собирается набор
+    # для обучения предпочтениям. Пусто, если переделки не было.
+    'revised_from', 'rejected_raw',
     # Цена разбора и его границы — см. шапку модуля. При вызове критика
     # токены и finish — его вызова (последнего), seconds — обоих вместе.
     'model', 'ctx', 'prompt_tokens', 'answer_tokens', 'limit', 'finish',
@@ -133,6 +138,8 @@ def record(pair, donor, verdict, stats=None):
             'data_gap_bars': verdict.get('data_gap_bars', ''),
             'obstacles': '; '.join(verdict.get('obstacles') or []),
             'raw': str(verdict.get('raw') or '')[:6000],
+            'revised_from': verdict.get('revised_from', ''),
+            'rejected_raw': str(verdict.get('rejected_raw') or '')[:6000],
             'model': stats.get('model', ''),
             'ctx': stats.get('ctx', ''),
             'prompt_tokens': stats.get('prompt_tokens', ''),

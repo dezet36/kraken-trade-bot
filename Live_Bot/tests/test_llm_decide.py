@@ -996,3 +996,21 @@ class TestARefusedPlanGoesBackToTheModel:
         })
         out = dec.decide('BTCUSDT', df, ask)
         assert out['gate'] == 'геометрия неверна', 'поломка переделки не должна менять вердикт'
+
+    def test_the_rejected_plan_is_kept_whole(self):
+        """
+        Пара «что модель написала сперва» и «что после замечания» — материал
+        для обучения предпочтениям. Второй ответ уходит в журнал как `raw`,
+        первый обязан сохраниться рядом, иначе пара распадается.
+        """
+        bad, good = answer(stop='L2'), answer()
+        out, _ = self._decide([bad, good])
+        assert out['rejected_raw'] == bad
+        assert out['raw'] == good
+        assert out['revised_from'].startswith('геометрия неверна')
+
+    def test_without_a_revision_there_is_nothing_to_keep(self):
+        """Переделки не было — поле пустое, пары нет."""
+        out, asked = self._decide([answer(d='skip', why='нечего')])
+        assert len(asked) == 1
+        assert not out.get('rejected_raw') and not out.get('revised_from')
