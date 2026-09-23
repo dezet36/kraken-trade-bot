@@ -36,25 +36,32 @@ def candles(n, start, step, tf_minutes=60):
 
 
 class TestWhichFrame:
-    def test_near_and_tight_plan_gets_quarter_hours(self):
-        # Вход в 0.5% от цены, стоп 1.5%, цели 3% и 4.5%: всё в 6%.
+    """
+    Картинка показывает ТОТ ТАЙМФРЕЙМ, НА КОТОРОМ ТОРГУЕМ, — часовой.
+    До 23.09.2026 выбиралось «удобнее для глаза» (15m или 4h), часовых в
+    выборе не было вовсе: человек смотрел на один масштаб, бот работал в
+    другом, и проверить план глазами было нельзя.
+    """
+
+    def test_a_near_and_tight_plan_is_still_hours(self):
         tf, bars = chart_frame.pick(signal(100.0, 98.5, [103.0, 104.5]), price=100.5)
-        assert tf == '15m' and bars == chart_frame.FRAMES['15m']
+        assert tf == '1h' and bars == chart_frame.BARS_NORMAL
 
-    def test_far_entry_gets_four_hours(self):
+    def test_a_far_entry_is_still_hours(self):
         tf, _ = chart_frame.pick(signal(100.0, 98.5, [103.0]), price=104.0)
-        assert tf == '4h'
+        assert tf == '1h'
 
-    def test_wide_plan_gets_four_hours_even_when_price_is_at_entry(self):
-        tf, _ = chart_frame.pick(signal(100.0, 97.0, [106.0, 110.0]), price=100.0)
-        assert tf == '4h'
+    def test_a_wide_plan_only_widens_the_window(self):
+        """Цель в десяти процентах: таймфрейм тот же, свечей больше."""
+        tf, bars = chart_frame.pick(signal(100.0, 97.0, [106.0, 110.0]), price=100.0)
+        assert tf == '1h' and bars == chart_frame.BARS_WIDE
 
-    def test_trigger_level_counts_as_a_point_to_show(self):
-        tf, _ = chart_frame.pick(signal(100.0, 98.5, [103.0], trigger_level=108.0), price=100.0)
-        assert tf == '4h'
+    def test_the_trigger_level_widens_the_window_too(self):
+        tf, bars = chart_frame.pick(signal(100.0, 98.5, [103.0], trigger_level=112.0), price=100.0)
+        assert tf == '1h' and bars == chart_frame.BARS_WIDE
 
-    def test_no_plan_means_hours(self):
-        assert chart_frame.pick({'params': {}}, price=100.0) == ('1h', 120)
+    def test_no_plan_means_the_normal_window(self):
+        assert chart_frame.pick({'params': {}}, price=100.0) == ('1h', chart_frame.BARS_NORMAL)
 
 
 class TestTheWindowFitsThePlan:
@@ -90,8 +97,9 @@ class TestTheMessageUsesTheChosenFrame:
 
         df_1h = candles(120, 104.0, 0.0)
         assert tg.llm_setup_found(signal(100.0, 98.5, [103.0]), df_1h, frames=frames) is True
-        assert asked == [('BTCUSDT', '4h', chart_frame.FRAMES['4h'])]
-        assert drawn['tf'] == '4h' and '4-часовые' in drawn['caption']
+        # Таймфрейм рабочий — свечи другого масштаба у биржи не просятся.
+        assert asked == []
+        assert drawn['tf'] == '1h' and 'часовые' in drawn['caption']
 
     def test_exchange_refusal_falls_back_to_the_hours_at_hand(self, monkeypatch):
         import telegram_notify as tg

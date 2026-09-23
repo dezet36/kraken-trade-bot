@@ -439,18 +439,18 @@ class TestTheNearestLevelsAlwaysMakeTheList:
 
 
 class TestTheModelSeesCandles:
-    def test_last_twelve_candles_are_printed_with_body_and_wicks(self):
+    def test_the_last_candles_are_printed_with_body_and_wicks(self):
         df = make_df(wavy(300))
         text = llm_context.build('BTCUSDT', df)['text']
-        assert 'ПОСЛЕДНИЕ 12 ЧАСОВЫХ СВЕЧЕЙ' in text
+        assert f'ПОСЛЕДНИЕ {llm_context.CANDLES_SHOWN} ЧАСОВЫХ СВЕЧЕЙ' in text
         rows = [l for l in text.splitlines() if l.strip().startswith(('0', '1', '2', '3')) and ' O ' in l and 'тело' in l]
-        assert len(rows) == 12
+        assert len(rows) == llm_context.CANDLES_SHOWN
         assert '↑' in rows[-1] and 'объём ×' in rows[-1]
 
     def test_a_short_history_prints_what_it_has(self):
         df = make_df(wavy(120))
         text = llm_context.build('BTCUSDT', df)['text']
-        assert 'ПОСЛЕДНИЕ 12 ЧАСОВЫХ СВЕЧЕЙ' in text
+        assert f'ПОСЛЕДНИЕ {llm_context.CANDLES_SHOWN} ЧАСОВЫХ СВЕЧЕЙ' in text
 
 
 class TestHtfZonesBecomeLevels:

@@ -59,7 +59,7 @@ COLUMNS = [
     # gate — имя отказа, включая отказы кода и критика по плану «войти».
     'decision', 'gate', 'side',
     # Куда модель ждала рынок — и при отказе: по этому судят направление.
-    'bias', 'data_gap_bars',
+    'bias', 'htf_trend', 'data_gap_bars',
     # Цена в момент разбора и план, если он был.
     'price', 'entry', 'stop', 'tp1',
     # Ход цены от момента разбора, в процентах, на каждом горизонте.
@@ -134,6 +134,10 @@ def watch(pair, verdict, price, ts, at=''):
             'gate': verdict.get('gate', ''),
             'side': side,
             'bias': verdict.get('bias', ''),
+            # Тренд старшего ТФ на момент плана: по нему потом видно, шла
+            # модель по структуре или против. Аудит 23.09.2026: её планы
+            # против тренда 4ч дали −2.99R против +9.17R по тренду.
+            'htf_trend': verdict.get('htf_trend', ''),
             'data_gap_bars': int(verdict.get('data_gap_bars') or 0),
             'price': float(price),
             'entry': float(entry) if entry else None,
@@ -361,6 +365,7 @@ def row(w):
     out = {
         'at': w.get('at', ''), 'pair': w['pair'], 'decision': w['decision'],
         'gate': w['gate'], 'side': w['side'], 'bias': w.get('bias', ''),
+        'htf_trend': w.get('htf_trend', ''),
         'data_gap_bars': w.get('data_gap_bars', 0), 'price': p0,
         'entry': w['entry'] if w['entry'] is not None else '',
         'stop': w['stop'] if w['stop'] is not None else '',
@@ -396,3 +401,61 @@ def write(rows):
         return
     stamped = [{'mode': config.TRADING_MODE, **r} for r in rows]
     csv_journal.append(CSV_PATH, COLUMNS, stamped, 'исходы вердиктов модели')
+
+
+def scoreboard(limit=40, since=None):
+    """
+    Счёт самой модели по её же планам: сколько дошло до цели раньше стопа,
+    в разрезе стороны и согласия со структурой 4ч, и насколько её оценка
+    вероятности расходится с фактом.
+
+    ЗАЧЕМ. Модель начинает каждый разбор с чистого листа: видит два прошлых
+    разбора этой пары — и всё. Она физически не могла знать, что её планы
+    против тренда 4ч дают два попадания из десяти, и повторяла это снова.
+    Замер 23.09.2026: по тренду +9.17R (47% прибыльных), против −2.99R (20%).
+
+    Возвращает словарь или None, если наблюдений совсем мало.
+    """
+    import csv as _csv
+    rows = []
+    try:
+        with open(CSV_PATH, encoding='utf-8', newline='') as fh:
+            for r in _csv.DictReader(fh):
+                if r.get('gate') or not r.get('side'):
+                    continue
+                if since and (r.get('at') or '') < since:
+                    continue
+                if r.get('hit_tp1') not in ('0', '1'):
+                    continue
+                rows.append(r)
+    except Exception:                                  # noqa: BLE001
+        return None
+    rows = rows[-limit:]
+    if len(rows) < 5:
+        return None
+
+    def won(r):
+        """Цель раньше стопа — единственный исход, который считается успехом."""
+        if r.get('hit_tp1') != '1':
+            return False
+        tp, sl = r.get('tp_hours'), r.get('sl_hours')
+        return not sl or (tp and float(tp) <= float(sl))
+
+    def block(sel):
+        part = [r for r in rows if sel(r)]
+        return len(part), sum(1 for r in part if won(r))
+
+    out = {'n': len(rows), 'won': sum(1 for r in rows if won(r))}
+    out['long'] = block(lambda r: r['side'] == 'LONG')
+    out['short'] = block(lambda r: r['side'] == 'SHORT')
+    want = {'LONG': 'BULLISH', 'SHORT': 'BEARISH'}
+    out['with_trend'] = block(lambda r: r.get('htf_trend') and
+                              r['htf_trend'] == want.get(r['side']))
+    out['against_trend'] = block(lambda r: r.get('htf_trend') and
+                                 r['htf_trend'] != want.get(r['side']))
+    # Условие входа против лимита сразу: сколько планов с условием вообще
+    # дождались его. Замер 23.09.2026: из 71 плана 19 умерли, не дождавшись.
+    cond = [r for r in rows if (r.get('trigger_when') or 'now') != 'now']
+    out['with_condition'] = (len(cond),
+                             sum(1 for r in cond if (r.get('cond_hours') or '') != ''))
+    return out

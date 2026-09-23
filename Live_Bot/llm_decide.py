@@ -797,6 +797,39 @@ def check(parsed, levels, answer=None, market=None, min_stop=None, atr_pct=None)
     return {'ok': True, 'gate': '', 'detail': '', **base, **numbers}
 
 
+# Отказы, которые модель МОЖЕТ исправить сама: они про суждение, а не про
+# данные и не про поломку. Их код возвращает ей с объяснением и просит
+# перестроить план — один раз.
+#
+# ЗАЧЕМ. За 206 разборов код отказал 77 раз — это 77 выброшенных
+# пятнадцатиминутных разборов, где модель уже прочитала рынок и ошиблась
+# в одном месте плана. Отказ ничему её не учит: между вызовами у неё нет
+# памяти. Возврат с причиной — единственный способ дать ей исправиться, и
+# он дёшев: вопрос и разметка уже лежат в кэше сервера, второй проход
+# стоит минуты вместо пятнадцати.
+#
+# Не возвращаются: «мало конфлюенса» и «модель пропустила» — это решение
+# или факт о рынке, а не ошибка плана; поломки — по ним нечего исправлять.
+REVISABLE_GATES = (
+    'геометрия неверна', 'стоп внутри зоны входа', 'стоп внутри живой зоны',
+    'план против структуры', 'цель недостижима', 'вход на пуле стопов',
+    'стоп в скоплении стопов', 'обоснование не о том плане',
+    'условие противоречит входу', 'низкое отношение', 'стоп теснее минимального',
+)
+
+
+def revision_request(question, answer, gate, detail):
+    """Тот же вопрос плюс ответ модели и причина отказа — просьба переделать."""
+    return (f"{question}\n\n"
+            f"ТВОЙ ПРЕДЫДУЩИЙ ОТВЕТ:\n{answer}\n\n"
+            f"КОД ОТВЕРГ ЭТОТ ПЛАН: {gate} — {detail}\n"
+            f"Это не придирка к формату: план в таком виде торговать нельзя. "
+            f"Перестрой его так, чтобы причина исчезла — сдвинь стоп за нужный "
+            f"уровень, возьми другой вход или другую цель. Если исправить "
+            f"нечем — ответь отказом (d: skip) и назови причину. Формат "
+            f"ответа тот же.")
+
+
 def decide(pair, df, ask, news=None, at=None, max_tokens=None, market=None,
            history=None):
     """
@@ -851,14 +884,37 @@ def decide(pair, df, ask, news=None, at=None, max_tokens=None, market=None,
         return _refusal(getattr(exc, 'llm_gate', 'модель недоступна'),
                         str(exc)[:300])
 
-    verdict = check(parse(answer, levels), levels, answer,
-                    market=facts.get('market'),
-                    min_stop=facts.get('min_stop_pct'), atr_pct=facts.get('atr_pct'))
+    def judge(text):
+        return check(parse(text, levels), levels, text,
+                     market=facts.get('market'),
+                     min_stop=facts.get('min_stop_pct'), atr_pct=facts.get('atr_pct'))
+
+    question = llm_prompt.build(context['text'])
+    verdict = judge(answer)
+    # ВТОРАЯ ПОПЫТКА. Отказ по суждению возвращается модели с причиной: у
+    # неё нет памяти между вызовами, и без этого она повторяет ту же ошибку
+    # на следующей паре. Попытка ровно одна — иначе разбор растянется.
+    if verdict.get('gate') in REVISABLE_GATES:
+        first_gate, first_detail = verdict['gate'], verdict.get('detail', '')
+        try:
+            second = ask(revision_request(question, answer, first_gate, first_detail),
+                         grammar, max_tokens)
+            retry = judge(second)
+            retry['revised_from'] = f'{first_gate}: {first_detail}'[:300]
+            log(f"   {pair}: план отвергнут ({first_gate}) — отдал модели переделать; "
+                f"второй ответ: {retry.get('gate') or 'принят'}")
+            verdict, answer = retry, second
+        except Exception as exc:                       # noqa: BLE001
+            log(f'⚠️ {pair}: переделка плана не удалась — {exc}')
     verdict['pair'] = pair
     verdict['levels'] = levels
     verdict['raw'] = answer
     verdict['data_gap_bars'] = int(facts.get('data_gap_bars') or 0)
     verdict['atr_pct'] = facts.get('atr_pct')
+    # Тренд старшего ТФ кладём в вердикт, чтобы наблюдение смогло потом
+    # разложить исходы на «по структуре» и «против неё».
+    verdict['htf_trend'] = ((((facts.get('market') or {}).get('htf') or {})
+                             .get('htf') or {}).get('trend') or '')
     # Что модель видела — для записи признаков и разметки (llm_record);
     # поток разбора снимает эти ключи после записи, чтобы не тащить снимок
     # в файл взведённых планов.

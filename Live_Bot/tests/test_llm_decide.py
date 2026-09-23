@@ -906,3 +906,93 @@ class TestExpectedValueUsesOurOwnStatistics:
         out = verdict()
         assert out['gate'] == 'ожидание не положительно'
         assert '0.10' in out['detail'] and '44' in out['detail']
+
+
+class TestARefusedPlanGoesBackToTheModel:
+    """
+    Отказ по суждению — не приговор, а замечание: код возвращает его модели
+    и просит перестроить план.
+
+    ОТКУДА. За 206 разборов код отказал 77 раз — семьдесят семь выброшенных
+    пятнадцатиминутных разборов, где модель прочитала рынок и ошиблась в
+    одном месте плана. Памяти между вызовами у неё нет, поэтому отказ её
+    ничему не учит; возврат с причиной — единственный способ дать исправить.
+    Попытка ровно одна.
+    """
+
+    def _decide(self, answers, **over):
+        """Прогон decide с очередью ответов модели."""
+        import pandas as pd
+        import numpy as np
+        asked = []
+
+        def ask(prompt, grammar, max_tokens):
+            asked.append(prompt)
+            return answers[len(asked) - 1]
+
+        n = 300
+        close = 100 + np.cumsum(np.random.default_rng(3).normal(0, 0.4, n))
+        df = pd.DataFrame({
+            'timestamp': pd.date_range('2026-01-01', periods=n, freq='h'),
+            'open': close, 'high': close + 0.5, 'low': close - 0.5,
+            'close': close, 'volume': np.ones(n) * 10,
+        })
+        out = dec.decide('BTCUSDT', df, ask, **over)
+        return out, asked
+
+    def test_a_fixable_refusal_is_returned_with_its_reason(self):
+        """Второй вопрос содержит и прошлый ответ, и причину отказа."""
+        bad = answer(stop='L2')                    # стоп выше входа у лонга
+        good = answer()
+        out, asked = self._decide([bad, good])
+        assert len(asked) == 2, 'модель не спросили второй раз'
+        assert 'ТВОЙ ПРЕДЫДУЩИЙ ОТВЕТ' in asked[1]
+        assert 'КОД ОТВЕРГ ЭТОТ ПЛАН' in asked[1]
+        assert out.get('revised_from', '').startswith('геометрия неверна')
+        assert out['raw'] == good
+
+    def test_the_second_answer_is_the_one_that_counts(self):
+        """В вердикт идёт второй ответ, а первый остаётся только в пометке."""
+        bad, good = answer(stop='L2'), answer()
+        out, _ = self._decide([bad, good])
+        assert out['raw'] == good
+        assert out['gate'] != 'геометрия неверна', 'вердикт остался от первого ответа'
+
+    def test_only_one_retry(self):
+        """Две ошибки подряд — второй отказ окончателен, третьего вопроса нет."""
+        out, asked = self._decide([answer(stop='L2'), answer(stop='L2')])
+        assert len(asked) == 2
+        assert not out['ok'] and out['gate'] == 'геометрия неверна'
+
+    def test_a_model_decision_is_not_second_guessed(self):
+        """«Пропускаю» — решение модели, а не ошибка плана: не переспрашиваем."""
+        out, asked = self._decide([answer(d='skip', why='нечего')])
+        assert len(asked) == 1
+        assert out['gate'] == 'модель пропустила'
+
+    def test_the_question_is_repeated_so_the_prefix_stays_cached(self):
+        """
+        Второй вопрос начинается тем же текстом: сервер держит префикс в
+        кэше, и переделка стоит минуты вместо пятнадцати.
+        """
+        _, asked = self._decide([answer(stop='L2'), answer()])
+        assert asked[1].startswith(asked[0][:2000])
+
+    def test_a_broken_second_answer_keeps_the_first_refusal(self, monkeypatch):
+        import pandas as pd
+        import numpy as np
+
+        def ask(prompt, grammar, max_tokens):
+            if 'ТВОЙ ПРЕДЫДУЩИЙ ОТВЕТ' in prompt:
+                raise RuntimeError('модель молчит')
+            return answer(stop='L2')
+
+        n = 300
+        close = 100 + np.cumsum(np.random.default_rng(3).normal(0, 0.4, n))
+        df = pd.DataFrame({
+            'timestamp': pd.date_range('2026-01-01', periods=n, freq='h'),
+            'open': close, 'high': close + 0.5, 'low': close - 0.5,
+            'close': close, 'volume': np.ones(n) * 10,
+        })
+        out = dec.decide('BTCUSDT', df, ask)
+        assert out['gate'] == 'геометрия неверна', 'поломка переделки не должна менять вердикт'
