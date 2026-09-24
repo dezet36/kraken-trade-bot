@@ -337,17 +337,20 @@ class TestCosts:
 
 
 class TestParallelStrategies:
-    def test_both_strategies_hold_same_pair(self, broker_env, monkeypatch):
+    def test_both_strategies_hold_same_pair(self, broker_env):
         """
         Ради этого фантомный режим и делался: на бирже позиция по инструменту
         одна, и более частая стратегия отбирала бы сетапы у второй.
 
-        С 19.09.2026 это РЕЖИМ ЗАМЕРА, а не умолчание: по умолчанию фантом
-        повторяет биржу (одна пара — одна позиция), потому что иначе его
-        результаты завышены. Замер по отдельности включается ключом.
+        С 24.09.2026 это УМОЛЧАНИЕ, а не режим замера: 19-24.09 фантом
+        повторял биржу (одна пара — одна позиция), и ИИ терял пары, которые
+        раньше открыла другая стратегия, не по своим планам, а по очереди —
+        BTCUSDT так не видела 65 часов подряд. Владелец решил не ограничивать
+        стратегии друг другом; цена — фантомные результаты снова завышены
+        относительно боя, как до 19.09. Прежнее поведение включается ключом
+        PAPER_EXCLUSIVE_PAIRS=1, см. test_the_isolated_mode_is_a_switch.
         """
         broker, client, pb, cfg = broker_env
-        monkeypatch.setattr(cfg, 'PAPER_EXCLUSIVE_PAIRS', False)
         pb._now_ms = lambda: 1_700_000_000_000
 
         assert broker.open('FIBO', signal(strategy='FIBO'))
@@ -910,8 +913,11 @@ class TestOneInstrumentOnePosition:
     одну пару, завышал результаты: каждая торговала, будто соседей нет.
     """
 
-    def test_the_second_strategy_is_refused_on_a_taken_pair(self, broker_env):
+    def test_the_second_strategy_is_refused_on_a_taken_pair_when_isolated(
+            self, broker_env, monkeypatch):
+        """Прежнее поведение (19-24.09.2026) — доступно ключом, не умолчание."""
         broker, client, pb, cfg = broker_env
+        monkeypatch.setattr(cfg, 'PAPER_EXCLUSIVE_PAIRS', True)
         pb._now_ms = lambda: 1_700_000_000_000
         assert broker.open('FIBO', signal(entry=100.0))
         assert not broker.open('SMC', signal(entry=100.0))
@@ -919,12 +925,25 @@ class TestOneInstrumentOnePosition:
         assert broker.pair_taken_by('BTCUSDT', except_strategy='FIBO') is None
         assert broker.open('SMC', signal(pair='ETHUSDT', entry=100.0))
 
-    def test_the_old_behaviour_is_a_switch(self, broker_env, monkeypatch):
+    def test_the_isolated_mode_is_a_switch(self, broker_env):
+        """Без ключа (умолчание с 24.09.2026) — пара доступна всем сразу."""
         broker, client, pb, cfg = broker_env
-        monkeypatch.setattr(cfg, 'PAPER_EXCLUSIVE_PAIRS', False)
         pb._now_ms = lambda: 1_700_000_000_000
         assert broker.open('FIBO', signal(entry=100.0))
         assert broker.open('SMC', signal(entry=100.0))
+
+    def test_a_strategy_still_refuses_its_own_second_position(self, broker_env):
+        """
+        Пара — одна позиция ВНУТРИ стратегии — остаётся правилом всегда.
+
+        Это не про биржевой лимит на инструмент, а про то, что стратегия не
+        может сама себе противоречить: план и уже открытая позиция на одной
+        паре у одной стратегии.
+        """
+        broker, client, pb, cfg = broker_env
+        pb._now_ms = lambda: 1_700_000_000_000
+        assert broker.open('FIBO', signal(entry=100.0))
+        assert not broker.open('FIBO', signal(entry=100.0))
 
 
 class TestTheThermostat:
