@@ -41,7 +41,11 @@ deadline=$(( $(date +%s) + WAIT ))
 while [ $(date +%s) -lt $deadline ]; do
   J=$(journalctl -u kraken-bot --no-pager -o cat --since "-3h")
   verdict=$(echo "$J" | grep -E "модель: [0-9]+ вход" | tail -1 | cut -c2-20)
-  handed=$(echo "$J"  | grep -E "отдал модели на разбор" | tail -1 | cut -c2-20)
+  # Переделка — второй ask() внутри одного decide(), своей строки
+  # "отдал модели на разбор" у неё нет; без строки "отдал модели на
+  # переделку" эта проверка не видела её как разбор в полёте — 24.09.2026,
+  # семь оборванных запросов подряд, "Remote end closed connection".
+  handed=$(echo "$J"  | grep -E "отдал модели (на разбор|на переделку)" | tail -1 | cut -c2-20)
   cycle=$(echo "$J"   | grep -E "LLM: сетапов найдено" | tail -1 | cut -c2-20)
 
   collected=1
