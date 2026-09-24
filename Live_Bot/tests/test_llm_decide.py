@@ -908,6 +908,111 @@ class TestExpectedValueUsesOurOwnStatistics:
         assert '0.10' in out['detail'] and '44' in out['detail']
 
 
+class TestTheModelIsToldWhereAStopMayGo:
+    """
+    Законные уровни для стопа считаются ДО вопроса и печатаются в таблице.
+
+    ОТКУДА. Ночь 23–24.09.2026: ноль принятых планов из тринадцати, десять
+    переделок, ни одной удачной. Модель узнавала правила только из отказа и
+    на переделке двигала четвёртый знак того же уровня (ARB 0.223871 →
+    0.223854) вместо того, чтобы взять другой. Замер 24.09: законных
+    уровней под стоп около трёх из двенадцати — угадать вслепую она и не
+    могла.
+    """
+
+    def test_a_level_inside_a_live_zone_is_not_offered(self):
+        """Уровень, за которым стоп попадёт в незакрытый имбаланс, не предлагается."""
+        market = {'fvgs': [{'bottom': 96.0, 'top': 99.0}]}
+        ok = dec.legal_stop_ids(LEVELS, market, price=105.0, atr_pct=0.5)
+        assert 'L4' not in ok['LONG'], 'L4 (98) внутри имбаланса 96..99'
+        assert 'L5' in ok['LONG'], 'L5 (94) ниже зоны — законен'
+
+    def test_the_buffer_counts_not_the_bare_level(self):
+        """
+        Проверяется ОТСТУПЛЕННЫЙ стоп, а не сам уровень.
+
+        Код отступает за названный уровень на буфер охоты за стопами, и
+        именно этот стоп попадает (или не попадает) в зону. Считать по голой
+        цене уровня значит мерить не то, что исполнится.
+        """
+        buffer = dec.stop_hunt_pct(0.5)
+        just_below = 100.0 * (1 - buffer / 100)
+        market = {'fvgs': [{'bottom': just_below - 0.05, 'top': just_below + 0.05}]}
+        ok = dec.legal_stop_ids(LEVELS, market, price=105.0, atr_pct=0.5)
+        assert 'L3' not in ok['LONG'], 'зона накрывает отступленный стоп, а не уровень'
+
+    def test_only_levels_on_the_right_side_of_price(self):
+        """Стоп лонга ниже цены, стоп шорта выше. Обратное — не стоп."""
+        ok = dec.legal_stop_ids(LEVELS, {}, price=105.0)
+        assert all(l in ('L3', 'L4', 'L5') for l in ok['LONG']), ok['LONG']
+        assert all(l in ('L1', 'L2') for l in ok['SHORT']), ok['SHORT']
+
+    def test_without_a_legal_stop_the_model_is_not_asked(self):
+        """
+        Ни одного законного уровня — разбор не начинается.
+
+        Проверка стоит микросекунды, разбор — полчаса машинного времени.
+        """
+        import pandas as pd
+        import numpy as np
+        asked = []
+
+        def ask(prompt, grammar, max_tokens):
+            asked.append(prompt)
+            return answer()
+
+        n = 300
+        close = 100 + np.cumsum(np.random.default_rng(5).normal(0, 0.4, n))
+        df = pd.DataFrame({
+            'timestamp': pd.date_range('2026-01-01', periods=n, freq='h'),
+            'open': close, 'high': close + 0.5, 'low': close - 0.5,
+            'close': close, 'volume': np.ones(n) * 10,
+        })
+        import llm_context
+        real = llm_context.build
+
+        def empty_stop_ok(*a, **k):
+            out = real(*a, **k)
+            out['stop_ok'] = {'LONG': [], 'SHORT': []}
+            return out
+
+        llm_context.build = empty_stop_ok
+        try:
+            out = dec.decide('BTCUSDT', df, ask)
+        finally:
+            llm_context.build = real
+        assert out['gate'] == 'нет законного стопа', out.get('gate')
+        assert asked == [], 'модель не должна быть спрошена'
+
+
+class TestAnEntryExactlyOnTheBreakIsAllowed:
+    """
+    Вход РОВНО на уровне слома структуры — ретест, а не ошибка.
+
+    ОТКУДА. LTCUSDT 23.09.2026 19:48: «вход 63.03 выше слом структуры 1ч
+    63.03» — одно и то же число в обеих половинах фразы. Уровень слома
+    лежит в таблице с максимальным весом и подписан «слом структуры»,
+    поэтому модель естественно выбирает его; нестрогое сравнение отвергало
+    такой план всегда.
+    """
+
+    def _market(self, level):
+        return {'structure_break': {'poi': {'long': level, 'short': level,
+                                            'tf': '1ч'}}}
+
+    def test_long_entry_on_the_break_passes(self):
+        assert dec.plan_against_structure('LONG', 100.0, 99.0,
+                                          self._market(100.0)) == ''
+
+    def test_short_entry_on_the_break_passes(self):
+        assert dec.plan_against_structure('SHORT', 100.0, 101.0,
+                                          self._market(100.0)) == ''
+
+    def test_a_long_entry_below_the_break_still_fails(self):
+        assert 'ниже' in dec.plan_against_structure('LONG', 99.5, 98.0,
+                                                    self._market(100.0))
+
+
 class TestARefusedPlanGoesBackToTheModel:
     """
     Отказ по суждению — не приговор, а замечание: код возвращает его модели

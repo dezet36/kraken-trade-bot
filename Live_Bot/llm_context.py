@@ -527,11 +527,30 @@ def build(pair, df, at=None, news=None, market=None, history=None):
         f'(издержки {min_stop_pct():.2f}%, половина ATR {STOP_ATR_SHARE * (atr_pct or 0):.2f}%)'
         f'   Отступ стопа за уровень: {_stop_buffer(atr_pct):.2f}% (ставит код)',
         '',
-        'УРОВНИ (сверху вниз, расстояние от цены; объём — к медианной свече, '
+        'УРОВНИ (сверху вниз, расстояние от цены; «← СТОП» — за этот уровень '
+        'стоп поставить МОЖНО, за остальные код откажет; объём — к медианной свече, '
         '×3 узел, ×0.5 пустота; дельта — перевес агрессора в минуты касания за ~16ч: '
         'плюс покупали, минус продавали. Объём и дельта печатаются, только если '
         'заметны; пусто — обычные значения)',
     ]
+    # ЗАКОННЫЕ СТОПЫ — В САМОЙ ТАБЛИЦЕ. Правило, которое модель узнавала
+    # только из отказа, теперь стоит рядом с уровнем. Импорт поздний:
+    # llm_decide читает этот модуль, и связь на уровне файла была бы
+    # круговой.
+    stop_ok = {'LONG': [], 'SHORT': []}
+    try:
+        import llm_decide
+        stop_ok = llm_decide.legal_stop_ids(found, market, price_now, atr_pct)
+    except Exception:                                  # noqa: BLE001
+        pass
+    mark = {}
+    for side, tag in (('LONG', 'ЛОНГ'), ('SHORT', 'ШОРТ')):
+        for lid in stop_ok.get(side) or ():
+            mark.setdefault(lid, []).append(tag)
+    lines.append('  ГОДЯТСЯ ПОД СТОП: ' + '   '.join(
+        f'{t} — ' + (', '.join(stop_ok.get(k) or ()) or 'НИ ОДИН')
+        for k, t in (('LONG', 'лонг'), ('SHORT', 'шорт'))))
+
     for level in found:
         touches = (f", касаний {level['touches']}"
                    if level['touches'] > 1 and not level.get('synthetic') else '')
@@ -543,8 +562,11 @@ def build(pair, df, at=None, news=None, market=None, history=None):
         d = level.get('delta')
         delta = (f"   дельта {d['share_pct']:+.0f}% ({d['touches']} кас., {d['minutes']} мин)"
                  if d and abs(d.get('share_pct') or 0) >= 5 else '')
+        stop_tag = ('   ← СТОП: ' + '/'.join(mark[level['id']])
+                    if mark.get(level['id']) else '')
         lines.append(f"  {level['id']:<4}{level['price']:>14.6g}   "
-                     f"{level['dist_pct']:+6.2f}%   {level['kind']}{touches}{vol}{delta}")
+                     f"{level['dist_pct']:+6.2f}%   {level['kind']}{touches}{vol}{delta}"
+                     f"{stop_tag}")
 
     lines += _candle_lines(df, at)
 
@@ -577,7 +599,8 @@ def build(pair, df, at=None, news=None, market=None, history=None):
     # не про рынок, и читаться должно уже после разметки.
     lines += _scoreboard_lines()
 
-    return {'levels': found, 'text': '\n'.join(lines), 'facts': facts}
+    return {'levels': found, 'text': '\n'.join(lines), 'facts': facts,
+            'stop_ok': stop_ok}
 
 
 def _when(df, at):
