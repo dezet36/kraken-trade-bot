@@ -908,6 +908,63 @@ class TestExpectedValueUsesOurOwnStatistics:
         assert '0.10' in out['detail'] and '44' in out['detail']
 
 
+class TestTheSideComesFromTheHigherTimeframe:
+    """
+    Сторона плана обязана совпадать со структурой старшего ТФ.
+
+    ОТКУДА. Разбор всех 17 сделок ИИ 24.09.2026: против тренда 4ч — 6
+    сделок, ноль выигрышей, −6.32 R; против дневного — 8 сделок, ноль
+    выигрышей, около −8.4 R; остальные девять вместе −1.1 R. Весь убыток
+    стратегии — встречные сделки.
+
+    Модель строила их не по слепоте: в каждом разборе она САМА писала
+    «4ч и День — тренд вверх, но 1ч — локальный нисходящий», «коррекция в
+    рамках старшего ап-тренда». Прежний промт просил один `bias` из трёх
+    таймфреймов без правила старшинства, и часовой откат превращался в
+    сторону сделки.
+    """
+
+    def _market(self, trend):
+        return {'structure_break': {'htf': {'direction': trend, 'tf': '4ч',
+                                            'price': 100.0}}}
+
+    def test_a_short_under_a_bullish_higher_trend_is_refused(self):
+        why = dec.plan_against_higher_trend('SHORT', self._market('BULLISH'))
+        assert 'снятие ликвидности' in why, why
+
+    def test_a_long_under_a_bearish_higher_trend_is_refused(self):
+        why = dec.plan_against_higher_trend('LONG', self._market('BEARISH'))
+        assert 'снятие ликвидности' in why, why
+
+    def test_a_plan_with_the_higher_trend_passes(self):
+        assert dec.plan_against_higher_trend('LONG', self._market('BULLISH')) == ''
+        assert dec.plan_against_higher_trend('SHORT', self._market('BEARISH')) == ''
+
+    def test_without_higher_structure_the_gate_is_silent(self):
+        """
+        Нет данных по 4ч — ворота молчат, а не запрещают.
+
+        Молчание тут правильнее запрета: отсутствие ряда не значит, что
+        сторона неверна, а торговлю останавливать из-за прочерка нельзя —
+        правило проекта про отказ источника.
+        """
+        assert dec.plan_against_higher_trend('SHORT', {}) == ''
+        assert dec.plan_against_higher_trend('SHORT', None) == ''
+        assert dec.plan_against_higher_trend(
+            'SHORT', {'structure_break': {'htf': {'direction': 'NEUTRAL'}}}) == ''
+
+    def test_the_gate_fires_before_geometry(self):
+        """
+        Встречный план отклоняется ДО проверок геометрии: считать их для
+        заведомо отклонённого плана — тратить работу впустую.
+        """
+        market = self._market('BULLISH')
+        out = dec.check(dec.parse(answer(side='SHORT', entry='L2', stop='L1',
+                                         tp=['L4', 'L5']), LEVELS),
+                        LEVELS, market=market)
+        assert out['gate'] == 'план против старшего тренда', out.get('gate')
+
+
 class TestTheModelIsToldWhereAStopMayGo:
     """
     Законные уровни для стопа считаются ДО вопроса и печатаются в таблице.
