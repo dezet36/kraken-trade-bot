@@ -260,6 +260,64 @@ class TestWhatTheModelActuallyReads:
         assert llm_context.price_of(out['levels'], 'L999') is None
 
 
+class TestStructureBreakShowsBothSides:
+    """
+    Слом структуры печатается дважды, когда лонг и шорт умирают на разных
+    уровнях — не только «по текущему тренду».
+
+    ОТКУДА. 24.09.2026, три отказа «план против структуры» подряд (SOL, ADA,
+    SUI): таблица показывала ОДНО число («по текущему тренду», `price`), а
+    ворота проверяли ДРУГОЕ — сторона-специфичный `long`/`short`, который в
+    таблицу не попадал никогда. У SUI строки не было вовсе. Модель не могла
+    угадать число, которого не видела.
+    """
+
+    def _market(self, price, long_, short_, tf='1ч'):
+        return {'structure_break': {'poi': {'tf': tf, 'price': price,
+                                            'long': long_, 'short': short_}}}
+
+    def test_both_sides_appear_when_they_differ(self):
+        """Ровно случай SOL 24.09: price=113.95=long, short=114.85 — отдельная строка."""
+        market = self._market(113.95, 113.95, 114.85)
+        out = llm_context.build('BTCUSDT', make_df(wavy(400)), market=market)
+        kinds = [lv['kind'] for lv in out['levels']]
+        assert 'слом структуры 1ч' in kinds
+        assert 'слом структуры 1ч для шорта' in kinds
+        assert 'слом структуры 1ч для лонга' not in kinds, \
+            'long совпадает с общим — дублировать не нужно'
+        short_row = next(lv for lv in out['levels']
+                         if lv['kind'] == 'слом структуры 1ч для шорта')
+        assert short_row['price'] == 114.85
+
+    def test_the_short_side_level_is_nameable_by_id(self):
+        """
+        Мало напечатать строку — модель отвечает идентификатором, и он
+        обязан восстанавливаться обратно в ту же цену (test_every_listed_
+        level_resolves_back_to_a_price делает это условием для всех уровней;
+        здесь — прицельно для нового вида строки).
+        """
+        market = self._market(113.95, 113.95, 114.85)
+        out = llm_context.build('BTCUSDT', make_df(wavy(400)), market=market)
+        short_row = next(lv for lv in out['levels']
+                         if lv['kind'] == 'слом структуры 1ч для шорта')
+        assert llm_context.price_of(out['levels'], short_row['id']) == 114.85
+
+    def test_both_sides_shown_when_general_matches_neither(self):
+        """SUI 24.09: общий `price` не совпадал ни с одной стороной — нужны обе строки."""
+        market = self._market(100.0, 98.0, 102.0)
+        out = llm_context.build('BTCUSDT', make_df(wavy(400)), market=market)
+        kinds = [lv['kind'] for lv in out['levels']]
+        assert 'слом структуры 1ч для лонга' in kinds
+        assert 'слом структуры 1ч для шорта' in kinds
+
+    def test_identical_sides_print_once(self):
+        """Лонг и шорт совпали с общим — одна строка, не три одинаковых числа подряд."""
+        market = self._market(100.0, 100.0, 100.0)
+        out = llm_context.build('BTCUSDT', make_df(wavy(400)), market=market)
+        matching = [lv for lv in out['levels'] if abs(lv['price'] - 100.0) < 0.01]
+        assert len(matching) == 1, matching
+
+
 class TestItDoesNotCrashOnThinData:
 
     def test_a_short_series_returns_empty(self):

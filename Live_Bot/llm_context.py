@@ -195,10 +195,33 @@ def extra_levels(market):
     # перестаёт существовать. Вес максимальный: этот уровень обязан попасть
     # в таблицу, иначе модель физически не сможет назвать его стопом —
     # грамматика принимает только идентификаторы из таблицы.
+    #
+    # СЧИТАЕТСЯ ДВАЖДЫ — ДЛЯ КАЖДОЙ СТОРОНЫ, ПЕЧАТАЕТСЯ ОБЕ. До 24.09.2026
+    # печатался только `price` — уровень «по текущему тренду»; `long` и
+    # `short` (нужны воротам ДЛЯ КОНКРЕТНОЙ стороны плана) в таблицу не
+    # попадали никогда. Три отказа «план против структуры» подряд 24.09
+    # (SOL, ADA, SUI) назвали число, которого в вопросе не было: сторона
+    # плана разошлась с направлением, по которому посчитан общий `price`, а
+    # число нужной стороны не показывалось. У SUI строки не было вовсе.
+    # Печатаем `long`/`short` отдельно, когда они существуют и отличаются
+    # от общего — иначе три близких числа на один и тот же слом засорили бы
+    # таблицу без нужды.
+    tol_pct = 0.05
     for row in (market.get('structure_break') or {}).values():
-        if row.get('price'):
-            out.append({'price': float(row['price']),
-                        'kind': f"слом структуры {row.get('tf', '')}".strip(),
+        tf_name = row.get('tf', '').strip()
+        general = float(row['price']) if row.get('price') else None
+        if general:
+            out.append({'price': general, 'kind': f"слом структуры {tf_name}".strip(),
+                        'touches': 4, 'last': 0})
+        for side_key, side_name in (('long', 'лонга'), ('short', 'шорта')):
+            value = row.get(side_key)
+            if not value:
+                continue
+            value = float(value)
+            if general and abs(value - general) / general * 100 < tol_pct:
+                continue                      # совпадает с общим — не дублируем
+            out.append({'price': value,
+                        'kind': f"слом структуры {tf_name} для {side_name}".strip(),
                         'touches': 4, 'last': 0})
 
     # Свинги старших ТФ: за ними стоят стопы позиций, живущих днями.
