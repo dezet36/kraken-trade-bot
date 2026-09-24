@@ -435,12 +435,21 @@ def legal_stop_ids(levels, market, price, atr_pct=None, tf='poi'):
     условие, а не достаточное: уровень из него может не подойти под
     конкретный вход. Пустой список для обеих сторон означает твёрдое «плана
     не будет», и разбор не начинается.
+
+    СТОРОНА, ЗАБРАКОВАННАЯ СТАРШИМ ТРЕНДОМ, СТОПОВ НЕ ПОЛУЧАЕТ. Найдено
+    24.09.2026 при том же разборе, что добавил эти ворота: без этой строки
+    таблица при бычьей 4ч показывала «ШОРТ — L1, L2», хотя
+    `plan_against_higher_trend` отклонит такой план целиком, что бы ни стоял
+    за стопом. Показывать «законный» стоп для стороны, которую код забракует
+    по другой причине, — не подсказка, а новая ложь в разметке взамен старой.
     """
     out = {'LONG': [], 'SHORT': []}
     if not levels or not price:
         return out
     buffer = stop_hunt_pct(atr_pct)
     for side in ('LONG', 'SHORT'):
+        if plan_against_higher_trend(side, market):
+            continue
         brk = structure_break_price(market, tf, side)
         for lv in levels:
             try:

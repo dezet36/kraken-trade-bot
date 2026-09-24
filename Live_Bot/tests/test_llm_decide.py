@@ -1004,6 +1004,27 @@ class TestTheModelIsToldWhereAStopMayGo:
         assert all(l in ('L3', 'L4', 'L5') for l in ok['LONG']), ok['LONG']
         assert all(l in ('L1', 'L2') for l in ok['SHORT']), ok['SHORT']
 
+    def test_a_side_the_trend_forbids_gets_no_stops_at_all(self):
+        """
+        Сторона, забракованная старшим трендом, не получает стопов вовсе.
+
+        ОТКУДА. Найдено 24.09.2026 в том же разборе, что добавил ворота
+        `plan_against_higher_trend`: без этой связи таблица при бычьей 4ч
+        показывала «ШОРТ — L1, L2», хотя такой план код отклонит целиком,
+        что бы ни стояло за стопом. Показать «законный» стоп для стороны,
+        которую код забракует по другой причине, — не подсказка, а новая
+        ложь в разметке взамен вчерашней.
+        """
+        bullish = {'structure_break': {'htf': {'direction': 'BULLISH', 'tf': '4ч'}}}
+        ok = dec.legal_stop_ids(LEVELS, bullish, price=105.0, atr_pct=0.5)
+        assert ok['SHORT'] == [], 'шорт при бычьей 4ч запрещён — стопов быть не должно'
+        assert ok['LONG'], 'лонг разрешён и стопы для него должны остаться'
+
+        bearish = {'structure_break': {'htf': {'direction': 'BEARISH', 'tf': '4ч'}}}
+        ok2 = dec.legal_stop_ids(LEVELS, bearish, price=105.0, atr_pct=0.5)
+        assert ok2['LONG'] == [], 'лонг при медвежьей 4ч запрещён'
+        assert ok2['SHORT']
+
     def test_without_a_legal_stop_the_model_is_not_asked(self):
         """
         Ни одного законного уровня — разбор не начинается.
