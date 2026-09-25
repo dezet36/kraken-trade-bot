@@ -57,7 +57,7 @@ def broker_env(tmp_path, monkeypatch):
     for _name in ('FIBO', 'SMC', 'LEVELS', 'RSIBB'):
         monkeypatch.setenv(f'PAPER_START_BALANCE_{_name}', '10000')
     monkeypatch.setenv('PAPER_FUNDING', 'false')
-    for module in ('config', 'paper_broker', 'dashboard', 'shadow'):
+    for module in ('config', 'paper_broker', 'dashboard', 'shadow', 'setup_journal'):
         sys.modules.pop(module, None)
 
     import config
@@ -1002,3 +1002,95 @@ class TestTheThermostat:
         if reloaded is None:
             pytest.skip('брокер создаётся иначе')
         assert reloaded._day_mark()['equity'] == mark['equity']
+
+
+class TestSetupJournalRecords:
+    """
+    Брокер пишет в журнал сетапов то, чего раньше не писал никто: снятую
+    заявку (с тем, как близко подходила цена), минуту каждой взятой цели и
+    режим рынка на момент заявки (setup_journal.py, 25.09.2026).
+    """
+
+    @staticmethod
+    def dropped_rows():
+        import csv
+        import setup_journal
+        with open(setup_journal.DROPPED_CSV, encoding='utf-8', newline='') as fh:
+            return list(csv.DictReader(fh))
+
+    def test_an_order_left_behind_is_journaled_with_how_close_price_came(self, broker_env):
+        broker, client, pb, _cfg = broker_env
+        pb._now_ms = lambda: 1_700_000_000_000
+        broker.open('FIBO', signal(entry=100.0, stop=90.0, tp1=130.0))
+        # Ближе всего — 101 (1% над входом); затем уход к цели без нас: 131
+        # от входа 100 при риске 10 — это +3.1R.
+        feed(broker, client, 'BTCUSDT', [(105, 101, 104), (131, 104, 130)])
+
+        rows = self.dropped_rows()
+        assert len(rows) == 1
+        row = rows[0]
+        assert row['strategy'] == 'FIBO' and row['pair'] == 'BTCUSDT'
+        assert row['reason'] == 'цена дошла до цели без нас'
+        assert float(row['min_gap_pct']) == pytest.approx(1.0)
+        assert float(row['best_run_r']) == pytest.approx(3.1)
+        assert row['why'] and row['placed_at'] and row['dropped_at']
+        assert float(row['limit_price']) == 100.0 and row['targets'] == '130'
+
+    def test_an_expired_order_is_journaled(self, broker_env):
+        broker, client, pb, _cfg = broker_env
+        pb._now_ms = lambda: 1_700_000_000_000
+        broker.open('FIBO', signal(entry=100.0))
+        broker.pending('FIBO')['BTCUSDT']['expires_ts'] = 1_700_000_000_000 + BAR_MS
+        feed(broker, client, 'BTCUSDT', [(105, 101, 104), (105, 101, 104)])
+        rows = self.dropped_rows()
+        assert len(rows) == 1 and rows[0]['reason'].startswith('лимит не заполнен за ')
+        # Истёкшая заявка ждала одну свечу: ближе всего цена была в 1% от входа.
+        assert float(rows[0]['min_gap_pct']) == pytest.approx(1.0)
+
+    def test_an_operator_cancel_is_journaled(self, broker_env):
+        broker, _client, pb, _cfg = broker_env
+        pb._now_ms = lambda: 1_700_000_000_000
+        broker.open('FIBO', signal(entry=100.0))
+        ok, _msg = broker.cancel_pending('FIBO', 'BTCUSDT')
+        assert ok
+        assert [r['reason'] for r in self.dropped_rows()] == ['снят оператором']
+
+    def test_a_filled_order_is_not_journaled_as_dropped(self, broker_env):
+        import setup_journal
+        broker, client, pb, _cfg = broker_env
+        pb._now_ms = lambda: 1_700_000_000_000
+        broker.open('FIBO', signal(entry=100.0))
+        feed(broker, client, 'BTCUSDT', [(104, 99.5, 102)])
+        assert broker.positions('FIBO')
+        assert not os.path.exists(setup_journal.DROPPED_CSV)
+
+    def test_the_minute_of_every_target_is_kept(self, broker_env):
+        broker, client, pb, _cfg = broker_env
+        pb._now_ms = lambda: 1_700_000_000_000
+        broker.open('SMC', signal(strategy='SMC', entry=100.0, stop=90.0, tp1=110.0,
+                                  targets=(110.0, 120.0), fractions=(0.5, 0.5),
+                                  breakeven=False))
+        # Вход на первой свече, цель 1 — на третьей (10 мин), цель 2 — на пятой.
+        feed(broker, client, 'BTCUSDT', [(101, 99.5, 100), (105, 100, 104), (111, 104, 110),
+                                         (115, 109, 114), (121, 114, 120)])
+        rows = pb.read_journal()
+        assert len(rows) == 1
+        assert rows[0]['tp_min'] == '10;20' and rows[0]['exit_reason'] == 'TP2'
+
+    def test_the_market_regime_goes_into_the_order(self, broker_env, monkeypatch):
+        import market_regime
+        broker, _client, pb, _cfg = broker_env
+        monkeypatch.setattr(market_regime, 'last_btc_regime', lambda now=None: ('боковик', 0.21))
+        pb._now_ms = lambda: 1_700_000_000_000
+        broker.open('FIBO', signal(entry=100.0))
+        ctx = broker.pending('FIBO')['BTCUSDT']['context']
+        assert (ctx['regime'], ctx['regime_er']) == ('боковик', 0.21)
+
+    def test_no_regime_is_a_dash_not_a_failure(self, broker_env, monkeypatch):
+        import market_regime
+        broker, _client, pb, _cfg = broker_env
+        monkeypatch.setattr(market_regime, '_btc_cache', {})
+        pb._now_ms = lambda: 1_700_000_000_000
+        assert broker.open('FIBO', signal(entry=100.0))
+        ctx = broker.pending('FIBO')['BTCUSDT']['context']
+        assert (ctx['regime'], ctx['regime_er']) == ('', None)

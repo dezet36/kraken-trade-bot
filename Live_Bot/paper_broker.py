@@ -83,7 +83,10 @@ COLUMNS = [
     'open_time', 'entry_price', 'planned_entry', 'entry_wait_min',
     'stop_loss', 'tp1', 'tp2', 'rr', 'risk_usd', 'position_size',
     'notional_usd', 'leverage_eff',
-    'close_time', 'exit_price', 'exit_reason', 'tps_hit', 'duration_min',
+    'close_time', 'exit_price', 'exit_reason', 'tps_hit',
+    # Минута взятия каждой цели от входа, через «;». С 25.09.2026.
+    'tp_min',
+    'duration_min',
     # Минуты жизни сделки, прожитые без свечей. Ноль — сделка годится для
     # разбора; больше нуля — считалась по неполным данным. Колонка появилась
     # после того, как девять сделок из 23 оказались испорчены 193-часовым
@@ -118,6 +121,10 @@ COLUMNS = [
     # atr_pct — размах свечей в процентах цены, то есть насколько трясёт.
     # hour_utc — час суток: азиатская сессия и американская живут по-разному.
     'atr_pct', 'hour_utc',
+    # Режим рынка по BTC на момент заявки (market_regime.btc_regime): рост,
+    # падение, боковик — и его коэффициент эффективности. С 25.09.2026; до
+    # того разбор по режиму делался задним числом по дневным свечам.
+    'regime', 'regime_er',
     'breakeven_set',
     'why', 'confluence', 'poi_type', 'factors', 'sweep',
     'impulse_pct', 'score', 'proximity', 'htf_strength',
@@ -924,6 +931,13 @@ class PaperBroker:
                      f"импульс {impulse}"]
         ctx['why'] = ' · '.join(parts)
         ctx['geometry'] = PaperBroker._geometry(strategy, signal)
+        # Режим рынка по BTC на момент заявки — для журнала сетапов. Считает
+        # цикл бота (market_regime.btc_regime); здесь только чтение, без сети.
+        try:
+            import market_regime
+            ctx['regime'], ctx['regime_er'] = market_regime.last_btc_regime()
+        except Exception:                              # noqa: BLE001
+            ctx['regime'], ctx['regime_er'] = '', None
 
         # Разбор модели, если сделку открыла пятая стратегия. Своё «почему»
         # она пишет сама и человеческим языком — оно заменяет собранное выше
@@ -1241,7 +1255,7 @@ class PaperBroker:
         if ts >= order['expires_ts']:
             self._drop_pending(strategy, pair,
                                f"лимит не заполнен за "
-                               f"{self._expiry_hours(strategy):.0f}ч")
+                               f"{self._expiry_hours(strategy):.0f}ч", ts)
             return
 
         # Заполнение проверяем ПЕРВЫМ: чтобы цена дошла до инвалидации или до
@@ -1263,6 +1277,15 @@ class PaperBroker:
             self._fill(strategy, pair, order, ts, price, taker=stop_entry)
             return
 
+        # КАК БЛИЗКО ПОДОШЛА ЦЕНА И СКОЛЬКО УШЛА БЕЗ НАС — для журнала снятых
+        # заявок (setup_journal): зазор до входа в % (>0 — не дошла) и ход к
+        # цели в R от входа, пока заявка ждала. Решений не меняет.
+        risk = abs(limit - order['stop_loss'])
+        gap = ((low - limit) if is_long != stop_entry else (limit - high)) / limit * 100
+        run = max(0.0, ((high - limit) if is_long else (limit - low)) / risk) if risk else 0.0
+        order['min_gap_pct'] = round(min(order.get('min_gap_pct', gap), gap), 4)
+        order['best_run_r'] = round(max(order.get('best_run_r', run), run), 3)
+
         # Страховка на случай сетапа, у которого уровень инвалидации окажется
         # БЛИЖЕ к рынку, чем лимит. Пока обе стратегии ставят его дальше, и
         # эта ветка не срабатывает: цена не может дойти до инвалидации, не
@@ -1271,24 +1294,34 @@ class PaperBroker:
         if inv:
             broken = (low <= inv) if is_long else (high >= inv)
             if broken:
-                self._drop_pending(strategy, pair, f"сетап разрушен (${_fmt_p(inv)})")
+                self._drop_pending(strategy, pair, f"сетап разрушен (${_fmt_p(inv)})", ts)
                 return
 
         target = order['targets'][0]
         gone = (high >= target) if is_long else (low <= target)
         if gone:
-            self._drop_pending(strategy, pair, "цена дошла до цели без нас")
+            self._drop_pending(strategy, pair, "цена дошла до цели без нас", ts)
 
-    def _drop_pending(self, strategy, pair, reason):
+    def _drop_pending(self, strategy, pair, reason, ts=None):
         """
         Снять заявку и СКАЗАТЬ ОБ ЭТОМ. Молчала она до 23.09.2026: за четверо
         суток так тихо умерли 47 заявок (FIBO 23, SMC 18, ИИ 4, остальные 2).
         Событие общее для всех стратегий — это отчётность, а не решение, и
         правила изоляции оно не касается; выключается настройкой
         `plan_dropped`.
+
+        С 25.09.2026 снятая заявка пишется и в журнал сетапов (setup_journal):
+        до этого от неё оставались строка лога и сообщение, а разбирать, какие
+        сетапы не наливаются и почему, было не по чему.
         """
         order = self.state['pending'][strategy].pop(pair, None) or {}
         log(f"   👻 [{strategy}] {pair}: ордер снят — {reason}")
+        try:
+            import setup_journal
+            setup_journal.record_dropped(strategy, pair, order, reason,
+                                         ts if ts is not None else _now_ms())
+        except Exception:                              # noqa: BLE001
+            pass
         try:
             import telegram_notify as tg
             tg.plan_dropped(strategy, pair, order.get('direction', ''),
@@ -1436,6 +1469,9 @@ class PaperBroker:
             if not reached:
                 break
             index = pos['tp_hit']
+            # Минута взятия каждой цели от входа — для журнала сетапов: итог
+            # помнит, сколько целей взято, но не когда.
+            pos.setdefault('tp_min', []).append(int((ts - pos['opened_ts']) / 60000))
             if index < len(pos['targets']) - 1:
                 self._take_partial(pos, index, level)
                 if pos.get('breakeven_after_tp', True) and not pos['breakeven_set']:
@@ -1568,6 +1604,7 @@ class PaperBroker:
             'exit_price': round(exit_price, 8),
             'exit_reason': reason,
             'tps_hit': pos['tp_hit'],
+            'tp_min': ';'.join(str(m) for m in (pos.get('tp_min') or [])),
             'duration_min': int((ts - pos['opened_ts']) / 60000),
             # Сколько минут жизни сделки прошло без свечей. Ноль — сделка
             # прожита целиком и годится для разбора; всё остальное считалось
@@ -1599,10 +1636,19 @@ class PaperBroker:
                            else (round(net / pos['risk_amount'], 3) if pos['risk_amount'] else '')),
             'atr_pct': pos.get('atr_pct', ''),
             'hour_utc': pos.get('hour_utc', ''),
+            'regime': ctx.get('regime', ''),
+            'regime_er': ctx.get('regime_er') if ctx.get('regime_er') is not None else '',
             'breakeven_set': pos['breakeven_set'],
             'why': ctx.get('why', ''),
             'geometry': json.dumps(ctx.get('geometry') or {}, ensure_ascii=False),
             **_llm_columns(ctx.get('llm')),
+            # Только в полный дамп (JSONL), не в CSV: обоснование стопа и цели
+            # у ИИ и вердикт критика — их читает журнал сетапов.
+            'llm_stop_why': (ctx.get('llm') or {}).get('stop_why', ''),
+            'llm_tp_why': (ctx.get('llm') or {}).get('tp_why', ''),
+            'llm_critic': ((ctx.get('llm') or {}).get('critic') or {}).get('verdict', ''),
+            # Все цели плана: в колонках CSV помещаются две, у SMC их три.
+            'targets_all': ';'.join(f'{float(t):.10g}' for t in targets),
             'exit_reason_ru': glossary.exit_reason(reason),
             'confirmed_ru': '; '.join(ctx.get('confirmed') or []),
             'missing_ru': '; '.join(ctx.get('missing') or []),
@@ -1624,9 +1670,14 @@ class PaperBroker:
         pair = _norm(pair)
         if pair not in self.pending(strategy):
             return False, f'{pair}: ожидающего ордера нет'
-        self.state['pending'][strategy].pop(pair, None)
+        order = self.state['pending'][strategy].pop(pair, None) or {}
         self._save_state()
         log(f"🖐 [{strategy}] {pair}: ордер снят оператором")
+        try:
+            import setup_journal
+            setup_journal.record_dropped(strategy, pair, order, 'снят оператором', _now_ms())
+        except Exception:                              # noqa: BLE001
+            pass
         return True, f'{pair}: ордер снят'
 
     def move_to_breakeven(self, strategy, pair):

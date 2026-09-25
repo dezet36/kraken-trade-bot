@@ -406,6 +406,12 @@ def write(rows):
     csv_journal.append(CSV_PATH, COLUMNS, stamped, 'исходы вердиктов модели')
 
 
+def running_rows():
+    """Наблюдения, ещё не досмотренные (неделя не прошла), — строками файла."""
+    with _lock:
+        return [{'mode': config.TRADING_MODE, **row(w)} for w in _load()]
+
+
 def scoreboard(limit=40, since=None):
     """
     Счёт самой модели по её же планам: сколько дошло до цели раньше стопа,

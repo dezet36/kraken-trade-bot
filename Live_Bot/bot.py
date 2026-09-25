@@ -314,6 +314,17 @@ def _paper_cycle():
         log(f'   лента сделок: сборщик не запущен — {exc}')
     _watch_streams()
 
+    # Режим рынка по BTC — в журнал сетапов всех стратегий: брокер кладёт его
+    # в контекст заявки (market_regime.last_btc_regime), сам к бирже не ходит.
+    # Раз в сутки UTC; запрос тот же, что у SMC, и берётся из кэша свечей.
+    try:
+        import market_regime
+        from exchange import fetch_ohlcv
+        market_regime.btc_regime(
+            lambda tf, limit, sym: fetch_ohlcv(tf, limit=limit, symbol=sym, client=client))
+    except Exception as exc:                           # noqa: BLE001
+        log(f'   режим рынка для журнала не посчитан — {exc}')
+
     hour_utc = datetime.now(timezone.utc).hour
     total_opened = 0
     # Кандидаты этого цикла по стратегиям: их разбирает модель, когда доходит

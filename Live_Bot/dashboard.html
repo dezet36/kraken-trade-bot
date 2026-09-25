@@ -1006,6 +1006,14 @@
           </div>
         </div>
         <div class="panel"><div class="scroll" id="closed"></div></div>
+
+        <div class="panel-head bare" style="margin-top:26px">
+          <h2>Журнал сетапов</h2>
+          <span class="hint">всё, что стратегия нашла, и чем кончилось: сделки, снятые заявки,
+            отказы пределов, планы ИИ — строкой на сетап, для Excel</span>
+          <div class="row-end"><span class="hint" id="export-note-journal"></span></div>
+        </div>
+        <div class="panel"><div class="scroll" id="setup-journal"></div></div>
       </section>
 
       <!-- ── Аналитика ────────────────────────────────────────────────── -->
@@ -1729,15 +1737,26 @@ function inAppWindow() {
   return typeof window.pywebview !== 'undefined';
 }
 
+/* Журнал сетапов — у каждой стратегии свой: kind «journal-SMC». */
+function exportSpec(kind) {
+  if (kind.startsWith('journal-')) {
+    const s = kind.slice('journal-'.length);
+    return { url: '/api/journal.csv?strategy=' + encodeURIComponent(s),
+             title: 'журнал ' + (NAMES[s] || s) };
+  }
+  return EXPORT_KINDS[kind];
+}
+
 function exportNote(kind, text, bad) {
-  const box = el(kind === 'report' ? 'export-note-report' : 'export-note');
+  const box = el(kind === 'report' ? 'export-note-report'
+                 : kind.startsWith('journal-') ? 'export-note-journal' : 'export-note');
   if (!box) return;
   box.textContent = text;
   box.style.color = bad ? 'var(--bad)' : 'var(--ink-4)';
 }
 
 async function saveExport(kind) {
-  const spec = EXPORT_KINDS[kind];
+  const spec = exportSpec(kind);
   if (!spec) return;
   exportNote(kind, 'готовлю ' + spec.title + '…');
   try {
@@ -1753,7 +1772,7 @@ async function saveExport(kind) {
 }
 
 function downloadExport(kind) {
-  const spec = EXPORT_KINDS[kind];
+  const spec = exportSpec(kind);
   if (!spec) return;
   /* Через blob, а не переходом по ссылке: при переходе ошибка сервера
      открылась бы страницей вместо файла, и человек увидел бы пустой экран
@@ -4052,6 +4071,50 @@ function shadowView(sh) {
   box.innerHTML = live + done;
 }
 
+/* ── Журнал сетапов ─────────────────────────────────────────────────────── */
+/* Сводка по этапам и выгрузка: строка на сетап со всем, что о нём известно
+   (setup_journal.py). Числа здесь — сколько строк получит файл. */
+const JOURNAL_PLANS = ['план отклонён', 'план не дошёл до заявки', 'план ждёт условия',
+                       'план принят, заявки нет'];
+
+function journalView(sj) {
+  const box = document.getElementById('setup-journal');
+  if (!box) return;
+  const on = activeStrategies();
+  const rows = Object.entries(sj || {}).filter(([k]) => on.includes(k));
+  if (!rows.length) {
+    box.innerHTML = '<div class="empty">Журнал пока пуст</div>';
+    return;
+  }
+  const n = (st, key) => (st[key] || 0);
+  const dash = '<span style="color:var(--ink-4)">—</span>';
+  const cell = v => v ? v : dash;
+  const body = rows.map(([k, s]) => {
+    const st = s.stages || {};
+    const plans = JOURNAL_PLANS.reduce((a, key) => a + n(st, key), 0);
+    const tr = s.trades_r || 0;
+    const total = n(st, 'сделка')
+      ? `<span class="${cls(tr)}">${tr >= 0 ? '+' : ''}${tr.toFixed(2)} R</span>` : dash;
+    return `<tr>
+      <td><span class="key" style="background:${COLOR[k] || 'var(--ink-4)'}"></span>
+        ${esc(NAMES[k] || k)}</td>
+      <td>${cell(n(st, 'сделка'))}</td><td>${total}</td>
+      <td>${cell(n(st, 'позиция открыта') + n(st, 'заявка ждёт'))}</td>
+      <td>${cell(n(st, 'заявка снята'))}</td>
+      <td>${cell(n(st, 'не пустил предел'))}</td>
+      <td>${k === 'LLM' ? cell(plans) : dash}</td>
+      <td>${s.total || 0}</td>
+      <td><button type="button" class="btn ghost sm" data-export="journal-${esc(k)}"
+        ${s.total ? '' : 'disabled'}>Выгрузить CSV</button></td>
+    </tr>`;
+  }).join('');
+  box.innerHTML = `<table><thead><tr>
+      <th>Стратегия</th><th>Сделок</th><th>Итог сделок</th><th>Сейчас в работе</th>
+      <th>Снятых заявок</th><th>Не пустил предел</th><th>Планов ИИ без заявки</th>
+      <th>Всего строк</th><th></th>
+    </tr></thead><tbody>${body}</tbody></table>`;
+}
+
 /* ── Действия оператора ─────────────────────────────────────────────────── */
 /**
  * Разрешены только снижающие риск. Опасные требуют подтверждения: кнопка
@@ -4643,6 +4706,7 @@ function render() {
   }
   funnelView(DATA.funnel);
   shadowView(DATA.shadow);
+  journalView(DATA.setup_journal);
   regimeView(DATA.regime);
   attention(DATA.attention);
   restorePosCharts();

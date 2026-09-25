@@ -183,7 +183,7 @@ class TestTheReasonNamesTheRightNumber:
     def test_the_message_carries_that_number(self, broker):
         inst = make(broker)
         said = []
-        inst._drop_pending = lambda s, p, why: said.append(why)
+        inst._drop_pending = lambda s, p, why, ts=None: said.append(why)
         order = an_order(expires_ts=48 * HOUR)
         inst.state['pending']['SMC']['BTCUSDT'] = order
         inst._process_pending('SMC', 'BTCUSDT', order, 152 * HOUR,

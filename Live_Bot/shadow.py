@@ -259,6 +259,13 @@ def write(rows):
     csv_journal.append(CSV_PATH, COLUMNS, stamped, 'тени отказов')
 
 
+def running_rows():
+    """Тени, ещё не досмотренные, — строками файла с исходом «идёт»."""
+    with _lock:
+        active = [dict(s) for s in _load()]
+    return [{'mode': config.TRADING_MODE, **row(s), 'outcome': 'идёт'} for s in active]
+
+
 def snapshot(price_of=None, closed_limit=400):
     """
     Для панели: тени, живые сейчас, и итог досмотренных по стратегиям и воротам.

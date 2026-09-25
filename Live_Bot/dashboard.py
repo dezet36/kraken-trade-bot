@@ -767,6 +767,12 @@ def build_payload():
         payload['shadow'] = shadow.snapshot()
     except Exception:                                  # noqa: BLE001
         payload['shadow'] = {'active': [], 'closed': {}}
+    # Журнал сетапов: сколько их на каждом этапе по стратегиям (setup_journal).
+    try:
+        import setup_journal
+        payload['setup_journal'] = setup_journal.summary(_journal_strategies(), _broker)
+    except Exception:                                  # noqa: BLE001
+        payload['setup_journal'] = {}
     payload['regime'] = _regime()
     payload['portfolio'] = _portfolio()
     payload['errors'] = _errors_summary()
@@ -1459,6 +1465,27 @@ def export_paths():
     return JOURNAL_FILE, os.path.join(config.DATA_DIR, 'trades_detail.jsonl')
 
 
+def _journal_strategies():
+    """Стратегии фантомного счёта — у каждой свой журнал сетапов."""
+    if _broker is not None:
+        return tuple(_broker.strategies)
+    import paper_broker
+    return paper_broker.STRATEGIES
+
+
+def _journal_export(strategy):
+    """
+    (байты, имя файла) журнала сетапов одной стратегии — собирается на лету
+    из первоисточников (setup_journal). ValueError — такой стратегии нет.
+    """
+    import setup_journal
+    known = _journal_strategies()
+    if strategy not in known:
+        raise ValueError(f'нет стратегии «{strategy}»; есть: {", ".join(known)}')
+    rows = setup_journal.build(strategy, _broker)
+    return setup_journal.to_csv(rows), setup_journal.filename(strategy)
+
+
 # ── HTTP ─────────────────────────────────────────────────────────────────────
 
 class _Handler(BaseHTTPRequestHandler):
@@ -1492,6 +1519,25 @@ class _Handler(BaseHTTPRequestHandler):
             self._send_file(export_paths()[1], 'application/x-ndjson; charset=utf-8')
         elif path == '/api/export/save':
             self._save_export()
+        elif path == '/api/journal.csv':
+            # Журнал сетапов одной стратегии: сделки, снятые заявки, отказы
+            # пределов, планы ИИ — строкой на сетап (setup_journal).
+            from urllib.parse import parse_qs, urlparse
+            strategy = (parse_qs(urlparse(self.path).query).get('strategy') or [''])[0].upper()
+            try:
+                body, name = _journal_export(strategy)
+            except ValueError as exc:
+                self._fail(400, str(exc))
+                return
+            except Exception as exc:                   # noqa: BLE001
+                self._fail(500, f'журнал не собрался: {exc}')
+                return
+            self.send_response(200)
+            self.send_header('Content-Type', 'text/csv; charset=utf-8')
+            self.send_header('Content-Disposition', f'attachment; filename="{name}"')
+            self.send_header('Content-Length', str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
         elif path == '/api/whoami':
             # КТО ДЕРЖИТ ПОРТ. Отвечает только наше приложение, и по ответу его
             # можно узнать наверняка — в отличие от имени процесса и командной
@@ -1796,6 +1842,8 @@ class _Handler(BaseHTTPRequestHandler):
                 import report
                 body = report.build().encode('utf-8')
                 name = report.filename()
+            elif kind.startswith('journal-'):
+                body, name = _journal_export(kind[len('journal-'):].upper())
             else:
                 source = export_paths()[1 if kind == 'jsonl' else 0]
                 if not os.path.exists(source):

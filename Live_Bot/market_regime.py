@@ -152,6 +152,45 @@ def describe(regime, er, threshold, multiplier=1.0):
     return f'{regime} (ER {er:.3f} при пороге {threshold:.3f}){tail}'
 
 
+_btc_cache = {}          # день UTC -> (режим, ER)
+
+
+def _utc_day(now=None):
+    from datetime import datetime, timezone
+    return (now or datetime.now(timezone.utc)).strftime('%Y-%m-%d')
+
+
+def btc_regime(fetch, now=None):
+    """
+    Режим рынка по дневным свечам SYMBOL — для журнала сетапов всех стратегий.
+
+    fetch(timeframe, limit, symbol) -> DataFrame свечей. Считается раз в сутки
+    UTC: дневная свеча закрывается в полночь, и до следующей ответ тот же.
+    Запрос тот же, что у SMC (ER_WINDOW + MIN_HISTORY + 30 дневных свечей), и
+    внутри цикла берётся из кэша свечей. -> (режим, ER) или ('', None), если
+    считать не из чего: отказ — прочерк, торговля от журнала не зависит.
+    """
+    day = _utc_day(now)
+    if day in _btc_cache:
+        return _btc_cache[day]
+    try:
+        import market_structure
+        df = market_structure.drop_forming_candle(fetch('1d', ER_WINDOW + MIN_HISTORY + 30, SYMBOL))
+        if df is None or len(df) < ER_WINDOW + 2:
+            return '', None
+        name, er, _threshold = classify(df['close'].to_numpy())
+    except Exception:                                  # noqa: BLE001
+        return '', None
+    _btc_cache.clear()
+    _btc_cache[day] = (name or 'неизвестен', round(float(er), 3) if er is not None else None)
+    return _btc_cache[day]
+
+
+def last_btc_regime(now=None):
+    """Посчитанный сегодня режим, без запроса к бирже. ('', None), если нет."""
+    return _btc_cache.get(_utc_day(now), ('', None))
+
+
 def volatility_pct(high, low, close, period=14):
     """
     Насколько трясёт: средний истинный диапазон в процентах от цены.
