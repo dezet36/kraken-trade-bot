@@ -117,7 +117,7 @@ def _prepare(df):
 
 def simulate_order(order, exec_arrays, start_pos, risk_amount,
                    breakeven_after_tp1=True, max_hold_hours=336.0,
-                   cancel_at_target=False):
+                   cancel_at_target=False, info=None):
     """
     Проводит один ордер через свечи исполнения: ожидание налива, затем ведение
     позиции до выхода.
@@ -139,6 +139,10 @@ def simulate_order(order, exec_arrays, start_pos, risk_amount,
     is_stop_entry = getattr(order, 'entry_type', 'limit') == 'stop'
 
     # ── Фаза 1: ждём налива ──────────────────────────────────────────────
+    # info['pending_end'] — когда умерла неналившаяся заявка (срок, снятие у
+    # цели, конец данных): по нему портфель держит пару занятой, как брокер.
+    if info is not None:
+        info['pending_end'] = order.expires
     fill_pos = None
     for i in range(start_pos, size):
         if ts[i] > order.expires:
@@ -156,9 +160,13 @@ def simulate_order(order, exec_arrays, start_pos, risk_amount,
         if cancel_at_target and order.targets:
             first = order.targets[0]
             if (high[i] >= first) if is_long else (low[i] <= first):
+                if info is not None:
+                    info['pending_end'] = ts[i]
                 return None
 
     if fill_pos is None:
+        if info is not None and size:
+            info['pending_end'] = min(order.expires, ts[-1])
         return None   # ордер не налился — сделки не было
 
     entry = order.entry
@@ -375,7 +383,9 @@ def simulate_order(order, exec_arrays, start_pos, risk_amount,
 def run_portfolio(orders, exec_data, risk_pct=1.0, max_positions=5,
                   cooldown_hours=12.0, initial_balance=INITIAL_BALANCE,
                   breakeven_after_tp1=True, max_hold_hours=336.0,
-                  max_same_direction=0, risk_scale=None, cancel_at_target=False):
+                  max_same_direction=0, risk_scale=None, cancel_at_target=False,
+                  occupy_while_pending=False, cooldown_from_placement=False,
+                  pending_in_cap=True):
     """
     Портфельная симуляция: ордера в хронологическом порядке, ограничения по
     числу позиций и кулдауну, риск считается от ТЕКУЩЕГО баланса.
@@ -388,6 +398,16 @@ def run_portfolio(orders, exec_data, risk_pct=1.0, max_positions=5,
         этого крючка отличить «торговать меньше» от «не торговать» нельзя.
         Множитель обязан считаться ТОЛЬКО по прошлым данным на момент
         order.created — иначе в симуляцию попадёт будущее.
+    Три правила живого брокера (paper_broker), которых движок до 25.09.2026 не
+    знал, — переключателями, чтобы мерить их цену для каждой стратегии:
+    cancel_at_target        — заявка снимается, когда цена дошла до первой цели
+                              без входа («цена дошла до цели без нас»);
+    occupy_while_pending    — неналитая заявка занимает пару, пока живёт;
+                              pending_in_cap=True — и считается в
+                              направленном кэпе (брокер считает позиции И
+                              заявки), False — кэп только по позициям;
+    cooldown_from_placement — пауза по паре идёт и с постановки заявки, а не
+                              только с выхода из сделки.
     """
     prepared = {pair: _prepare(df) for pair, df in exec_data.items()}
     positions = {}
@@ -447,18 +467,33 @@ def run_portfolio(orders, exec_data, risk_pct=1.0, max_positions=5,
             skipped['risk_zero'] = skipped.get('risk_zero', 0) + 1
             continue
         risk_amount = balance * risk_pct / 100 * scale
+        info = {}
         result = simulate_order(
             order, arrays, start_pos, risk_amount,
             breakeven_after_tp1=breakeven_after_tp1,
             max_hold_hours=max_hold_hours,
             cancel_at_target=cancel_at_target,
+            info=info,
         )
 
         # Ключ помечаем использованным независимо от исхода: зона отработана
         seen_keys.add(order.key)
 
+        # Пауза с постановки — брокер ставит её, выставляя лимит.
+        if cooldown_from_placement:
+            until = created + np.timedelta64(int(cooldown_hours * 3600), 's')
+            if order.pair not in cooldown or cooldown[order.pair] < until:
+                cooldown[order.pair] = until
+
         if result is None:
             skipped['no_fill'] += 1
+            # Пока заявка жила, пара была занята — у брокера на ней «уже есть заявка».
+            # И считалась в направленном кэпе: брокер считает позиции И заявки.
+            if occupy_while_pending and info.get('pending_end') is not None:
+                end = max(active.get(order.pair, info['pending_end']), info['pending_end'])
+                active[order.pair] = end
+                if pending_in_cap:
+                    active_dir[order.pair] = (end, order.direction)
             continue
 
         balance += result['pnl']
