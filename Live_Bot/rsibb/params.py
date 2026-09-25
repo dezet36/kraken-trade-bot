@@ -160,6 +160,5 @@ MAX_ENTRY_COST_SHARE_PCT = _f('MAX_ENTRY_COST_SHARE_PCT', 8.0)
 
 # ── Портфель ─────────────────────────────────────────────────────────────────
 RISK_PCT = _f('RISK_PCT', 0.5)
-MAX_POSITIONS = _i('MAX_POSITIONS', 6)
 COOLDOWN_HOURS = _f('COOLDOWN_HOURS', 2.0)
 MAX_SAME_DIRECTION = _i('MAX_SAME_DIRECTION', 0)

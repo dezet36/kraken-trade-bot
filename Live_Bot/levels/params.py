@@ -146,7 +146,6 @@ MIN_TARGET_R = _f('MIN_TARGET_R', 1.75)
 RISK_PCT = _f('RISK_PCT', 0.5)
 
 # ── Портфель ─────────────────────────────────────────────────────────────────
-MAX_POSITIONS = _i('MAX_POSITIONS', 6)
 COOLDOWN_HOURS = _f('COOLDOWN_HOURS', 6.0)
 MAX_SAME_DIRECTION = _i('MAX_SAME_DIRECTION', 0)   # 0 — без лимита
 MAX_HOLD_HOURS = _f('MAX_HOLD_HOURS', 168.0)
