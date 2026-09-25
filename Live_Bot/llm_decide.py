@@ -915,8 +915,9 @@ def check(parsed, levels, answer=None, market=None, min_stop=None, atr_pct=None)
                                 (market or {}).get('atr_day_pct'))
     if reach:
         return _refusal('цель недостижима', reach, base)
-    # Стоп у скопления стопов и в зоне 4ч — пометки, не отказы: отклонённые
-    # по ним планы дали бы плюс (п. 37); журнал копит исходы для проверки.
+    # Стоп у скопления стопов и в зоне 4ч — пометки, не отказы (п. 47, 48):
+    # отклонённые ими планы при исполнении бота почти не доходили до входа,
+    # вреда не видно; журнал копит исходы для проверки.
     marks = [m for m in (stop_in_liquidity(side, stop, market, atr_pct, stop_level=stop_level),
                          stop_in_higher_zone(stop, market)) if m]
     base['obstacles'] = marks + obstacles_to_target(side, entry, targets[0], market)
