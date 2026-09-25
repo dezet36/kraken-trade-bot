@@ -97,6 +97,13 @@ _work_lock = threading.Lock()
 _busy = None            # пара, которая разбирается прямо сейчас
 _done = []              # готовые вердикты, ждут ближайшего цикла
 _thread = None
+_unasked = []           # пары пачки, до которых поток не дошёл, — вернуть в очередь
+
+# Отказы, которые код выносит ДО вопроса модели, за доли секунды. После такого
+# поток сразу берёт следующую пару пачки: 25.09.2026 AAVE, AVAX и LINK подряд
+# получили «нет законного плана», и модель простояла три цикла — 15 минут.
+QUICK_GATES = ('нет разметки', 'нет законного стопа', 'нет законного плана')
+BATCH = 3
 
 
 def busy():
@@ -116,9 +123,32 @@ def join(timeout=None):
         thread.join(timeout)
 
 
-def _run(pair, df, market, submitted):
-    """Разбор одной пары. Идёт в своём потоке, минутами."""
+def _run(batch, submitted):
+    """
+    Разбор пачки [(pair, df, market), ...] в своём потоке, минутами.
+
+    Следующая пара берётся, только если предыдущая кончилась отказом без
+    модели (QUICK_GATES); иначе остаток возвращается в очередь — к концу
+    разбора его разметка устарела бы.
+    """
     global _busy
+    for i, (pair, df, market) in enumerate(batch):
+        if i:
+            with _work_lock:
+                _busy = pair
+            # Та же строка, что при отправке из цикла: по ней сторожа видят разбор в полёте.
+            log(f'   {NAME} {pair}: отдал модели на разбор, вердикт будет через несколько минут')
+        verdict = _decide_one(pair, df, market)
+        with _work_lock:
+            _done.append((pair, df, verdict, submitted))
+            if verdict.get('gate') not in QUICK_GATES or i == len(batch) - 1:
+                _unasked.extend(p for p, _df, _m in batch[i + 1:])
+                _busy = None
+                return
+
+
+def _decide_one(pair, df, market):
+    """Разбор одной пары: вердикт записан в журнал, тяжёлые поля сняты."""
     try:
         # Прошлые разборы этой пары читаются здесь, в потоке: файл журнала
         # растёт на строку за разбор, и чтение его целиком — секунды, а не
@@ -143,23 +173,32 @@ def _run(pair, df, market, submitted):
         # «модель ничего не находит».
         log(f'⚠️ {NAME} {pair}: разбор оборвался — {exc}')
         verdict = {'ok': False, 'gate': 'разбор оборвался', 'detail': str(exc)[:200]}
-    with _work_lock:
-        _done.append((pair, df, verdict, submitted))
-        _busy = None
+    return verdict
 
 
-def _submit(pair, df, market=None):
-    """Отдаёт пару модели. False — она занята предыдущей."""
+def _submit(batch):
+    """Отдаёт пачку [(pair, df, market), ...] модели. False — она занята."""
     global _busy, _thread
+    if not batch:
+        return False
     with _work_lock:
         if _busy is not None:
             return False
-        _busy = pair
-    _thread = threading.Thread(target=_run,
-                               args=(pair, df, market, time.time()),
+        _busy = batch[0][0]
+    _thread = threading.Thread(target=_run, args=(list(batch), time.time()),
                                name='llm-decide', daemon=True)
     _thread.start()
     return True
+
+
+def _release_unasked():
+    """Пары пачки, до которых поток не дошёл, снова в очереди: метку «спрошена» снять."""
+    with _work_lock:
+        left = list(_unasked)
+        _unasked.clear()
+    for pair in left:
+        _asked.pop(pair, None)
+        _asked_sig.pop(pair, None)
 
 
 def _harvest():
@@ -747,9 +786,10 @@ def scan_for_setups(pairs, gate, client=None, balance=None, candles=None,
     Забирает готовые вердикты и отдаёт модели следующую пару. Не ждёт.
 
     pairs — ликвидные пары этого цикла, те же, что получают остальные
-    стратегии. Обходятся по кругу: одна пара за цикл, потому что модель
-    разбирает одну за пять-семь минут и очередь длиннее единицы означала бы
-    вердикты о разметке, которой к их приходу уже нет.
+    стратегии. Обходятся по кругу: модели — одна пара за цикл, потому что
+    разбор идёт минутами, и очередь длиннее единицы означала бы вердикты о
+    разметке, которой к их приходу уже нет. Потоку отдаётся пачка до BATCH
+    пар: следующую он берёт, только если код отказал без модели (QUICK_GATES).
 
     candles(pair) -> df — откуда брать свечи. Отдельным параметром, чтобы
     проверки обходились без сети. Свечи берутся ЗДЕСЬ, в цикле, и передаются
@@ -780,6 +820,7 @@ def scan_for_setups(pairs, gate, client=None, balance=None, candles=None,
     _frames = frames
 
     out = _collect(_harvest(), candles)
+    _release_unasked()
     out += _check_armed(candles)
 
     if market is None:
@@ -808,7 +849,10 @@ def scan_for_setups(pairs, gate, client=None, balance=None, candles=None,
         log(f'   {NAME}: все пары разобраны недавно или заняты планами, жду')
         return out
 
+    batch = []
     for pair in queue:
+        if len(batch) >= BATCH:
+            break
         try:
             df = candles(pair)
         except Exception as exc:                   # noqa: BLE001
@@ -824,17 +868,20 @@ def scan_for_setups(pairs, gate, client=None, balance=None, candles=None,
         except Exception as exc:                   # noqa: BLE001
             log(f'   {NAME} {pair}: снимок рынка не собран — {exc}')
             facts = None
+        batch.append((pair, df, facts))
 
-        # Метка ставится ПРИ ОТПРАВКЕ, а не по ответу: иначе следующий цикл
-        # отдал бы ту же пару второй раз, пока первая ещё разбирается. И
-        # только если отправка удалась — запомнив неотправленную пару, мы на
-        # час перестали бы спрашивать о том, чего модель не видела.
-        if _submit(pair, df, facts):
+    # Метка ставится ПРИ ОТПРАВКЕ, а не по ответу: иначе следующий цикл
+    # отдал бы ту же пару второй раз, пока первая ещё разбирается. И
+    # только если отправка удалась — запомнив неотправленную пару, мы на
+    # час перестали бы спрашивать о том, чего модель не видела. Пары пачки,
+    # до которых поток не дойдёт, вернёт _release_unasked.
+    if _submit(batch):
+        for pair, _df, _facts in batch:
             _remember(pair)
-            _cursor = (list(pairs).index(pair) + 1) % max(1, len(pairs))
-            log(f'   {NAME} {pair}: отдал модели на разбор, вердикт будет '
-                f'через несколько минут')
-        break
+        first = batch[0][0]
+        _cursor = (list(pairs).index(first) + 1) % max(1, len(pairs))
+        log(f'   {NAME} {first}: отдал модели на разбор, вердикт будет '
+            f'через несколько минут')
     return out
 
 

@@ -121,8 +121,8 @@ def build(level_ids, prices=None, min_stop_pct=0.0, min_rr=0.0, stop_buffer_pct=
     уверенность без сомнений, а на рынке её не бывает: такое число говорит не о
     сетапе, а о том, что модель себя не откалибровала.
 
-    branch_ok(side, entry_price, stop_level_price) — ворота кода, которые
-    знают только сторону, вход и стоп (llm_decide.branch_filter).
+    branch_ok(side, entry_id, stop_id) — ворота кода, которые знают только
+    сторону, вход и стоп (llm_decide.branch_filter).
     """
     if not level_ids:
         return with_thinking(_skip_only(), think_chars)
@@ -342,9 +342,8 @@ def _plans(level_ids, prices=None, min_stop_pct=0.0, min_rr=0.0, stop_buffer_pct
             lower = list(level_ids[index + 1:])
             stops, targets = (lower, higher) if side == 'LONG' else (higher, lower)
             stops = [s for s in stops if far_enough(entry, s, max(0.0, min_stop_pct - buffer))]
-            if branch_ok and entry in price_of:
-                stops = [s for s in stops
-                         if s in price_of and branch_ok(side, price_of[entry], price_of[s])]
+            if branch_ok:
+                stops = [s for s in stops if branch_ok(side, entry, s)]
             # R:R ЦЕЛИКОМ В ГРАММАТИКЕ: ветка на каждую пару «вход + стоп», и
             # цели в ней — только те, что дальше min_rr × дистанции ЭТОГО
             # стопа. 19 сентября 2026 ETH: 5 факторов из 5, план в тексте, и

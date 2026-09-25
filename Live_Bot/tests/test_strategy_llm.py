@@ -80,6 +80,7 @@ def _forget_previous_pairs(tmp_path):
     strategy_llm._refused.clear()
     strategy_llm._reasons.clear()
     strategy_llm._done.clear()
+    strategy_llm._unasked.clear()
     strategy_llm._busy = None
     strategy_llm._cursor = 0
     strategy_llm._armed.clear()
@@ -138,6 +139,34 @@ class TestItWalksThePairsInTurn:
                                          candles=lambda pair: [0] * 500)
             strategy_llm.join(15)
         assert asked == PAIRS
+
+    def test_a_refusal_without_the_model_takes_the_next_pair_at_once(self, monkeypatch):
+        """
+        Отказ кода до вопроса модели — не повод ждать цикл: 25.09.2026 AAVE,
+        AVAX и LINK подряд получили «нет законного плана», модель стояла 15 минут.
+        """
+        asked = []
+
+        def decide(pair, *args, **kwargs):
+            asked.append(pair)
+            gate = 'нет законного плана' if pair == 'BTCUSDT' else 'модель пропустила'
+            return {'ok': False, 'gate': gate, 'detail': ''}
+
+        monkeypatch.setattr(strategy_llm.llm_local, 'available', lambda: True)
+        monkeypatch.setattr(strategy_llm.llm_decide, 'decide', decide)
+        strategy_llm.scan_for_setups(PAIRS, gate=None, candles=lambda pair: [0] * 500)
+        strategy_llm.join(15)
+        assert asked == ['BTCUSDT', 'ETHUSDT'], 'после ответа модели пачка обрывается'
+
+    def test_pairs_the_thread_did_not_reach_return_to_the_queue(self, monkeypatch):
+        asked = []
+        monkeypatch.setattr(strategy_llm.llm_local, 'available', lambda: True)
+        monkeypatch.setattr(strategy_llm.llm_decide, 'decide', refusing_decide(asked))
+        strategy_llm.scan_for_setups(PAIRS, gate=None, candles=lambda pair: [0] * 500)
+        strategy_llm.join(15)
+        strategy_llm._release_unasked()
+        assert asked == ['BTCUSDT']
+        assert set(strategy_llm._asked) == {'BTCUSDT'}, 'неразобранные пары снова в очереди'
 
     def test_a_pair_without_candles_is_skipped_not_fatal(self, monkeypatch):
         asked = []

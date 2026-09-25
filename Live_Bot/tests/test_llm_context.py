@@ -570,3 +570,8 @@ class TestLegalEntriesAreShownAsASpan:
 
     def test_nothing_legal_is_said_plainly(self):
         assert llm_context._id_span([], self.ORDER) == 'НИ ОДИН'
+
+    def test_gaps_split_the_span_into_runs(self):
+        order = [f'L{i}' for i in range(1, 11)]
+        ids = ['L1', 'L2', 'L3', 'L5', 'L7', 'L8', 'L9', 'L10']
+        assert llm_context._id_span(ids, order) == 'L1–L3, L5, L7–L10'

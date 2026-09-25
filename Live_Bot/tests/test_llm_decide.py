@@ -1087,11 +1087,12 @@ class TestAPlanTheCodeWouldRefuseCannotBeWritten:
     PRICES = [lv['price'] for lv in LEVELS]
     IDS = [lv['id'] for lv in LEVELS]
 
-    def _rules(self, market):
+    def _rules(self, market, levels=LEVELS):
         import llm_grammar
-        grammar = llm_grammar.build(self.IDS, prices=self.PRICES, min_rr=2.0,
+        grammar = llm_grammar.build([lv['id'] for lv in levels],
+                                    prices=[lv['price'] for lv in levels], min_rr=2.0,
                                     stop_buffer_pct=dec.stop_hunt_pct(),
-                                    branch_ok=dec.branch_filter(market))
+                                    branch_ok=dec.branch_filter(levels, market))
         return llm_grammar.rules_of(grammar)
 
     def test_an_entry_on_the_dead_side_of_the_break_is_not_offered(self):
@@ -1115,10 +1116,30 @@ class TestAPlanTheCodeWouldRefuseCannotBeWritten:
         assert 'long-l3-l4' in self._rules({})
 
     def test_legal_entries_lie_on_the_live_side(self):
+        # Живая сторона: лонг ≥ 99 — L1..L3, шорт ≤ 101 — L3..L5; минус пулы
+        # чужой стороны: L1 (скопление максимумов) для лонга, L4 (минимумов) для шорта.
         market = {'structure_break': {'poi': {'long': 99.0, 'short': 101.0, 'tf': '1ч'}}}
         ok = dec.legal_entry_ids(LEVELS, market)
-        assert ok['LONG'] == ['L1', 'L2', 'L3']
-        assert ok['SHORT'] == ['L3', 'L4', 'L5']
+        assert ok['LONG'] == ['L2', 'L3']
+        assert ok['SHORT'] == ['L3', 'L5']
+
+    def test_a_long_from_the_shorts_stop_pool_is_not_offered(self):
+        """
+        Лонг от пула стопов шортов (EQH) — покупка на вершине выноса, отказ при
+        любом условии: 10 из 11 отказов «вход на пуле стопов», ZEC 25.09 дважды.
+        """
+        levels = [
+            {'id': 'L1', 'price': 118.0, 'kind': 'пивот-максимум'},
+            {'id': 'L2', 'price': 105.0, 'kind': 'равные экстремумы EQH'},
+            {'id': 'L3', 'price': 100.0, 'kind': 'низ зоны ордер-блок'},
+            {'id': 'L4', 'price': 97.0, 'kind': 'пивот-минимум'},
+            {'id': 'L5', 'price': 90.0, 'kind': 'пивот-минимум'},
+        ]
+        assert dec.wrong_pool_entry('LONG', levels[1])
+        assert not dec.wrong_pool_entry('SHORT', levels[1])
+        rules = self._rules({}, levels)
+        assert 'long-l2-l3' not in rules
+        assert 'long-l3-l4' in rules, 'вход из зоны законен'
 
     def test_without_a_legal_branch_the_model_is_not_asked(self, monkeypatch):
         asked = []
@@ -1128,7 +1149,7 @@ class TestAPlanTheCodeWouldRefuseCannotBeWritten:
             return answer()
 
         monkeypatch.setattr(dec, 'branch_filter',
-                            lambda market, atr_pct=None: (lambda *a: False))
+                            lambda *a, **k: (lambda *x: False))
         out = dec.decide('BTCUSDT', _random_df(5), ask)
         assert out['gate'] == 'нет законного плана', out.get('gate')
         assert asked == [], 'модель не должна быть спрошена'

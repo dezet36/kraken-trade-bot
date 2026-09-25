@@ -473,7 +473,7 @@ def legal_stop_ids(levels, market, price, atr_pct=None, tf='poi'):
 
 
 def legal_entry_ids(levels, market, tf='poi'):
-    """Уровни, вход от которых не отвергнут слом структуры и старший тренд."""
+    """Уровни, вход от которых не отвергнут слом структуры, старший тренд и пул чужой стороны."""
     out = {'LONG': [], 'SHORT': []}
     for side in ('LONG', 'SHORT'):
         if plan_against_higher_trend(side, market):
@@ -486,20 +486,27 @@ def legal_entry_ids(levels, market, tf='poi'):
                 continue
             if brk and ((side == 'LONG' and level < brk) or (side == 'SHORT' and level > brk)):
                 continue
+            if wrong_pool_entry(side, lv):
+                continue
             out[side].append(lv.get('id'))
     return out
 
 
-def branch_filter(market, atr_pct=None):
+def branch_filter(levels, market, atr_pct=None):
     """
-    Сочетание «сторона + вход + стоп», которое `check` не отвергнет, — для
-    грамматики: те ворота, которым не нужны цель, условие и текст. Неверный
-    план становится невыразимым, а не отвергаемым (п. 47 замечаний ИИ).
+    Сочетание «сторона + вход + стоп» (номера уровней), которое `check` не
+    отвергнет, — для грамматики: те ворота, которым не нужны цель, условие и
+    текст. Неверный план становится невыразимым, а не отвергаемым (п. 47).
     """
     buffer = stop_hunt_pct(atr_pct)
+    by_id = {lv.get('id'): lv for lv in levels or ()}
 
-    def ok(side, entry, stop_level):
-        if plan_against_higher_trend(side, market):
+    def ok(side, entry_id, stop_id):
+        e, s = by_id.get(entry_id), by_id.get(stop_id)
+        if not e or not s:
+            return True
+        entry, stop_level = float(e['price']), float(s['price'])
+        if plan_against_higher_trend(side, market) or wrong_pool_entry(side, e):
             return False
         stop = (stop_level * (1 - buffer / 100) if side == 'LONG'
                 else stop_level * (1 + buffer / 100))
@@ -535,6 +542,25 @@ def _pool_sides(kind):
     return sides
 
 
+def _pool_of(level):
+    """Чьи стопы за уровнем-пулом ({'SSL','BSL'}, может быть пусто); None — не пул или зона."""
+    kind = str((level or {}).get('kind', ''))
+    names = [n.strip() for n in kind.split('/')]
+    if any(any(z in n for z in ZONE_KINDS) for n in names):
+        return None
+    if not any(any(p in n for p in POOL_KINDS) for n in names):
+        return None
+    return _pool_sides(kind)
+
+
+def wrong_pool_entry(side, level):
+    """Вход от пула ЧУЖОЙ стороны — `entry_on_pool` отвергает его при любом условии."""
+    sides = _pool_of(level) or set()
+    own = 'SSL' if side == 'LONG' else 'BSL'
+    wrong = 'BSL' if side == 'LONG' else 'SSL'
+    return wrong in sides and own not in sides
+
+
 def entry_on_pool(parsed, levels):
     """
     Вход стоит на пуле чужих стопов. Описание или ''.
@@ -548,20 +574,12 @@ def entry_on_pool(parsed, levels):
     """
     entry_id = (parsed.get('ids') or {}).get('entry')
     level = next((lv for lv in (levels or []) if lv.get('id') == entry_id), None)
-    if not level:
+    if not level or _pool_of(level) is None:
         return ''
     kind = str(level.get('kind', ''))
-    names = [n.strip() for n in kind.split('/')]
-    if any(any(z in n for z in ZONE_KINDS) for n in names):
-        return ''
-    if not any(any(p in n for p in POOL_KINDS) for n in names):
-        return ''
     side = parsed.get('side')
-    sides = _pool_sides(kind)
-    own = 'SSL' if side == 'LONG' else 'BSL'
-    wrong = 'BSL' if side == 'LONG' else 'SSL'
     head = f'вход {entry_id} {level.get("price"):.6g} — {kind}: там чужие стопы'
-    if wrong in sides and own not in sides:
+    if wrong_pool_entry(side, level):
         return (f'{head}; {"лонг на стопах шортов — покупка на вершине выноса" if side == "LONG" else "шорт на стопах лонгов — продажа в дно выноса"}; '
                 f'для {side} это цель, а вход — из зоны инициатора')
     if (parsed.get('trigger_when') or 'now') == 'sweep_reclaim':
@@ -1047,7 +1065,8 @@ def decide(pair, df, ask, news=None, at=None, max_tokens=None, market=None,
                                 min_rr=MIN_RR,
                                 stop_buffer_pct=stop_hunt_pct(facts.get('atr_pct')),
                                 think_chars=getattr(config, 'LLM_THINK_CHARS', 0),
-                                branch_ok=branch_filter(facts.get('market'), facts.get('atr_pct')))
+                                branch_ok=branch_filter(levels, facts.get('market'),
+                                                        facts.get('atr_pct')))
     # Ни одного плана, который пропустит код, — разбор был бы получасом впустую.
     if 'enter' not in llm_grammar.rules_of(grammar):
         return _refusal('нет законного плана',

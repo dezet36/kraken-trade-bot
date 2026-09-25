@@ -1107,13 +1107,18 @@ def market_lines(market, price_now):
 
 
 def _id_span(ids, order):
-    """«L3–L9», если уровни идут подряд по таблице; иначе список; пусто — «НИ ОДИН»."""
+    """Три и больше подряд по таблице — «L3–L9», остальные через запятую; пусто — «НИ ОДИН»."""
     idx = sorted(order.index(i) for i in (ids or ()) if i in order)
     if not idx:
         return 'НИ ОДИН'
-    if len(idx) > 2 and idx == list(range(idx[0], idx[-1] + 1)):
-        return f'{order[idx[0]]}–{order[idx[-1]]}'
-    return ', '.join(order[i] for i in idx)
+    parts, start = [], idx[0]
+    for a, b in zip(idx, idx[1:] + [None]):
+        if b == a + 1:
+            continue
+        parts += ([f'{order[start]}–{order[a]}'] if a - start >= 2
+                  else [order[i] for i in range(start, a + 1)])
+        start = b
+    return ', '.join(parts)
 
 
 def _regime_line(r):

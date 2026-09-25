@@ -155,6 +155,23 @@ def _completion(body, timeout):
 
 THINK_CLOSE = '</think>' + chr(10) + chr(10)
 
+# Токены прошлого вопроса. Переделка повторяет его целиком и дописывает
+# замечание — прогрев ей вреден: он откатил бы слот к системному префиксу, и
+# разметку пришлось бы читать заново (ZEC 25.09.2026: 5283 токена, 580 с из
+# 850). Без прогрева сервер сам откатится к контрольной точке, которую
+# поставил за 516 токенов до конца прошлого вопроса.
+_last_ids = []
+SAME_QUESTION_SHARE = 0.8
+
+
+def _continues_last(ids):
+    """Вопрос повторяет прошлый почти целиком — это переделка, а не новая пара."""
+    n = min(len(ids), len(_last_ids))
+    i = 0
+    while i < n and ids[i] == _last_ids[i]:
+        i += 1
+    return bool(_last_ids) and i >= SAME_QUESTION_SHARE * len(_last_ids)
+
 
 def ask(prompt, grammar=None, max_tokens=None, timeout=None):
     """
@@ -185,10 +202,13 @@ def ask(prompt, grammar=None, max_tokens=None, timeout=None):
     text = _chatml(prompt + ('\n' + config.LLM_THINK_TAG if config.LLM_THINK_TAG else '')) + think_open
     # Вопрос уходит токенами, а не строкой: так префикс прогрева и начало
     # вопроса совпадают гарантированно, а не «обычно».
+    global _last_ids
     prompt_ids = None
     try:
         prompt_ids = _tokenize(text)
-        _warm_prefix(text, prompt_ids)
+        if not _continues_last(prompt_ids):
+            _warm_prefix(text, prompt_ids)
+        _last_ids = prompt_ids
     except Exception as exc:                       # noqa: BLE001
         log(f'   модель: токенизация не удалась, шлю строкой — {exc}')
         prompt_ids = None

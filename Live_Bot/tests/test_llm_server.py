@@ -75,6 +75,7 @@ def server(monkeypatch):
     t = threading.Thread(target=srv.serve_forever, daemon=True); t.start()
     monkeypatch.setattr(config, 'LLM_SERVER_URL', f'http://127.0.0.1:{srv.server_port}')
     monkeypatch.setattr(config, 'LLM_THINK_TAG', '')
+    monkeypatch.setattr(llm_server, '_last_ids', [])
     FakeLlamaServer.seen = []; FakeLlamaServer.status = 200; FakeLlamaServer.delay = 0.0
     FakeLlamaServer.thought = 'the leg is up, price in premium'; FakeLlamaServer.thought_closes = True
     yield srv
@@ -180,3 +181,22 @@ def test_the_prefix_is_warmed_before_the_question(server):
     assert warm['n_predict'] == 0
     assert question['prompt'][:len(warm['prompt'])] == warm['prompt'], 'прогрев — точное начало вопроса'
     assert ''.join(chr(t) for t in warm['prompt']).endswith(llm_server.PREFIX_SEP)
+
+
+def _warmups():
+    return sum(1 for body in FakeLlamaServer.seen if body.get('n_predict') == 0)
+
+
+def test_a_revision_is_not_warmed(server):
+    """Переделка продолжает прошлый вопрос: прогрев откатил бы слот и заставил читать разметку заново."""
+    question = 'СИСТЕМА ' * 40 + llm_server.PREFIX_SEP + 'Пара: XRPUSDT ' + 'РАЗМЕТКА ' * 60
+    llm_server.ask(question, max_tokens=5)
+    llm_server.ask(question + '\n\nТВОЙ ПРЕДЫДУЩИЙ ПЛАН:\n{}\n\nКОД ОТВЕРГ ЭТОТ ПЛАН', max_tokens=5)
+    assert _warmups() == 1
+
+
+def test_a_new_pair_is_warmed_again(server):
+    head = 'СИСТЕМА ' * 40 + llm_server.PREFIX_SEP
+    llm_server.ask(head + 'Пара: XRPUSDT ' + 'РАЗМЕТКА XRP ' * 60, max_tokens=5)
+    llm_server.ask(head + 'Пара: BTCUSDT ' + 'РАЗМЕТКА BTC ' * 60, max_tokens=5)
+    assert _warmups() == 2
