@@ -525,18 +525,78 @@ class TestHtfZonesBecomeLevels:
         assert 'ордер-блок вверх 97.5..99' in lines[0] and 'имбаланс вниз' in lines[1]
 
 
+def _observed(at, pct=-1.2, side='SHORT'):
+    return {'at': at, 'side': side, 'decision': 'enter', 'pct': pct, 'max_up': 0.4,
+            'max_down': -1.6, 'hit_tp1': False, 'hit_sl': False, 'hours': 4.0, 'done': False}
+
+
 class TestPastVerdictsCarryTheirOutcome:
     def test_the_outcome_line_follows_the_verdict(self, monkeypatch):
         import llm_outcomes
         monkeypatch.setattr(llm_outcomes, 'recent', lambda pair, limit=2: [
-            {'at': '2026-09-20T10:11:00+00:00', 'side': 'SHORT', 'decision': 'enter', 'pct': -1.2,
-             'max_up': 0.4, 'max_down': -1.6, 'hit_tp1': False, 'hit_sl': False, 'hours': 4.0, 'done': False}])
+            _observed('2026-09-20T10:11:00+00:00')])
         history = [{'pair': 'BNBUSDT', 'at': '2026-09-20T10:11:47+00:00', 'decision': 'enter',
                     'side': 'SHORT', 'why': 'вход на пуле'}]
         lines = llm_context._history_lines('BNBUSDT', history)
         joined = '\n'.join(lines)
         assert '10:11 UTC: вход SHORT' in joined
-        assert 'с тех пор -1.20% за 4ч' in joined and 'цели нет' in joined and 'стоп снят' not in joined
+        assert 'с тех пор -1.2% за 4ч (макс +0.4%, мин -1.6%)' in joined
+        assert 'цели нет' in joined and 'стоп снят' not in joined
+
+    def test_an_observation_started_minutes_later_is_the_outcome(self, monkeypatch):
+        """
+        Наблюдение заводит цикл, забирая вердикт, — через 3 минуты в медиане и
+        до 19. По совпадению минуты исход находился у 12 разборов из 161.
+        """
+        import llm_outcomes
+        monkeypatch.setattr(llm_outcomes, 'recent', lambda pair, limit=2: [
+            _observed('2026-09-20T10:26:05+00:00', pct=2.5),
+            _observed('2026-09-20T08:14:30+00:00', pct=-0.7)])
+        history = [{'pair': 'BNBUSDT', 'at': '2026-09-20T10:11:47+00:00', 'decision': 'skip',
+                    'gate': 'модель пропустила', 'why': 'боковик'},
+                   {'pair': 'BNBUSDT', 'at': '2026-09-20T08:11:02+00:00', 'decision': 'skip',
+                    'gate': 'мало конфлюенса', 'why': 'нет потока'}]
+        joined = '\n'.join(llm_context._history_lines('BNBUSDT', history))
+        first, second = joined.split('08:11 UTC')
+        assert 'с тех пор +2.5%' in first and 'с тех пор -0.7%' in second
+
+    def test_an_observation_long_after_is_not_this_analysis(self, monkeypatch):
+        import llm_outcomes
+        monkeypatch.setattr(llm_outcomes, 'recent', lambda pair, limit=2: [
+            _observed('2026-09-20T11:05:00+00:00')])
+        history = [{'pair': 'BNBUSDT', 'at': '2026-09-20T10:11:47+00:00', 'decision': 'skip',
+                    'gate': 'модель пропустила', 'why': 'боковик'}]
+        assert 'с тех пор' not in '\n'.join(llm_context._history_lines('BNBUSDT', history))
+
+    def test_code_refusals_before_the_model_are_not_its_past_analyses(self, monkeypatch):
+        """
+        «Нет законного плана» выносит код до вопроса — модель этой пары не
+        видела. Такие строки не занимают два места прошлых разборов.
+        """
+        import llm_outcomes
+        monkeypatch.setattr(llm_outcomes, 'recent', lambda pair, limit=2: [])
+        history = [
+            {'pair': 'ARBUSDT', 'at': '2026-09-25T11:07:00+00:00', 'decision': 'skip',
+             'gate': 'нет законного плана', 'detail': 'структура 4ч и 1ч расходится'},
+            {'pair': 'ARBUSDT', 'at': '2026-09-25T10:07:00+00:00', 'decision': 'skip',
+             'gate': 'ответ обрезан', 'detail': 'окно кончилось'},
+            {'pair': 'ARBUSDT', 'at': '2026-09-25T09:07:00+00:00', 'decision': 'enter',
+             'gate': '', 'side': 'LONG', 'why': 'отскок от ордер-блока'},
+            {'pair': 'ARBUSDT', 'at': '2026-09-25T08:07:00+00:00', 'decision': 'skip',
+             'gate': 'мало конфлюенса', 'why': 'два фактора из пяти'},
+        ]
+        joined = '\n'.join(llm_context._history_lines('ARBUSDT', history))
+        assert 'нет законного плана' not in joined and 'расходится' not in joined
+        assert 'окно кончилось' not in joined
+        assert '09:07 UTC: вход LONG — отскок от ордер-блока' in joined
+        assert '08:07 UTC: отказ — два фактора из пяти' in joined
+
+    def test_only_code_refusals_mean_no_block(self, monkeypatch):
+        import llm_outcomes
+        monkeypatch.setattr(llm_outcomes, 'recent', lambda pair, limit=2: [])
+        history = [{'pair': 'ARBUSDT', 'at': '2026-09-25T11:07:00+00:00', 'decision': 'skip',
+                    'gate': 'нет законного стопа', 'detail': 'стоп некуда'}]
+        assert llm_context._history_lines('ARBUSDT', history) == []
 
 
 class TestDeltaAtLevelInTheList:

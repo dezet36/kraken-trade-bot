@@ -39,6 +39,8 @@ find_pools, и в чтение позиционирования. Проверк�
 шапке каждого блока сказано, факт это или прокси.
 """
 
+from datetime import datetime
+
 import numpy as np
 import pandas as pd
 
@@ -691,9 +693,16 @@ def _history_lines(pair, history):
     что рынок её опроверг.
 
     history — список строк журнала (llm_journal.last) или None. Берутся до
-    двух последних по этой паре.
+    двух последних СОБСТВЕННЫХ разборов модели по этой паре: отказы кода до
+    вопроса (llm_decide.NO_MODEL_GATES) и поломки разбора — не её мысль. До
+    25.09.2026 они шли в счёт двух строк, а их почти половина журнала, и
+    настоящий прошлый разбор модели часто вытеснялся строкой «отказ — нет
+    законного плана», которого она не писала.
     """
-    rows = [r for r in (history or []) if r.get('pair') == pair][:2]
+    import llm_decide
+    skip = set(llm_decide.NO_MODEL_GATES) | set(llm_decide.BROKEN_GATES)
+    rows = [r for r in (history or [])
+            if r.get('pair') == pair and (r.get('gate') or '') not in skip][:2]
     if not rows:
         return []
     # Исходы: куда пошла цена после вердикта. Без них модель каждый раз
@@ -702,28 +711,62 @@ def _history_lines(pair, history):
     outcomes = []
     try:
         import llm_outcomes
-        outcomes = llm_outcomes.recent(pair, limit=4)
+        outcomes = llm_outcomes.recent(pair, limit=6)
     except Exception:                              # noqa: BLE001
         outcomes = []
     out = ['ПРОШЛЫЕ РАЗБОРЫ ЭТОЙ ПАРЫ (и что цена сделала после)']
+    taken = set()
     for r in rows:
         when = (r.get('at') or '')[11:16]
         decision = ('вход ' + (r.get('side') or '') if r.get('decision') == 'enter'
                     else 'отказ')
         why = (r.get('why') or r.get('detail') or '')[:160]
         line = f"  {when} UTC: {decision} — {why}"
-        match = next((o for o in outcomes if (o.get('at') or '')[:16] == (r.get('at') or '')[:16]), None)
+        match = _outcome_of(r, outcomes, taken)
         if match and match.get('pct') is not None:
-            tail = f"с тех пор {match['pct']:+.2f}% за {match['hours']:.0f}ч"
+            tail = f"с тех пор {match['pct']:+.1f}% за {match['hours']:.0f}ч"
             if match.get('max_up') is not None:
-                tail += f" (макс {match['max_up']:+.2f}% / мин {match['max_down']:+.2f}%)"
+                tail += f" (макс {match['max_up']:+.1f}%, мин {match['max_down']:+.1f}%)"
             if match.get('side'):
                 tail += ('; цель достигнута' if match['hit_tp1'] else '; цели нет') + \
                         ('; стоп снят' if match['hit_sl'] else '')
-            line += f"\n         → {tail}"
+            line += f"\n    → {tail}"
         out.append(line)
     out.append('')
     return out
+
+
+def _epoch(at):
+    try:
+        return datetime.fromisoformat(str(at).replace('Z', '+00:00')).timestamp()
+    except (TypeError, ValueError):
+        return None
+
+
+def _outcome_of(row, outcomes, taken):
+    """
+    Наблюдение за ценой, заведённое по этому разбору.
+
+    Разбор пишется в потоке модели, наблюдение — когда цикл забирает вердикт:
+    на 3 минуты позже в медиане и до 19 минут (замер 25.09.2026 по 161
+    разбору). До этого их сличали по совпадению минуты, и исход находился у
+    12 разборов из 161 — модель почти никогда не видела, что стало с её
+    прошлой мыслью. Берётся ближайшее наблюдение в пределах получаса после.
+    """
+    at = _epoch(row.get('at'))
+    if at is None:
+        return None
+    best = None
+    for k, o in enumerate(outcomes):
+        t = _epoch(o.get('at'))
+        if k in taken or t is None or not (at - 60 <= t <= at + 1800):
+            continue
+        if best is None or abs(t - at) < abs(best[1] - at):
+            best = (k, t)
+    if best is None:
+        return None
+    taken.add(best[0])
+    return outcomes[best[0]]
 
 
 # ── Снимок рынка текстом ─────────────────────────────────────────────────────

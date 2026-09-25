@@ -456,12 +456,14 @@ class TestThePairIsNotReExaminedEveryCycle:
             strategy_llm._asked[key] -= minutes * 60 + 1
         strategy_llm.scan_for_setups(['BTCUSDT'], gate=None,
                                      candles=lambda pair: [0] * 500)
+        strategy_llm.join(15)          # вопрос задаёт поток — ждём его, а не угадываем
         assert len(asked) == 1
         # …или планового прохода раз в STALE_HOURS.
         for key in list(strategy_llm._asked):
             strategy_llm._asked[key] -= llm_urgency.STALE_HOURS * 3600
         strategy_llm.scan_for_setups(['BTCUSDT'], gate=None,
                                      candles=lambda pair: [0] * 500)
+        strategy_llm.join(15)
         assert len(asked) == 2
 
     def test_a_reason_reopens_the_pair_after_the_window(self, monkeypatch):
@@ -477,6 +479,9 @@ class TestThePairIsNotReExaminedEveryCycle:
         monkeypatch.setattr(llm_urgency, 'rank',
                             lambda pairs, context_of, now_ms=None: [(p, 2, ['цена у L5']) for p in pairs])
         strategy_llm.scan_for_setups(['BTCUSDT'], gate=None, candles=lambda pair: [0] * 500)
+        # Вопрос задаёт поток: без ожидания проверка гадала, успел ли он, и
+        # под нагрузкой (25.09.2026, четыре бэктеста рядом) падала 2 раза из 5.
+        strategy_llm.join(15)
         assert len(asked) == 2
 
     def test_the_same_reason_after_a_refusal_is_not_asked_again(self, monkeypatch):
@@ -675,6 +680,28 @@ class TestEveryAnswerIsWrittenDown:
         assert row['prompt_tokens'] == '1703'
         assert row['ctx'] == '4096'
         assert row['finish'] == 'stop'
+
+    def test_a_refusal_before_the_model_carries_no_price_of_a_call(self, monkeypatch):
+        """
+        Отказ кода до вопроса модель не вызывал. До 25.09.2026 его строке
+        доставались токены ПРОШЛОГО вызова: 37 строк из 63 врали о размере
+        вопроса, по которому меряется окно контекста.
+        """
+        import llm_journal
+
+        monkeypatch.setattr(strategy_llm.llm_local, 'available', lambda: True)
+        monkeypatch.setattr(strategy_llm.llm_local, 'last_stats',
+                            lambda: {'model': 'Qwen', 'ctx': 12288, 'prompt_tokens': 10606,
+                                     'answer_tokens': 750, 'finish': 'stop', 'seconds': 400.0})
+        monkeypatch.setattr(strategy_llm.llm_decide, 'decide',
+                            lambda *a, **k: {'ok': False, 'gate': 'нет законного плана',
+                                             'detail': 'структура 4ч и 1ч расходится'})
+
+        strategy_llm.scan_for_setups(PAIRS[:1], gate=None, candles=lambda pair: [0] * 500)
+        strategy_llm.join(15)
+        row = llm_journal.last()[0]
+        assert row['gate'] == 'нет законного плана'
+        assert row['prompt_tokens'] == '' and row['seconds'] == ''
 
 
 class TestABrokenAnswerIsNotTakenForAJudgement:
