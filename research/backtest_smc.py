@@ -54,6 +54,18 @@ COOLDOWN_HOURS = 12.0
 # брокер. По умолчанию выключено: так мерились параметры стратегий до 25.09.2026.
 CANCEL_AT_TARGET = os.getenv('BT_CANCEL_AT_TARGET', '0') == '1'
 
+# КОГДА ПОЯВЛЯЕТСЯ ЗАЯВКА. Сигнал считается по часовой свече ЦЕЛИКОМ, а знать её
+# можно только на закрытии. До 25.09.2026 заявка рождалась на ОТКРЫТИИ свечи
+# сигнала и могла налиться внутри того же часа — ценой, которая и породила
+# сигнал. У SMC таких наливов ноль (касание зоны в этом часе снимает сетап), у
+# фибо — 27–29% сделок и 64–70% прибыли бэктеста (замер 25.09.2026). Теперь
+# заявка — на закрытии свечи; BT_CREATED_AT_OPEN=1 — прежнее поведение для
+# сравнения. Живой фибо считает по НЕзакрытой свече раз в 5 минут, так что для
+# него честная оценка между этими двумя; SMC работает по закрытым — для неё
+# закрытие точно.
+CREATED_AT_OPEN = os.getenv('BT_CREATED_AT_OPEN', '0') == '1'
+_SIGNAL_BAR = np.timedelta64(0 if CREATED_AT_OPEN else 3600, 's')
+
 
 # ── Данные ───────────────────────────────────────────────────────────────────
 def load_cached(pair, timeframe):
@@ -128,7 +140,7 @@ def smc_orders(pair, data, reasons=None):
             continue
         seen.add(key)
 
-        created = np.datetime64(pd.Timestamp(setup['time']).tz_convert('UTC').tz_localize(None))
+        created = np.datetime64(pd.Timestamp(setup['time']).tz_convert('UTC').tz_localize(None)) + _SIGNAL_BAR
         trade = setup['params']
 
         orders.append(Order(
@@ -221,7 +233,7 @@ def fibo_orders(pair, data, reasons=None):
             continue
         seen.add(key)
 
-        created = now_naive
+        created = now_naive + _SIGNAL_BAR
         orders.append(Order(
             pair=pair,
             direction='LONG' if setup['type'] == 'LONG' else 'SHORT',

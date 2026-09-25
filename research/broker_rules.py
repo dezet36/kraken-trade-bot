@@ -86,10 +86,11 @@ def main(strategy):
         out = run_portfolio(orders, exec_data, risk_pct=bt.RISK_PCT, **{**base, **extra})
         trades = out['trades']
         total = sum(t['pnl'] / t['risk'] for t in trades)
-        # Налив раньше закрытия свечи сигнала — заглядывание вперёд
-        # (created — время ОТКРЫТИЯ часовой свечи, а сетап известен на закрытии).
-        early = [t for t in trades
-                 if t['entry_time'] < by_key[t['key']].created + np.timedelta64(1, 'h')]
+        # Налив раньше закрытия свечи сигнала — заглядывание вперёд. С 25.09.2026
+        # заявка рождается на закрытии (backtest_smc._SIGNAL_BAR), и таких
+        # наливов быть не должно; при BT_CREATED_AT_OPEN=1 — прежний счёт.
+        to_close = np.timedelta64(3600, 's') - bt._SIGNAL_BAR
+        early = [t for t in trades if t['entry_time'] < by_key[t['key']].created + to_close]
         s = compute_stats(out)
         print(f"{name:36s} {len(trades):6d} {total:8.1f} {total / max(1, len(trades)):6.3f} "
               f"{s.get('profit_factor', 0):6.3f} {s.get('max_dd_pct', 0):7.1f}% "
