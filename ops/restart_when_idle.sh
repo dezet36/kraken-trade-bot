@@ -43,7 +43,11 @@ while [ $(date +%s) -lt $deadline ]; do
   if ! { idle && sleep 3 && idle; }; then
     in_flight=1
     age=$(( $(date +%s) - $(stamp_to_epoch "$handed") ))
-    if [ -n "$handed" ] && [ "$age" -le "$GRACE" ]; then
+    # Переделка — продолжение разбора, начатого минут двадцать назад, а не
+    # свежий разбор: запас на неё не распространяется (25.09.2026 10:31
+    # выкатка оборвала переделку NEAR через 2 минуты после её начала).
+    last=$(echo "$J" | grep -E "отдал модели (на разбор|на переделку)" | tail -1)
+    if [ -n "$handed" ] && [ "$age" -le "$GRACE" ] && ! echo "$last" | grep -q 'на переделку'; then
       in_flight=0
       why="начатый разбор $handed моложе ${GRACE}с"
     fi
