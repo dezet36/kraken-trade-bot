@@ -387,6 +387,7 @@ def _shadow_rows(strategy):
             'tps_hit': r.get('targets_hit'), 'pnl_r': r.get('result_r'),
             'mfe_r': r.get('best_r'), 'mae_r': r.get('worst_r'),
             'fill_hours': r.get('fill_hours'), 'closed_hours': r.get('closed_hours'),
+            'min_gap_pct': r.get('min_gap_pct'), 'best_run_r': r.get('best_run_r'),
             'gate': r.get('gate'), 'detail': r.get('detail'), 'refusals': r.get('refusals'),
             '_t': first or 0, '_placed': first, '_entry': r.get('entry'),
         })

@@ -4061,13 +4061,14 @@ function shadowView(sh) {
   const rows = [];
   for (const [k, gates] of closed) {
     for (const [gate, c] of Object.entries(gates)) {
-      rows.push(`<tr><td>${name(k)}</td><td>${esc(gate)}</td><td>${c.n}</td><td>${c.entered}</td>
-        <td>${c.wins} / ${c.losses}</td><td>${r(c.sum_r)}</td></tr>`);
+      rows.push(`<tr><td>${name(k)}</td><td>${esc(gate)}</td><td>${c.n}</td><td>${c.missed || 0}</td>
+        <td>${c.entered}</td><td>${c.wins} / ${c.losses}</td><td>${r(c.sum_r)}</td></tr>`);
     }
   }
   const done = rows.length ? `<div class="group-head" style="margin-top:18px">
       <span class="nm">Досмотренные</span><span class="cnt">по правилам брокера, за вычетом издержек</span></div>
-    <table><thead><tr><th>Стратегия</th><th>Что не пустило</th><th>Сетапов</th><th>Вошли бы</th>
+    <table><thead><tr><th>Стратегия</th><th>Что не пустило</th><th>Сетапов</th>
+      <th>Цель без входа</th><th>Вошли бы</th>
       <th>Плюс / минус</th><th>Итог</th></tr></thead><tbody>${rows.join('')}</tbody></table>` : '';
   box.innerHTML = live + done;
 }

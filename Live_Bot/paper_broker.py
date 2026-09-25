@@ -1131,7 +1131,7 @@ class PaperBroker:
                 log(f'⚠️ наблюдения за вердиктами {pair}: {exc}')
             try:
                 import shadow
-                shadow.advance(pair, ts, high, low, close)
+                shadow.advance(pair, ts, high, low, close, _open)
             except Exception as exc:                   # noqa: BLE001
                 log(f'⚠️ тени отказов {pair}: {exc}')
 
