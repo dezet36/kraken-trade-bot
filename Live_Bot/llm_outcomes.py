@@ -122,10 +122,13 @@ def watch(pair, verdict, price, ts, at=''):
         import llm_decide
         if verdict.get('gate') in llm_decide.BROKEN_GATES:
             return
-        side = verdict.get('side') if verdict.get('side') in ('LONG', 'SHORT') else ''
-        entry = verdict.get('entry') if side else None
-        stop = verdict.get('stop') if side else None
-        targets = verdict.get('targets') or []
+        # У отказа кода числа плана лежат в verdict['plan'] (llm_decide.check):
+        # без них отклонённое наблюдалось только ходом цены, без цели и стопа.
+        plan = verdict if verdict.get('side') in ('LONG', 'SHORT') else (verdict.get('plan') or {})
+        side = plan.get('side') if plan.get('side') in ('LONG', 'SHORT') else ''
+        entry = plan.get('entry') if side else None
+        stop = plan.get('stop') if side else None
+        targets = plan.get('targets') or []
         atr_pct = float(verdict.get('atr_pct') or 0)
         w = {
             'pair': pair,

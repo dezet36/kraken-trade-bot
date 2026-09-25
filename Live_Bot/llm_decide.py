@@ -858,10 +858,20 @@ def check(parsed, levels, answer=None, market=None, min_stop=None, atr_pct=None)
         return _refusal('уровень не найден',
                         'ответ ссылается на то, чего нет в разметке', base)
 
+    side = parsed.get('side')
+    # СТОП — ЗА УРОВНЕМ, А НЕ НА НЁМ. Модель называет структуру, которая
+    # защищает идею; код отступает за неё на буфер охоты за стопами (база
+    # плюс доля ATR). До 20.09.2026 стоп стоял ровно на уровне — то есть
+    # ровно там, где стоят чужие стопы, которые снимают первыми.
+    buffer = stop_hunt_pct(atr_pct)
+    stop = stop_level * (1 - buffer / 100) if side == 'LONG' else stop_level * (1 + buffer / 100)
+    # План и у отказа — под своим ключом: наблюдение (llm_outcomes) досматривает
+    # исход отклонённого, а журнал и уведомления об отказах его не читают.
+    base['plan'] = {'side': side, 'entry': entry, 'stop': stop, 'targets': targets}
+
     if votes < MIN_CONFLUENCE:
         return _refusal('мало конфлюенса', f'{votes} из {len(FACTORS)}', base)
 
-    side = parsed.get('side')
     # СТОРОНА — ПЕРВЫМ ДЕЛОМ. Проверять геометрию плана, который и так идёт
     # против старшего тренда, значит тратить работу на заведомо отклонённое.
     counter = plan_against_higher_trend(side, market)
@@ -873,12 +883,6 @@ def check(parsed, levels, answer=None, market=None, min_stop=None, atr_pct=None)
                         f'{side}: вход {entry:.6g}, стоп {stop_level:.6g}, '
                         f'цели {[round(t, 6) for t in targets]}', base)
 
-    # СТОП — ЗА УРОВНЕМ, А НЕ НА НЁМ. Модель называет структуру, которая
-    # защищает идею; код отступает за неё на буфер охоты за стопами (база
-    # плюс доля ATR). До 20.09.2026 стоп стоял ровно на уровне — то есть
-    # ровно там, где стоят чужие стопы, которые снимают первыми.
-    buffer = stop_hunt_pct(atr_pct)
-    stop = stop_level * (1 - buffer / 100) if side == 'LONG' else stop_level * (1 + buffer / 100)
     inside = stop_inside_entry_zone(side, entry, stop_level, market)
     if inside:
         return _refusal('стоп внутри зоны входа', inside, base)

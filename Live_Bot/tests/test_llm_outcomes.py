@@ -70,6 +70,19 @@ class TestAnEntryIsMeasuredInR:
         assert row['hit_sl'] == 1 and row['hit_tp1'] == 0
         assert row['worst_r'] == pytest.approx(-(103 - 100) / 2)
 
+    def test_a_code_refusal_is_watched_by_its_plan(self):
+        """Отказ кода несёт план в verdict['plan'] — исход отклонённого досматривается."""
+        start = 1_700_000_000_000
+        llm_outcomes.watch('XRPUSDT', {'ok': False, 'gate': 'мало конфлюенса',
+                                       'plan': {'side': 'LONG', 'entry': 100.0, 'stop': 98.0,
+                                                'targets': [104.0]}},
+                           price=100.2, ts=start)
+        done = run_bars('XRPUSDT', start, [(3, 104.5, 99.8, 104), (24, 105, 103, 104),
+                                           (48, 105, 103, 104), (168, 105, 103, 104)])
+        row = llm_outcomes.row(done[0])
+        assert row['decision'] == 'skip' and row['side'] == 'LONG'
+        assert row['hit_tp1'] == 1 and row['hit_sl'] == 0 and row['entry_touched'] == 1
+
 
 class TestASkipIsMeasuredInPercent:
 

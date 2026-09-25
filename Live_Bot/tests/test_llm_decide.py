@@ -187,6 +187,10 @@ class TestConfluenceIsCountedByCode:
         assert not out['ok']
         assert out['gate'] == 'мало конфлюенса'
         assert out['votes'] == 2
+        # План остаётся в отказе — наблюдение досмотрит его исход.
+        assert out['plan'] == {'side': 'LONG', 'entry': 100.0, 'stop': pytest.approx(STOP),
+                               'targets': [107.0, 109.0]}
+        assert 'side' not in out, 'сторона на верхнем уровне включила бы уведомление об отказе'
 
     def test_three_of_five_passes(self):
         """С 25.09.2026 порог — три: идея верна у 57% планов с тремя, 34% с пятью (п. 50)."""
