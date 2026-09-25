@@ -49,7 +49,7 @@ MIN_RR = 2.0
 
 # Отказы, которые выносит код (проверки плана) или сторож стратегии, а не
 # сама модель: панель подсвечивает их отдельно — видно, кто останавливает.
-CODE_GATES = ('нет законного стопа', 'план против старшего тренда',
+CODE_GATES = ('нет законного стопа', 'нет законного плана', 'план против старшего тренда',
               'геометрия неверна', 'стоп теснее минимального', 'низкое отношение',
               'стоп внутри зоны входа', 'стоп внутри живой зоны', 'план против структуры',
               'цель недостижима',
@@ -426,9 +426,8 @@ def legal_stop_ids(levels, market, price, atr_pct=None, tf='poi'):
 
     Считается ровно то же, что проверяет `check`, и в том же порядке: код
     отступает за названный уровень на буфер охоты за стопами, и уже этот
-    отступленный стоп обязан быть за сломом структуры, вне незакрытой зоны
-    и не вплотную под чужим пулом. Пул НА САМОМ названном уровне не мешает —
-    за него стоп и прячется (см. `stop_in_liquidity`).
+    отступленный стоп обязан быть за сломом структуры и вне незакрытого
+    имбаланса 1ч.
 
     ЧЕГО ЗДЕСЬ НЕТ. Проверки, которым нужен вход: «стоп внутри зоны входа»,
     минимальный стоп, R:R, предел издержек. Поэтому список — необходимое
@@ -467,10 +466,45 @@ def legal_stop_ids(levels, market, price, atr_pct=None, tf='poi'):
                 continue
             if stop_inside_live_zone(side, stop, market):
                 continue
-            if stop_in_liquidity(side, stop, market, atr_pct, stop_level=level):
+            out[side].append(lv.get('id'))
+    return out
+
+
+def legal_entry_ids(levels, market, tf='poi'):
+    """Уровни, вход от которых не отвергнут слом структуры и старший тренд."""
+    out = {'LONG': [], 'SHORT': []}
+    for side in ('LONG', 'SHORT'):
+        if plan_against_higher_trend(side, market):
+            continue
+        brk = structure_break_price(market, tf, side)
+        for lv in levels or ():
+            try:
+                level = float(lv['price'])
+            except (TypeError, ValueError, KeyError):
+                continue
+            if brk and ((side == 'LONG' and level < brk) or (side == 'SHORT' and level > brk)):
                 continue
             out[side].append(lv.get('id'))
     return out
+
+
+def branch_filter(market, atr_pct=None):
+    """
+    Сочетание «сторона + вход + стоп», которое `check` не отвергнет, — для
+    грамматики: те ворота, которым не нужны цель, условие и текст. Неверный
+    план становится невыразимым, а не отвергаемым (п. 47 замечаний ИИ).
+    """
+    buffer = stop_hunt_pct(atr_pct)
+
+    def ok(side, entry, stop_level):
+        if plan_against_higher_trend(side, market):
+            return False
+        stop = (stop_level * (1 - buffer / 100) if side == 'LONG'
+                else stop_level * (1 + buffer / 100))
+        return not (stop_inside_entry_zone(side, entry, stop_level, market)
+                    or stop_inside_live_zone(side, stop, market)
+                    or plan_against_structure(side, entry, stop, market))
+    return ok
 
 
 # Подписи уровней, за которыми стоят чужие стопы. Вход на таком уровне без
@@ -673,31 +707,35 @@ def plan_against_structure(side, entry, stop, market, tf='poi'):
 
 def stop_inside_live_zone(side, stop, market):
     """
-    Стоп внутри живой зоны — часовой ИЛИ четырёхчасовой. Описание или ''.
+    Стоп внутри незакрытого имбаланса 1ч. Описание или ''.
 
     Отдельно от `stop_inside_entry_zone`: та смотрит только зону, из которой
     вход. Но незакрытый имбаланс — магнит, куда цена приходит его заполнять,
     и стоп внутри него снимается этим заполнением, где бы вход ни стоял.
-    Проверка 22.09.2026 показала дыру: ворота читали только часовые зоны
-    (`fvgs`, `pois`), а промт отправляет модель к зонам 4ч (`htf_zones`),
-    и стоп внутри имбаланса 4ч проходил — так было у четырёх планов из
-    шестнадцати (SHIB 21.09, SOL, DOGE, XLM 22.09).
+
+    Зоны 4ч не проверяются: стоп часового плана стоит за часовым сломом, а
+    зона 4ч бывает шириной 5% цены — с 23.09.2026, когда их сюда добавили,
+    ИИ не принял ни одного плана (п. 30, 37, 47). Теперь это пометка.
     """
     if not market or not stop:
         return ''
-    zones = []
     for g in (market.get('fvgs') or []):
-        if g.get('top') and g.get('bottom'):
-            zones.append((float(g['bottom']), float(g['top']), 'имбаланса 1ч'))
-    for z in (market.get('htf_zones') or []):
-        if z.get('top') and z.get('bottom'):
-            name = 'имбаланса 4ч' if z.get('kind') == 'FVG' else 'зоны 4ч'
-            zones.append((float(z['bottom']), float(z['top']), name))
-    for bottom, top, name in zones:
+        if not (g.get('top') and g.get('bottom')):
+            continue
+        bottom, top = float(g['bottom']), float(g['top'])
         if bottom <= stop <= top:
             edge = bottom if side == 'LONG' else top
-            return (f'стоп {stop:.6g} внутри незакрытого {name} {bottom:.6g}..{top:.6g}: '
+            return (f'стоп {stop:.6g} внутри незакрытого имбаланса 1ч {bottom:.6g}..{top:.6g}: '
                     f'заполнение зоны снимет его — ставить за {edge:.6g}')
+    return ''
+
+
+def stop_in_higher_zone(stop, market):
+    """Стоп внутри зоны 4ч — пометка для журнала и критика, не отказ."""
+    for z in ((market or {}).get('htf_zones') or []):
+        if z.get('top') and z.get('bottom') and float(z['bottom']) <= stop <= float(z['top']):
+            name = 'имбаланс 4ч' if z.get('kind') == 'FVG' else 'зона 4ч'
+            return f"стоп в {name} {float(z['bottom']):.6g}..{float(z['top']):.6g}"
     return ''
 
 
@@ -866,15 +904,6 @@ def check(parsed, levels, answer=None, market=None, min_stop=None, atr_pct=None)
         return _refusal('низкое отношение', f'R:R {rr:.2f} при минимуме {MIN_RR}',
                         base)
 
-    # ГЕОМЕТРИЯ ПРОТИВ ЛИКВИДНОСТИ — КОДОМ, А НЕ ТОЛЬКО КРИТИКОМ. Стоп,
-    # стоящий вплотную под скоплением стопов, снимут вместе с ними; это
-    # проверяется арифметикой, и отдавать её модели значило бы платить пять
-    # минут за то, что считается за микросекунду. Препятствия на пути к цели
-    # не запрещают вход — они уходят критику и в журнал.
-    hunted = stop_in_liquidity(side, stop, market, atr_pct, stop_level=stop_level)
-    if hunted:
-        return _refusal('стоп в скоплении стопов', hunted, base)
-
     # Условие входа, которое противоречит идее: лонг «после закрытия НИЖЕ»
     # уровня не ниже входа — это ожидание инвалидации, а не подтверждения.
     # 19 сентября 2026 DOGE: лонг от L5 с условием close_below L5.
@@ -886,7 +915,11 @@ def check(parsed, levels, answer=None, market=None, min_stop=None, atr_pct=None)
                                 (market or {}).get('atr_day_pct'))
     if reach:
         return _refusal('цель недостижима', reach, base)
-    base['obstacles'] = obstacles_to_target(side, entry, targets[0], market)
+    # Стоп у скопления стопов и в зоне 4ч — пометки, не отказы: отклонённые
+    # по ним планы дали бы плюс (п. 37); журнал копит исходы для проверки.
+    marks = [m for m in (stop_in_liquidity(side, stop, market, atr_pct, stop_level=stop_level),
+                         stop_in_higher_zone(stop, market)) if m]
+    base['obstacles'] = marks + obstacles_to_target(side, entry, targets[0], market)
 
     cost_r = cost_in_r(entry, stop)
     # Ожидание считаем по СВОЕЙ доле дошедших до цели, а не по числу, которое
@@ -927,7 +960,7 @@ def check(parsed, levels, answer=None, market=None, min_stop=None, atr_pct=None)
 REVISABLE_GATES = (
     'геометрия неверна', 'стоп внутри зоны входа', 'стоп внутри живой зоны',
     'план против структуры', 'цель недостижима', 'вход на пуле стопов',
-    'стоп в скоплении стопов', 'обоснование не о том плане',
+    'обоснование не о том плане',
     'условие противоречит входу', 'низкое отношение', 'стоп теснее минимального',
 )
 
@@ -1006,7 +1039,14 @@ def decide(pair, df, ask, news=None, at=None, max_tokens=None, market=None,
                                 min_stop_pct=facts.get('min_stop_pct') or llm_context.min_stop_pct(),
                                 min_rr=MIN_RR,
                                 stop_buffer_pct=stop_hunt_pct(facts.get('atr_pct')),
-                                think_chars=getattr(config, 'LLM_THINK_CHARS', 0))
+                                think_chars=getattr(config, 'LLM_THINK_CHARS', 0),
+                                branch_ok=branch_filter(facts.get('market'), facts.get('atr_pct')))
+    # Ни одного плана, который пропустит код, — разбор был бы получасом впустую.
+    if 'enter' not in llm_grammar.rules_of(grammar):
+        return _refusal('нет законного плана',
+                        'ни одно сочетание входа, стопа и цели не проходит проверок '
+                        'кода (старший тренд, слом структуры, зоны, минимальный стоп, '
+                        'R:R) — плана быть не может')
     # Разметка без задачи — таблица без вопроса. Первый прогон по живому рынку
     # отдавал модели только context['text'], и она отвечала «no news, no
     # comment»: её просто не спросили.
@@ -1051,8 +1091,11 @@ def decide(pair, df, ask, news=None, at=None, max_tokens=None, market=None,
         log(f'   LLM {pair}: план отвергнут ({first_gate}) — отдал модели '
             f'на переделку, вердикт будет через несколько минут')
         try:
+            # Без мысли: модель уже думала на первом проходе, а с мыслью
+            # вопрос переделки (~10.4 тыс.) не оставлял места плану — 2 из 5
+            # дошедших переделок 24–25.09 «ответ обрезан» (п. 46).
             second = ask(revision_request(question, answer, first_gate, first_detail),
-                         grammar, max_tokens)
+                         llm_grammar.answer_only(grammar), max_tokens)
             retry = judge(second)
             retry['revised_from'] = f'{first_gate}: {first_detail}'[:300]
             # ОТВЕРГНУТЫЙ ОТВЕТ СОХРАНЯЕМ ЦЕЛИКОМ. Пара «что модель написала

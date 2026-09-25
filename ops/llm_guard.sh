@@ -44,8 +44,10 @@ WAIT=3600
 exec 9>/run/lock/kraken_llm_guard.lock
 flock -n 9 || exit 0
 
-P=$(pgrep -f llama-server | head -1)
-[ -z "$P" ] && exit 0
+# PID из systemd, а не pgrep -f: тот находит и любую оболочку, в чьей
+# командной строке встретилось слово llama-server.
+P=$(systemctl show -p MainPID --value kraken-llm)
+[ -z "$P" ] || [ "$P" = "0" ] && exit 0
 
 anon_gb=$(awk '/^RssAnon/{printf "%.2f", $2/1048576}' "/proc/$P/status" 2>/dev/null)
 [ -z "$anon_gb" ] && exit 0
@@ -80,7 +82,7 @@ while [ $(date +%s) -lt $deadline ]; do
   if [ $collected -eq 1 ] && [ $in_flight -eq 0 ]; then
     systemctl restart kraken-llm
     sleep 60
-    Q=$(pgrep -f llama-server | head -1)
+    Q=$(systemctl show -p MainPID --value kraken-llm)
     now=$(awk '/^RssAnon/{printf "%.2f", $2/1048576}' "/proc/$Q/status" 2>/dev/null)
     res=$(awk '/^RssFile/{printf "%.2f", $2/1048576}' "/proc/$Q/status" 2>/dev/null)
     echo "$(date -u +%FT%TZ) анонимная память ${anon_gb} ГБ > ${LIMIT_GB} — модель перезапущена; стало anon ${now} ГБ, весов в памяти ${res} ГБ" >> "$LOG"

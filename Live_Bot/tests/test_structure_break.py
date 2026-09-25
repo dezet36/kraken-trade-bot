@@ -112,23 +112,25 @@ class TestThePlanMustAgreeWithTheStructure:
 
 
 class TestTheStopIsNotInsideALiveZone:
-    """Дыра, найденная аудитом: ворота читали только часовые зоны."""
-
-    def test_a_stop_inside_a_four_hour_imbalance_is_refused(self):
-        market = {'htf_zones': [{'bottom': 95.0, 'top': 99.0, 'kind': 'FVG'}]}
-        why = llm_decide.stop_inside_live_zone('LONG', 97.0, market)
-        assert 'имбаланса 4ч' in why and '95' in why
+    """Стоп в имбалансе 1ч — отказ; в зоне 4ч — пометка, не отказ (п. 47)."""
 
     def test_a_stop_inside_an_hourly_imbalance_is_refused(self):
         market = {'fvgs': [{'bottom': 95.0, 'top': 99.0}]}
-        assert llm_decide.stop_inside_live_zone('LONG', 97.0, market) != ''
+        why = llm_decide.stop_inside_live_zone('LONG', 97.0, market)
+        assert 'имбаланса 1ч' in why and '95' in why
+
+    def test_a_four_hour_zone_is_a_mark_not_a_refusal(self):
+        market = {'htf_zones': [{'bottom': 95.0, 'top': 99.0, 'kind': 'FVG'}]}
+        assert llm_decide.stop_inside_live_zone('LONG', 97.0, market) == ''
+        assert 'имбаланс 4ч 95..99' in llm_decide.stop_in_higher_zone(97.0, market)
+        assert llm_decide.stop_in_higher_zone(94.4, market) == ''
 
     def test_a_stop_beyond_the_zone_passes(self):
-        market = {'htf_zones': [{'bottom': 95.0, 'top': 99.0, 'kind': 'FVG'}]}
+        market = {'fvgs': [{'bottom': 95.0, 'top': 99.0}]}
         assert llm_decide.stop_inside_live_zone('LONG', 94.4, market) == ''
 
     def test_a_short_stop_above_the_zone_passes(self):
-        market = {'htf_zones': [{'bottom': 95.0, 'top': 99.0, 'kind': 'FVG'}]}
+        market = {'fvgs': [{'bottom': 95.0, 'top': 99.0}]}
         assert llm_decide.stop_inside_live_zone('SHORT', 99.6, market) == ''
         assert llm_decide.stop_inside_live_zone('SHORT', 98.0, market) != ''
 

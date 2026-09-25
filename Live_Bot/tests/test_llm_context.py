@@ -554,3 +554,19 @@ class TestDeltaAtLevelInTheList:
         assert all(lv['delta']['minutes'] == 600 for lv in with_delta)
         far = [lv for lv in found if abs(lv['price'] - price) / price * 100 > 1.0]
         assert far and all(not lv.get('delta') for lv in far)
+
+
+class TestLegalEntriesAreShownAsASpan:
+    """Законные входы лежат подряд по таблице — печатаются диапазоном."""
+
+    ORDER = ['L1', 'L2', 'L3', 'L4', 'L5']
+
+    def test_a_run_of_three_or_more_is_a_span(self):
+        assert llm_context._id_span(['L3', 'L1', 'L2'], self.ORDER) == 'L1–L3'
+
+    def test_short_or_broken_runs_are_listed(self):
+        assert llm_context._id_span(['L4', 'L5'], self.ORDER) == 'L4, L5'
+        assert llm_context._id_span(['L2', 'L4'], self.ORDER) == 'L2, L4'
+
+    def test_nothing_legal_is_said_plainly(self):
+        assert llm_context._id_span([], self.ORDER) == 'НИ ОДИН'

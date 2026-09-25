@@ -106,7 +106,7 @@ def _analysis_rule():
 
 
 def build(level_ids, prices=None, min_stop_pct=0.0, min_rr=0.0, stop_buffer_pct=0.0,
-          think_chars=0):
+          think_chars=0, branch_ok=None):
     """
     Грамматика под КОНКРЕТНЫЙ список уровней.
 
@@ -120,11 +120,14 @@ def build(level_ids, prices=None, min_stop_pct=0.0, min_rr=0.0, stop_buffer_pct=
     Вероятность ограничена диапазоном 0.01-0.99 намеренно. Единица означала бы
     уверенность без сомнений, а на рынке её не бывает: такое число говорит не о
     сетапе, а о том, что модель себя не откалибровала.
+
+    branch_ok(side, entry_price, stop_level_price) — ворота кода, которые
+    знают только сторону, вход и стоп (llm_decide.branch_filter).
     """
     if not level_ids:
         return with_thinking(_skip_only(), think_chars)
 
-    plans, rules = _plans(level_ids, prices, min_stop_pct, min_rr, stop_buffer_pct)
+    plans, rules = _plans(level_ids, prices, min_stop_pct, min_rr, stop_buffer_pct, branch_ok)
     if not plans:
         # Меньше трёх уровней — сделки не выразить: вход, стоп и цель обязаны
         # быть разными уровнями. Разрешить вход здесь значило бы разрешить
@@ -279,7 +282,8 @@ ws       ::= [ \\n]{{0,2}}
 '''
 
 
-def _plans(level_ids, prices=None, min_stop_pct=0.0, min_rr=0.0, stop_buffer_pct=0.0):
+def _plans(level_ids, prices=None, min_stop_pct=0.0, min_rr=0.0, stop_buffer_pct=0.0,
+           branch_ok=None):
     """
     По одному правилу на каждую пару «направление + уровень входа».
 
@@ -338,6 +342,9 @@ def _plans(level_ids, prices=None, min_stop_pct=0.0, min_rr=0.0, stop_buffer_pct
             lower = list(level_ids[index + 1:])
             stops, targets = (lower, higher) if side == 'LONG' else (higher, lower)
             stops = [s for s in stops if far_enough(entry, s, max(0.0, min_stop_pct - buffer))]
+            if branch_ok and entry in price_of:
+                stops = [s for s in stops
+                         if s in price_of and branch_ok(side, price_of[entry], price_of[s])]
             # R:R ЦЕЛИКОМ В ГРАММАТИКЕ: ветка на каждую пару «вход + стоп», и
             # цели в ней — только те, что дальше min_rr × дистанции ЭТОГО
             # стопа. 19 сентября 2026 ETH: 5 факторов из 5, план в тексте, и

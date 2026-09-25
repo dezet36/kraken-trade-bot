@@ -550,8 +550,8 @@ def build(pair, df, at=None, news=None, market=None, history=None):
         f'(издержки {min_stop_pct():.2f}%, половина ATR {STOP_ATR_SHARE * (atr_pct or 0):.2f}%)'
         f'   Отступ стопа за уровень: {_stop_buffer(atr_pct):.2f}% (ставит код)',
         '',
-        'УРОВНИ (сверху вниз, расстояние от цены; «← СТОП» — за этот уровень '
-        'стоп поставить МОЖНО, за остальные код откажет; объём — к медианной свече, '
+        'УРОВНИ (сверху вниз, расстояние от цены; «← СТОП» — стоп можно только '
+        'за такой уровень; объём — к медианной свече, '
         '×3 узел, ×0.5 пустота; дельта — перевес агрессора в минуты касания за ~16ч: '
         'плюс покупали, минус продавали. Объём и дельта печатаются, только если '
         'заметны; пусто — обычные значения)',
@@ -561,17 +561,21 @@ def build(pair, df, at=None, news=None, market=None, history=None):
     # llm_decide читает этот модуль, и связь на уровне файла была бы
     # круговой.
     stop_ok = {'LONG': [], 'SHORT': []}
+    entry_ok = {'LONG': [], 'SHORT': []}
     try:
         import llm_decide
         stop_ok = llm_decide.legal_stop_ids(found, market, price_now, atr_pct)
+        entry_ok = llm_decide.legal_entry_ids(found, market)
     except Exception:                                  # noqa: BLE001
         pass
     mark = {}
     for side, tag in (('LONG', 'ЛОНГ'), ('SHORT', 'ШОРТ')):
         for lid in stop_ok.get(side) or ():
             mark.setdefault(lid, []).append(tag)
-    lines.append('  ГОДЯТСЯ ПОД СТОП: ' + '   '.join(
-        f'{t} — ' + (', '.join(stop_ok.get(k) or ()) or 'НИ ОДИН')
+    # Стопы помечены в строках таблицы; сторона без законного стопа входов не имеет.
+    order = [lv['id'] for lv in found]
+    lines.append('  ГОДЯТСЯ ПОД ВХОД: ' + '   '.join(
+        f'{t} — {_id_span(entry_ok.get(k) if stop_ok.get(k) else (), order)}'
         for k, t in (('LONG', 'лонг'), ('SHORT', 'шорт'))))
 
     for level in found:
@@ -1100,6 +1104,16 @@ def market_lines(market, price_now):
     out += _macro_lines(market.get('macro'))
     out.append('')
     return out
+
+
+def _id_span(ids, order):
+    """«L3–L9», если уровни идут подряд по таблице; иначе список; пусто — «НИ ОДИН»."""
+    idx = sorted(order.index(i) for i in (ids or ()) if i in order)
+    if not idx:
+        return 'НИ ОДИН'
+    if len(idx) > 2 and idx == list(range(idx[0], idx[-1] + 1)):
+        return f'{order[idx[0]]}–{order[idx[-1]]}'
+    return ', '.join(order[i] for i in idx)
 
 
 def _regime_line(r):

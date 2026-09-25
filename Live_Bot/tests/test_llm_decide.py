@@ -517,9 +517,9 @@ class TestTheCriticSecondOpinion:
 
 class TestGeometryAgainstLiquidityIsCode:
     """
-    Стоп вплотную под скоплением чужих стопов снимут вместе с ними — это
-    арифметика, и платить за неё пять минут модели незачем. Препятствия на
-    пути к цели входа не запрещают, но уходят критику и в журнал.
+    Стоп вплотную под скоплением чужих стопов и препятствия на пути к цели
+    считает код, но вход они не запрещают: уходят критику и в журнал.
+    Отклонённые по скоплению планы дали бы +6.29 R (п. 37 замечаний ИИ).
     """
 
     MARKET = {
@@ -534,14 +534,12 @@ class TestGeometryAgainstLiquidityIsCode:
                                     'dist_pct': 6.2, 'side': 'шорты'}], 'below': []},
     }
 
-    def test_a_stop_just_under_a_pool_is_refused(self):
+    def test_a_stop_just_under_a_pool_is_marked_not_refused(self):
         # Вход L3 100, стоп за L4 98 → 97.706; пул стопов лонгов на 97.8,
-        # в 0.1% выше стопа — снимут одним ходом. Сам L4 пулом не считается:
-        # за него стоп и спрятан.
+        # в 0.1% выше стопа. Сам L4 пулом не считается: за него стоп и спрятан.
         out = dec.check(dec.parse(answer(), LEVELS), LEVELS, market=self.MARKET)
-        assert out['ok'] is False
-        assert out['gate'] == 'стоп в скоплении стопов'
-        assert '97.8' in out['detail']
+        assert out['ok'] is True, out.get('gate')
+        assert any('97.8' in o and 'снимут' in o for o in out['obstacles'])
 
     def test_a_stop_safely_below_the_pool_passes(self):
         market = {'smc': {'untapped': [{'price': 98.5, 'side': 'SSL', 'source': 'SWING'}]}}
@@ -1061,6 +1059,90 @@ class TestTheModelIsToldWhereAStopMayGo:
             llm_context.build = real
         assert out['gate'] == 'нет законного стопа', out.get('gate')
         assert asked == [], 'модель не должна быть спрошена'
+
+
+def _random_df(seed=3, n=300):
+    import pandas as pd
+    import numpy as np
+    close = 100 + np.cumsum(np.random.default_rng(seed).normal(0, 0.4, n))
+    return pd.DataFrame({
+        'timestamp': pd.date_range('2026-01-01', periods=n, freq='h'),
+        'open': close, 'high': close + 0.5, 'low': close - 0.5,
+        'close': close, 'volume': np.ones(n) * 10,
+    })
+
+
+class TestAPlanTheCodeWouldRefuseCannotBeWritten:
+    """
+    Ворота, которым хватает стороны, входа и стопа, стоят в грамматике: план
+    против слома или старшего тренда невыразим. 23–25.09.2026 «план против
+    структуры» — 17 отказов из 64 разборов, каждый — полчаса модели (п. 47).
+    """
+
+    PRICES = [lv['price'] for lv in LEVELS]
+    IDS = [lv['id'] for lv in LEVELS]
+
+    def _rules(self, market):
+        import llm_grammar
+        grammar = llm_grammar.build(self.IDS, prices=self.PRICES, min_rr=2.0,
+                                    stop_buffer_pct=dec.stop_hunt_pct(),
+                                    branch_ok=dec.branch_filter(market))
+        return llm_grammar.rules_of(grammar)
+
+    def test_an_entry_on_the_dead_side_of_the_break_is_not_offered(self):
+        # Слом для лонга 99: вход L4 (98) ниже — мёртвая сторона; L3 (100) — живая.
+        market = {'structure_break': {'poi': {'long': 99.0, 'short': 101.0, 'tf': '1ч'}}}
+        rules = self._rules(market)
+        assert 'long-l3-l4' in rules
+        assert 'long-l4-l5' not in rules
+        assert 'long-l4-l5' in self._rules({}), 'без слома ветка была бы'
+
+    def test_a_side_the_trend_forbids_gets_no_branch(self):
+        market = {'structure_break': {'htf': {'direction': 'BULLISH', 'tf': '4ч'}}}
+        rules = self._rules(market)
+        assert not any(r.startswith('short-') for r in rules)
+        assert any(r.startswith('long-') for r in rules)
+
+    def test_a_stop_inside_an_hourly_imbalance_is_not_offered(self):
+        # Стоп за L4 = 97.706 — внутри имбаланса 1ч 97..98.5.
+        market = {'fvgs': [{'bottom': 97.0, 'top': 98.5}]}
+        assert 'long-l3-l4' not in self._rules(market)
+        assert 'long-l3-l4' in self._rules({})
+
+    def test_legal_entries_lie_on_the_live_side(self):
+        market = {'structure_break': {'poi': {'long': 99.0, 'short': 101.0, 'tf': '1ч'}}}
+        ok = dec.legal_entry_ids(LEVELS, market)
+        assert ok['LONG'] == ['L1', 'L2', 'L3']
+        assert ok['SHORT'] == ['L3', 'L4', 'L5']
+
+    def test_without_a_legal_branch_the_model_is_not_asked(self, monkeypatch):
+        asked = []
+
+        def ask(prompt, grammar, max_tokens):
+            asked.append(prompt)
+            return answer()
+
+        monkeypatch.setattr(dec, 'branch_filter',
+                            lambda market, atr_pct=None: (lambda *a: False))
+        out = dec.decide('BTCUSDT', _random_df(5), ask)
+        assert out['gate'] == 'нет законного плана', out.get('gate')
+        assert asked == [], 'модель не должна быть спрошена'
+
+    def test_the_revision_is_asked_without_a_thought(self, monkeypatch):
+        """Переделка без мысли: с ней вопрос ~10.4 тыс. не оставлял места плану (п. 46)."""
+        import llm_grammar
+        monkeypatch.setattr(config, 'LLM_THINK_CHARS', 2400)
+        grammars = []
+        answers = [answer(stop='L2'), answer()]
+
+        def ask(prompt, grammar, max_tokens):
+            grammars.append(grammar)
+            return answers[len(grammars) - 1]
+
+        dec.decide('BTCUSDT', _random_df(3), ask)
+        assert len(grammars) == 2, 'переделки не было'
+        assert 'think' in llm_grammar.rules_of(grammars[0])
+        assert 'think' not in llm_grammar.rules_of(grammars[1])
 
 
 class TestAnEntryExactlyOnTheBreakIsAllowed:
