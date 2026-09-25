@@ -57,7 +57,7 @@ def broker_env(tmp_path, monkeypatch):
     for _name in ('FIBO', 'SMC', 'LEVELS', 'RSIBB'):
         monkeypatch.setenv(f'PAPER_START_BALANCE_{_name}', '10000')
     monkeypatch.setenv('PAPER_FUNDING', 'false')
-    for module in ('config', 'paper_broker', 'dashboard'):
+    for module in ('config', 'paper_broker', 'dashboard', 'shadow'):
         sys.modules.pop(module, None)
 
     import config
@@ -485,6 +485,18 @@ class TestDirectionCap:
         assert broker.open('SMC', signal(pair='BTCUSDT', strategy='SMC', cap=2))
         assert broker.open('SMC', signal(pair='ETHUSDT', strategy='SMC', cap=2))
         assert not broker.open('SMC', signal(pair='SOLUSDT', strategy='SMC', cap=2))
+
+    def test_the_capped_setup_gets_a_shadow(self, broker_env):
+        """Отказ кэпа не пропадает: сетап досматривается тенью (shadow.py) до исхода."""
+        broker, _client, pb, _cfg = broker_env
+        pb._now_ms = lambda: 1_700_000_000_000
+        import shadow
+        broker.open('SMC', signal(pair='BTCUSDT', strategy='SMC', cap=1))
+        for _ in range(3):                         # тот же сетап три цикла подряд
+            broker.open('SMC', signal(pair='SOLUSDT', strategy='SMC', cap=1))
+        shadows = shadow._load()
+        assert [(s['pair'], s['gate'], s['refusals']) for s in shadows] == \
+            [('SOLUSDT', 'направленный кэп', 3)]
 
     def test_opposite_direction_still_allowed(self, broker_env):
         broker, _client, pb, _cfg = broker_env

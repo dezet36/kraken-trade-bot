@@ -801,6 +801,8 @@
   .group-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
                 margin: 0 0 11px 2px; }
   .group-head .key { width: 10px; height: 10px; border-radius: 3px; }
+  #shadow td .key { display: inline-block; width: 8px; height: 8px; border-radius: 2px;
+                    margin-right: 6px; vertical-align: middle; }
   .group-head .nm { font-size: 13.5px; font-weight: 650; }
   .group-head .cnt { font-size: 12px; color: var(--ink-4); }
   .group-head .sum { margin-left: auto; font-size: 13px; font-weight: 620;
@@ -1033,6 +1035,12 @@
           <div class="panel-head"><h2>Почему бот не торгует</h2>
             <span class="hint">воронка отсева за последний цикл</span></div>
           <div class="panel-body"><div id="funnel"></div></div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head"><h2>Не открыто из-за пределов</h2>
+            <span class="hint">сетап был готов, но не пустил предохранитель — и чем бы он кончился</span></div>
+          <div class="panel-body"><div id="shadow" class="scroll"></div></div>
         </div>
       </section>
 
@@ -4001,6 +4009,47 @@ function funnelView(funnel) {
   }).join('');
 }
 
+/* ── Тени отказов ───────────────────────────────────────────────────────── */
+/* Сетап, который брокер отверг своим пределом (направленный кэп, предел
+   портфеля, издержек…), досматривается как сделка — по правилам брокера,
+   без денег (shadow.py). Иначе предел не проверить: может, он отсекает как
+   раз прибыльное. */
+function shadowView(sh) {
+  const box = document.getElementById('shadow');
+  if (!box) return;
+  const on = activeStrategies();
+  const active = ((sh || {}).active || []).filter(s => on.includes(s.strategy));
+  const closed = Object.entries((sh || {}).closed || {}).filter(([k]) => on.includes(k));
+  if (!active.length && !closed.length) {
+    box.innerHTML = '<div class="empty">Предохранители ничего не отклоняли</div>';
+    return;
+  }
+  const name = k => `<span class="key" style="background:${COLOR[k] || 'var(--ink-4)'}"></span>
+    ${esc(NAMES[k] || k)}`;
+  const r = v => v == null ? '—' : `<span class="${cls(v)}">${v >= 0 ? '+' : ''}${v.toFixed(2)} R</span>`;
+  const live = active.length ? `<table><thead><tr>
+      <th>Стратегия</th><th>Пара</th><th>Сторона</th><th>Что не пустило</th>
+      <th>Вход</th><th>Стоп</th><th>Цель</th><th>Сейчас</th><th>Итог сейчас</th><th>Отказов</th>
+    </tr></thead><tbody>${active.map(s => `<tr>
+      <td>${name(s.strategy)}</td><td class="pair">${esc(s.pair)}</td><td>${esc(s.direction)}</td>
+      <td>${esc(s.gate)}</td><td>${price(s.entry)}</td><td>${price(s.stop)}</td><td>${price(s.target)}</td>
+      <td>${esc(s.status)}${s.targets_hit ? ` · целей ${s.targets_hit}` : ''}</td>
+      <td>${r(s.now_r)}</td><td>${s.refusals}</td></tr>`).join('')}</tbody></table>`
+    : '<div class="empty">Сейчас предохранители ничего не держат</div>';
+  const rows = [];
+  for (const [k, gates] of closed) {
+    for (const [gate, c] of Object.entries(gates)) {
+      rows.push(`<tr><td>${name(k)}</td><td>${esc(gate)}</td><td>${c.n}</td><td>${c.entered}</td>
+        <td>${c.wins} / ${c.losses}</td><td>${r(c.sum_r)}</td></tr>`);
+    }
+  }
+  const done = rows.length ? `<div class="group-head" style="margin-top:18px">
+      <span class="nm">Досмотренные</span><span class="cnt">по правилам брокера, за вычетом издержек</span></div>
+    <table><thead><tr><th>Стратегия</th><th>Что не пустило</th><th>Сетапов</th><th>Вошли бы</th>
+      <th>Плюс / минус</th><th>Итог</th></tr></thead><tbody>${rows.join('')}</tbody></table>` : '';
+  box.innerHTML = live + done;
+}
+
 /* ── Действия оператора ─────────────────────────────────────────────────── */
 /**
  * Разрешены только снижающие риск. Опасные требуют подтверждения: кнопка
@@ -4591,6 +4640,7 @@ function render() {
     }
   }
   funnelView(DATA.funnel);
+  shadowView(DATA.shadow);
   regimeView(DATA.regime);
   attention(DATA.attention);
   restorePosCharts();

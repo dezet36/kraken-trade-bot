@@ -761,6 +761,12 @@ def build_payload():
     # они уходили только в лог. Это ответ на самый частый вопрос при
     # наблюдении — «почему он ничего не делает».
     payload['funnel'] = scan_report.snapshot()
+    # Что отклонили предохранители брокера — и чем бы это кончилось (shadow.py).
+    try:
+        import shadow
+        payload['shadow'] = shadow.snapshot()
+    except Exception:                                  # noqa: BLE001
+        payload['shadow'] = {'active': [], 'closed': {}}
     payload['regime'] = _regime()
     payload['portfolio'] = _portfolio()
     payload['errors'] = _errors_summary()

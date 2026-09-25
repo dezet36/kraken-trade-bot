@@ -65,6 +65,12 @@ def _refuse(strategy, signal, gate, detail='', cost_share=''):
         refused.record(strategy, signal, gate, detail, cost_share)
     except Exception:                              # noqa: BLE001
         pass
+    # Тень: чем кончился бы отвергнутый сетап (shadow.py). Молча, как и запись.
+    try:
+        import shadow
+        shadow.watch(strategy, signal, gate, detail)
+    except Exception:                              # noqa: BLE001
+        pass
 
 
 JOURNAL_CSV  = os.path.join(config.DATA_DIR, 'paper_trades.csv')
@@ -832,6 +838,11 @@ class PaperBroker:
         # сетап переоткрывался бы каждые 5 минут, пока лимит ждёт цену.
         self.state['cooldown'][strategy][pair] = now
         self._save_state()
+        try:
+            import shadow
+            shadow.opened(strategy, pair, direction, entry, stop)
+        except Exception:                          # noqa: BLE001
+            pass
 
         log(f"   👻 [{strategy}] {pair} {direction}: лимит ${_fmt_p(limit_price)} | "
             f"стоп ${_fmt_p(stop)} | цель ${_fmt_p(targets[0])} | RR {record['rr']:.2f}")
@@ -953,6 +964,12 @@ class PaperBroker:
             llm_outcomes.expire(_now_ms())
         except Exception as exc:                       # noqa: BLE001
             log(f'⚠️ наблюдения за вердиктами: {exc}')
+        try:
+            import shadow
+            for pair, since in shadow.pairs().items():
+                pairs[pair] = min(pairs.get(pair, since), since)
+        except Exception as exc:                       # noqa: BLE001
+            log(f'⚠️ тени отказов: {exc}')
 
         if not pairs:
             return
@@ -1098,6 +1115,11 @@ class PaperBroker:
                 llm_outcomes.advance(pair, ts, high, low, close)
             except Exception as exc:                   # noqa: BLE001
                 log(f'⚠️ наблюдения за вердиктами {pair}: {exc}')
+            try:
+                import shadow
+                shadow.advance(pair, ts, high, low, close)
+            except Exception as exc:                   # noqa: BLE001
+                log(f'⚠️ тени отказов {pair}: {exc}')
 
             pending = self.pending(strategy).get(pair)
             if pending and ts > pending['last_ts']:
