@@ -166,6 +166,20 @@ class TestFill:
         assert not broker.positions('FIBO')
         assert not pb.read_journal()   # несостоявшийся вход — не сделка
 
+    def test_an_smc_order_waits_past_its_target(self, broker_env):
+        """
+        У SMC заявка у цели не снимается: её бэктест так не делал, а замер
+        25.09.2026 показал, что снятие отнимает у неё лучшие сделки. Заявка
+        ждёт отката к зоне и наливается.
+        """
+        broker, client, pb, _cfg = broker_env
+        pb._now_ms = lambda: 1_700_000_000_000
+        broker.open('SMC', signal(strategy='SMC', entry=100.0, stop=90.0, tp1=130.0))
+        feed(broker, client, 'BTCUSDT', [(131, 101, 130)])
+        assert broker.pending('SMC'), 'заявку SMC сняли у цели'
+        feed(broker, client, 'BTCUSDT', [(131, 101, 130), (125, 99.5, 110)])
+        assert broker.positions('SMC')['BTCUSDT']['entry_price'] == 100.0
+
     def test_pending_expires(self, broker_env):
         broker, client, pb, cfg = broker_env
         pb._now_ms = lambda: 1_700_000_000_000

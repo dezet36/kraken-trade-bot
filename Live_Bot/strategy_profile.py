@@ -1,6 +1,6 @@
 """
 Что у стратегии СВОЁ в исполнении: срок заявки, кулдаун, предел издержек,
-смещение лимита, предел удержания позиции.
+смещение лимита, предел удержания позиции, снятие заявки у цели.
 
 ЗАЧЕМ ОДНО МЕСТО. Правило проекта: общий параметр не имеет права запирать
 одну стратегию. Пока ответ «своё или общее» лежал в трёх модулях
@@ -130,6 +130,23 @@ def max_hold_hours(strategy):
     return _own(strategy, own, getattr(_config(), 'MAX_POSITION_HOLD_HOURS', 0.0) or 0.0)
 
 
+def drops_at_target(strategy):
+    """
+    Снимать ли неналитую заявку, когда цена дошла до первой цели, не задев
+    входа («цена дошла до цели без нас»).
+
+    Общее — снимать: так брокер жил с первого дня. У SMC — нет: её бэктест
+    этого правила не знал, и замер 25.09.2026 показал, что оно отнимает у неё
+    лучшие сделки (smc/params.CANCEL_PENDING_AT_TARGET).
+    """
+    try:
+        if strategy == 'SMC':
+            return bool(_smc().CANCEL_PENDING_AT_TARGET)
+    except Exception:                              # noqa: BLE001
+        pass
+    return bool(getattr(_config(), 'CANCEL_PENDING_AT_TARGET', True))
+
+
 # Кто читает ручку оператора «минимальный стоп» (settings_store). Уровни и
 # Боллинджер считают по своему params.MIN_STOP_PCT, ИИ — по издержкам; для
 # них ручка мертва, и панель обязана это показывать, а не рисовать 0.8%.
@@ -168,4 +185,5 @@ def describe(strategy):
         'max_hold_hours': max_hold_hours(strategy),
         'min_stop_pct': min_stop_pct(strategy),
         'min_stop_knob': strategy in MIN_STOP_KNOB_READERS,
+        'drops_at_target': drops_at_target(strategy),
     }

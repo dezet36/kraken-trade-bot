@@ -346,6 +346,12 @@ class MarketContext:
         trade = self._build_trade(best, leg, bias, swept, at_index, balance)
         if trade is None:
             return None, self._no_trade_reason or 'геометрия не собралась'
+        # 8.5) Цена уже за первой целью. Выключено: по бэктесту вредно, см.
+        # params.SKIP_TARGET_TAKEN.
+        if params.SKIP_TARGET_TAKEN:
+            first = trade['targets'][0]
+            if (price >= first) if bias == BULLISH else (price <= first):
+                return None, 'цена уже за первой целью'
         if trade['rr'] < params.MIN_RR:
             return None, f'RR {trade["rr"]:.2f} < {params.MIN_RR}'
         # Слишком далёкая цель — нереалистичный сценарий, а не хорошая сделка:

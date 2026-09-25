@@ -423,6 +423,28 @@ TP_CLOSE_FRACTIONS = (0.25, 0.25, 0.50)
 # основную часть прибыли при винрейте около 25%.
 BREAKEVEN_AFTER_TP1 = _b('BREAKEVEN_AFTER_TP1', False)
 
+# Снимать неналитую заявку, если цена дошла до первой цели, не задев входа.
+# У SMC — НЕТ: заявка ждёт отката к зоне весь PENDING_ORDER_MAX_HOURS, как в
+# бэктесте, по которому стратегия настроена (research/smc_engine до 25.09.2026
+# такого снятия не знал вовсе). Брокер снимал такие заявки у всех стратегий,
+# и замер 25.09.2026 (research/backtest_smc.py, BT_CANCEL_AT_TARGET) показал
+# цену этого для SMC:
+#     период            заявка ждёт              снимается у цели
+#     рост 2025–26      256 сделок  +118.6R      194 сделки  +69.5R
+#     падение 2022–23   372 сделки   +18.9R      271 сделка  −32.1R
+# Снятые сделки — лучшие у стратегии (+0.79R и +0.50R в среднем): цена
+# показывает, что доходит до цели, откатывает в свежий ордер-блок и идёт
+# оттуда снова. Исполнители читают это через strategy_profile.drops_at_target.
+CANCEL_PENDING_AT_TARGET = _b('CANCEL_PENDING_AT_TARGET', False)
+
+# Не выдавать сетап, если цена уже за его первой целью. ПРОВЕРЕНО И
+# ОТВЕРГНУТО 25.09.2026: придумано против тех же «протухших» сетапов (LTC и
+# LINK предлагались на 3.5R и 6.8R за входом), но по бэктесту вредно —
+# рост 256 → 237 сделок, +118.6R → +103.0R; падение 372 → 356, +18.9R →
+# −11.6R. Это те самые сетапы, что потом наливаются на откате (см. выше).
+# Оставлено выключенным и покрыто тестами, чтобы не пробовать вслепую снова.
+SKIP_TARGET_TAKEN = _b('SKIP_TARGET_TAKEN', False)
+
 # ── Лимитный ордер на вход (агрессивный режим, выбор пользователя) ───────────
 ENTRY_MODE = os.getenv('SMC_ENTRY_MODE', 'POI_LIMIT')  # POI_LIMIT | CONFIRMATION
 PENDING_ORDER_MAX_HOURS = _f('PENDING_ORDER_MAX_HOURS', 48.0)
@@ -493,7 +515,8 @@ DECISION = frozenset((
     'ENTRY_MODE', 'PENDING_ORDER_MAX_HOURS', 'MAX_ENTRY_COST_SHARE_PCT',
     'MAX_POSITION_HOLD_HOURS', 'COOLDOWN_HOURS',
     'MAX_SAME_DIRECTION', 'RANKED_POOL', 'MIN_VOLUME_24H_USD',
-    'BREAKEVEN_AFTER_TP1', 'TP1_R_MULTIPLE',
+    'BREAKEVEN_AFTER_TP1', 'TP1_R_MULTIPLE', 'SKIP_TARGET_TAKEN',
+    'CANCEL_PENDING_AT_TARGET',
 ))
 
 

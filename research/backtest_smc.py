@@ -50,6 +50,9 @@ DEFAULT_PAIRS = [
 RISK_PCT = 1.0
 MAX_POSITIONS = 5
 COOLDOWN_HOURS = 12.0
+# Снимать заявку, если цена дошла до первой цели, не задев входа, — как живой
+# брокер. По умолчанию выключено: так мерились параметры стратегий до 25.09.2026.
+CANCEL_AT_TARGET = os.getenv('BT_CANCEL_AT_TARGET', '0') == '1'
 
 
 # ── Данные ───────────────────────────────────────────────────────────────────
@@ -275,7 +278,8 @@ def run(pairs, which='both'):
             orders, exec_data, risk_pct=RISK_PCT, max_positions=MAX_POSITIONS,
             cooldown_hours=COOLDOWN_HOURS,
             breakeven_after_tp1=smc_params.BREAKEVEN_AFTER_TP1,
-            max_hold_hours=smc_params.MAX_POSITION_HOLD_HOURS)
+            max_hold_hours=smc_params.MAX_POSITION_HOLD_HOURS,
+            cancel_at_target=CANCEL_AT_TARGET)
         results.append(compute_stats(outcome, label='SMC'))
         _print_breakdown(outcome, 'SMC')
 
@@ -293,7 +297,8 @@ def run(pairs, which='both'):
         outcome = run_portfolio(
             orders, exec_data, risk_pct=RISK_PCT, max_positions=MAX_POSITIONS,
             cooldown_hours=COOLDOWN_HOURS, breakeven_after_tp1=False,
-            max_hold_hours=config.MAX_POSITION_HOLD_HOURS or 336.0)
+            max_hold_hours=config.MAX_POSITION_HOLD_HOURS or 336.0,
+            cancel_at_target=CANCEL_AT_TARGET)
         results.append(compute_stats(outcome, label='Фибо v3'))
         _print_breakdown(outcome, 'Фибо v3')
 

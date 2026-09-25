@@ -1297,9 +1297,12 @@ class PaperBroker:
                 self._drop_pending(strategy, pair, f"сетап разрушен (${_fmt_p(inv)})", ts)
                 return
 
+        # Цель без входа — снимать ли, решает стратегия (strategy_profile):
+        # у SMC заявка ждёт свой срок, как в её бэктесте (замер 25.09.2026).
+        import strategy_profile
         target = order['targets'][0]
         gone = (high >= target) if is_long else (low <= target)
-        if gone:
+        if gone and strategy_profile.drops_at_target(strategy):
             self._drop_pending(strategy, pair, "цена дошла до цели без нас", ts)
 
     def _drop_pending(self, strategy, pair, reason, ts=None):

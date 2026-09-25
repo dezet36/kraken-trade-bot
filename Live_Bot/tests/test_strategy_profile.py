@@ -124,8 +124,10 @@ class TestDescribeListsEverything:
             d = sp.describe(name)
             assert set(d) == {'expiry_hours', 'cooldown_hours', 'cost_limit_pct',
                               'limit_offset_pct', 'max_hold_hours', 'min_stop_pct',
-                              'min_stop_knob'}
-            assert all(isinstance(v, float) for k, v in d.items() if k != 'min_stop_knob')
+                              'min_stop_knob', 'drops_at_target'}
+            flags = ('min_stop_knob', 'drops_at_target')
+            assert all(isinstance(v, float) for k, v in d.items() if k not in flags)
+            assert all(isinstance(d[k], bool) for k in flags)
 
 
 class TestTheMinStopKnobIsHonest:

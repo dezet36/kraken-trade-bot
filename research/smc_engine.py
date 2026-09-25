@@ -116,7 +116,8 @@ def _prepare(df):
 
 
 def simulate_order(order, exec_arrays, start_pos, risk_amount,
-                   breakeven_after_tp1=True, max_hold_hours=336.0):
+                   breakeven_after_tp1=True, max_hold_hours=336.0,
+                   cancel_at_target=False):
     """
     Проводит один ордер через свечи исполнения: ожидание налива, затем ведение
     позиции до выхода.
@@ -149,6 +150,13 @@ def simulate_order(order, exec_arrays, start_pos, risk_amount,
         if touched:
             fill_pos = i
             break
+        # Как живой брокер (paper_broker._process_pending): цена дошла до
+        # первой цели, не задев входа, — заявка снимается. До 25.09.2026
+        # движка этого правила не было, а брокер его применял ко всем.
+        if cancel_at_target and order.targets:
+            first = order.targets[0]
+            if (high[i] >= first) if is_long else (low[i] <= first):
+                return None
 
     if fill_pos is None:
         return None   # ордер не налился — сделки не было
@@ -367,7 +375,7 @@ def simulate_order(order, exec_arrays, start_pos, risk_amount,
 def run_portfolio(orders, exec_data, risk_pct=1.0, max_positions=5,
                   cooldown_hours=12.0, initial_balance=INITIAL_BALANCE,
                   breakeven_after_tp1=True, max_hold_hours=336.0,
-                  max_same_direction=0, risk_scale=None):
+                  max_same_direction=0, risk_scale=None, cancel_at_target=False):
     """
     Портфельная симуляция: ордера в хронологическом порядке, ограничения по
     числу позиций и кулдауну, риск считается от ТЕКУЩЕГО баланса.
@@ -443,6 +451,7 @@ def run_portfolio(orders, exec_data, risk_pct=1.0, max_positions=5,
             order, arrays, start_pos, risk_amount,
             breakeven_after_tp1=breakeven_after_tp1,
             max_hold_hours=max_hold_hours,
+            cancel_at_target=cancel_at_target,
         )
 
         # Ключ помечаем использованным независимо от исхода: зона отработана

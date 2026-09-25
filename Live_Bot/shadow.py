@@ -13,7 +13,8 @@
 счётчик. Лимит — со смещением стратегии и живёт её срок заявки; вход по ходу
 движения (стоп-заявка уровней) наливается пробоем, а при разрыве — по открытию
 свечи. Цена дошла до первой цели, не задев входа, — «цель без входа»: брокер
-такую заявку снимает. Налился — цели и доли по плану выхода стратегии
+такую заявку снимает (кроме SMC — у неё заявка ждёт весь срок, см.
+strategy_profile.drops_at_target). Налился — цели и доли по плану выхода стратегии
 (exit_plan.tp_plan), безубыток после первой цели, если он у неё включён; стоп
 внутри одной свечи считается раньше цели. Итог — в R от задуманного риска за
 вычетом издержек круга (risk_gate.entry_cost_share). Фандинга нет — на доли R
@@ -120,15 +121,29 @@ def _hold(strategy, pair, until_ms):
     _cooldown[key] = max(int(until_ms), _cooldown.get(key, 0))
 
 
+def _drops_at_target(strategy):
+    try:
+        import strategy_profile
+        return bool(strategy_profile.drops_at_target(strategy))
+    except Exception:                                  # noqa: BLE001
+        return True
+
+
 def _migrate(shadows):
     """
     Тени, заведённые по прежним правилам, переигрываются с начала: состояние —
     как в момент отказа, last_ts — на start_ts, и брокер сам отдаст свечи с этой
     отметки (pairs() берёт last_ts). Свечи, уже виденные позициями и
     наблюдениями, те пропускают — повтор безвреден. -> были ли такие тени.
+
+    Живой тени правил 2 без флага «снимать у цели» флаг просто проставляется:
+    раз она жива, цели без входа у неё не было, и переигрывать нечего.
     """
     changed = False
     for s in shadows:
+        if 'drops_at_target' not in s:
+            s['drops_at_target'] = _drops_at_target(s['strategy'])
+            changed = True
         if s.get('rules') == RULES:
             continue
         s.update(filled=False, fill_hours=None, hit=0, left=1.0, realized=0.0,
@@ -200,6 +215,8 @@ def watch(strategy, signal, gate, detail='', now_ms=None):
                 # Тип входа — у стратегии, как у брокера (_process_pending).
                 'stop_entry': str(((signal or {}).get('trigger') or {}).get('entry_type', '')
                                   ).upper() in ('MARKET', 'STOP'),
+                # Снимать ли у цели без входа — тоже у стратегии (у SMC — нет).
+                'drops_at_target': _drops_at_target(strategy),
                 'filled': False, 'fill_hours': None, 'hit': 0, 'left': 1.0,
                 'realized': 0.0, 'best_r': 0.0, 'worst_r': 0.0,
                 'outcome': '', 'closed_hours': None, 'rules': RULES,
@@ -287,10 +304,10 @@ def _step(s, high, low, close, hours, open_price=None):
             s['min_gap_pct'] = round(min(s.get('min_gap_pct', gap), gap), 4)
             s['best_run_r'] = round(max(s.get('best_run_r', run), run), 3)
             # ЦЕЛЬ БЕЗ ВХОДА: брокер снимает такую заявку («цена дошла до цели
-            # без нас»). Тень до 25.09.2026 этого не знала и «ждала входа» над
-            # целью, пока не выйдет срок.
+            # без нас») — если стратегия это правило признаёт. SMC его не
+            # признаёт: заявка ждёт отката весь срок, как в её бэктесте.
             target = s['targets'][0]
-            if (high >= target) if is_long else (low <= target):
+            if s.get('drops_at_target', True) and ((high >= target) if is_long else (low <= target)):
                 s['outcome'], s['closed_hours'] = 'цель без входа', round(hours, 2)
             return
         s['filled'], s['fill_hours'] = True, round(hours, 2)

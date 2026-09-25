@@ -120,10 +120,10 @@ class TestItPlaysOutLikeTheBroker:
 
     def test_a_target_reached_before_the_entry_ends_it(self):
         """
-        25.09.2026 LTC и LINK SMC «ждали входа», уйдя за первую цель: брокер
-        такую заявку снимает («цена дошла до цели без нас»), тень — нет.
+        Брокер снимает заявку, когда цена дошла до первой цели, не задев входа
+        («цена дошла до цели без нас»), — тень тоже.
         """
-        shadow.watch('SMC', signal(), 'направленный кэп', now_ms=START)
+        shadow.watch('FIBO', signal(), 'предел портфеля', now_ms=START)
         done = run([(1, 103.0, 101.0, 102.5), (2, 104.5, 102.0, 104.2)])
         assert [s['outcome'] for s in done] == ['цель без входа']
         row = closed_rows()[0]
@@ -131,6 +131,18 @@ class TestItPlaysOutLikeTheBroker:
         # Ближе всего — 101 (1% над входом); без нас — до 104.5, это +2.25R.
         assert float(row['min_gap_pct']) == pytest.approx(1.0)
         assert float(row['best_run_r']) == pytest.approx(2.25)
+
+    def test_an_smc_order_waits_past_its_target_like_in_its_backtest(self):
+        """
+        У SMC заявка у цели не снимается (strategy_profile.drops_at_target):
+        её бэктест так не делал, и замер 25.09.2026 показал, что снятие
+        отнимает у неё лучшие сделки. Тень ждёт отката и наливается.
+        """
+        shadow.watch('SMC', signal(), 'направленный кэп', now_ms=START)
+        assert run([(1, 104.5, 102.0, 104.2)]) == []          # цель без входа — ждёт
+        done = run([(3, 102.0, 99.8, 100.4), (5, 104.6, 100.3, 104.4)])
+        assert [s['outcome'] for s in done] == ['цель']
+        assert float(closed_rows()[0]['fill_hours']) == 3.0
 
     def test_entry_and_target_in_one_candle_is_a_fill(self):
         """Как у брокера: чтобы дойти до цели, цена прошла через вход."""
@@ -179,12 +191,12 @@ class TestTheBrokersCooldown:
         monkeypatch.setattr(strategy_profile, 'cooldown_hours', lambda s: 12.0)
 
     def test_no_new_shadow_within_the_cooldown_after_a_miss(self):
-        shadow.watch('SMC', signal(), 'направленный кэп', now_ms=START)
+        shadow.watch('FIBO', signal(), 'предел портфеля', now_ms=START)
         run([(1, 104.5, 102.0, 104.2)])                # цель без входа
-        shadow.watch('SMC', signal(), 'направленный кэп', now_ms=START + 2 * H)
+        shadow.watch('FIBO', signal(), 'предел портфеля', now_ms=START + 2 * H)
         assert shadow._load() == []
         # Пауза — от постановки: через 12 ч тень заводится снова.
-        shadow.watch('SMC', signal(), 'направленный кэп', now_ms=START + 12 * H + 1)
+        shadow.watch('FIBO', signal(), 'предел портфеля', now_ms=START + 12 * H + 1)
         assert len(shadow._load()) == 1
 
     def test_a_filled_shadow_restarts_the_pause_at_its_exit(self):
@@ -196,10 +208,10 @@ class TestTheBrokersCooldown:
         assert len(shadow._load()) == 1
 
     def test_the_pause_survives_a_restart(self):
-        shadow.watch('SMC', signal(), 'направленный кэп', now_ms=START)
+        shadow.watch('FIBO', signal(), 'предел портфеля', now_ms=START)
         run([(1, 104.5, 102.0, 104.2)])
         shadow._shadows = None                         # «перезапуск»
-        shadow.watch('SMC', signal(), 'направленный кэп', now_ms=START + 2 * H)
+        shadow.watch('FIBO', signal(), 'предел портфеля', now_ms=START + 2 * H)
         assert shadow._load() == []
 
 
@@ -211,8 +223,8 @@ class TestShadowsOfTheOldRulesAreReplayed:
         отдаёт свечи с её start_ts, и она закрывается, как закрылась бы заявка.
         """
         import json
-        legacy = [{'key': ['SMC', 'LTCUSDT', 'LONG', 66.91, 65.930955], 'strategy': 'SMC',
-                   'pair': 'LTCUSDT', 'direction': 'LONG', 'gate': 'направленный кэп',
+        legacy = [{'key': ['FIBO', 'LTCUSDT', 'LONG', 66.91, 65.930955], 'strategy': 'FIBO',
+                   'pair': 'LTCUSDT', 'direction': 'LONG', 'gate': 'предел портфеля',
                    'detail': '', 'first_at': '2026-09-25T10:32:05Z', 'refusals': 24,
                    'start_ts': START, 'last_ts': START + 7 * H, 'last_close': 69.66,
                    'entry': 66.91, 'limit': 66.91, 'stop0': 65.930955, 'stop': 65.930955,
