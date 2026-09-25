@@ -4027,12 +4027,14 @@ function shadowView(sh) {
   const name = k => `<span class="key" style="background:${COLOR[k] || 'var(--ink-4)'}"></span>
     ${esc(NAMES[k] || k)}`;
   const r = v => v == null ? '—' : `<span class="${cls(v)}">${v >= 0 ? '+' : ''}${v.toFixed(2)} R</span>`;
+  // Стоп стоит с отступом за уровень: 65.930955 вместо 65.93 — шесть значащих цифр.
+  const px = v => v ? price(Number(Number(v).toPrecision(6))) : '—';
   const live = active.length ? `<table><thead><tr>
       <th>Стратегия</th><th>Пара</th><th>Сторона</th><th>Что не пустило</th>
       <th>Вход</th><th>Стоп</th><th>Цель</th><th>Сейчас</th><th>Итог сейчас</th><th>Отказов</th>
     </tr></thead><tbody>${active.map(s => `<tr>
       <td>${name(s.strategy)}</td><td class="pair">${esc(s.pair)}</td><td>${esc(s.direction)}</td>
-      <td>${esc(s.gate)}</td><td>${price(s.entry)}</td><td>${price(s.stop)}</td><td>${price(s.target)}</td>
+      <td>${esc(s.gate)}</td><td>${px(s.entry)}</td><td>${px(s.stop)}</td><td>${px(s.target)}</td>
       <td>${esc(s.status)}${s.targets_hit ? ` · целей ${s.targets_hit}` : ''}</td>
       <td>${r(s.now_r)}</td><td>${s.refusals}</td></tr>`).join('')}</tbody></table>`
     : '<div class="empty">Сейчас предохранители ничего не держат</div>';
