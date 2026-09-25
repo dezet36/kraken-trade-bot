@@ -38,8 +38,10 @@ while [ $(date +%s) -lt $deadline ]; do
   collected=1
   if [ -n "$verdict" ] && ! [[ "$cycle" > "$verdict" ]]; then collected=0; fi
 
+  # «Не раньше», а не «позже»: переделка отдаётся в ту же секунду, что
+  # пишется вердикт первого прохода (см. ops/llm_guard.sh, 25.09.2026).
   in_flight=0
-  if [ -n "$handed" ] && { [ -z "$verdict" ] || [[ "$handed" > "$verdict" ]]; }; then
+  if [ -n "$handed" ] && { [ -z "$verdict" ] || ! [[ "$handed" < "$verdict" ]]; }; then
     age=$(( $(date +%s) - $(stamp_to_epoch "$handed") ))
     if [ "$age" -gt "$GRACE" ]; then in_flight=1; fi
   fi
