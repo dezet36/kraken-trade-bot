@@ -1154,6 +1154,33 @@ class TestAPlanTheCodeWouldRefuseCannotBeWritten:
         assert out['gate'] == 'нет законного плана', out.get('gate')
         assert asked == [], 'модель не должна быть спрошена'
 
+    def test_a_mismatch_revision_names_the_legal_stops(self, monkeypatch):
+        """
+        ZEC 25.09: обоснование о стопе L11, законный — один L12; переделка
+        повторила L11, потому что не знала, почему нельзя. Теперь список в замечании.
+        """
+        import llm_context
+        real = llm_context.build
+
+        def with_legal_stops(*a, **k):
+            out = real(*a, **k)
+            out['stop_ok'] = {'LONG': ['L7', 'L8'], 'SHORT': []}
+            return out
+
+        monkeypatch.setattr(llm_context, 'build', with_legal_stops)
+        monkeypatch.setattr(dec, 'branch_filter', lambda *a, **k: None)
+        monkeypatch.setattr(dec, 'entry_on_pool', lambda *a, **k: '')   # в случайной разметке L3 бывает пулом
+        asked = []
+        mismatch = answer(stop_why='стоп за L5 — там умирает идея')      # в плане стоп L4
+
+        def ask(prompt, grammar, max_tokens):
+            asked.append(prompt)
+            return mismatch if len(asked) == 1 else answer(d='skip', why='законный стоп не подходит')
+
+        dec.decide('BTCUSDT', _random_df(3), ask)
+        assert len(asked) == 2, 'переделки не было'
+        assert 'годятся только L7, L8' in asked[1]
+
     def test_the_revision_is_asked_without_a_thought(self, monkeypatch):
         """Переделка без мысли: с ней вопрос ~10.4 тыс. не оставлял места плану (п. 46)."""
         import llm_grammar

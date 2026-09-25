@@ -1116,11 +1116,23 @@ def decide(pair, df, ask, news=None, at=None, max_tokens=None, market=None,
         # модели», что и первая отправка — grep один и тот же.
         log(f'   LLM {pair}: план отвергнут ({first_gate}) — отдал модели '
             f'на переделку, вердикт будет через несколько минут')
+        # Расхождение обоснования с планом теперь чаще всего значит, что модель
+        # думала о стопе, которого грамматика не пускает (п. 52): ZEC 25.09
+        # хотел стоп за L11, законным был один L12 — и переделка повторила L11,
+        # не зная почему. Называем законные стопы прямо.
+        hint = ''
+        if first_gate == 'обоснование не о том плане':
+            side = (verdict.get('plan') or {}).get('side')
+            legal = (context.get('stop_ok') or {}).get(side) or []
+            if legal:
+                hint = (f'. Под стоп для {side} годятся только {", ".join(legal)} '
+                        f'(помечены «← СТОП»), за другой уровень код стоп не пустит: '
+                        f'построй обоснование под законный стоп или ответь skip')
         try:
             # Без мысли: модель уже думала на первом проходе, а с мыслью
             # вопрос переделки (~10.4 тыс.) не оставлял места плану — 2 из 5
             # дошедших переделок 24–25.09 «ответ обрезан» (п. 46).
-            second = ask(revision_request(question, answer, first_gate, first_detail),
+            second = ask(revision_request(question, answer, first_gate, first_detail + hint),
                          llm_grammar.answer_only(grammar), max_tokens)
             retry = judge(second)
             retry['revised_from'] = f'{first_gate}: {first_detail}'[:300]
