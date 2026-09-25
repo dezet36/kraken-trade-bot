@@ -181,18 +181,19 @@ class TestConfluenceIsCountedByCode:
     решение. Поэтому она отмечает признаки, а считает их код.
     """
 
-    def test_three_of_five_is_refused(self):
-        out = verdict(cf={'poi': True, 'vp': True, 'der': True,
+    def test_two_of_five_is_refused(self):
+        out = verdict(cf={'poi': True, 'vp': True, 'der': False,
                           'smc': False, 'flow': False})
         assert not out['ok']
         assert out['gate'] == 'мало конфлюенса'
-        assert out['votes'] == 3
+        assert out['votes'] == 2
 
-    def test_four_of_five_passes(self):
+    def test_three_of_five_passes(self):
+        """С 25.09.2026 порог — три: идея верна у 57% планов с тремя, 34% с пятью (п. 50)."""
         out = verdict(cf={'poi': True, 'vp': True, 'der': True,
-                          'smc': True, 'flow': False})
+                          'smc': False, 'flow': False})
         assert out['ok'], out.get('gate')
-        assert out['votes'] == 4
+        assert out['votes'] == 3
 
     def test_the_vote_survives_a_refusal(self):
         """Счёт факторов нужен и у отказа — иначе разбирать нечего."""
