@@ -195,6 +195,11 @@ def _iso(ms: int) -> str:
     return datetime.fromtimestamp(ms / 1000, tz=timezone.utc).isoformat(timespec='seconds')
 
 
+def _ordered_targets(direction, targets):
+    """Цели от ближней к дальней: у лонга по возрастанию, у шорта по убыванию."""
+    return sorted(targets, reverse=str(direction).upper() != 'LONG')
+
+
 def _norm(symbol: str) -> str:
     return (symbol or '').replace('/', '').replace(':USDT', '').replace(':', '').upper()
 
@@ -330,6 +335,25 @@ class PaperBroker:
                 log(f"⚠️ {name}: в настройках депозит ${wanted:,.0f}, но эксперимент "
                     f"начат с ${stored:,.0f}. Оставляю начальный. "
                     f"Чтобы начать заново — PAPER_RESET=true")
+
+        # ЦЕЛИ — ОТ БЛИЖНЕЙ К ДАЛЬНЕЙ, и у уже стоящих заявок тоже. До
+        # 26.09.2026 план ИИ мог прийти с дальней целью первой (ARB LONG
+        # [0.23127, 0.22933]); цели здесь берутся по порядку, и после первой
+        # «вторая» оказывалась пройденной — остаток закрывался ниже рынка.
+        # Позиции, где цель уже взята, не трогаются: их порядок прожит.
+        fixed = []
+        for name in self.strategies:
+            for book in ('pending', 'positions'):
+                for pair, rec in (state.get(book, {}).get(name) or {}).items():
+                    if book == 'positions' and rec.get('tp_hit'):
+                        continue
+                    targets = list(rec.get('targets') or [])
+                    ordered = _ordered_targets(rec.get('direction'), targets)
+                    if targets != ordered:
+                        rec['targets'] = ordered
+                        fixed.append(f'{name} {pair}')
+        if fixed:
+            log(f"🔧 Цели упорядочены от ближней к дальней: {', '.join(fixed)}")
         return state
 
     def _save_state(self, state=None):
@@ -820,6 +844,10 @@ class PaperBroker:
         if not targets:
             log(f"   [{strategy}] {pair}: у сигнала нет целей — пропуск")
             return False
+        # Цели берутся по порядку — значит, он обязан быть от ближней к
+        # дальней (см. _load_state). Доли остаются по местам: «половина на
+        # первой» — это про ближнюю.
+        targets = _ordered_targets(direction, list(targets))
 
         now = _now_ms()
         record = {

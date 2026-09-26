@@ -1508,3 +1508,28 @@ class TestAnEntryPastThePriceIsRepricedOrRefused:
         monkeypatch.setattr(dec.llm_context, 'min_stop_pct', lambda atr_pct=None: 1.5)
         out = verdict()
         assert out['ok'] and out['min_stop_pct'] == 1.5
+
+
+class TestTargetsGoFromNearToFar:
+    """
+    Модель перечисляет цели как хочет: в 11 принятых планах из 89
+    (19–26.09.2026) первой шла дальняя — ARB LONG [0.23127, 0.22933]. Брокер
+    берёт цели по порядку, а R:R считается по первой: дальняя его завышала.
+    """
+
+    def test_far_first_is_reordered_with_its_level_names(self):
+        out = verdict(tp=['L1', 'L2'])                     # L1 109 дальше, L2 107 ближе
+        assert out['ok'], out.get('gate')
+        assert out['targets'] == [107.0, 109.0]
+        assert out['ids']['tp'] == ['L2', 'L1']
+        assert out['rr'] == pytest.approx(7 / RISK, abs=0.01), 'R:R — по ближней цели'
+
+    def test_a_short_orders_downwards(self):
+        out = verdict(side='SHORT', entry='L2', stop='L1', tp=['L4', 'L3'])
+        assert out['ok'], out.get('gate')
+        assert out['targets'] == [100.0, 98.0]
+        assert out['ids']['tp'] == ['L3', 'L4']
+
+    def test_the_order_already_right_stays(self):
+        out = verdict(tp=['L2', 'L1'])
+        assert out['targets'] == [107.0, 109.0] and out['ids']['tp'] == ['L2', 'L1']

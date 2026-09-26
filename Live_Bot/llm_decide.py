@@ -146,7 +146,10 @@ def reprice_at_market(verdict, price):
     тейкер туда и обратно, а не мейкер на входе, как у лимита.
     """
     side, entry, stop = verdict.get('side'), verdict.get('entry'), verdict.get('stop')
-    targets = [t for t in (verdict.get('targets') or []) if t]
+    # От ближней к дальней: план, взведённый до 26.09.2026, мог хранить их
+    # в порядке модели, а R:R ниже считается по первой.
+    targets = sorted((t for t in (verdict.get('targets') or []) if t),
+                     key=lambda t: abs(t - (price or entry or 0)))
     if not side or not entry or not stop or not targets or not price:
         return verdict, ''
     if not past_entry(side, entry, price):
@@ -945,13 +948,26 @@ def check(parsed, levels, answer=None, market=None, min_stop=None, atr_pct=None)
     entry, stop_level = parsed.get('entry'), parsed.get('stop')
     # Одна и та же цель дважды — это одна цель: грамматика повтор не
     # запрещает, а брокер делил бы позицию на две одинаковые части.
-    targets = []
-    for t in (parsed.get('targets') or []):
+    ids = dict(parsed.get('ids') or {})
+    ids_tp = list(ids.get('tp') or [])
+    targets, tp_ids = [], []
+    for k, t in enumerate(parsed.get('targets') or []):
         if t is not None and t not in targets:
             targets.append(t)
+            tp_ids.append(ids_tp[k] if k < len(ids_tp) else None)
     if not entry or not stop_level or not targets:
         return _refusal('уровень не найден',
                         'ответ ссылается на то, чего нет в разметке', base)
+    # ЦЕЛИ — ОТ БЛИЖНЕЙ К ДАЛЬНЕЙ. Модель перечисляет их как хочет: в 11
+    # принятых планах из 89 (19–26.09.2026) первой шла дальняя — ARB LONG
+    # [0.23127, 0.22933]. Брокер берёт цели по порядку: после «первой» (дальней)
+    # «вторая» уже пройдена, и остаток закрывался бы ниже рынка. И R:R ниже
+    # считается по первой цели — дальняя его завышала, план проходил порог 2.0
+    # по цели, до которой ближняя стоит раньше.
+    order = sorted(range(len(targets)), key=lambda k: abs(targets[k] - entry))
+    targets = [targets[k] for k in order]
+    if ids_tp:
+        ids['tp'] = [tp_ids[k] for k in order]
 
     side = parsed.get('side')
     # СТОП — ЗА УРОВНЕМ, А НЕ НА НЁМ. Модель называет структуру, которая
@@ -1039,7 +1055,7 @@ def check(parsed, levels, answer=None, market=None, min_stop=None, atr_pct=None)
                # Минимум, которым план проверен: им же сверяется вход, если
                # к заявке он окажется за ценой (reprice_at_market).
                'min_stop_pct': floor,
-               'ids': parsed.get('ids', {})}
+               'ids': ids}
     if ev is not None and ev <= 0:
         return _refusal('ожидание не положительно',
                         f'EV {ev:.3f} при нашей доле цели {p_real:.2f} по {n_real} '

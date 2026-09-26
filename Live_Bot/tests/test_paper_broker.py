@@ -1196,3 +1196,49 @@ class TestALimitThroughTheMarket:
             row = json.loads(fh.readlines()[-1])
         assert 'по рынку' in row['entry_note']
         assert row['llm_entry_plan'] == 101.5
+
+
+class TestTargetsAreTakenNearToFar:
+    """
+    Цели берутся по порядку, значит порядок обязан быть от ближней к дальней.
+    26.09.2026 заявка ИИ ARB LONG стояла с [0.23127, 0.22933]: после «первой»
+    (дальней) «вторая» уже пройдена, и остаток закрылся бы ниже рынка.
+    """
+
+    def test_a_new_order_is_put_in_order(self, broker_env):
+        broker, _client, pb, _cfg = broker_env
+        pb._now_ms = lambda: 1_700_000_000_000
+        broker.open('SMC', signal(strategy='SMC', entry=100.0, stop=90.0, tp1=120.0,
+                                  targets=(120.0, 110.0), fractions=(0.5, 0.5)))
+        order = broker.pending('SMC')['BTCUSDT']
+        assert order['targets'] == [110.0, 120.0] and order['fractions'] == [0.5, 0.5]
+
+    def test_a_short_goes_downwards(self, broker_env):
+        broker, _client, pb, _cfg = broker_env
+        pb._now_ms = lambda: 1_700_000_000_000
+        broker.open('SMC', signal(strategy='SMC', direction='SHORT', entry=100.0, stop=110.0,
+                                  tp1=80.0, targets=(80.0, 90.0), fractions=(0.5, 0.5)))
+        assert broker.pending('SMC')['BTCUSDT']['targets'] == [90.0, 80.0]
+
+    def test_an_order_already_standing_is_repaired_on_load(self, broker_env):
+        broker, client, pb, _cfg = broker_env
+        pb._now_ms = lambda: 1_700_000_000_000
+        broker.open('SMC', signal(strategy='SMC', entry=100.0, stop=90.0, tp1=110.0,
+                                  targets=(110.0, 120.0), fractions=(0.5, 0.5)))
+        broker.pending('SMC')['BTCUSDT']['targets'] = [120.0, 110.0]     # как у заявки до правки
+        broker._save_state()
+        again = pb.PaperBroker(client, strategies=('FIBO', 'SMC'))
+        assert again.pending('SMC')['BTCUSDT']['targets'] == [110.0, 120.0]
+
+    def test_a_position_with_a_target_taken_is_left_alone(self, broker_env):
+        broker, client, pb, _cfg = broker_env
+        pb._now_ms = lambda: 1_700_000_000_000
+        broker.open('SMC', signal(strategy='SMC', entry=100.0, stop=90.0, tp1=110.0,
+                                  targets=(110.0, 120.0), fractions=(0.5, 0.5), breakeven=False))
+        feed(broker, client, 'BTCUSDT', [(101, 99.5, 100), (111, 100, 110)])
+        pos = broker.positions('SMC')['BTCUSDT']
+        assert pos['tp_hit'] == 1
+        pos['targets'] = [120.0, 110.0]
+        broker._save_state()
+        again = pb.PaperBroker(client, strategies=('FIBO', 'SMC'))
+        assert again.positions('SMC')['BTCUSDT']['targets'] == [120.0, 110.0], 'прожитый порядок не трогаем'

@@ -1286,3 +1286,26 @@ class TestAnEntryPastThePrice:
         assert len(out) == 1
         assert out[0]['signal']['params']['entry'] == 100.0
         assert out[0]['signal']['market_price'] == pytest.approx(101.0)
+
+
+class TestAnOldPlanWithFarTargetFirst:
+    """
+    План, взведённый до 26.09.2026, лежит в llm_armed.json с целями в порядке
+    модели. Сигнал из него — с целями от ближней к дальней и честным R:R.
+    """
+
+    def test_the_signal_is_reordered(self):
+        verdict = approving_verdict(entry=100.0, stop=97.0, targets=[109.0, 107.0], rr=3.0,
+                                    ids={'entry': 'L5', 'stop': 'L7', 'tp': ['L1', 'L2']})
+        signal = strategy_llm._reshape('ARBUSDT', verdict)
+        params = signal['params']
+        assert params['tp_targets'] == [107.0, 109.0]
+        assert params['take_profit_1'] == 107.0 and params['take_profit_2'] == 109.0
+        assert params['rr'] == pytest.approx(7 / 3, abs=0.01)
+        assert signal['llm']['ids']['tp'] == ['L2', 'L1'] and signal['llm']['rr'] == params['rr']
+
+    def test_a_plan_already_in_order_keeps_its_numbers(self):
+        verdict = approving_verdict()
+        signal = strategy_llm._reshape('BTCUSDT', verdict)
+        assert signal['params']['tp_targets'] == [107.0, 109.0]
+        assert signal['params']['rr'] == verdict['rr']

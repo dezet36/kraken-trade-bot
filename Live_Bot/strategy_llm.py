@@ -697,7 +697,7 @@ def _at_price(pair, verdict, df, sig=frozenset()):
         'pair': pair,
         'signal': signal,
         'score': priced.get('votes', 0),
-        'rr': priced['rr'],
+        'rr': signal['params']['rr'],
         'poi_type': 'LLM',
         'df_1h': df,
     }
@@ -736,7 +736,19 @@ def _reshape(pair, verdict, df=None):
     структуру. Поля — те, что читают paper_broker и trade_manager: пара,
     имя стратегии, тип сетапа, параметры входа и выхода.
     """
-    targets = list(verdict['targets'])
+    # Цели — от ближней к дальней. llm_decide.check упорядочивает их с
+    # 26.09.2026, но план, взведённый раньше, лежит в llm_armed.json как был:
+    # у 11 из 89 принятых планов первой шла дальняя цель.
+    order = sorted(range(len(verdict['targets'])),
+                   key=lambda k: abs(verdict['targets'][k] - verdict['entry']))
+    targets = [verdict['targets'][k] for k in order]
+    ids = dict(verdict.get('ids') or {})
+    if len(ids.get('tp') or []) == len(order):
+        ids['tp'] = [ids['tp'][k] for k in order]
+    rr = verdict['rr']
+    if order != sorted(order) and verdict['entry'] != verdict['stop']:
+        # R:R такого плана считался по дальней цели — здесь честно, по ближней.
+        rr = round(abs(targets[0] - verdict['entry']) / abs(verdict['entry'] - verdict['stop']), 2)
     params = {
         # Размер позиции считает брокер по этой доле, текущему депозиту и
         # дистанции стопа. Здесь его не бывает.
@@ -747,7 +759,7 @@ def _reshape(pair, verdict, df=None):
         'take_profit_2': targets[-1],
         'tp_targets': targets,
         'tp_fractions': _fractions(len(targets)),
-        'rr': verdict['rr'],
+        'rr': rr,
         'sl_distance': abs(verdict['entry'] - verdict['stop']),
         # БЕЗУБЫТОК ПРИ +1R. До 22.09.2026 он был выключен с доводом «модель
         # сама называет уровень инвалидации». Замер по одиннадцати закрытым
@@ -786,11 +798,11 @@ def _reshape(pair, verdict, df=None):
             'p': verdict.get('p'),
             'votes': verdict.get('votes'),
             'confluence': verdict.get('confluence', {}),
-            'rr': verdict.get('rr'),
+            'rr': rr,
             'ev': verdict.get('ev'),
             'cost_r': verdict.get('cost_r'),
             'model': llm_local.last_stats().get('model', ''),
-            'ids': verdict.get('ids', {}),
+            'ids': ids,
             'trigger_when': verdict.get('trigger_when', 'now'),
             'trigger_level': verdict.get('trigger_level'),
             'trigger_id': verdict.get('trigger_id'),
