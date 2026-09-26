@@ -1,0 +1,42 @@
+копия find_local_extremes совпала с оригиналом на 3000 окнах
+   backtest_cache_mid1 XRPUSDT: 487 заявок
+   backtest_cache_mid1 BTCUSDT: 347 заявок
+   backtest_cache_mid1 ETHUSDT: 391 заявок
+   backtest_cache_mid1 SOLUSDT: 954 заявок
+   backtest_cache_mid1 BNBUSDT: 362 заявок
+   backtest_cache_mid1 ADAUSDT: 632 заявок
+   backtest_cache_mid1 DOGEUSDT: 715 заявок
+   backtest_cache_mid1 AVAXUSDT: 849 заявок
+   backtest_cache_mid2 BTCUSDT: 403 заявок
+   backtest_cache_mid2 ETHUSDT: 555 заявок
+   backtest_cache_mid1 LINKUSDT: 776 заявок
+   backtest_cache_mid1 LTCUSDT: 514 заявок
+   backtest_cache_mid2 SOLUSDT: 765 заявок
+   backtest_cache_mid2 XRPUSDT: 702 заявок
+   backtest_cache_mid2 BNBUSDT: 411 заявок
+   backtest_cache_mid2 DOGEUSDT: 792 заявок
+   backtest_cache_mid2 ADAUSDT: 805 заявок
+   backtest_cache_mid2 AVAXUSDT: 794 заявок
+   backtest_cache_mid2 LINKUSDT: 817 заявок
+   backtest_cache_mid2 LTCUSDT: 654 заявок
+
+== backtest_cache_mid1: заявок 6027, в пределе издержек 4933
+   ЖИВАЯ ФИБО: предел издержек 5%, снятие у цели      946 сд     -13.7R  -0.014 R/сд  PF 0.964  просадка  38.3%
+   то же без снятия у цели                            889 сд     -19.5R  -0.022 R/сд  PF 0.942  просадка  37.3%
+   без предела издержек, снятие у цели               1124 сд     -44.6R  -0.040 R/сд  PF 0.925  просадка  49.2%
+
+== backtest_cache_mid2: заявок 6698, в пределе издержек 5586
+   ЖИВАЯ ФИБО: предел издержек 5%, снятие у цели     1072 сд     -27.3R  -0.025 R/сд  PF 0.952  просадка  50.4%
+   то же без снятия у цели                            946 сд      +4.1R  +0.004 R/сд  PF 0.994  просадка  29.8%
+   без предела издержек, снятие у цели               1252 сд     -32.9R  -0.026 R/сд  PF 0.950  просадка  51.2%
+
+== по направлениям (те же заявки, живые правила; лонги и шорты прогнаны порознь,
+   поэтому в сумме сделок больше, чем в общем прогоне)
+== backtest_cache_mid1
+   все              946 сд     -13.7R  -0.014 R/сд  винрейт 32.7%
+   только лонги     692 сд     -45.9R  -0.066 R/сд  винрейт 30.5%
+   только шорты     520 сд     +14.2R  +0.027 R/сд  винрейт 33.8%
+== backtest_cache_mid2
+   все             1072 сд     -27.3R  -0.025 R/сд  винрейт 31.8%
+   только лонги     679 сд     -51.9R  -0.077 R/сд  винрейт 30.0%
+   только шорты     700 сд      +4.8R  +0.007 R/сд  винрейт 33.6%
