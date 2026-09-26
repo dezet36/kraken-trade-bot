@@ -40,6 +40,12 @@ def _smc():
     return params
 
 
+def _llm_rules():
+    """Правила ИИ, если он в режиме «правила» (config.LLM_MODE=rules), иначе None."""
+    import llm_rules
+    return llm_rules.DECISION if llm_rules.enabled() else None
+
+
 def _bar_hours(timeframe):
     return {'1m': 1 / 60, '5m': 1 / 12, '15m': 0.25, '30m': 0.5,
             '1h': 1.0, '2h': 2.0, '4h': 4.0, '1d': 24.0}.get(str(timeframe), 1.0)
@@ -66,6 +72,8 @@ def expiry_hours(strategy):
         if name == 'SMC':
             return _smc().PENDING_ORDER_MAX_HOURS
         if name == 'LLM':
+            if _llm_rules() is not None:
+                return _llm_rules().PENDING_ORDER_MAX_HOURS
             # Заявка — часть плана и живёт столько же, сколько ждёт условия план.
             return getattr(_config(), 'LLM_TRIGGER_TTL_H', 12) or 12
         return None
@@ -82,6 +90,8 @@ def cooldown_hours(strategy):
         if name == 'SMC':
             return _smc().COOLDOWN_HOURS
         if name == 'LLM':
+            if _llm_rules() is not None:
+                return _llm_rules().COOLDOWN_HOURS
             return getattr(_config(), 'LLM_COOLDOWN_HOURS', 4.0)
         return None
     return _own(strategy, own, getattr(_config(), 'COOLDOWN_HOURS', 12.0))
@@ -97,6 +107,8 @@ def cost_limit_pct(strategy):
         if name == 'SMC':
             return _smc().MAX_ENTRY_COST_SHARE_PCT
         if name == 'LLM':
+            if _llm_rules() is not None:
+                return _llm_rules().MAX_ENTRY_COST_SHARE_PCT
             return getattr(_config(), 'LLM_MAX_ENTRY_COST_SHARE_PCT', 5.0)
         return None
     return _own(strategy, own, getattr(_config(), 'MAX_ENTRY_COST_SHARE_PCT', 5.0))
@@ -126,6 +138,8 @@ def max_hold_hours(strategy):
         if name == 'SMC':
             return _smc().MAX_POSITION_HOLD_HOURS
         if name == 'LLM':
+            if _llm_rules() is not None:
+                return _llm_rules().MAX_POSITION_HOLD_HOURS
             return getattr(_config(), 'LLM_MAX_HOLD_HOURS', 336.0)
         return None
     return _own(strategy, own, getattr(_config(), 'MAX_POSITION_HOLD_HOURS', 0.0) or 0.0)
@@ -143,6 +157,8 @@ def drops_at_target(strategy):
     try:
         if strategy == 'SMC':
             return bool(_smc().CANCEL_PENDING_AT_TARGET)
+        if strategy == 'LLM' and _llm_rules() is not None:
+            return bool(_llm_rules().CANCEL_PENDING_AT_TARGET)
     except Exception:                              # noqa: BLE001
         pass
     return bool(getattr(_config(), 'CANCEL_PENDING_AT_TARGET', True))
@@ -172,6 +188,8 @@ def fills_through_market(strategy):
         if strategy == 'SMC':
             return bool(_smc().FILL_THROUGH_MARKET)
         if strategy == 'LLM':
+            if _llm_rules() is not None:
+                return bool(_llm_rules().FILL_THROUGH_MARKET)
             return bool(getattr(_config(), 'LLM_FILL_THROUGH_MARKET', True))
         if strategy == 'FIBO':
             return bool(getattr(_config(), 'FIBO_FILL_THROUGH_MARKET', False))
@@ -200,6 +218,8 @@ def min_stop_pct(strategy):
         if strategy == 'RSIBB':
             return float(_rsibb().MIN_STOP_PCT)
         if strategy == 'LLM':
+            if _llm_rules() is not None:
+                return float(_llm_rules().MIN_SL_PCT) * 100
             import llm_context
             return float(llm_context.min_stop_pct())
         import settings_store

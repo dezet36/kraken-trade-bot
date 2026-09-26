@@ -237,13 +237,20 @@ class MarketContext:
         return NEUTRAL
 
     # ── Основная оценка ───────────────────────────────────────────────────
-    def evaluate(self, at_index, balance=10_000.0):
+    def evaluate(self, at_index, balance=10_000.0, decision=None):
         """
         Строит сетап на свече `at_index` рабочего ТФ или возвращает None.
 
         Второе значение — причина отказа (строкой), чтобы бот и бэктест
         могли логировать воронку отсева, а не молча пропускать пары.
+
+        decision — набор ПРАВИЛ РЕШЕНИЙ (имена из params.DECISION); None — правила
+        SMC из smc/params. Структура (свинги, зоны, пулы) у контекста одна на всех
+        читателей; решать по ней каждая стратегия может своими правилами, не
+        трогая чужие (CLAUDE.md, «Изоляция стратегий»). Так ИИ держит свою
+        копию правил отбора SMC (llm_rules), а правка SMC её не меняет.
         """
+        d = params if decision is None else decision
         df = self.frames['poi']
         if at_index < 30 or at_index >= len(df):
             return None, 'мало данных'
@@ -252,7 +259,7 @@ class MarketContext:
         price = float(df['close'].iloc[at_index])
 
         # 0) Торговая сессия (§11.2) — как жёсткий фильтр, если включён
-        if params.KILLZONE_AS_GATE and not self.killzones[at_index]:
+        if d.KILLZONE_AS_GATE and not self.killzones[at_index]:
             return None, 'вне killzone'
 
         # 1) Bias старшего ТФ
@@ -270,10 +277,10 @@ class MarketContext:
         # Длина ноги: разбор сделок показал, что ноги 10-20 свечей дают лучший
         # результат на обоих периодах, а очень короткие и очень длинные хуже.
         leg_bars = leg['end']['index'] - leg['start']['index']
-        if params.LEG_BARS_MIN and leg_bars < params.LEG_BARS_MIN:
-            return None, f'нога {leg_bars} свечей короче {params.LEG_BARS_MIN}'
-        if params.LEG_BARS_MAX and leg_bars > params.LEG_BARS_MAX:
-            return None, f'нога {leg_bars} свечей длиннее {params.LEG_BARS_MAX}'
+        if d.LEG_BARS_MIN and leg_bars < d.LEG_BARS_MIN:
+            return None, f'нога {leg_bars} свечей короче {d.LEG_BARS_MIN}'
+        if d.LEG_BARS_MAX and leg_bars > d.LEG_BARS_MAX:
+            return None, f'нога {leg_bars} свечей длиннее {d.LEG_BARS_MAX}'
         if fib.is_invalidated(price, leg):
             return None, 'сетап инвалидирован (цена за 88.6%)'
 
@@ -282,15 +289,15 @@ class MarketContext:
         lo = bisect_left(self._poi_confirmed, at_index - params.POI_MAX_AGE_BARS)
         hi = bisect_right(self._poi_confirmed, at_index)
         window = self.pois[lo:hi]
-        if params.POI_TYPES_ENABLED:
-            window = [p for p in window if p['type'] in params.POI_TYPES_ENABLED]
+        if d.POI_TYPES_ENABLED:
+            window = [p for p in window if p['type'] in d.POI_TYPES_ENABLED]
 
         candidates = poi_mod.active_pois(df, window, at_index, direction=bias)
         if not candidates:
             return None, 'нет активных POI'
 
         # 4) Фильтр premium/discount (§10.1)
-        if params.REQUIRE_PREMIUM_DISCOUNT:
+        if d.REQUIRE_PREMIUM_DISCOUNT:
             valid = [p for p in candidates
                      if fib.is_valid_side(p['entry_near'], leg, bias)]
             if not valid:
@@ -300,7 +307,7 @@ class MarketContext:
         # 4.5) Зона OTE как жёсткое условие (§10.1). Самый сильный предиктор
         # из найденных: вход в OTE даёт +0.42R на медвежьем периоде против
         # -0.24R вне её. В качестве мягкого фактора этот сигнал терялся.
-        if params.REQUIRE_OTE:
+        if d.REQUIRE_OTE:
             in_ote = [p for p in candidates if fib.in_ote(p['entry_near'], leg)]
             if not in_ote:
                 return None, 'ни одна зона не попадает в OTE'
@@ -326,15 +333,15 @@ class MarketContext:
 
         # 7) Confluence по чек-листу §23
         factors, score, structure_break = self._confluence(
-            df, at_index, best, leg, bias, swept, best_gap, timestamp
+            df, at_index, best, leg, bias, swept, best_gap, timestamp, d=d
         )
         # Порог у покупок может быть выше: замер на двух независимых периодах и
         # во всех трёх режимах рынка показал, что лонги слабее шортов ВЕЗДЕ
         # (0.144 R против 0.390 R при 46% и 54% сделок). Премия равна нулю —
         # поведение прежнее, симметричное.
-        threshold = params.MIN_CONFLUENCE_SCORE
+        threshold = d.MIN_CONFLUENCE_SCORE
         if bias == BULLISH:
-            threshold += params.LONG_CONFLUENCE_PREMIUM
+            threshold += d.LONG_CONFLUENCE_PREMIUM
         if score < threshold:
             missing = [k for k, v in factors.items() if not v]
             return None, f'confluence {score:.1f} < {threshold} (нет: {", ".join(missing)})'
@@ -343,21 +350,21 @@ class MarketContext:
         # Причина несобравшейся геометрии — для воронки отказов: тесный стоп
         # называется отдельно, иначе он тонет в общем «геометрия не собралась».
         self._no_trade_reason = None
-        trade = self._build_trade(best, leg, bias, swept, at_index, balance)
+        trade = self._build_trade(best, leg, bias, swept, at_index, balance, d=d)
         if trade is None:
             return None, self._no_trade_reason or 'геометрия не собралась'
         # 8.5) Цена уже за первой целью. Выключено: по бэктесту вредно, см.
-        # params.SKIP_TARGET_TAKEN.
-        if params.SKIP_TARGET_TAKEN:
+        # smc/params.SKIP_TARGET_TAKEN.
+        if d.SKIP_TARGET_TAKEN:
             first = trade['targets'][0]
             if (price >= first) if bias == BULLISH else (price <= first):
                 return None, 'цена уже за первой целью'
-        if trade['rr'] < params.MIN_RR:
-            return None, f'RR {trade["rr"]:.2f} < {params.MIN_RR}'
+        if trade['rr'] < d.MIN_RR:
+            return None, f'RR {trade["rr"]:.2f} < {d.MIN_RR}'
         # Слишком далёкая цель — нереалистичный сценарий, а не хорошая сделка:
         # сетапы с RR выше 12 убыточны на обоих рыночных режимах.
-        if params.MAX_RR and trade['rr'] > params.MAX_RR:
-            return None, f'RR {trade["rr"]:.2f} > {params.MAX_RR}'
+        if d.MAX_RR and trade['rr'] > d.MAX_RR:
+            return None, f'RR {trade["rr"]:.2f} > {d.MAX_RR}'
 
         return {
             'pair': self.pair,
@@ -393,9 +400,10 @@ class MarketContext:
             return price > candidate['entry_near']
         return price < candidate['entry_near']
 
-    def _confluence(self, df, at_index, candidate, leg, bias, swept, gap, timestamp):
+    def _confluence(self, df, at_index, candidate, leg, bias, swept, gap, timestamp, d=None):
         """Считает факторы подтверждения и их суммарный вес (§23)."""
-        weights = params.CONFLUENCE_WEIGHTS
+        d = params if d is None else d
+        weights = d.CONFLUENCE_WEIGHTS
         entry = candidate['entry_near']
 
         correction_bars = at_index - leg['end']['index']
@@ -419,7 +427,7 @@ class MarketContext:
         # молча. Одно вычисление — один ответ.
         return factors, score, recent_break
 
-    def _build_trade(self, candidate, leg, direction, swept, at_index, balance):
+    def _build_trade(self, candidate, leg, direction, swept, at_index, balance, d=None):
         """
         Вход, стоп, цели, размер позиции.
 
@@ -432,24 +440,25 @@ class MarketContext:
         непротестированный пул ликвидности, он становится первой целью —
         §14.2 требует ставить тейки на очевидных пулах.
         """
-        depth = params.POI_ENTRY_DEPTH
+        d = params if d is None else d
+        depth = d.POI_ENTRY_DEPTH
         entry = (candidate['entry_near'] * (1 - depth) + candidate['entry_mid'] * depth)
 
         # Отступ наружу от зоны: лимит встаёт навстречу цене и наливается чаще.
         # Половина сетапов иначе теряется — цена разворачивается, не дойдя до
         # границы. Платим за это чуть худшей ценой входа и, соответственно,
         # чуть большим стопом.
-        if params.POI_ENTRY_OFFSET:
+        if d.POI_ENTRY_OFFSET:
             span = abs(candidate['top'] - candidate['bottom'])
-            shift = span * params.POI_ENTRY_OFFSET
+            shift = span * d.POI_ENTRY_OFFSET
             entry = entry + shift if direction == BULLISH else entry - shift
 
         far_edge = candidate['invalidation']
-        if params.SL_MODE == 'conservative' and swept is not None:
+        if d.SL_MODE == 'conservative' and swept is not None:
             extreme = swept['extreme']
             far_edge = min(far_edge, extreme) if direction == BULLISH else max(far_edge, extreme)
 
-        buffer_ = params.SL_BUFFER_PCT
+        buffer_ = d.SL_BUFFER_PCT
         if direction == BULLISH:
             stop = far_edge * (1 - buffer_)
         else:
@@ -462,9 +471,9 @@ class MarketContext:
         # двигается. MIN_SL_PCT — фильтр: зона теснее минимума не окупает шум
         # и комиссии, сетап не берётся. До 21.09.2026 стоп здесь ОТОДВИГАЛСЯ
         # до минимума, то есть уходил из-под структуры.
-        if sl_distance < entry * params.MIN_SL_PCT:
+        if sl_distance < entry * d.MIN_SL_PCT:
             self._no_trade_reason = (f'стоп {sl_distance / entry * 100:.2f}% теснее минимума '
-                                     f'{params.MIN_SL_PCT * 100:.2f}% — зона слишком узкая')
+                                     f'{d.MIN_SL_PCT * 100:.2f}% — зона слишком узкая')
             return None
 
         raw_targets = fib.targets(leg, entry=entry)
@@ -476,19 +485,19 @@ class MarketContext:
         # глубоко в коррекции — цене нужно пройти всю ногу обратно, чтобы дать
         # хотя бы первый тейк. Близкая цель ловит движения, которые иначе
         # заканчиваются чистым стопом.
-        if params.TP_MODE == 'hybrid':
-            near = (entry + params.TP1_R_MULTIPLE * sl_distance if direction == BULLISH
-                    else entry - params.TP1_R_MULTIPLE * sl_distance)
+        if d.TP_MODE == 'hybrid':
+            near = (entry + d.TP1_R_MULTIPLE * sl_distance if direction == BULLISH
+                    else entry - d.TP1_R_MULTIPLE * sl_distance)
             farther = [
                 t for t in raw_targets
                 if (t > near if direction == BULLISH else t < near)
             ]
             raw_targets = [near] + farther
 
-        if params.TP_MODE == 'liquidity':
+        if d.TP_MODE == 'liquidity':
             raw_targets = self._liquidity_targets(
                 direction, entry, sl_distance, at_index,
-                count=len(params.TP_CLOSE_FRACTIONS), fallback=raw_targets)
+                count=len(d.TP_CLOSE_FRACTIONS), fallback=raw_targets, d=d)
             if not raw_targets:
                 return None
         else:
@@ -508,7 +517,7 @@ class MarketContext:
                 if closer and abs(nearest - entry) / sl_distance >= 1.0:
                     raw_targets = [nearest] + raw_targets
 
-        fractions = list(params.TP_CLOSE_FRACTIONS)
+        fractions = list(d.TP_CLOSE_FRACTIONS)
         targets = raw_targets[:len(fractions)]
         fractions = fractions[:len(targets)]
         # Остаток веса вешаем на последнюю цель, чтобы сумма долей была ровно 1
@@ -523,7 +532,7 @@ class MarketContext:
         )
         rr = weighted_gain / sl_distance
 
-        risk_amount = balance * (params.RISK_PER_TRADE_PCT / 100)
+        risk_amount = balance * (d.RISK_PER_TRADE_PCT / 100)
         position_size = risk_amount / sl_distance
 
         return {
@@ -537,11 +546,11 @@ class MarketContext:
             'sl_distance': float(sl_distance),
             'position_size': float(position_size),
             'risk_amount': float(risk_amount),
-            'sl_mode': params.SL_MODE,
+            'sl_mode': d.SL_MODE,
         }
 
     def _liquidity_targets(self, direction, entry, sl_distance, at_index,
-                           count, fallback):
+                           count, fallback, d=None):
         """
         Цели на непротестированных пулах ликвидности (§14.2).
 
@@ -555,6 +564,7 @@ class MarketContext:
         Пулы берутся только непротестированные: снятый уровень ликвидности
         больше не притягивает цену. Сортировка по расстоянию, ближние первыми.
         """
+        d = params if d is None else d
         pools = liquidity.untapped_pools(
             self.pools, self.sweeps, at_index,
             side=liquidity.BSL if direction == BULLISH else liquidity.SSL,
@@ -564,9 +574,9 @@ class MarketContext:
         ahead = [
             p for p in pools
             if (p['price'] > entry if bullish else p['price'] < entry)
-            and p.get('weight', 0) >= params.LIQ_MIN_WEIGHT
+            and p.get('weight', 0) >= d.LIQ_MIN_WEIGHT
             # Цель ближе минимума не окупает комиссию и проскальзывание
-            and abs(p['price'] - entry) / sl_distance >= params.LIQ_MIN_R
+            and abs(p['price'] - entry) / sl_distance >= d.LIQ_MIN_R
         ]
         ahead.sort(key=lambda p: abs(p['price'] - entry))
 
@@ -575,7 +585,7 @@ class MarketContext:
         # без всякого смысла, поэтому близкие пулы сливаем, оставляя значимый.
         merged = []
         for pool in ahead:
-            if merged and abs(pool['price'] - merged[-1]['price']) / entry < params.LIQ_MERGE_PCT:
+            if merged and abs(pool['price'] - merged[-1]['price']) / entry < d.LIQ_MERGE_PCT:
                 if pool.get('weight', 0) > merged[-1].get('weight', 0):
                     merged[-1] = pool
                 continue

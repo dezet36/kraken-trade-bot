@@ -361,6 +361,15 @@ LLM_MAX_HOLD_HOURS = float(os.getenv('LLM_MAX_HOLD_HOURS', 336.0))
 # пересчитывает от цены (llm_decide.reprice_at_market), и заявка за рынком
 # — это вход по рынку, прошедший те же проверки.
 LLM_FILL_THROUGH_MARKET = os.getenv('LLM_FILL_THROUGH_MARKET', '1') not in ('0', 'false', 'False', '')
+# Режим стратегии ИИ:
+#   plans — модель сама строит план по разметке (как было до 27.09.2026);
+#   rules — сетап по своей копии правил отбора, проверенных на истории
+#           (llm_rules): модель входа не выбирает. Причина и замеры —
+#           llm_rules и docs/ИИ_замечания_на_проверку.md, п. 58–61.
+LLM_MODE = os.getenv('LLM_MODE', 'plans').strip().lower()
+# Даты решений ФРС для режима rules (окно ±24 ч без входов), через запятую
+# YYYY-MM-DD. Пусто — календарь 2026 года из llm_rules.
+LLM_EVENT_DATES = os.getenv('LLM_EVENT_DATES', '').strip()
 
 # ── Веб-дашборд ──────────────────────────────────────────────────────────────
 DASHBOARD_PORT = int(os.getenv('DASHBOARD_PORT', 8787))

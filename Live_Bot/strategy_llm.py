@@ -868,6 +868,13 @@ def scan_for_setups(pairs, gate, client=None, balance=None, candles=None,
     """
     global _cursor, _frames
 
+    # РЕЖИМ ПРАВИЛ: сетап по своей копии проверенных правил отбора, модель
+    # входа не выбирает (llm_rules, config.LLM_MODE). Модель при этом не нужна
+    # вовсе — стратегия торгует и когда она занята или недоступна.
+    import llm_rules
+    if llm_rules.enabled():
+        return llm_rules.scan(pairs, gate, client=client, balance=balance)
+
     if not llm_local.available():
         log(f'   {NAME}: модель недоступна — стратегия простаивает')
         return []

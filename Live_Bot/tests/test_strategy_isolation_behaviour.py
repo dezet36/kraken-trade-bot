@@ -87,6 +87,24 @@ def smc_decisions(df):
     return _fp(out)
 
 
+def llm_rules_decisions(df):
+    """ИИ в режиме «правила»: то же ядро, но СВОИ правила решений (llm_rules)."""
+    import llm_rules
+    from smc import signal as smc_signal
+    ctx = smc_signal.build_context(frames_of(df.copy()), pair='TEST')
+    out = []
+    for i in range(800, len(df), 7):
+        setup, reason = ctx.evaluate(i, decision=llm_rules.DECISION)
+        if setup is None:
+            out.append(reason)
+        else:
+            t = setup['params']
+            out.append((setup['direction'], setup['poi']['type'], setup['poi']['index'],
+                        round(setup['confluence'], 6), round(t['entry'], 8),
+                        round(t['stop_loss'], 8), [round(x, 8) for x in t['targets']]))
+    return _fp(out)
+
+
 def llm_structure(df):
     """Разметка структуры для модели — по тому же общему контексту."""
     import llm_market
@@ -142,6 +160,7 @@ def profiles():
 
 READERS = {
     'SMC': smc_decisions,
+    'LLM-правила': llm_rules_decisions,
     'LLM-структура': llm_structure,
     'LLM-уровни': llm_levels,
     'LEVELS': levels_decisions,
@@ -185,6 +204,22 @@ class TestDecisionParamsAreIsolated:
         assert strategy_profile.fills_through_market('SMC') is True
         for other in ('LEVELS', 'RSIBB', 'LLM'):
             assert _fp(strategy_profile.describe(other)) == _fp(json.loads(baseline['профили'])[other])
+
+    def test_llm_rules_do_not_reach_anyone_else(self, df, baseline, monkeypatch):
+        """
+        Своя копия правил отбора у ИИ (llm_rules.DECISION): её правка меняет
+        сетапы ИИ и не трогает SMC, хотя ядро и структура у них общие.
+        """
+        import llm_rules
+        for name, value in {
+            'MIN_RR': 1.0, 'TP_MODE': 'liquidity', 'MIN_SL_PCT': 0.02, 'SL_MODE': 'aggressive',
+            'MIN_CONFLUENCE_SCORE': 0.5, 'REQUIRE_PREMIUM_DISCOUNT': False, 'POI_ENTRY_DEPTH': 0.5,
+        }.items():
+            monkeypatch.setattr(llm_rules.DECISION, name, value)
+        assert llm_rules_decisions(df) != baseline['LLM-правила'], 'правка правил ИИ должна менять ИИ — иначе тест пуст'
+        for name, fn in READERS.items():
+            if name != 'LLM-правила':
+                assert fn(df) == baseline[name], f'{name} изменился от правки правил ИИ'
 
     def test_levels_decisions_do_not_reach_anyone_else(self, df, baseline, monkeypatch):
         from levels import params
@@ -296,7 +331,7 @@ STRATEGY_MODULES = {
     'LEVELS': ('strategy_levels.py',),
     'RSIBB': ('strategy_rsibb.py',),
     'LLM': ('strategy_llm.py', 'llm_market.py', 'llm_context.py', 'llm_decide.py',
-            'llm_record.py', 'llm_urgency.py', 'llm_prompt.py', 'llm_grammar.py'),
+            'llm_record.py', 'llm_urgency.py', 'llm_prompt.py', 'llm_grammar.py', 'llm_rules.py'),
 }
 SHARED = ('market_structure.py', 'smc/signal.py', 'smc/structure.py', 'smc/swings.py',
           'smc/liquidity.py', 'smc/imbalance.py', 'smc/poi.py', 'smc/fib.py',
