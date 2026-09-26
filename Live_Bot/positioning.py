@@ -39,7 +39,7 @@ import config
 import exchange
 from logger import log
 
-SOURCES = ('open_interest', 'long_short', 'funding', 'premium', 'delta')
+SOURCES = ('open_interest', 'long_short', 'funding', 'premium', 'delta', 'book')
 
 # Какая возможность ccxt нужна каждому источнику. Биржи расходятся, и сильно:
 # у BingX из четырёх есть только фандинг (проверено запросом). Без этой таблицы
@@ -51,6 +51,7 @@ NEEDS = {
     'funding': 'fetchFundingRateHistory',
     'premium': 'fetchPremiumIndexOHLCV',
     'delta': 'fetchTrades',
+    'book': 'fetchOrderBook',
 }
 
 # ДЕЛЬТА — ОСОБЫЙ СЛУЧАЙ, И ПОТОМУ О НЁМ ОТДЕЛЬНО.
@@ -89,7 +90,26 @@ _seen = None            # {source: set((pair, timestamp))}
 DELTA_INTERVAL_SEC = int(os.getenv('POSITIONING_DELTA_INTERVAL_SEC', 240))
 
 
+# СТАКАН — ТОЖЕ ТОЛЬКО ВПРОК (с 27.09.2026). Биржа отдаёт его лишь «сейчас»:
+# ни одного снимка задним числом. А это последний непроверенный источник
+# направления: замер 27.09.2026 (research/ai_direction_ml.py) показал, что
+# обученная модель по всему, у чего есть история (цена, объём, ОИ, фандинг,
+# премия, BTC, ширина рынка), направления на 4–24 ч не находит. Проверить
+# стакан можно только на своих записях, поэтому пишем каждый цикл сжатый
+# снимок: спред, перекос сторон на пяти глубинах, микроцена, крупнейшая
+# плита с каждой стороны. ~2 МБ в сутки на 20 пар. ГЛУБИНА: REST Bybit отдаёт
+# до 500 уровней без агрегации цены, и на BTC/ETH с шагом цены в центы это
+# ~0.06% от середины — полосы 0.1–2% у них совпадают с видимой книгой. На
+# альтах 500 уровней покрывают 2% и больше. Поэтому в каждой строке —
+# reach_pct: сколько процентов книга реально покрыла.
+BOOK_INTERVAL_SEC = int(os.getenv('POSITIONING_BOOK_INTERVAL_SEC', 240))
+BOOK_DEPTH = int(os.getenv('POSITIONING_BOOK_DEPTH', 500))
+BOOK_BANDS_PCT = (0.1, 0.25, 0.5, 1.0, 2.0)
+
+
 def _interval(source):
+    if source == 'book':
+        return BOOK_INTERVAL_SEC
     return DELTA_INTERVAL_SEC if source == 'delta' else INTERVAL_SEC
 
 
@@ -179,7 +199,59 @@ def _fetch(client, source, pair):
     if source == 'delta':
         raw = client.fetch_trades(pair, limit=DELTA_LIMIT)
         return _fold_delta(raw)
+    if source == 'book':
+        snapshot = book_snapshot(client.fetch_order_book(pair, limit=BOOK_DEPTH))
+        return [snapshot] if snapshot else []
     return []
+
+
+def book_snapshot(book, now_ms=None):
+    """
+    Сжатый снимок стакана — одна строка на пару и минуту.
+
+    Хранятся не уровни, а то, что из них считают: объём сторон в котируемой
+    валюте в пяти полосах от середины, перекос (доля покупателей), спред и
+    микроцена в базисных пунктах, крупнейшая плита с каждой стороны в
+    пределах 2% (расстояние и кратность к медианному уровню), и сколько
+    процентов книга реально покрыла — на дорогой монете уровни кончаются
+    раньше запрошенной глубины.
+    """
+    bids = [(float(p), float(q)) for p, q, *_ in (book or {}).get('bids') or []]
+    asks = [(float(p), float(q)) for p, q, *_ in (book or {}).get('asks') or []]
+    if not bids or not asks:
+        return None
+    best_bid, bid_qty = bids[0]
+    best_ask, ask_qty = asks[0]
+    mid = (best_bid + best_ask) / 2
+    if mid <= 0:
+        return None
+    stamp = int(now_ms if now_ms is not None else time.time() * 1000) // 60_000 * 60_000
+    row = {'ts': stamp, 'mid': round(mid, 10),
+           'spread_bp': round((best_ask - best_bid) / mid * 1e4, 3)}
+    if bid_qty + ask_qty > 0:
+        micro = (best_bid * ask_qty + best_ask * bid_qty) / (bid_qty + ask_qty)
+        row['micro_bp'] = round((micro / mid - 1) * 1e4, 3)
+    for band in BOOK_BANDS_PCT:
+        lo, hi = mid * (1 - band / 100), mid * (1 + band / 100)
+        b = sum(p * q for p, q in bids if p >= lo)
+        a = sum(p * q for p, q in asks if p <= hi)
+        row[f'bid_{band:g}'] = round(b, 2)
+        row[f'ask_{band:g}'] = round(a, 2)
+    near_b, near_a = row['bid_1'], row['ask_1']
+    row['value'] = round(near_b / (near_b + near_a), 4) if near_b + near_a > 0 else None
+    row['reach_pct'] = round(min((mid - bids[-1][0]) / mid, (asks[-1][0] - mid) / mid) * 100, 3)
+
+    def wall(side, sign):
+        inside = [(p, p * q) for p, q in side if abs(p / mid - 1) <= 0.02]
+        if len(inside) < 3:
+            return None, None
+        sizes = sorted(v for _, v in inside)
+        median = sizes[len(sizes) // 2]
+        price, size = max(inside, key=lambda x: x[1])
+        return round((price / mid - 1) * 100, 3), round(size / median, 1) if median > 0 else None
+    row['wall_bid_pct'], row['wall_bid_x'] = wall(bids, -1)
+    row['wall_ask_pct'], row['wall_ask_x'] = wall(asks, 1)
+    return row
 
 
 def _fold_delta(trades):

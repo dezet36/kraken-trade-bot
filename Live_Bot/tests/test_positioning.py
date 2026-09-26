@@ -55,7 +55,7 @@ class FakeClient:
         self.has = {name: True for name in (caps or (
             'fetchOpenInterestHistory', 'fetchLongShortRatioHistory',
             'fetchFundingRateHistory', 'fetchPremiumIndexOHLCV',
-            'fetchTrades'))}
+            'fetchTrades', 'fetchOrderBook'))}
 
     def load_markets(self):
         return self.markets
@@ -86,6 +86,12 @@ class FakeClient:
         n = self._series('premium')
         return [[1_000 + i * 3_600_000, 1, 1, 1, 0.02, 0] for i in range(n)]
 
+    def fetch_order_book(self, pair, limit=None):
+        """Стакан у 100: покупатели гуще продавцов, плита на 99."""
+        self._series('book')
+        return {'bids': [[99.99, 5.0], [99.5, 10.0], [99.0, 80.0], [98.5, 10.0]],
+                'asks': [[100.01, 4.0], [100.5, 6.0], [101.0, 5.0], [102.5, 3.0]]}
+
     def fetch_trades(self, pair, limit=None):
         """Лента: по две сделки в минуту, покупка крупнее продажи."""
         n = self._series('delta')
@@ -104,8 +110,10 @@ class TestCollection:
         # У дельты на одну запись меньше: последняя минута ещё формируется и
         # сознательно отбрасывается.
         assert written['delta'] == 2
+        # Стакан — один снимок на пару за проход.
+        assert written['book'] == 1
         assert all(count == 3 for name, count in written.items()
-                   if name != 'delta')
+                   if name not in ('delta', 'book'))
         for source in store.SOURCES:
             assert os.path.exists(store.path_for(source))
 
@@ -129,8 +137,9 @@ class TestNoDuplicates:
         first = store.collect(client, pairs=['BTCUSDT'])
         second = store.collect(client, pairs=['BTCUSDT'])
         assert first['delta'] == 4          # последняя минута отброшена
+        assert first['book'] == 1           # снимок на минуту
         assert all(count == 5 for name, count in first.items()
-                   if name != 'delta')
+                   if name not in ('delta', 'book'))
         assert all(count == 0 for count in second.values())
 
     def test_only_new_records_appended(self, store):
@@ -246,7 +255,8 @@ class TestSchedule:
             store._last_run[name] -= store.DELTA_INTERVAL_SEC + 1
         written = store.collect_if_due(client, pairs=['BTCUSDT'])
         assert written is not None
-        assert set(written) == {'delta'}
+        # Стакан снимается так же часто, как дельта: его тоже нет задним числом.
+        assert set(written) == {'delta', 'book'}
 
 
 class TestSummary:
@@ -259,3 +269,33 @@ class TestSummary:
 
     def test_empty_store_reports_zero(self, store):
         assert store.summary()['funding']['rows'] == 0
+
+
+class TestBookSnapshot:
+    """
+    Стакан истории не имеет — пишется впрок сжатым снимком (с 27.09.2026).
+    """
+
+    BOOK = {'bids': [[99.99, 5.0], [99.5, 10.0], [99.0, 80.0], [98.5, 10.0]],
+            'asks': [[100.01, 4.0], [100.5, 6.0], [101.0, 5.0], [102.5, 3.0]]}
+
+    def test_bands_and_imbalance(self, store):
+        row = store.book_snapshot(self.BOOK, now_ms=1_000_000)
+        assert row['mid'] == pytest.approx(100.0)
+        assert row['spread_bp'] == pytest.approx(2.0, abs=0.01)
+        # В полосе 1%: покупки 99.99×5 + 99.5×10 + 99.0×80, продажи до 101.
+        bid1 = 99.99 * 5 + 99.5 * 10 + 99.0 * 80
+        ask1 = 100.01 * 4 + 100.5 * 6 + 101.0 * 5
+        assert row['bid_1'] == pytest.approx(bid1, abs=0.01)
+        assert row['ask_1'] == pytest.approx(ask1, abs=0.01)
+        assert row['value'] == pytest.approx(bid1 / (bid1 + ask1), abs=1e-4)
+        assert row['ts'] == 960_000                 # к началу минуты
+
+    def test_biggest_wall_found(self, store):
+        row = store.book_snapshot(self.BOOK, now_ms=0)
+        assert row['wall_bid_pct'] == pytest.approx(-1.0, abs=0.01)
+        assert row['wall_bid_x'] > 5
+
+    def test_empty_side_gives_nothing(self, store):
+        assert store.book_snapshot({'bids': [], 'asks': [[1, 1]]}) is None
+        assert store.book_snapshot(None) is None
