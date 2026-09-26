@@ -96,15 +96,16 @@ class TestTheListReadsLikeAPlan:
 class TestTheButtonAndCommandSendTheList:
     def test_the_command_sends_the_list_and_the_menu_has_the_button(self, monkeypatch):
         import telegram_bot
+        import telegram_panel
         sent = []
         ctl = telegram_bot.BotController()
         ctl.trade_manager = FakeBroker()
         monkeypatch.setattr(ctl, '_send', lambda chat_id, text, reply_markup=None: sent.append((text, reply_markup)))
         ctl._handle_command('/setups', '1', [])
         assert sent and 'Живые сетапы ИИ' in sent[-1][0] and 'AAVEUSDT SHORT' in sent[-1][0]
-        # Кнопка в меню статуса
-        import inspect
-        src = inspect.getsource(telegram_bot.BotController._send_status)
-        assert '"/setups"' in src and 'Сетапы ИИ' in src
-        assert '/setups' in inspect.getsource(telegram_bot.BotController._send_help)
-        assert '"setups"' in inspect.getsource(telegram_bot.BotController._set_commands)
+        # Кнопка «ИИ» — в главном меню панели, команда — в меню Telegram и в справке.
+        _text, keyboard = telegram_panel.main_view({'strategies': {}, 'ai': {'armed': [{}]}})
+        assert any(b['callback_data'] == 'ai' and 'ИИ' in b['text']
+                   for row in keyboard['inline_keyboard'] for b in row)
+        assert '/setups' in telegram_panel.help_view()[0]
+        assert 'setups' in [name for name, _what, _code in telegram_bot.COMMANDS]

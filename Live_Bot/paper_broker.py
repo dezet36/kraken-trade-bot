@@ -38,6 +38,7 @@ import csv
 import json
 import os
 import shutil
+import threading
 from datetime import datetime, timezone
 
 import config
@@ -222,6 +223,17 @@ class StrategyGate:
         return self._broker.has_position_or_order(self._strategy, pair)
 
 
+def _locked(method):
+    """Метод под замком брокера (PaperBroker._lock): его зовут и из других потоков."""
+    import functools
+
+    @functools.wraps(method)
+    def wrapper(self, *args, **kwargs):
+        with self._guard():
+            return method(self, *args, **kwargs)
+    return wrapper
+
+
 # ── Брокер ───────────────────────────────────────────────────────────────────
 
 class PaperBroker:
@@ -237,7 +249,24 @@ class PaperBroker:
         self.daily_pnl = 0.0
         self._funding_cache = {}     # pair -> (ставка, время запроса ms)
 
+        # ОДНО СОСТОЯНИЕ — ТРИ ПОТОКА. Цикл бота прокручивает свечи, а сайт и
+        # Telegram из своих потоков закрывают позиции и снимают заявки. Без
+        # замка ручное закрытие могло прийтись на середину прокрутки той же
+        # пары: позицию закрыли бы дважды — рукой и стопом. Сеть (свечи,
+        # фандинг) идёт ВНЕ замка: кнопка ждёт одну пару, а не весь цикл.
+        self._lock = threading.RLock()
+
         self.state = self._load_state(start_balance)
+
+    def _guard(self):
+        """
+        Замок брокера. Проверки собирают брокер без __init__ (PaperBroker.__new__),
+        и замок у такого экземпляра заводится при первом обращении.
+        """
+        lock = self.__dict__.get('_lock')
+        if lock is None:
+            lock = self.__dict__.setdefault('_lock', threading.RLock())
+        return lock
 
     # ── Состояние ────────────────────────────────────────────────────────────
 
@@ -604,6 +633,7 @@ class PaperBroker:
         """Момент последнего перезапуска стратегии (или None)."""
         return (self.state.get('reset_at') or {}).get(strategy)
 
+    @_locked
     def set_deposit(self, strategy, deposit, restart=False):
         """
         Задаёт депозит, с которого стратегия торгует.
@@ -664,6 +694,7 @@ class PaperBroker:
 
     # ── Открытие ─────────────────────────────────────────────────────────────
 
+    @_locked
     def open(self, strategy, signal):
         """
         Ставит фантомный лимитный ордер по сигналу стратегии.
@@ -1007,18 +1038,20 @@ class PaperBroker:
         прошлого вызова. Вызывается раз в цикл бота.
         """
         pairs = {}
-        for strategy in self.strategies:
-            for pair, rec in list(self.pending(strategy).items()):
-                pairs[pair] = min(pairs.get(pair, rec['last_ts']), rec['last_ts'])
-            for pair, rec in list(self.positions(strategy).items()):
-                pairs[pair] = min(pairs.get(pair, rec['last_ts']), rec['last_ts'])
+        with self._guard():
+            for strategy in self.strategies:
+                for pair, rec in list(self.pending(strategy).items()):
+                    pairs[pair] = min(pairs.get(pair, rec['last_ts']), rec['last_ts'])
+                for pair, rec in list(self.positions(strategy).items()):
+                    pairs[pair] = min(pairs.get(pair, rec['last_ts']), rec['last_ts'])
 
-        # ПАРЫ ПОД НАБЛЮДЕНИЕМ ТОЖЕ НУЖНЫ. Свечи запрашивались только там, где
-        # висит ордер или стоит позиция, а наблюдение за уже ЗАКРЫТОЙ сделкой
-        # ни того ни другого не имеет — и не получало ни одной свечи. Поймано
-        # сквозным прогоном: наблюдение заводилось и не досматривалось никогда.
-        for w in (self.state.get('follow') or []):
-            pairs[w['pair']] = min(pairs.get(w['pair'], w['last_ts']), w['last_ts'])
+            # ПАРЫ ПОД НАБЛЮДЕНИЕМ ТОЖЕ НУЖНЫ. Свечи запрашивались только там,
+            # где висит ордер или стоит позиция, а наблюдение за уже ЗАКРЫТОЙ
+            # сделкой ни того ни другого не имеет — и не получало ни одной
+            # свечи. Поймано сквозным прогоном: наблюдение заводилось и не
+            # досматривалось никогда.
+            for w in (self.state.get('follow') or []):
+                pairs[w['pair']] = min(pairs.get(w['pair'], w['last_ts']), w['last_ts'])
 
         # Наблюдения за вердиктами модели — тот же приём: свечи нужны и там,
         # где нет ни ордера, ни позиции.
@@ -1046,12 +1079,14 @@ class PaperBroker:
             if not candles:
                 continue
             funding = self._funding_rate(pair)
-            for strategy in self.strategies:
-                if self._advance(strategy, pair, candles, funding):
-                    changed = True
+            with self._guard():
+                for strategy in self.strategies:
+                    if self._advance(strategy, pair, candles, funding):
+                        changed = True
 
         if changed:
-            self._save_state()
+            with self._guard():
+                self._save_state()
 
     MAX_BARS = 500   # предел выдачи биржи за один запрос
     MAX_PAGES = 12   # ...и сколько запросов подряд не жалко на одну пару
@@ -1452,10 +1487,7 @@ class PaperBroker:
         # торговле, поэтому глушится целиком.
         try:
             import telegram_notify as tg
-            tg.paper_trade_opened(strategy, pair, order['direction'], price,
-                                  order['stop_loss'], order['targets'][0],
-                                  order['rr'], order['risk_amount'],
-                                  (order.get('context') or {}).get('why', ''))
+            tg.paper_entry(strategy, pair, position, self.balance(strategy))
         except Exception:                          # noqa: BLE001
             pass
 
@@ -1510,6 +1542,7 @@ class PaperBroker:
                     from exit_plan import breakeven_price
                     pos['stop_loss'] = breakeven_price(pos['entry_price'], is_long)
                     pos['breakeven_set'] = True
+                    self._notify('paper_breakeven', strategy, pair, pos)
 
         # Стоп проверяем РАНЬШЕ тейка: порядок событий внутри свечи по OHLC
         # неизвестен, и трактовка в свою пользу завышает результат.
@@ -1534,6 +1567,8 @@ class PaperBroker:
                 if pos.get('breakeven_after_tp', True) and not pos['breakeven_set']:
                     pos['stop_loss'] = pos['entry_price']
                     pos['breakeven_set'] = True
+                # Одно сообщение на цель: безубыток после неё — его строка.
+                self._notify('paper_target', strategy, pair, pos, index, level)
             else:
                 self._close(strategy, pair, pos, ts, level, f'TP{index + 1}', slip=False)
                 return
@@ -1621,11 +1656,14 @@ class PaperBroker:
         icon = '🟢' if net > 0 else ('⚪' if net == 0 else '🔴')
         log(f"   👻 [{strategy}] {pair}: {icon} {reason} @ ${_fmt_p(exit_price)} | "
             f"${net:+.2f} ({net / pos['risk_amount']:+.2f}R) | депозит ${balance_after:,.2f}")
-        pnl_r = net / pos['risk_amount'] if pos['risk_amount'] else 0
+        self._notify('paper_exit', row)
+
+    @staticmethod
+    def _notify(name, *args):
+        """Уведомление в Telegram. Его отказ торговле не мешает — глушится целиком."""
         try:
             import telegram_notify as tg
-            tg.paper_trade_closed(strategy, pair, glossary.exit_reason(reason),
-                                  net, pnl_r, balance_after)
+            getattr(tg, name)(*args)
         except Exception:                          # noqa: BLE001
             pass
 
@@ -1726,6 +1764,7 @@ class PaperBroker:
 
     # ── Действия оператора ───────────────────────────────────────────────────
 
+    @_locked
     def cancel_pending(self, strategy, pair):
         """Снимает ожидающий ордер. Возвращает (получилось, сообщение)."""
         pair = _norm(pair)
@@ -1741,6 +1780,7 @@ class PaperBroker:
             pass
         return True, f'{pair}: ордер снят'
 
+    @_locked
     def move_to_breakeven(self, strategy, pair):
         """
         Переносит стоп во вход.
@@ -1766,6 +1806,7 @@ class PaperBroker:
         log(f"🖐 [{strategy}] {pair}: стоп переведён в безубыток оператором")
         return True, f'{pair}: стоп в безубытке'
 
+    @_locked
     def close_one(self, strategy, pair):
         """Закрывает одну фантомную позицию по текущей цене."""
         pair = _norm(pair)
@@ -1777,6 +1818,7 @@ class PaperBroker:
         self._save_state()
         return True, f'{pair}: позиция закрыта'
 
+    @_locked
     def close_all(self, strategy):
         """Закрывает все позиции стратегии и снимает её ордера."""
         closed = 0
@@ -1791,6 +1833,7 @@ class PaperBroker:
 
     # ── Ручное закрытие (Telegram /close) ────────────────────────────────────
 
+    @_locked
     def close_position_by_pair(self, trading_pair):
         """Закрывает фантомную позицию по паре во ВСЕХ стратегиях, что её держат."""
         key = _norm(trading_pair).split(' ')[0]
@@ -1808,6 +1851,7 @@ class PaperBroker:
 
     # ── Сводка для дашборда ──────────────────────────────────────────────────
 
+    @_locked
     def snapshot(self):
         """Живое состояние счетов и открытых позиций (без обращений к бирже)."""
         out = {'started_at': self.state.get('started_at'), 'strategies': {},
@@ -1857,7 +1901,12 @@ class PaperBroker:
             'zone': pos.get('zone', '—'),
             'entry': pos['entry_price'],
             'price': price,
+            # Когда была эта цена: закрытие последней обработанной свечи.
+            'price_at': (_iso(int(pos['last_ts']) + BAR_MS)
+                         if isinstance(pos.get('last_ts'), (int, float)) and pos['last_ts'] > 0 else ''),
             'stop': pos['stop_loss'],
+            # Исходный стоп: от него считается R целей, текущий мог уйти в безубыток.
+            'initial_stop': pos.get('initial_stop', pos['stop_loss']),
             'targets': list(targets),
             'fractions': list(pos.get('fractions') or []),
             'tp1': targets[0],

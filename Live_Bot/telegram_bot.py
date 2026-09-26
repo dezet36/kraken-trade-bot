@@ -1,45 +1,116 @@
 """
-Telegram control panel for Kraken bot.
-Runs as a background daemon thread using long-polling (pure requests).
+Telegram-панель управления ботом: одно меню, которое перерисовывается на месте.
 
-Commands:
-  /status    — баланс, позиции, дневной PnL
-  /positions — открытые позиции с live PnL
-  /stats     — полная статистика из журнала
-  /close PAIR — ручное закрытие позиции
-  /pause     — блокировать новые входы
-  /resume    — возобновить торговлю
-  /mute      — отключить уведомления
-  /unmute    — включить уведомления
-  /help      — список команд
+ПОЧЕМУ ПЕРЕПИСАНА (26.09.2026). Панель писалась под боевой счёт и на
+бумажном работала через переходник брокера — с поломками, которые видел
+владелец:
+  • «Позиции» падали (время входа с поясом минус время без пояса) — при
+    открытых позициях кнопка не отвечала вовсе;
+  • «Статус» подписывал бумажный счёт «🔴 LIVE», писал «Позиций 16/5» и
+    «сегодня 0 сделок» — считал только сделки с последнего перезапуска;
+  • «Статистика» смешивала пять стратегий и показывала всем зоны фибо;
+  • «Выгрузка» искала файлы боевого журнала и отвечала «журнал пуст»;
+  • каждая кнопка слала НОВОЕ сообщение — чат зарастал копиями меню;
+  • пауза и «без звука» жили в памяти и снимались каждой выкаткой;
+  • закрытие позиции — без подтверждения.
+
+КАК ТЕПЕРЬ. Экраны рисует telegram_panel (чистые функции), здесь — сбор
+данных, маршрут кнопок, действия и HTTP. Кнопка меняет то сообщение, на
+котором нажата (editMessageText); кнопка из уведомления («!» в коде)
+открывает панель новым сообщением, не затирая уведомление.
+
+Действия, меняющие позиции, — только через подтверждение со сроком
+годности (CONFIRM_TTL_S): нажатие, пролежавшее в очереди Telegram, пока бот
+перезапускался, не закроет позицию через полчаса. Увеличить риск отсюда
+нельзя — только закрыть, снять, стоп в безубыток, пауза.
+
+Боевой счёт (LiveTradeManager) панель не знает — у него нет snapshot();
+для него оставлены прежние экраны (_legacy_*).
 """
 
+import json
+import os
 import threading
 import time
+from datetime import datetime, timezone
+
 import requests
+
 import config
+import telegram_state
 from logger import log
-from datetime import datetime
+
+CONFIRM_TTL_S = 600
+POLL_TIMEOUT_S = 25
+
+# Команды меню Telegram и экран, который открывает каждая (None — своя ветка).
+COMMANDS = (
+    ('menu', 'Панель: капитал, сегодня, стратегии', 'm'),
+    ('positions', 'Позиции: карточка, безубыток, закрыть', 'pl:0'),
+    ('orders', 'Заявки: карточка, снять', 'ol:0'),
+    ('setups', 'Сетапы ИИ: ждут условия, цену, в позиции', 'ai'),
+    ('stats', 'Статистика по стратегиям', 'st:7'),
+    ('strategies', 'Стратегии: входы вкл/выкл', 'sl'),
+    ('notify', 'Какие уведомления присылать', 'nt'),
+    ('pause', 'Остановить новые входы', None),
+    ('resume', 'Возобновить новые входы', None),
+    ('mute', 'Выключить все уведомления', None),
+    ('unmute', 'Включить уведомления', None),
+    ('export', 'Журнал сделок файлами', None),
+    ('help', 'Как пользоваться', 'h'),
+)
+ALIASES = {'start': 'm', 'status': 'm'}
+
+
+def _stamp(now=None):
+    """Метка подтверждения: секунды в base36 — коротко для callback_data (≤ 64 байт)."""
+    n = int(now if now is not None else time.time())
+    digits = '0123456789abcdefghijklmnopqrstuvwxyz'
+    out = ''
+    while n:
+        n, k = divmod(n, 36)
+        out = digits[k] + out
+    return out or '0'
+
+
+def _fresh(stamp, now=None):
+    try:
+        made = int(stamp, 36)
+    except (TypeError, ValueError):
+        return False
+    age = (now if now is not None else time.time()) - made
+    return 0 <= age <= CONFIRM_TTL_S
+
+
+def _int(parts, default=0):
+    try:
+        return int(parts[0])
+    except (IndexError, TypeError, ValueError):
+        return default
 
 
 class BotController:
     def __init__(self):
-        self._paused  = False
-        self._muted   = False
-        self._lock    = threading.Lock()
-        self._offset  = 0
+        self._lock = threading.Lock()
+        self._offset = 0
         self._running = False
-        self._thread  = None
-        self.trade_manager = None  # assigned by bot.py after LiveTradeManager() init
+        self._thread = None
+        self._conflict_logged = False
+        self.trade_manager = None  # брокер бумажного счёта или LiveTradeManager — ставит bot.py
+        # Пауза и «без звука» переживают перезапуск (telegram_state).
+        state = telegram_state.load()
+        self._paused = bool(state.get('paused', False))
+        self._muted = bool(state.get('muted', False))
 
-    # ── public API ─────────────────────────────────────────────────────────────
+    # ── Публичное ────────────────────────────────────────────────────────────
 
     def start(self):
         self._running = True
-        self._thread  = threading.Thread(target=self._poll_loop, daemon=True, name="tg-panel")
+        self._thread = threading.Thread(target=self._poll_loop, daemon=True, name="tg-panel")
         self._thread.start()
         self._set_commands()
-        log("Telegram-панель запущена (polling)")
+        log("Telegram-панель запущена (polling)"
+            + (" — новые входы НА ПАУЗЕ с прошлого запуска, снять: /resume" if self._paused else ""))
 
     def stop(self):
         self._running = False
@@ -52,354 +123,343 @@ class BotController:
         with self._lock:
             return self._muted
 
-    # ── polling ────────────────────────────────────────────────────────────────
+    def set_paused(self, value, source='Telegram'):
+        with self._lock:
+            self._paused = bool(value)
+        telegram_state.update(paused=bool(value))
+        log(f"🖐 Новые входы {'на паузе' if value else 'возобновлены'} ({source})")
+
+    def set_muted(self, value, source='Telegram'):
+        with self._lock:
+            self._muted = bool(value)
+        telegram_state.update(muted=bool(value))
+        log(f"🖐 Уведомления Telegram {'выключены' if value else 'включены'} ({source})")
+
+    # ── Опрос ────────────────────────────────────────────────────────────────
 
     def _poll_loop(self):
         while self._running:
             try:
                 self._fetch_updates()
-            except Exception as e:
-                log(f"Telegram polling error: {e}")
-            time.sleep(1)
+            except Exception as e:                     # noqa: BLE001
+                log(f"Telegram polling error: {self._safe(e)}")
+                time.sleep(5)
 
     def _fetch_updates(self):
-        if not config.TELEGRAM_BOT_TOKEN:
+        token = config.TELEGRAM_BOT_TOKEN
+        if not token:
             time.sleep(30)
             return
-        url = f"https://api.telegram.org/bot{config.TELEGRAM_BOT_TOKEN}/getUpdates"
+        # Длинный опрос: запрос висит до POLL_TIMEOUT_S и возвращается сразу,
+        # как только нажата кнопка. Прежний короткий (5 с + пауза 1 с) слал
+        # запрос каждые шесть секунд и отвечал на нажатие с задержкой.
         try:
-            resp = requests.get(url, params={"offset": self._offset, "timeout": 5}, timeout=10)
-        except Exception:
+            resp = requests.get(
+                f"https://api.telegram.org/bot{token}/getUpdates",
+                params={"offset": self._offset, "timeout": POLL_TIMEOUT_S,
+                        "allowed_updates": json.dumps(["message", "callback_query"])},
+                timeout=POLL_TIMEOUT_S + 10)
+        except Exception:                              # noqa: BLE001
+            time.sleep(3)
             return
         if not resp.ok:
+            # 409 — тот же токен опрашивает ещё один процесс: две копии бота.
+            if resp.status_code == 409 and not self._conflict_logged:
+                self._conflict_logged = True
+                log("⚠️ Telegram: токен опрашивает ещё один процесс (409) — кнопки будут "
+                    "отвечать через раз. Один токен — один опрос.")
+            time.sleep(5)
             return
         for update in resp.json().get("result", []):
             self._offset = update["update_id"] + 1
             try:
                 self._handle_update(update)
-            except Exception as e:
-                log(f"Telegram update handler error: {e}")
+            except Exception as e:                     # noqa: BLE001
+                log(f"Telegram update handler error: {self._safe(e)}")
 
-    # ── update routing ─────────────────────────────────────────────────────────
+    # ── Маршрут ──────────────────────────────────────────────────────────────
+
+    @staticmethod
+    def _authorized(chat_id):
+        return bool(config.TELEGRAM_CHAT_ID) and str(chat_id) == str(config.TELEGRAM_CHAT_ID)
 
     def _handle_update(self, update):
         if "message" in update:
-            msg     = update["message"]
+            msg = update["message"]
             chat_id = str(msg["chat"]["id"])
-            if chat_id != str(config.TELEGRAM_CHAT_ID):
+            if not self._authorized(chat_id):
                 return
             text = msg.get("text", "").strip()
             if text.startswith("/"):
                 parts = text.split()
-                cmd   = parts[0].lower().split("@")[0]
-                args  = parts[1:] if len(parts) > 1 else []
-                self._handle_command(cmd, chat_id, args)
-
+                cmd = parts[0].lower().split("@")[0]
+                self._handle_command(cmd, chat_id, parts[1:])
         elif "callback_query" in update:
-            cb      = update["callback_query"]
-            chat_id = str(cb["message"]["chat"]["id"])
-            if chat_id != str(config.TELEGRAM_CHAT_ID):
+            cb = update["callback_query"]
+            msg = cb.get("message") or {}
+            chat_id = str((msg.get("chat") or {}).get("id", ""))
+            if not self._authorized(chat_id):
                 return
-            self._answer_callback(cb["id"])
-            self._handle_command(cb["data"], chat_id, [])
+            self._handle_callback(cb.get("data") or "", chat_id, msg.get("message_id"), cb["id"])
 
     def _handle_command(self, cmd: str, chat_id: str, args: list = None):
         args = args or []
-        if cmd in ("/start", "/status"):
-            self._send_status(chat_id)
-        elif cmd == "/pause":
-            with self._lock:
-                self._paused = True
-            self._send(chat_id,
-                "⏸ <b>Бот приостановлен</b>\n"
-                "Новые входы заблокированы.\n"
-                "Открытые позиции управляются.")
-        elif cmd == "/resume":
-            with self._lock:
-                self._paused = False
-            self._send(chat_id, "▶️ <b>Бот возобновлён</b>\nСканирование и новые входы активны.")
-        elif cmd == "/positions":
-            self._send_positions(chat_id)
-        elif cmd == "/setups":
-            self._send_setups(chat_id)
-        elif cmd == "/stats":
-            self._send_stats(chat_id)
-        elif cmd == "/close":
-            if args:
-                pair = args[0].upper()
-                if not pair.endswith('USDT'):
-                    pair += 'USDT'
-                self._handle_close(pair, chat_id)
-            else:
-                tm = self.trade_manager
-                open_pairs = sorted(tm.get_open_pairs()) if tm else []
-                if open_pairs:
-                    pairs_list = '\n'.join(f'  /close {p}' for p in open_pairs)
-                    self._send(chat_id, f"Укажи пару для закрытия:\n{pairs_list}")
-                else:
-                    self._send(chat_id, "Нет открытых позиций.")
-        elif cmd == "/mute":
-            with self._lock:
-                self._muted = True
-            self._send(chat_id, "🔇 <b>Уведомления отключены</b>\nКоманды по-прежнему работают.")
-        elif cmd == "/unmute":
-            with self._lock:
-                self._muted = False
-            self._send(chat_id, "🔔 <b>Уведомления включены</b>")
-        elif cmd == "/export":
-            self._send_export(chat_id)
-        elif cmd == "/help":
-            self._send_help(chat_id)
-
-    # ── message builders ───────────────────────────────────────────────────────
-
-    def _send_status(self, chat_id: str):
-        tm = self.trade_manager
-        if tm is None:
-            self._send(chat_id, "⚠️ Trade manager не инициализирован")
+        name = cmd.lstrip('/').lower()
+        if name in ('pause', 'resume'):
+            self.set_paused(name == 'pause')
+            name = 'menu'
+        if name in ('mute', 'unmute'):
+            self.set_muted(name == 'mute')
+            self._send(chat_id, "🔇 <b>Уведомления выключены</b> — кнопки и команды работают. "
+                                "Включить: /unmute" if name == 'mute' else "🔔 <b>Уведомления включены</b>")
             return
+        if name == 'export':
+            self._send_export(chat_id)
+            return
+        if name == 'close':
+            if not self._paper():
+                self._legacy_close_command(args, chat_id)
+                return
+            code = self._close_code(args)
+        else:
+            code = ALIASES.get(name) or next((c for n, _d, c in COMMANDS if n == name and c), None)
+        if code is None:
+            code = 'h'
+        toast, text, keyboard = self._render(code)
+        if text:
+            self._send(chat_id, text, reply_markup=keyboard)
 
-        balance = tm.get_real_balance()
-        active  = tm.get_active_count()
-        pairs   = ", ".join(sorted(tm.get_open_pairs())) or "—"
+    def _close_code(self, args):
+        """/close DOGE → подтверждение, если позиция одна; иначе список позиций."""
+        if not args:
+            return 'pl:0'
+        pair = args[0].upper()
+        if not pair.endswith('USDT'):
+            pair += 'USDT'
+        try:
+            found = [p for p in self.trade_manager.snapshot().get('open') or [] if p.get('pair') == pair]
+        except Exception:                              # noqa: BLE001
+            found = []
+        if len(found) == 1:
+            return f"pc:{found[0]['strategy']}:{pair}"
+        return 'pl:0'
 
-        today = datetime.now().date()
-        today_trades = [t for t in tm.trade_history
-                        if t.get('exit_time') and t['exit_time'].date() == today]
-        daily_pnl = sum(t.get('pnl', 0) for t in today_trades)
-        wins      = sum(1 for t in today_trades if t.get('pnl', 0) > 0)
-        total_t   = len(today_trades)
-        wr_str    = f"{wins/total_t*100:.0f}%" if total_t > 0 else "—"
+    def _handle_callback(self, data, chat_id, message_id, callback_id):
+        fresh_message = data.startswith('!')
+        code = data.lstrip('!')
+        try:
+            toast, text, keyboard = self._render(code)
+        except Exception as e:                         # noqa: BLE001
+            log(f"Telegram: экран «{code}» не собран — {self._safe(e)}")
+            toast, text, keyboard = 'Не получилось — подробности в журнале бота', None, None
+        self._answer_callback(callback_id, toast)
+        if not text:
+            return
+        if fresh_message or not message_id:
+            self._send(chat_id, text, reply_markup=keyboard)
+        else:
+            self._edit(chat_id, message_id, text, keyboard)
 
-        with self._lock:
-            paused = self._paused
-            muted  = self._muted
+    # ── Экраны ───────────────────────────────────────────────────────────────
 
-        status_icon = "⏸" if paused else "▶️"
-        mute_icon   = "🔇" if muted  else "🔔"
-        mode        = "🟢 DEMO" if config.TRADING_MODE == "DEMO" else "🔴 LIVE"
-        pnl_icon    = "📈" if daily_pnl >= 0 else "📉"
-        pnl_sign    = "+" if daily_pnl >= 0 else ""
-        now         = datetime.now().strftime("%H:%M %d.%m")
+    def _paper(self):
+        return hasattr(self.trade_manager, 'snapshot')
 
-        text = (
-            f"<b>📊 Kraken — {mode}</b>\n"
-            f"━━━━━━━━━━━━━━━━━━━━\n"
-            f"Состояние:    {status_icon} {'Пауза' if paused else 'Активен'}\n"
-            f"Уведомления:  {mute_icon} {'Выкл' if muted else 'Вкл'}\n"
-            f"Баланс:       <b>${balance:,.2f}</b>\n"
-            f"Позиций:      {active}/{config.MAX_ACTIVE_PAIRS}\n"
-            f"Пары:         {pairs}\n"
-            f"━━━━━━━━━━━━━━━━━━━━\n"
-            f"Сегодня:      {total_t} сделок  ✅{wins} ❌{total_t-wins}  WR: {wr_str}\n"
-            f"{pnl_icon} Дневной PnL: <b>{pnl_sign}${daily_pnl:.2f}</b>\n"
-            f"⏰ {now}"
-        )
+    def _render(self, code):
+        """Код кнопки → (всплывающая подсказка, текст, кнопки). Действия — здесь же."""
+        import telegram_panel as panel
+        if not self._paper():
+            return self._legacy_render(code)
+        parts = code.split(':')
+        head, rest = parts[0], parts[1:]
 
-        pause_btn = "▶️ Возобновить" if paused else "⏸ Пауза"
-        pause_cmd = "/resume"       if paused else "/pause"
-        mute_btn  = "🔔 Вкл звук"  if muted  else "🔇 Без звука"
-        mute_cmd  = "/unmute"       if muted  else "/mute"
+        if head == 'y':
+            return self._confirmed(rest)
+        if head == 'pz':
+            self.set_paused(not self.is_paused())
+            return ('Новые входы на паузе' if self.is_paused() else 'Пауза снята',
+                    *panel.main_view(self._collect()))
+        if head == 'nm':
+            self.set_muted(not self.is_muted())
+            return ('Уведомления выключены' if self.is_muted() else 'Уведомления включены',
+                    *panel.notify_view(self._collect()))
+        if head == 'ne' and rest:
+            return self._toggle_event(rest[0])
+        if head in ('ns', 'sn') and rest:
+            return self._toggle_strategy_notify(rest[0], back_to_strategy=(head == 'sn'))
+        if head == 'se' and rest:
+            return self._toggle_strategy(rest[0])
 
-        keyboard = {"inline_keyboard": [
-            [{"text": pause_btn, "callback_data": pause_cmd},
-             {"text": mute_btn,  "callback_data": mute_cmd}],
-            [{"text": "📋 Позиции",   "callback_data": "/positions"},
-             {"text": "📊 Статистика","callback_data": "/stats"}],
-            [{"text": "🤖 Сетапы ИИ", "callback_data": "/setups"},
-             {"text": "🔄 Обновить",  "callback_data": "/status"}],
-        ]}
-        self._send(chat_id, text, reply_markup=keyboard)
+        d = self._collect()
+        views = {
+            'm': lambda: panel.main_view(d),
+            'pl': lambda: panel.positions_view(d, _int(rest)),
+            'p': lambda: panel.position_view(d, rest[0], rest[1]),
+            'pc': lambda: panel.close_confirm_view(d, rest[0], rest[1], _stamp()),
+            'pb': lambda: panel.breakeven_confirm_view(d, rest[0], rest[1], _stamp()),
+            'ol': lambda: panel.orders_view(d, _int(rest)),
+            'o': lambda: panel.order_view(d, rest[0], rest[1]),
+            'oc': lambda: panel.cancel_confirm_view(d, rest[0], rest[1], _stamp()),
+            'ai': lambda: panel.ai_view(d),
+            'st': lambda: panel.stats_view(d, rest[0] if rest else '7'),
+            'sl': lambda: panel.strategies_view(d),
+            's': lambda: panel.strategy_view(d, rest[0]),
+            'sa': lambda: panel.close_all_confirm_view(d, rest[0], _stamp()),
+            'nt': lambda: panel.notify_view(d),
+            'h': panel.help_view,
+        }
+        try:
+            text, keyboard = views.get(head, views['m'])()
+        except IndexError:                             # код без обязательной части
+            text, keyboard = panel.main_view(d)
+        return '', text, keyboard
 
-    def _send_setups(self, chat_id: str):
-        """Живые сетапы ИИ: планы, ждущие условия, заявки и позиции."""
+    def _collect(self):
+        """Всё, что рисует панель, — одним снимком. Отказ части — прочерк, не падение."""
+        tm = self.trade_manager
+        d = {'mode': config.TRADING_MODE, 'now': datetime.now(timezone.utc),
+             'paused': self.is_paused(), 'muted': self.is_muted(), 'model': None,
+             'strategies': {}, 'open': [], 'pending': [], 'settings': {}, 'trades': [],
+             'ai': {'armed': [], 'pending': [], 'open': []}, 'cycle_min': self._cycle_age()}
+        try:
+            snap = tm.snapshot() or {}
+            d['strategies'] = snap.get('strategies') or {}
+            d['open'] = snap.get('open') or []
+            d['pending'] = snap.get('pending') or []
+        except Exception as e:                         # noqa: BLE001
+            log(f"Telegram: состояние брокера не прочитано — {e}")
+        try:
+            import settings_store
+            d['settings'] = settings_store.load()
+        except Exception:                              # noqa: BLE001
+            pass
+        try:
+            from dashboard import _read_paper_trades
+            d['trades'] = _read_paper_trades()
+        except Exception:                              # noqa: BLE001
+            pass
         try:
             import strategy_llm
-            import telegram_notify as tg
-            text = tg.llm_setups_text(strategy_llm.current_setups(self.trade_manager))
-        except Exception as e:                      # noqa: BLE001
-            text = f"⚠️ Список сетапов не собран: {e}"
-        self._send(chat_id, text)
+            d['ai'] = strategy_llm.current_setups(tm)
+            d['model'] = strategy_llm.busy()
+        except Exception:                              # noqa: BLE001
+            pass
+        return d
 
-    def _send_positions(self, chat_id: str):
-        tm = self.trade_manager
-        if tm is None:
-            self._send(chat_id, "⚠️ Trade manager не инициализирован")
-            return
+    @staticmethod
+    def _cycle_age():
+        """Сколько минут назад прошёл цикл бота (bot.note_cycle пишет метку)."""
+        try:
+            with open(os.path.join(config.DATA_DIR, 'last_cycle.json'), encoding='utf-8') as fh:
+                ts = float(json.load(fh).get('ts') or 0)
+            return max(0.0, (time.time() - ts) / 60) if ts else None
+        except (OSError, ValueError):
+            return None
 
-        open_positions = [
-            (pair, pos)
-            for pair, positions in tm.active_positions.items()
-            for pos in positions
-            if pos['status'] == 'OPEN'
-        ]
-        pending = tm._load_pending_orders()
+    # ── Переключатели ────────────────────────────────────────────────────────
 
-        if not open_positions and not pending:
-            self._send(chat_id, "📭 <b>Открытых позиций и ожидающих ордеров нет</b>")
-            return
-
-        lines = ([f"<b>📋 Открытые позиции ({len(open_positions)})</b>", "━━━━━━━━━━━━━━━━━━━━"]
-                 if open_positions else [])
-        for pair, pos in open_positions:
-            direction = pos['signal']['setup']['type']
-            entry     = pos['entry_price']
-            sl        = pos['params']['stop_loss']
-            tp1       = pos['params']['take_profit_1']
-            tp2       = pos['params']['take_profit_2']
-            size      = pos['params']['position_size']
-            tps_hit   = pos['tp_hit']
-            trail_ico = " 🔄" if pos.get('trailing_active') else ""
-            be_ico    = " ➿" if pos.get('breakeven_set') else ""
-            dir_icon  = "📈" if direction == "LONG" else "📉"
-
-            # Duration
-            minutes = int((datetime.now() - pos['entry_time']).total_seconds() / 60)
-            h, m = minutes // 60, minutes % 60
-            dur_str = f"{h}ч {m}м" if h > 0 else f"{m}м"
-
-            # Live PnL (try to fetch current price)
-            pnl_str = ""
-            try:
-                ticker = tm.exchange.fetch_ticker(pair)
-                cur    = ticker['last']
-                if direction == 'LONG':
-                    unreal = (cur - entry) * size
-                else:
-                    unreal = (entry - cur) * size
-                pnl_icon = "🟢" if unreal >= 0 else "🔴"
-                pnl_str  = f"\n   PnL:    {pnl_icon} <b>${unreal:+.2f}</b>  @ <code>${cur:.4f}</code>"
-            except Exception:
-                pass
-
-            n_tp = len(getattr(config, 'TP_CLOSE_FRACTIONS', [1.0]))
-            tp_line = (f"   TP:     <code>${tp1:.4f}</code>" if n_tp == 1 else
-                       f"   TP1:    <code>${tp1:.4f}</code>  TP2: <code>${tp2:.4f}</code>")
-            lines.append(
-                f"\n{dir_icon} <b>{pair}</b> {direction}{trail_ico}{be_ico}  [{dur_str}]\n"
-                f"   Вход:   <code>${entry:.4f}</code>{pnl_str}\n"
-                f"   SL:     <code>${sl:.4f}</code>\n"
-                f"{tp_line}\n"
-                f"   TP взято: {tps_hit}/{n_tp}"
-            )
-
-        if pending:
-            if lines:
-                lines.append("")
-            lines.append(f"<b>⏳ Ожидают заполнения ({len(pending)})</b>")
-            lines.append("━━━━━━━━━━━━━━━━━━━━")
-            for pair, po in pending.items():
-                side = "LONG" if po.get('side') == 'buy' else "SHORT"
-                lines.append(f"⏳ <b>{pair}</b> {side} — лимит "
-                             f"<code>${po.get('limit_price', 0):.4f}</code>")
-
-        self._send(chat_id, "\n".join(lines))
-
-    def _send_stats(self, chat_id: str):
-        tm = self.trade_manager
-        if tm is None:
-            self._send(chat_id, "⚠️ Trade manager не инициализирован")
-            return
-
-        stats = tm.get_stats_dict()
-        if not stats:
-            self._send(chat_id, "📊 Статистика пуста — сделок ещё не было.\nДанные появятся после первой закрытой сделки.")
-            return
-
-        total = stats['total']
-        wins  = stats['wins']
-        wr    = stats['win_rate']
-        pf    = stats['profit_factor']
-        pf_str = f"{pf:.2f}" if pf != float('inf') else "∞"
-
-        total_pnl = stats['total_pnl']
-        today_pnl = stats['today_pnl']
-        best      = stats['best']
-        worst     = stats['worst']
-        avg_min   = stats['avg_duration']
-
-        avg_h, avg_m = int(avg_min // 60), int(avg_min % 60)
-        dur_str = f"{avg_h}ч {avg_m}м" if avg_h > 0 else f"{avg_m}м"
-
-        za_cnt, za_w = stats['zone_a']
-        zb_cnt, zb_w = stats['zone_b']
-        l_cnt,  l_w  = stats['longs']
-        s_cnt,  s_w  = stats['shorts']
-
-        za_wr = za_w / za_cnt * 100 if za_cnt > 0 else 0
-        zb_wr = zb_w / zb_cnt * 100 if zb_cnt > 0 else 0
-        l_wr  = l_w  / l_cnt  * 100 if l_cnt  > 0 else 0
-        s_wr  = s_w  / s_cnt  * 100 if s_cnt  > 0 else 0
-
-        pnl_icon  = "📈" if total_pnl >= 0 else "📉"
-        today_ico = "📈" if today_pnl >= 0 else "📉"
-
-        self._send(chat_id,
-            f"<b>📊 Статистика — Kraken</b>\n"
-            f"━━━━━━━━━━━━━━━━━━━━\n"
-            f"🔢 Сделок:        <b>{total}</b>\n"
-            f"✅ Прибыльных:    <b>{wins}</b> ({wr:.1f}%)\n"
-            f"❌ Убыточных:     <b>{stats['losses']}</b> ({100-wr:.1f}%)\n"
-            f"📊 Profit Factor: <b>{pf_str}</b>\n"
-            f"━━━━━━━━━━━━━━━━━━━━\n"
-            f"{pnl_icon} Total PnL:   <b>${total_pnl:+.2f}</b>\n"
-            f"{today_ico} Сегодня:     <b>${today_pnl:+.2f}</b>\n"
-            f"⏱ Ср. сделка:  {dur_str}\n"
-            f"━━━━━━━━━━━━━━━━━━━━\n"
-            f"🏆 Лучшая:  <code>${best[0]:+.2f}</code>  {best[1]}\n"
-            f"📉 Худшая:  <code>${worst[0]:+.2f}</code>  {worst[1]}\n"
-            f"━━━━━━━━━━━━━━━━━━━━\n"
-            f"🅰️ Zone A:  {za_cnt} сд.  WR: {za_wr:.0f}%\n"
-            f"🅱️ Zone B:  {zb_cnt} сд.  WR: {zb_wr:.0f}%\n"
-            f"📈 LONG:    {l_cnt} сд.   WR: {l_wr:.0f}%\n"
-            f"📉 SHORT:   {s_cnt} сд.  WR: {s_wr:.0f}%"
-        )
-
-    def _handle_close(self, pair: str, chat_id: str):
-        tm = self.trade_manager
-        if tm is None:
-            self._send(chat_id, "⚠️ Trade manager не инициализирован")
-            return
-
-        open_pairs = tm.get_open_pairs()
-        if pair not in open_pairs:
-            pairs_str = ", ".join(sorted(open_pairs)) or "нет открытых позиций"
-            self._send(chat_id,
-                f"❓ Позиция <b>{pair}</b> не найдена.\n"
-                f"Открытые: {pairs_str}")
-            return
-
-        self._send(chat_id, f"⏳ Закрываю <b>{pair}</b>...")
-        success, price = tm.close_position_by_pair(pair)
-        if success:
-            self._send(chat_id,
-                f"✅ <b>{pair}</b> закрыта вручную\n"
-                f"Цена: <code>${price:.4f}</code>")
+    def _toggle_event(self, event):
+        import settings_store
+        import telegram_panel as panel
+        if event in {e for e, _l, _w in panel.EVENTS}:
+            on = settings_store.notify_on(event, 'telegram')
+            settings_store.save({settings_store.NOTIFY: {f'{event}_telegram': not on}})
+            log(f"🖐 Уведомление «{event}» в Telegram {'выключено' if on else 'включено'} (Telegram)")
+            toast = 'Выключено' if on else 'Включено'
         else:
-            self._send(chat_id, f"⚠️ Не удалось закрыть <b>{pair}</b>. Проверь лог.")
+            toast = ''
+        return (toast, *panel.notify_view(self._collect()))
 
-    def _send_help(self, chat_id: str):
-        self._send(chat_id,
-            "<b>🤖 Kraken — команды</b>\n"
-            "━━━━━━━━━━━━━━━━━━━━\n"
-            "/status         — баланс и состояние\n"
-            "/positions      — позиции с live PnL\n"
-            "/setups         — живые сетапы ИИ: ждут условия, ждут цену, в позиции\n"
-            "/stats          — полная статистика\n"
-            "/close BTCUSDT  — закрыть позицию вручную\n"
-            "/pause          — остановить новые входы\n"
-            "/resume         — возобновить торговлю\n"
-            "/mute           — отключить уведомления\n"
-            "/unmute         — включить уведомления\n"
-            "/export         — выгрузить журнал сделок файлами (для анализа)\n"
-            "/help           — эта справка")
+    def _toggle_strategy_notify(self, name, back_to_strategy=False):
+        import settings_store
+        import telegram_panel as panel
+        on = settings_store.notify_strategy(name)
+        settings_store.save({name: {'notify': not on}})
+        log(f"🖐 Сделки {name} в Telegram {'не присылать' if on else 'присылать'} (Telegram)")
+        d = self._collect()
+        view = panel.strategy_view(d, name) if back_to_strategy else panel.notify_view(d)
+        return ('Сделки этой стратегии не присылаются' if on else 'Сделки этой стратегии присылаются', *view)
+
+    def _toggle_strategy(self, name):
+        """Выключить входы — через подтверждение; включить — сразу (это снятие ограничения)."""
+        import settings_store
+        import telegram_panel as panel
+        d = self._collect()
+        if settings_store.enabled(name):
+            return ('', *panel.strategy_off_confirm_view(d, name, _stamp()))
+        settings_store.save({name: {'enabled': True}})
+        log(f"🖐 {name}: входы включены (Telegram)")
+        return ('Входы включены', *panel.strategy_view(self._collect(), name))
+
+    # ── Действия после подтверждения ─────────────────────────────────────────
+
+    def _confirmed(self, rest):
+        import settings_store
+        import telegram_panel as panel
+        if len(rest) < 3:
+            return ('', *panel.main_view(self._collect()))
+        action, stamp, args = rest[0], rest[1], rest[2:]
+        if not _fresh(stamp):
+            return ('Подтверждение устарело', *panel.result_view(
+                False, 'Подтверждение устарело — прошло больше 10 минут. Откройте карточку заново.',
+                ('◀ Назад', 'm')))
+        tm = self.trade_manager
+        strategy = args[0]
+        pair = args[1] if len(args) > 1 else ''
+        if action == 'c':
+            ok, msg = tm.close_one(strategy, pair)
+            if ok:
+                msg = self._closed_text(strategy, pair) or msg
+            back = ('◀ Позиции', 'pl:0')
+        elif action == 'b':
+            ok, msg = tm.move_to_breakeven(strategy, pair)
+            back = ('◀ Позиция', f'p:{strategy}:{pair}')
+        elif action == 'x':
+            ok, msg = tm.cancel_pending(strategy, pair)
+            back = ('◀ Заявки', 'ol:0')
+        elif action == 'a':
+            ok, msg = tm.close_all(strategy)
+            back = ('◀ Стратегия', f's:{strategy}')
+        elif action == 'f':
+            settings_store.save({strategy: {'enabled': False}})
+            ok, msg = True, (f'{strategy}: новые входы выключены. Позиции и заявки ведутся как '
+                             f'обычно; включить — кнопкой на карточке стратегии.')
+            back = ('◀ Стратегия', f's:{strategy}')
+        else:
+            return ('', *panel.main_view(self._collect()))
+        log(f"🖐 Telegram: {action} {strategy} {pair} — {'готово' if ok else 'не вышло'}: {msg}")
+        return ('Готово' if ok else 'Не вышло', *panel.result_view(ok, msg, back))
+
+    @staticmethod
+    def _closed_text(strategy, pair):
+        """Итог только что закрытой вручную позиции — из журнала сделок."""
+        try:
+            import paper_broker
+            import tg_format as fmt
+            rows = [r for r in paper_broker.read_journal()
+                    if r.get('strategy') == strategy and r.get('pair') == pair]
+            if not rows:
+                return ''
+            r = rows[-1]
+            return (f"{pair} {r.get('direction', '')} · {fmt.name(strategy)} закрыта по "
+                    f"{fmt.price(r.get('exit_price'))}: {fmt.r(r.get('pnl_r'))} ({fmt.money(r.get('pnl_usd'))})")
+        except Exception:                              # noqa: BLE001
+            return ''
+
+    # ── Выгрузка ─────────────────────────────────────────────────────────────
 
     def _send_export(self, chat_id: str):
-        """Шлёт файлы журнала сделок документами в чат (для анализа)."""
-        import os
-        base = config.DATA_DIR
-        files = [os.path.join(base, 'trades_detail.jsonl'),
-                 os.path.join(base, 'trades_journal.csv')]
+        """
+        Журнал сделок файлами. На бумажном счёте — paper_trades.*: до 26.09.2026
+        выгрузка искала файлы БОЕВОГО журнала и отвечала «журнал пуст» при
+        семидесяти семи сделках.
+        """
+        if self._paper():
+            import paper_broker
+            files = [paper_broker.JOURNAL_CSV, paper_broker.JOURNAL_JSON]
+        else:
+            files = [os.path.join(config.DATA_DIR, 'trades_detail.jsonl'),
+                     os.path.join(config.DATA_DIR, 'trades_journal.csv')]
         sent = 0
         for path in files:
             if os.path.exists(path) and os.path.getsize(path) > 0:
@@ -408,9 +468,59 @@ class BotController:
         if sent == 0:
             self._send(chat_id, "📭 Журнал пока пуст — файлы появятся после первой закрытой сделки.")
         else:
-            self._send(chat_id, f"📎 Выгружено файлов: {sent}. Передай их для анализа сделок.")
+            self._send(chat_id, f"📎 Выгружено файлов: {sent} — журнал сделок (CSV для Excel и полный JSONL).")
 
-    # ── low-level HTTP ─────────────────────────────────────────────────────────
+    # ── HTTP ─────────────────────────────────────────────────────────────────
+
+    @staticmethod
+    def _safe(error):
+        """Текст ошибки без токена: адрес Bot API несёт его открытым текстом."""
+        text = str(error)
+        token = config.TELEGRAM_BOT_TOKEN or ''
+        return text.replace(token, '<TOKEN>') if token else text
+
+    def _api(self, method, payload, timeout=15):
+        token = config.TELEGRAM_BOT_TOKEN
+        if not token:
+            return None
+        try:
+            resp = requests.post(f"https://api.telegram.org/bot{token}/{method}",
+                                 json=payload, timeout=timeout)
+            body = resp.json()
+        except Exception as e:                         # noqa: BLE001
+            log(f"Telegram {method}: {self._safe(e)}")
+            return None
+        if not body.get('ok'):
+            desc = str(body.get('description', ''))
+            if 'message is not modified' not in desc:
+                log(f"Telegram {method}: {resp.status_code} {desc[:160]}")
+        return body
+
+    def _send(self, chat_id: str, text: str, reply_markup: dict = None):
+        payload = {"chat_id": chat_id, "text": text, "parse_mode": "HTML",
+                   "disable_web_page_preview": True}
+        if reply_markup:
+            payload["reply_markup"] = reply_markup
+        return self._api("sendMessage", payload)
+
+    def _edit(self, chat_id, message_id, text, reply_markup=None):
+        payload = {"chat_id": chat_id, "message_id": message_id, "text": text,
+                   "parse_mode": "HTML", "disable_web_page_preview": True}
+        if reply_markup:
+            payload["reply_markup"] = reply_markup
+        body = self._api("editMessageText", payload)
+        if body is None or body.get('ok'):
+            return body
+        if 'message is not modified' in str(body.get('description', '')):
+            return body
+        # Сообщение слишком старое, удалено или было фото — рисуем новым.
+        return self._send(chat_id, text, reply_markup)
+
+    def _answer_callback(self, callback_id: str, text: str = ''):
+        payload = {"callback_query_id": callback_id}
+        if text:
+            payload["text"] = text[:190]
+        self._api("answerCallbackQuery", payload, timeout=5)
 
     def _send_document(self, chat_id: str, path: str) -> bool:
         if not config.TELEGRAM_BOT_TOKEN:
@@ -421,54 +531,106 @@ class BotController:
                 r = requests.post(url, data={"chat_id": chat_id},
                                   files={"document": f}, timeout=60)
             return bool(r.json().get('ok'))
-        except Exception as e:
-            log(f"Telegram sendDocument error: {e}")
+        except Exception as e:                         # noqa: BLE001
+            log(f"Telegram sendDocument error: {self._safe(e)}")
             return False
-
-    def _send(self, chat_id: str, text: str, reply_markup: dict = None):
-        if not config.TELEGRAM_BOT_TOKEN:
-            return
-        try:
-            url     = f"https://api.telegram.org/bot{config.TELEGRAM_BOT_TOKEN}/sendMessage"
-            payload = {"chat_id": chat_id, "text": text, "parse_mode": "HTML"}
-            if reply_markup:
-                payload["reply_markup"] = reply_markup
-            requests.post(url, json=payload, timeout=10)
-        except Exception as e:
-            log(f"Telegram panel send error: {e}")
-
-    def _answer_callback(self, callback_id: str):
-        try:
-            url = f"https://api.telegram.org/bot{config.TELEGRAM_BOT_TOKEN}/answerCallbackQuery"
-            requests.post(url, json={"callback_query_id": callback_id}, timeout=5)
-        except Exception:
-            pass
 
     def _set_commands(self):
         if not config.TELEGRAM_BOT_TOKEN:
             return
-        commands = [
-            {"command": "status",    "description": "Баланс, позиции, дневной PnL"},
-            {"command": "positions", "description": "Открытые позиции с live PnL"},
-            {"command": "setups",    "description": "Живые сетапы ИИ: планы, заявки, позиции"},
-            {"command": "stats",     "description": "Полная статистика торговли"},
-            {"command": "close",     "description": "Закрыть позицию: /close BTCUSDT"},
-            {"command": "pause",     "description": "Остановить новые входы"},
-            {"command": "resume",    "description": "Возобновить торговлю"},
-            {"command": "mute",      "description": "Отключить уведомления"},
-            {"command": "unmute",    "description": "Включить уведомления"},
-            {"command": "help",      "description": "Список команд"},
-        ]
-        try:
-            url = f"https://api.telegram.org/bot{config.TELEGRAM_BOT_TOKEN}/setMyCommands"
-            resp = requests.post(url, json={"commands": commands}, timeout=10)
-            if resp.ok:
-                log("Telegram команды зарегистрированы")
-            else:
-                log(f"Telegram setMyCommands: {resp.text[:100]}")
-        except Exception as e:
-            log(f"Telegram setMyCommands error: {e}")
+        commands = [{"command": name, "description": what} for name, what, _code in COMMANDS]
+        body = self._api("setMyCommands", {"commands": commands}, timeout=10)
+        if body and body.get('ok'):
+            log("Telegram команды зарегистрированы")
+
+    # ── Боевой счёт: прежние экраны ──────────────────────────────────────────
+
+    def _legacy_render(self, code):
+        """LiveTradeManager: снимка у него нет — показываем то, что было до панели."""
+        import telegram_panel as panel
+        head = code.split(':')[0]
+        if head == 'pl':
+            text = self._legacy_positions_text()
+        elif head == 'st':
+            text = self._legacy_stats_text()
+        elif head == 'ai':
+            try:
+                import strategy_llm
+                import telegram_notify as tg
+                text = tg.llm_setups_text(strategy_llm.current_setups(self.trade_manager))
+            except Exception as e:                     # noqa: BLE001
+                text = f"⚠️ Список сетапов не собран: {e}"
+        elif head == 'h':
+            return ('', *panel.help_view())
+        elif head == 'pz':
+            self.set_paused(not self.is_paused())
+            text = self._legacy_status_text()
+        else:
+            text = self._legacy_status_text()
+        keyboard = panel.keyboard([
+            [('⏸ Пауза входов' if not self.is_paused() else '▶️ Снять паузу', 'pz'), ('🔄', 'm')],
+            [('📋 Позиции', 'pl:0'), ('📊 Статистика', 'st:7'), ('🤖 Сетапы ИИ', 'ai')],
+        ])
+        return '', text, keyboard
+
+    def _legacy_status_text(self):
+        import tg_format as fmt
+        tm = self.trade_manager
+        if tm is None:
+            return "⚠️ Торговый модуль не запущен"
+        balance = tm.get_real_balance()
+        pairs = ", ".join(sorted(tm.get_open_pairs())) or "—"
+        return (f"<b>📊 Kraken — {fmt.mode_label(config.TRADING_MODE)}</b>\n"
+                f"━━━━━━━━━━━━━━━━━━━━\n"
+                f"Состояние: {'⏸ Пауза' if self.is_paused() else '▶️ Активен'}\n"
+                f"Баланс: <b>${balance:,.2f}</b>\n"
+                f"Позиций: {tm.get_active_count()}\n"
+                f"Пары: {fmt.esc(pairs)}")
+
+    def _legacy_positions_text(self):
+        import tg_format as fmt
+        tm = self.trade_manager
+        if tm is None:
+            return "⚠️ Торговый модуль не запущен"
+        lines = []
+        for pair, positions in tm.active_positions.items():
+            for pos in positions:
+                if pos.get('status') != 'OPEN':
+                    continue
+                opened = fmt.parse_time(pos.get('entry_time'))
+                minutes = fmt.minutes_since(opened) or 0
+                lines.append(f"{fmt.side_icon(pos['signal']['setup']['type'])} <b>{fmt.esc(pair)}</b> "
+                             f"{pos['signal']['setup']['type']} · вход {fmt.price(pos['entry_price'])} · "
+                             f"стоп {fmt.price(pos['params']['stop_loss'])} · {fmt.duration(minutes)}")
+        return ("<b>📋 Открытые позиции</b>\n" + "\n".join(lines)) if lines else "📭 Открытых позиций нет"
+
+    def _legacy_stats_text(self):
+        tm = self.trade_manager
+        stats = tm.get_stats_dict() if tm is not None else None
+        if not stats:
+            return "📊 Статистика пуста — сделок ещё не было."
+        pf = stats['profit_factor']
+        return (f"<b>📊 Статистика</b>\n"
+                f"Сделок: <b>{stats['total']}</b> · WR {stats['win_rate']:.1f}% · "
+                f"PF {'∞' if pf == float('inf') else f'{pf:.2f}'}\n"
+                f"Итог: <b>${stats['total_pnl']:+.2f}</b> · сегодня ${stats['today_pnl']:+.2f}")
+
+    def _legacy_close_command(self, args, chat_id):
+        tm = self.trade_manager
+        if tm is None or not args:
+            self._send(chat_id, "Укажите пару: /close BTCUSDT")
+            return
+        pair = args[0].upper()
+        if not pair.endswith('USDT'):
+            pair += 'USDT'
+        if pair not in tm.get_open_pairs():
+            self._send(chat_id, f"❓ Позиция <b>{pair}</b> не найдена.")
+            return
+        success, price = tm.close_position_by_pair(pair)
+        self._send(chat_id, f"✅ <b>{pair}</b> закрыта вручную по <code>${price:.4f}</code>"
+                   if success else f"⚠️ Не удалось закрыть <b>{pair}</b>. Проверь лог.")
 
 
-# Global singleton — imported by bot.py and telegram_notify.py
+# Один на процесс: bot.py ставит ему брокер и запускает опрос, dashboard и
+# telegram_notify спрашивают паузу и «без звука».
 controller = BotController()

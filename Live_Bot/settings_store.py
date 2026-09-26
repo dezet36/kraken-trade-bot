@@ -78,8 +78,12 @@ EXCHANGES = ('bybit', 'bingx')
 # настройки. Молча выключить часть сообщений значило бы, что человек
 # перестанет что-то получать и не поймёт почему.
 NOTIFY = 'NOTIFY'
+# С 26.09.2026 ещё четыре: цель взята (tp_hit), стоп в безубытке (breakeven),
+# отказ плана ИИ (llm_rejected — раньше шёл под одним ключом с принятым
+# планом, и выключить поток отказов, не потеряв планы, было нельзя) и запуск
+# бота (service — раньше уходил без спроса после каждой выкатки).
 NOTIFY_EVENTS = ('trade_opened', 'trade_closed', 'error', 'daily', 'llm_setup',
-                 'plan_dropped')
+                 'plan_dropped', 'tp_hit', 'breakeven', 'llm_rejected', 'service')
 NOTIFY_CHANNELS = ('telegram',)
 
 _lock = threading.Lock()
@@ -150,6 +154,11 @@ def _defaults():
             # Второе мнение о плане модели. Осмысленно только у LLM, но поле
             # есть у всех: схема одна, лишний ключ безвреден.
             'critic': True,
+            # Присылать ли в Telegram сделки ЭТОЙ стратегии (вход, цели,
+            # безубыток, выход, снятые заявки). Торговлю не трогает — только
+            # сообщения: у фибо входов много, у ИИ мало, и человеку может
+            # быть нужен поток одной стратегии без шума другой.
+            'notify': True,
         }
         for name in STRATEGIES
     }
@@ -230,6 +239,8 @@ def load(force=False):
                                                        data[name]['sides'])
                     if 'critic' in item:
                         data[name]['critic'] = bool(item['critic'])
+                    if 'notify' in item:
+                        data[name]['notify'] = bool(item['notify'])
             except Exception as exc:
                 log(f"⚠️ runtime_settings.json нечитаем ({exc}) — берём значения из .env")
 
@@ -273,6 +284,8 @@ def save(changes):
             data[name]['sides'] = _clean_sides(item['sides'], data[name]['sides'])
         if 'critic' in item:
             data[name]['critic'] = bool(item['critic'])
+        if 'notify' in item:
+            data[name]['notify'] = bool(item['notify'])
 
     with _lock:
         try:
@@ -445,6 +458,11 @@ def notify_on(event, channel):
     key = f'{event}_{channel}'
     section = load().get(NOTIFY) or {}
     return bool(section.get(key, True))
+
+
+def notify_strategy(strategy):
+    """Присылать ли сообщения о сделках этой стратегии. Незнакомая — да."""
+    return bool(load().get(strategy, {}).get('notify', True))
 
 
 def daily_loss_pct():

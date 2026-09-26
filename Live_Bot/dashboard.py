@@ -1202,10 +1202,10 @@ def _run_action(request):
     if action in ('pause', 'resume'):
         try:
             from telegram_bot import controller
-            with controller._lock:
-                controller._paused = (action == 'pause')
+            # Через set_paused: пауза пишется на диск и переживает перезапуск
+            # (telegram_state) — до 26.09.2026 её снимала каждая выкатка.
+            controller.set_paused(action == 'pause', source='сайт')
             state = 'на паузе' if action == 'pause' else 'возобновлён'
-            log(f"🖐 Бот {state} из дашборда")
             set_status('paused' if action == 'pause' else 'running')
             return True, f'Бот {state}'
         except Exception as exc:

@@ -9,13 +9,23 @@ import requests
 import config
 from exit_plan import tp_plan
 from logger import log
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 
 # ── internal send ─────────────────────────────────────────────────────────────
 
-def _send(text: str, chat_id=None) -> bool:
+def _safe(error) -> str:
+    """
+    Текст ошибки без токена бота. Исключение requests несёт адрес запроса, а в
+    адресе Bot API токен стоит открытым текстом — и уходил в журнал бота.
+    """
+    text = str(error)
+    token = config.TELEGRAM_BOT_TOKEN or ''
+    return text.replace(token, '<TOKEN>') if token else text
+
+
+def _send(text: str, chat_id=None, reply_markup=None) -> bool:
     """Отправка сообщения. chat_id=None -> legacy общий чат (config.TELEGRAM_CHAT_ID);
-    адресат — общий чат из .env."""
+    адресат — общий чат из .env. reply_markup — кнопки под сообщением."""
     target = chat_id if chat_id is not None else config.TELEGRAM_CHAT_ID
     if not config.TELEGRAM_BOT_TOKEN or not target:
         return False
@@ -29,16 +39,16 @@ def _send(text: str, chat_id=None) -> bool:
             pass
     try:
         url  = f"https://api.telegram.org/bot{config.TELEGRAM_BOT_TOKEN}/sendMessage"
-        resp = requests.post(
-            url,
-            json={"chat_id": target, "text": text, "parse_mode": "HTML"},
-            timeout=10,
-        )
+        payload = {"chat_id": target, "text": text, "parse_mode": "HTML",
+                   "disable_web_page_preview": True}
+        if reply_markup:
+            payload["reply_markup"] = reply_markup
+        resp = requests.post(url, json=payload, timeout=10)
         if not resp.ok:
             log(f"Telegram: ошибка отправки — {resp.status_code} {resp.text[:120]}")
         return resp.ok
     except Exception as e:
-        log(f"Telegram: исключение — {e}")
+        log(f"Telegram: исключение — {_safe(e)}")
         return False
 
 
@@ -90,7 +100,7 @@ def _send_photo(photo_path: str, caption: str = "", chat_id=None) -> bool:
             log(f"Telegram photo: ошибка — {resp.status_code} {resp.text[:120]}")
         return resp.ok
     except Exception as e:
-        log(f"Telegram photo: исключение — {e}")
+        log(f"Telegram photo: исключение — {_safe(e)}")
         return False
     finally:
         try:
@@ -101,9 +111,38 @@ def _send_photo(photo_path: str, caption: str = "", chat_id=None) -> bool:
 
 # ── public notifications ───────────────────────────────────────────────────────
 
-def bot_started(balance: float):
-    mode = "🟢 DEMO" if config.TRADING_MODE == "DEMO" else "🔴 LIVE"
-    _send(
+def bot_started(balance: float, broker=None):
+    """
+    Бот запущен. На бумажном счёте — строка состояния и кнопка меню.
+
+    До 26.09.2026 это сообщение уходило после КАЖДОЙ выкатки без спроса и
+    подписывало бумажный счёт «🔴 LIVE»: метка сравнивала режим только с
+    DEMO. Теперь режим назван как есть, а выключается событием «service».
+    """
+    import tg_format as fmt
+    if not _allowed('service'):
+        return False
+    mode = fmt.mode_label(config.TRADING_MODE)
+    if broker is not None and hasattr(broker, 'snapshot'):
+        try:
+            snap = broker.snapshot()
+            start = sum(s.get('start_balance', 0) for s in snap['strategies'].values())
+            since = (balance / start - 1) * 100 if start else 0.0
+            paused = False
+            try:
+                from telegram_bot import controller
+                paused = controller.is_paused()
+            except Exception:                          # noqa: BLE001
+                pass
+            text = (f"▶️ <b>Kraken запущен</b> · {mode}\n"
+                    f"Капитал <b>{fmt.money(balance, signed=False)}</b> · с начала {fmt.pct(since)}\n"
+                    f"Позиций {len(snap['open'])} · заявок {len(snap['pending'])}"
+                    + ("\n⏸ новые входы на паузе — снять: /resume" if paused else ''))
+            return _send(text, reply_markup={'inline_keyboard': [[
+                {'text': '🏠 Меню', 'callback_data': '!m'}]]})
+        except Exception as exc:                       # noqa: BLE001
+            log(f"Telegram: сводка при запуске не собрана — {exc}")
+    return _send(
         f"<b>🤖 Kraken запущен</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
         f"Режим:         {mode}\n"
@@ -394,9 +433,11 @@ def llm_plan_caption(signal: dict, chart_span: str = '') -> str:
     def pct(p):
         return f"{abs(p - entry) / entry * 100:.2f}%" if entry else "—"
 
+    import tg_format as fmt
+
     def tail(level_id):
         kind = _level_kind(llm, level_id)
-        return f"  · {kind}" if kind else ''
+        return f"  · {fmt.esc(kind)}" if kind else ''
 
     lines = [
         f"{arrow} <b>ИИ: план {pair} {direction}</b>",
@@ -418,7 +459,7 @@ def llm_plan_caption(signal: dict, chart_span: str = '') -> str:
     lines.append(f"⏳ Условие: {condition} — ждёт до {ttl} ч")
     critic = llm.get('critic') or {}
     if critic.get('verdict') == 'confirm':
-        lines.append("✅ Критик подтвердил" + (f" · риск: {critic['worst'][:120]}"
+        lines.append("✅ Критик подтвердил" + (f" · риск: {fmt.esc(critic['worst'][:120])}"
                                               if critic.get('worst') and critic.get('worst') not in ('—', 'нет') else ''))
     if chart_span:
         lines[0] += f"  <i>· {chart_span}</i>"
@@ -457,6 +498,7 @@ def llm_plan_story(signal: dict, budget: int = CAPTION_LIMIT) -> str:
         ('📈 Куда рынок' + (f' — {bias}' if bias else ''), parts.get('direction'), 160),
         ('⚠️ Что сломает идею', llm.get('risk'), 140),
     ]
+    import tg_format as fmt
     rendered = []
     for title, body, limit in blocks:
         body = ' '.join((body or '').split())
@@ -464,7 +506,9 @@ def llm_plan_story(signal: dict, budget: int = CAPTION_LIMIT) -> str:
             continue
         if len(body) > limit:
             body = body[:limit - 1].rstrip() + '…'
-        rendered.append(f"<b>{title}</b>" + chr(10) + body)
+        # Текст модели — в разметке HTML: «цена < уровня» без экранирования
+        # делал подпись нечитаемой для Telegram, и план не приходил вовсе.
+        rendered.append(f"<b>{title}</b>" + chr(10) + fmt.esc(body))
     while rendered and _plain_len(chr(10).join(rendered)) > budget:
         rendered.pop()
     return chr(10).join(rendered)
@@ -515,6 +559,12 @@ def llm_setup_found(signal: dict, df_1h=None, frames=None):
     return _send(llm_plan_message(signal))
 
 
+def _esc(text):
+    """Текст модели в разметке HTML — экранируется (см. tg_format.esc)."""
+    import tg_format as fmt
+    return fmt.esc(text)
+
+
 def llm_setups_text(setups: dict) -> str:
     """
     Список живых сетапов ИИ по кнопке: ждут условия → ждут цену → в позиции.
@@ -548,7 +598,7 @@ def llm_setups_text(setups: dict) -> str:
             out.append(f"   условие: {cond}")
             out.append(f"   ждёт {hours(a.get('minutes'))}, снимется через {hours(a.get('left_min'))}")
             if a.get('why'):
-                out.append(f"   <i>{a['why'][:160]}</i>")
+                out.append(f"   <i>{_esc(a['why'][:160])}</i>")
         out.append('')
     if pending:
         out.append(f"<b>📥 Заявка стоит, ждёт цену ({len(pending)})</b>")
@@ -561,7 +611,7 @@ def llm_setups_text(setups: dict) -> str:
             dist = f" · до лимита {o['distance_pct']}%" if o.get('distance_pct') is not None else ''
             out.append(f"   ждёт {hours(o.get('waiting_min'))}{dist}, снимется через {hours(o.get('expires_in_min'))}")
             if o.get('why'):
-                out.append(f"   <i>{str(o['why'])[:160]}</i>")
+                out.append(f"   <i>{_esc(str(o['why'])[:160])}</i>")
         out.append('')
     if open_:
         out.append(f"<b>📈 В позиции ({len(open_)})</b>")
@@ -575,18 +625,24 @@ def llm_setups_text(setups: dict) -> str:
                        + (f" · цель {_fmt_p(float(o['tp1']))}" if o.get('tp1') else '')
                        + (f" · цена {_fmt_p(float(o['price']))}" if o.get('price') else ''))
             if o.get('why'):
-                out.append(f"   <i>{str(o['why'])[:160]}</i>")
+                out.append(f"   <i>{_esc(str(o['why'])[:160])}</i>")
     return chr(10).join(out).rstrip()
 
 
 def llm_setup_rejected(pair: str, side: str, entry: float, gate: str, detail: str = ''):
-    """Модель предложила сетап, но его отклонил код или критик — коротко, без картинки."""
-    if not _allowed('llm_setup'):
+    """
+    Модель предложила сетап, но его отклонил код или критик — коротко, без
+    картинки. Свой ключ настройки (llm_rejected): до 26.09.2026 отказы шли
+    под одним ключом с принятыми планами, и выключить поток отказов, не
+    потеряв планы, было нельзя.
+    """
+    import tg_format as fmt
+    if not _allowed('llm_rejected'):
         return False
     return _send(
-        f"⚪ <b>ИИ предложила сетап, отклонён</b> · {pair} {side} от {_fmt_p(entry)}\n"
+        f"⚪ <b>ИИ предложила сетап, отклонён</b> · {fmt.esc(pair)} {fmt.esc(side)} от {_fmt_p(entry)}\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"{gate}" + (f": {detail[:300]}" if detail else '')
+        f"{fmt.esc(gate)}" + (f": {fmt.esc(str(detail)[:300])}" if detail else '')
     )
 
 
@@ -604,48 +660,231 @@ def plan_dropped(strategy: str, pair: str, side: str, entry: float,
     За четверо суток так умерли 47 заявок — то есть картина «что стало с
     планом» была неполной у каждой второй.
     """
-    if not _allowed('plan_dropped'):
+    import tg_format as fmt
+    if not _allowed('plan_dropped') or not _strategy_on(strategy):
         return False
     arrow = "🟢" if str(side).upper() == "LONG" else "🔴"
-    head = f"{arrow} <b>{pair} {side}</b>" if side else f"<b>{pair}</b>"
+    head = f"{arrow} <b>{fmt.esc(pair)} {fmt.esc(side)}</b>" if side else f"<b>{fmt.esc(pair)}</b>"
     return _send(
-        f"⌛ <b>Сетап снят, сделки не было</b> · {strategy}\n"
+        f"⌛ <b>Сетап снят, сделки не было</b> · {fmt.name(strategy)}\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
         f"{head}" + (f" от {_fmt_p(entry)}" if entry else '') + "\n"
-        f"{reason}" + (f"\n<i>{str(detail)[:300]}</i>" if detail else '')
+        f"{fmt.esc(reason)}" + (f"\n<i>{fmt.esc(str(detail)[:300])}</i>" if detail else '')
     )
 
 
-def paper_trade_opened(strategy: str, pair: str, direction: str, entry: float,
-                       stop: float, target: float, rr: float, risk: float,
-                       why: str = ''):
-    if not _allowed('trade_opened'):
-        return
-    arrow = "🟢" if direction == "LONG" else "🔴"
-    tail = f"\n<i>{why}</i>" if why else ""
-    _send(
-        f"{arrow} <b>{strategy}</b> · вход {pair} {direction}\n"
-        f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"Вход:  <b>{_fmt_p(entry)}</b>\n"
-        f"Стоп:  {_fmt_p(stop)}\n"
-        f"Цель:  {_fmt_p(target)}   RR {rr:.2f}\n"
-        f"Риск:  ${risk:.2f}"
-        + tail
-    )
+# ── Сделки бумажного счёта ───────────────────────────────────────────────────
+# Каждое сообщение отвечает на вопросы трейдера по порядку: что и где, сколько
+# стоит ошибка, куда идём, почему. До 26.09.2026 вход был пятью строками без
+# размера и процента стопа, выход — без цены входа, выхода и времени, а о
+# взятых целях и безубытке бумажный счёт не сообщал вовсе. Владелец выключил
+# эти сообщения 18.09 — читать их было незачем.
+
+def _strategy_on(strategy):
+    """Сделки этой стратегии присылать? (settings_store, поле notify)."""
+    try:
+        import settings_store as settings
+        return settings.notify_strategy(strategy)
+    except Exception:                                  # noqa: BLE001
+        return True
 
 
-def paper_trade_closed(strategy: str, pair: str, reason: str, pnl: float,
-                       pnl_r: float, balance: float):
-    if not _allowed('trade_closed'):
-        return
-    icon = "✅" if pnl > 0 else ("⚪" if pnl == 0 else "❌")
-    _send(
-        f"{icon} <b>{strategy}</b> · закрыта {pair}\n"
-        f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"Итог:    <b>{_pnl_str(pnl)}</b>  ({pnl_r:+.2f} R)\n"
-        f"Причина: {reason}\n"
-        f"Депозит: <b>${balance:,.2f}</b>"
-    )
+def _position_buttons(strategy, pair):
+    """«!» — открыть панель новым сообщением, не затирая уведомление."""
+    return {'inline_keyboard': [[
+        {'text': '📈 Позиция', 'callback_data': f'!p:{strategy}:{pair}'},
+        {'text': '🏠 Меню', 'callback_data': '!m'},
+    ]]}
+
+
+def _r_of(pos, level):
+    entry = float(pos['entry_price'])
+    dist = abs(entry - float(pos.get('initial_stop') or pos['stop_loss'])) or 1e-12
+    sign = 1 if pos['direction'] == 'LONG' else -1
+    return sign * (float(level) - entry) / dist
+
+
+def paper_entry(strategy, pair, pos, balance=None):
+    """Позиция открыта: цифры, чтобы понять сделку с одного взгляда."""
+    import tg_format as fmt
+    if not _allowed('trade_opened') or not _strategy_on(strategy):
+        return False
+    direction = pos['direction']
+    entry, stop = float(pos['entry_price']), float(pos['stop_loss'])
+    targets, fractions = pos.get('targets') or [], pos.get('fractions') or []
+    risk = float(pos.get('risk_amount') or 0)
+    lines = [
+        f"{fmt.side_icon(direction)} <b>Вход · {fmt.esc(pair)} {direction}</b> · {fmt.name(strategy)}",
+        fmt.RULE,
+        f"Вход <b>{fmt.price(entry)}</b>" + (
+            f" · по плану {fmt.price(pos['planned_entry'])}"
+            if pos.get('planned_entry') and abs(float(pos['planned_entry']) - entry) / entry > 0.0001 else ''),
+        f"Стоп {fmt.price(stop)} · {fmt.pct((stop - entry) / entry * 100)}",
+    ]
+    for k, t in enumerate(targets):
+        share = f" · {float(fractions[k]) * 100:.0f}%" if k < len(fractions) and len(targets) > 1 else ''
+        lines.append(f"🎯 Цель {k + 1} {fmt.price(t)}{share} · {fmt.r(_r_of(pos, t))}")
+    lines.append(f"Риск {fmt.money(risk, signed=False)}"
+                 + (f" ({risk / balance * 100:.2f}% депозита)" if balance else '')
+                 + f" · позиция {fmt.money(float(pos['size']) * entry, signed=False)}")
+    cost = pos.get('cost_share_pct')
+    if cost not in (None, ''):
+        lines.append(f"Издержки ≈ {float(cost):.1f}% риска")
+    waited = (int(pos.get('opened_ts', 0)) - int(pos.get('placed_ts', 0))) / 60000
+    lines.append('<i>' + fmt.esc(pos.get('entry_note')
+                                 or (f"лимит ждал {fmt.duration(waited)}" if waited >= 1
+                                     else 'лимит налился сразу')) + '</i>')
+    why = (pos.get('context') or {}).get('why')
+    if why:
+        lines += [fmt.RULE, f"<i>{fmt.esc(fmt.cut(why, 350))}</i>"]
+    return _send('\n'.join(lines), reply_markup=_position_buttons(strategy, pair))
+
+
+def paper_target(strategy, pair, pos, index, level):
+    """Взята частичная цель: сколько зафиксировано и что осталось."""
+    import tg_format as fmt
+    if not _allowed('tp_hit') or not _strategy_on(strategy):
+        return False
+    targets = pos.get('targets') or []
+    fraction = float((pos.get('fractions') or [0])[index])
+    portion = float(pos.get('initial_size') or pos['size']) * fraction
+    sign = 1 if pos['direction'] == 'LONG' else -1
+    fixed = sign * (float(level) - float(pos['entry_price'])) * portion
+    left = (float(pos['size']) / float(pos['initial_size']) * 100) if pos.get('initial_size') else 0
+    lines = [
+        f"🎯 <b>Цель {index + 1} из {len(targets)} · {fmt.esc(pair)} {pos['direction']}</b> · {fmt.name(strategy)}",
+        f"Цена {fmt.price(level)} · закрыто {fraction * 100:.0f}% · <b>{fmt.money(fixed)}</b> "
+        f"({fmt.r(_r_of(pos, level) * fraction)})",
+        f"Осталось {left:.0f}%" + (" · стоп в безубытке" if pos.get('breakeven_set') else ''),
+    ]
+    return _send('\n'.join(lines), reply_markup=_position_buttons(strategy, pair))
+
+
+def paper_breakeven(strategy, pair, pos):
+    """Стоп перенесён в безубыток правилом стратегии."""
+    import tg_format as fmt
+    if not _allowed('breakeven') or not _strategy_on(strategy):
+        return False
+    be = pos.get('be_level')
+    return _send(
+        f"🛡 <b>Безубыток · {fmt.esc(pair)} {pos['direction']}</b> · {fmt.name(strategy)}\n"
+        + (f"Цена прошла {fmt.price(be)} — " if be else '')
+        + f"стоп перенесён на {fmt.price(pos['stop_loss'])} (вход + издержки). Риск по сделке снят.",
+        reply_markup=_position_buttons(strategy, pair))
+
+
+def _exit_reason_text(reason, targets_n):
+    reason = str(reason or '')
+    if reason.startswith('TP'):
+        return f"🎯 цель {reason[2:]} из {targets_n}" if targets_n > 1 else '🎯 цель'
+    return {'SL': '🛑 стоп', 'BE': '🛡 безубыток', 'TIME': '⏱ предел удержания',
+            'MANUAL': '🖐 закрыта вручную'}.get(reason, reason)
+
+
+def _strategy_today(strategy):
+    """Итог стратегии за текущие сутки UTC по журналу: (деньги, сделок)."""
+    try:
+        import paper_broker
+        today = datetime.now(timezone.utc).strftime('%Y-%m-%d')
+        rows = [r for r in paper_broker.read_journal()
+                if r.get('strategy') == strategy and str(r.get('close_time', ''))[:10] == today]
+        return sum(float(r.get('pnl_usd') or 0) for r in rows), len(rows)
+    except Exception:                                  # noqa: BLE001
+        return None, 0
+
+
+def paper_exit(row):
+    """Сделка закрыта: итог, путь от входа до выхода и что это значит для стратегии."""
+    import tg_format as fmt
+    strategy, pair = row.get('strategy', ''), row.get('pair', '')
+    if not _allowed('trade_closed') or not _strategy_on(strategy):
+        return False
+    pnl = float(row.get('pnl_usd') or 0)
+    targets_n = len([t for t in str(row.get('targets_all') or '').split(';') if t]) or 1
+    word = 'в плюс' if pnl > 0 else ('в минус' if pnl < 0 else 'в ноль')
+    costs = float(row.get('fees_usd') or 0) + float(row.get('funding_usd') or 0)
+    lines = [
+        f"{fmt.result_icon(pnl)} <b>Закрыта {word} · {fmt.esc(pair)} {row.get('direction', '')}</b> · "
+        f"{fmt.name(strategy)}",
+        fmt.RULE,
+        f"{_exit_reason_text(row.get('exit_reason'), targets_n)} · "
+        f"{fmt.price(row.get('entry_price'))} → {fmt.price(row.get('exit_price'))} · "
+        f"{fmt.duration(row.get('duration_min'))}",
+        f"Итог <b>{fmt.money(pnl)}</b> · <b>{fmt.r(row.get('pnl_r'))}</b> · издержки {fmt.money(costs, signed=False)}",
+    ]
+    if row.get('mfe_r') not in (None, ''):
+        lines.append(f"Ход в сделке: лучший {fmt.r(row.get('mfe_r'))} · худший {fmt.r(row.get('mae_r'))}")
+    day, n = _strategy_today(strategy)
+    lines.append(f"{fmt.name(strategy)}: депозит {fmt.money(row.get('balance_after'), signed=False)}"
+                 + (f" · сегодня {fmt.money(day)} ({n} сд)" if day is not None else ''))
+    return _send('\n'.join(lines), reply_markup={'inline_keyboard': [[
+        {'text': '📊 Статистика', 'callback_data': '!st:d'},
+        {'text': '🏠 Меню', 'callback_data': '!m'}]]})
+
+
+def daily_report_text(broker, day):
+    """Итог суток UTC по журналу: по стратегиям, лучшая и худшая, что в рынке сейчас."""
+    import tg_format as fmt
+    import telegram_panel as panel
+    start = datetime.fromisoformat(day).replace(tzinfo=timezone.utc)
+    end = start + timedelta(days=1)
+    snap = broker.snapshot()
+    try:
+        from dashboard import _read_paper_trades
+        trades = _read_paper_trades()
+    except Exception:                                  # noqa: BLE001
+        trades = []
+    d = {'strategies': snap.get('strategies') or {}, 'trades': trades}
+    rows = [t for t in panel._closed(d, since=start) if fmt.parse_time(t.get('closed')) < end]
+    total = panel.summarise(rows)
+    lines = [f"📊 <b>Итог {start.strftime('%d.%m.%Y')}</b> · {fmt.mode_label(config.TRADING_MODE)}",
+             fmt.RULE]
+    if not rows:
+        lines.append('Сделок не было.')
+    else:
+        lines.append(panel._stat_line('<b>Всего</b>', total))
+        for name in fmt.ordered(d['strategies']):
+            subset = [t for t in rows if t.get('strategy') == name]
+            if subset:
+                lines.append(panel._stat_line(fmt.name(name), panel.summarise(subset)))
+        best = max(rows, key=lambda t: fmt.num(t.get('pnl_r')))
+        worst = min(rows, key=lambda t: fmt.num(t.get('pnl_r')))
+        lines.append(f"🏆 {fmt.esc(fmt.coin(best.get('pair')))} {fmt.name(best.get('strategy'))} "
+                     f"{fmt.r(best.get('pnl_r'))} · 💀 {fmt.esc(fmt.coin(worst.get('pair')))} "
+                     f"{fmt.name(worst.get('strategy'))} {fmt.r(worst.get('pnl_r'))}")
+    equity = sum(s.get('equity', 0) for s in d['strategies'].values())
+    start_bal = sum(s.get('start_balance', 0) for s in d['strategies'].values())
+    lines += [fmt.RULE,
+              f"Капитал {fmt.money(equity, signed=False)} · с начала "
+              f"{fmt.pct((equity / start_bal - 1) * 100 if start_bal else 0)} · "
+              f"позиций {len(snap.get('open') or [])} · заявок {len(snap.get('pending') or [])}"]
+    return '\n'.join(lines)
+
+
+def daily_report_once(broker, now=None):
+    """
+    Итог прошедших суток UTC — ОДИН раз на сутки.
+
+    Прежняя сводка брала сделки из памяти процесса и помнила дату отправки
+    там же: после каждой выкатки она уходила заново и говорила «сделок не
+    было» — память после перезапуска пуста. Теперь сделки — из журнала, дата
+    отправки — на диске (telegram_state).
+    """
+    import telegram_state
+    now = now or datetime.now(timezone.utc)
+    day = (now - timedelta(days=1)).date().isoformat()
+    if telegram_state.load().get('daily_sent') == day:
+        return False
+    telegram_state.update(daily_sent=day)
+    if not _allowed('daily'):
+        return False
+    try:
+        return _send(daily_report_text(broker, day), reply_markup={'inline_keyboard': [[
+            {'text': '📊 Статистика', 'callback_data': '!st:7'},
+            {'text': '🏠 Меню', 'callback_data': '!m'}]]})
+    except Exception as exc:                           # noqa: BLE001
+        log(f"Telegram: итог дня не собран — {exc}")
+        return False
 
 
 def daily_by_strategy(rows: list, date_str: str = ''):
@@ -701,12 +940,13 @@ def scan_result(liquid: int, candidates: int, active_positions: int):
 
 
 def error_alert(message: str):
+    import tg_format as fmt
     if not _allowed('error'):
         return
     _send(
         f"⚠️ <b>ОШИБКА БОТА</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"<code>{message[:400]}</code>\n"
+        f"<code>{fmt.esc(_safe(message)[:400])}</code>\n"
         f"⏰ {_now()}",
     )
 

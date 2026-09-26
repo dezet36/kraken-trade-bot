@@ -2803,12 +2803,19 @@ async function sendPortfolio(risk, slots, day) {
    мало» — разные беды у одного человека. Сообщение о каждом входе на телефон
    раздражает, а сообщение об ошибке пропускать нельзя. */
 let NOTIFY_SETTINGS = {};
+/* Тот же список, что в Telegram (telegram_panel.EVENTS): настройки общие,
+   и событие, которого нет на одной из панелей, там не выключить. */
 const NOTIFY_EVENTS = [
   ['trade_opened', 'Вход в сделку'],
   ['trade_closed', 'Закрытие сделки'],
+  ['tp_hit', 'Взята частичная цель'],
+  ['breakeven', 'Стоп в безубыток'],
+  ['plan_dropped', 'Заявка или план сняты без сделки'],
   ['llm_setup', 'Сетап ИИ (план с графиком)'],
+  ['llm_rejected', 'Отказ плана ИИ'],
   ['error', 'Ошибки бота'],
   ['daily', 'Дневная сводка'],
+  ['service', 'Запуск бота'],
 ];
 const NOTIFY_CHANNELS = [['telegram', 'Telegram']];
 

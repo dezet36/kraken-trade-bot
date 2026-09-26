@@ -31,6 +31,15 @@ _last_summary_date = None   # tracks date of last daily summary sent
 def _send_daily_summary_if_needed():
     """Sends daily summary once per day at the first cycle after midnight."""
     global _last_summary_date
+    if trade_manager is None and broker is not None:
+        # Бумажный счёт: итог — по журналу, раз в сутки UTC, дата отправки на
+        # диске (telegram_state), поэтому спрашивать можно каждый цикл.
+        # Прежний путь ниже брал сделки из памяти процесса и помнил день там
+        # же: после каждой выкатки сводка уходила заново и говорила «сделок
+        # не было».
+        tg.daily_report_once(broker)
+        return
+
     today = date.today()
     if _last_summary_date == today:
         return
@@ -775,7 +784,7 @@ def _start_paper():
             f"≥ {config.PORTFOLIO_DAILY_DD_PAUSE_PCT:.1f}%")
 
     dashboard.start_dashboard(broker=broker)
-    tg.bot_started(broker.get_real_balance())
+    tg.bot_started(broker.get_real_balance(), broker=broker)
 
 
 
