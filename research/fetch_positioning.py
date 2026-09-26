@@ -1,5 +1,5 @@
 """
-История позиционирования под кэши замеров: открытый интерес (1h) и фандинг.
+История позиционирования под кэши замеров: открытый интерес (1h), фандинг и премия перпетуала к индексу (1h).
 
 Кладётся рядом со свечами кэша:
     <кэш>/open_interest/<PAIR>_1h.csv   timestamp, open_interest
@@ -96,6 +96,28 @@ def funding(client, symbol, start, end):
     return {t: v for t, v in seen.items() if start - 8 * HOUR <= t <= end}
 
 
+def premium(client, symbol, start, end):
+    """Премия перпетуала к индексу (часовые свечи индекса премии), закрытие часа."""
+    seen, cursor = {}, start
+    while cursor < end:
+        try:
+            rows = client.fetch_premium_index_ohlcv(symbol, '1h', since=cursor, limit=1000)
+        except Exception as exc:                          # noqa: BLE001
+            print(f'      премия сорвалась: {str(exc)[:80]}')
+            break
+        if not rows:
+            break
+        for r in rows:
+            if r[0] is not None and r[4] is not None:
+                seen[int(r[0])] = float(r[4])
+        newest = rows[-1][0]
+        if newest <= cursor:
+            break
+        cursor = newest + HOUR
+        time.sleep(PAUSE)
+    return {t: v for t, v in seen.items() if start <= t <= end}
+
+
 def save(path, column, found):
     frame = pd.DataFrame({'timestamp': list(found), column: list(found.values())}).sort_values('timestamp')
     frame['timestamp'] = pd.to_datetime(frame['timestamp'], unit='ms', utc=True)
@@ -135,6 +157,13 @@ def main(names):
                 line += f'   фандинг {n:>5}'
             else:
                 line += '   фандинг есть'
+            pr_path = os.path.join(ROOT, 'research', cache, 'premium', f'{pair}_1h.csv')
+            if not os.path.exists(pr_path):
+                found = premium(client, symbol, start, end)
+                n = save(pr_path, 'premium', found) if found else 0
+                line += f'   премия {n:>5} ({n / max(1, (end - start) / HOUR) * 100:5.1f}%)'
+            else:
+                line += '   премия есть'
             print(line, flush=True)
 
 
