@@ -1108,3 +1108,91 @@ class TestSetupJournalRecords:
         assert broker.open('FIBO', signal(entry=100.0))
         ctx = broker.pending('FIBO')['BTCUSDT']['context']
         assert (ctx['regime'], ctx['regime_er']) == ('', None)
+
+
+class TestALimitThroughTheMarket:
+    """
+    Лимит, который при постановке уже за рынком (покупка не ниже цены,
+    продажа не выше), биржа исполняет сразу и по рынку, с комиссией тейкера.
+    26.09.2026 брокер налил лимит ИИ по DOGE по его цене 0.09869 при рынке
+    0.0979 — позиция родилась на −0.7R, которых на бирже не было бы.
+
+    Правило — у стратегии, которая его объявила (strategy_profile.
+    fills_through_market): сейчас только ИИ. Остальные живут по-старому,
+    пока не измерено на их движках.
+    """
+
+    @staticmethod
+    def _broker(broker_env):
+        _fibo_smc, client, pb, cfg = broker_env
+        pb._now_ms = lambda: 1_700_000_000_000
+        return pb.PaperBroker(client, strategies=('FIBO', 'LLM')), client, pb, cfg
+
+    @staticmethod
+    def _ai(market_price=None, **over):
+        sig = signal(strategy='LLM', **over)
+        if market_price is not None:
+            sig['market_price'] = market_price
+        return sig
+
+    def test_an_ai_long_above_the_market_fills_at_once_at_the_market(self, broker_env, monkeypatch):
+        broker, _client, _pb, cfg = self._broker(broker_env)
+        monkeypatch.setattr(cfg, 'PAPER_FEE_TAKER', 0.001)
+        assert broker.open('LLM', self._ai(98.0, entry=100.0, stop=90.0, tp1=130.0))
+        assert not broker.pending('LLM'), 'заявка за рынком не ждёт свечи'
+        pos = broker.positions('LLM')['BTCUSDT']
+        assert pos['entry_price'] == pytest.approx(98.0)
+        assert pos['fees_paid'] == pytest.approx(pos['size'] * 98.0 * 0.001), 'вход по рынку — тейкер'
+        assert 'по рынку' in pos['entry_note']
+
+    def test_a_short_below_the_market_mirrors_it(self, broker_env):
+        broker, _client, _pb, _cfg = self._broker(broker_env)
+        assert broker.open('LLM', self._ai(102.0, direction='SHORT', entry=100.0,
+                                           stop=110.0, tp1=70.0))
+        assert broker.positions('LLM')['BTCUSDT']['entry_price'] == pytest.approx(102.0)
+
+    def test_slippage_is_paid_but_never_past_the_limit(self, broker_env, monkeypatch):
+        broker, _client, _pb, cfg = self._broker(broker_env)
+        monkeypatch.setattr(cfg, 'PAPER_SLIPPAGE_PCT', 0.0005)
+        broker.open('LLM', self._ai(98.0, entry=100.0, stop=90.0, tp1=130.0))
+        assert broker.positions('LLM')['BTCUSDT']['entry_price'] == pytest.approx(98.0 * 1.0005)
+
+    def test_a_limit_at_the_price_fills_no_worse_than_itself(self, broker_env, monkeypatch):
+        broker, _client, _pb, cfg = self._broker(broker_env)
+        monkeypatch.setattr(cfg, 'PAPER_SLIPPAGE_PCT', 0.0005)
+        broker.open('LLM', self._ai(99.99, entry=100.0, stop=90.0, tp1=130.0))
+        assert broker.positions('LLM')['BTCUSDT']['entry_price'] == pytest.approx(100.0)
+
+    def test_a_resting_limit_still_waits_for_the_price(self, broker_env):
+        broker, _client, _pb, _cfg = self._broker(broker_env)
+        broker.open('LLM', self._ai(103.0, entry=100.0, stop=90.0, tp1=130.0))
+        assert broker.pending('LLM') and not broker.positions('LLM')
+
+    def test_without_a_price_the_order_waits_as_before(self, broker_env):
+        broker, _client, _pb, _cfg = self._broker(broker_env)
+        broker.open('LLM', self._ai(entry=100.0, stop=90.0, tp1=130.0))
+        assert broker.pending('LLM') and not broker.positions('LLM')
+
+    def test_a_strategy_without_the_rule_is_untouched(self, broker_env):
+        """Фибо правило не объявляла: заявка ждёт и наливается по цене лимита, как всегда."""
+        broker, client, pb, _cfg = broker_env
+        pb._now_ms = lambda: 1_700_000_000_000
+        sig = signal(entry=100.0, stop=90.0, tp1=130.0)
+        sig['market_price'] = 98.0
+        broker.open('FIBO', sig)
+        assert broker.pending('FIBO') and not broker.positions('FIBO')
+        feed(broker, client, 'BTCUSDT', [(99, 97, 98)])
+        assert broker.positions('FIBO')['BTCUSDT']['entry_price'] == 100.0
+
+    def test_the_journal_keeps_how_it_entered(self, broker_env):
+        import json
+        broker, client, pb, _cfg = self._broker(broker_env)
+        sig = self._ai(98.0, entry=100.0, stop=90.0, tp1=130.0)
+        sig['llm'] = {'entry_plan': 101.5}
+        broker.open('LLM', sig)
+        feed(broker, client, 'BTCUSDT', [(99, 89.0, 89.5)])          # стоп
+        assert pb.read_journal()[-1]['exit_reason'] == 'SL'
+        with open(pb.JOURNAL_JSON, encoding='utf-8') as fh:
+            row = json.loads(fh.readlines()[-1])
+        assert 'по рынку' in row['entry_note']
+        assert row['llm_entry_plan'] == 101.5

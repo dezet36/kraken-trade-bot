@@ -4816,6 +4816,7 @@ function renderAiOutcomes(o) {
     cell('цель без входа', o.target_without_entry || 0, o.accepted ? `${Math.round(missed / o.accepted * 100)}% с «обогнал»` : ''),
     cell('рынок обогнал план', o.overtaken || 0, ''),
     cell('условие не наступило', o.expired || 0, ''),
+    cell('вход уже за ценой', o.past_entry || 0, 'с 26.09.2026'),
     cell('досмотрено 48 ч', o.observed || 0, ''),
     cell('цель первой', o.tp_first || 0, o.observed ? `${Math.round(o.tp_first / o.observed * 100)}%` : ''),
     cell('стоп первым', o.sl_first || 0, o.observed ? `${Math.round(o.sl_first / o.observed * 100)}%` : ''),

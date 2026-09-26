@@ -354,6 +354,13 @@ LLM_LIMIT_ENTRY_OFFSET_PCT = float(os.getenv('LLM_LIMIT_ENTRY_OFFSET_PCT', 0.0))
 # Значение то же, что было общим: план модели держит цель и стоп сам, а это
 # лишь страховка от позиции, повисшей на недели.
 LLM_MAX_HOLD_HOURS = float(os.getenv('LLM_MAX_HOLD_HOURS', 336.0))
+# Лимит ИИ, оказавшийся при постановке за рынком, брокер исполняет сразу по
+# рынку тейкером, как биржа (strategy_profile.fills_through_market). До
+# 26.09.2026 он наливался по цене лимита: DOGE LONG от 0.09869 при цене
+# 0.0979 — на бумаге −0.7R с первой свечи. Сама стратегия такой план теперь
+# пересчитывает от цены (llm_decide.reprice_at_market), и заявка за рынком
+# — это вход по рынку, прошедший те же проверки.
+LLM_FILL_THROUGH_MARKET = os.getenv('LLM_FILL_THROUGH_MARKET', '1') not in ('0', 'false', 'False', '')
 
 # ── Веб-дашборд ──────────────────────────────────────────────────────────────
 DASHBOARD_PORT = int(os.getenv('DASHBOARD_PORT', 8787))
@@ -507,6 +514,12 @@ LIMIT_ENTRY_OFFSET_PCT  = float(os.getenv('LIMIT_ENTRY_OFFSET_PCT', 0.001))  # 0
 # прежние 4ч недобирали ~27пп годовых; инвалидация/TP-touch отменяют ордер раньше
 # независимо от срока, кулдаун 12ч истекает до отмены — ре-детекция как в модели)
 PENDING_ORDER_MAX_HOURS = float(os.getenv('PENDING_ORDER_MAX_HOURS', 72.0))
+# Лимит Фибоначчи, оказавшийся при постановке за рынком, — исполнять сразу по
+# рынку (strategy_profile.fills_through_market). СВОЁ значение фибо, не общее:
+# у других стратегий своё. Выключено, пока не измерено (research/fibo_live_sim
+# наливает такой лимит по его цене, как брокер до 26.09.2026). Сканер ставит
+# вход ниже цены у лонга, так что за рынком оказывается разве что смещение 0.1%.
+FIBO_FILL_THROUGH_MARKET = os.getenv('FIBO_FILL_THROUGH_MARKET', '0') not in ('0', 'false', 'False', '')
 
 LOOKBACK_CANDLES = 48
 

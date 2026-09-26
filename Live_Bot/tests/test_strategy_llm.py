@@ -1178,3 +1178,111 @@ class TestBusyPairsAreNotReAsked:
         strategy_llm.scan_for_setups(['BTCUSDT', 'ETHUSDT'], gate=Gate(), candles=lambda pair: [0] * 500)
         strategy_llm.join(15)
         assert asked == ['ETHUSDT']
+
+
+class TestAnEntryPastThePrice:
+    """
+    26.09.2026 DOGE: LONG от 0.09869, условие — вынос под 0.09756 и возврат.
+    Условие наступило при цене 0.0979, и лимит на покупку встал ВЫШЕ рынка:
+    брокер налил его по 0.09869, позиция родилась на −0.7R. Стоп от настоящей
+    цены был 0.77% при минимуме 1.5% — такой сделки проверки не пропустили бы.
+
+    Теперь план, чей вход к заявке оказался за ценой, пересчитывается от цены
+    (стоп и цели на месте) и проходит те же проверки; не прошёл — отказ
+    «вход уже за ценой», план снят.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _plain_costs(self, monkeypatch):
+        monkeypatch.setattr(strategy_llm.llm_decide, 'empirical_p', lambda *a, **k: (None, 0))
+        monkeypatch.setattr(strategy_llm.config, 'PAPER_FEE_TAKER', 0.00055)
+        monkeypatch.setattr(strategy_llm.llm_local, 'available', lambda: True)
+
+    @staticmethod
+    def _refusals(monkeypatch):
+        written = []
+        import refused
+        monkeypatch.setattr(refused, 'record', lambda *a, **k: written.append(a))
+        return written
+
+    @staticmethod
+    def _arm(monkeypatch, **plan):
+        verdict = approving_verdict(trigger_when='sweep_reclaim', trigger_level=98.0,
+                                    trigger_id='L11', min_stop_pct=1.5, **plan)
+        monkeypatch.setattr(strategy_llm.llm_decide, 'decide', lambda *a, **k: dict(verdict))
+        strategy_llm.scan_for_setups(['BTCUSDT'], gate=None, candles=lambda pair: [0] * 500)
+        strategy_llm.join(15)
+        strategy_llm.scan_for_setups([], gate=None, candles=lambda pair: [0] * 500)
+        assert strategy_llm.armed(), 'план должен быть взведён'
+
+    @staticmethod
+    def _swept_and_reclaimed(close):
+        """Вынос под 98 и закрытие обратно выше; текущая свеча — по close."""
+        import numpy as np
+        import pandas as pd
+        armed_ms = int(strategy_llm._armed['BTCUSDT']['armed_at'] * 1000)
+        return pd.DataFrame({
+            'timestamp': pd.to_datetime(np.arange(3) * 3_600_000 + armed_ms - 3_600_000 + 1000, unit='ms'),
+            'open': [98.5, 97.8, close], 'high': [98.6, close + 0.1, close + 0.1],
+            'low': [97.5, 98.2, close - 0.1], 'close': [97.8, close, close], 'volume': [1.0] * 3})
+
+    @staticmethod
+    def _now_frame(last_close, n=500):
+        import numpy as np
+        import pandas as pd
+        closes = [101.0] * (n - 1) + [last_close]
+        return pd.DataFrame({
+            'timestamp': pd.to_datetime(np.arange(n) * 3_600_000, unit='ms'),
+            'open': closes, 'high': [c + 0.3 for c in closes], 'low': [c - 0.3 for c in closes],
+            'close': closes, 'volume': [1.0] * n})
+
+    def test_a_triggered_plan_past_the_price_is_refused(self, monkeypatch):
+        written = self._refusals(monkeypatch)
+        self._arm(monkeypatch, entry=100.0, stop=97.0, targets=[107.0, 109.0])
+        df = self._swept_and_reclaimed(98.8)          # вход 100 выше цены 98.8
+        out = strategy_llm.scan_for_setups([], gate=None, candles=lambda pair: df)
+        assert out == [] and strategy_llm.armed() == []
+        assert any('вход уже за ценой' in str(a) for a in written), written
+        assert 'BTCUSDT' in strategy_llm._refused
+
+    def test_a_triggered_plan_with_room_enters_at_the_market(self, monkeypatch):
+        self._arm(monkeypatch, entry=100.0, stop=90.0, targets=[130.0, 140.0])
+        df = self._swept_and_reclaimed(98.8)
+        out = strategy_llm.scan_for_setups([], gate=None, candles=lambda pair: df)
+        assert len(out) == 1
+        signal = out[0]['signal']
+        assert signal['params']['entry'] == pytest.approx(98.8)
+        assert signal['params']['stop_loss'] == 90.0, 'стоп не двигается'
+        assert signal['market_price'] == pytest.approx(98.8)
+        assert signal['llm']['entry_plan'] == 100.0
+        assert out[0]['rr'] == pytest.approx((130 - 98.8) / 8.8, abs=0.01)
+
+    def test_a_triggered_plan_on_the_right_side_is_untouched(self, monkeypatch):
+        self._arm(monkeypatch, entry=98.0, stop=90.0, targets=[130.0, 140.0])
+        df = self._swept_and_reclaimed(98.8)          # вход 98 ниже цены — лимит ждёт отката
+        out = strategy_llm.scan_for_setups([], gate=None, candles=lambda pair: df)
+        assert len(out) == 1
+        assert out[0]['signal']['params']['entry'] == 98.0
+        assert out[0]['signal']['market_price'] == pytest.approx(98.8)
+        assert out[0]['signal']['llm']['entry_plan'] == ''
+
+    def test_a_plan_to_enter_now_is_checked_against_the_price_too(self, monkeypatch):
+        """Пока модель думала, цена ушла под вход — лимит «сразу» исполнился бы по рынку."""
+        written = self._refusals(monkeypatch)
+        monkeypatch.setattr(strategy_llm.llm_decide, 'decide', lambda *a, **k: approving_verdict(min_stop_pct=1.5))
+        frame = self._now_frame(99.0)                 # вход 100, стоп 97: от цены 2%, тейкер 5.4% > 5%
+        strategy_llm.scan_for_setups(['LTCUSDT'], gate=None, candles=lambda pair: frame)
+        strategy_llm.join(15)
+        out = strategy_llm.scan_for_setups([], gate=None, candles=lambda pair: frame)
+        assert out == []
+        assert any('вход уже за ценой' in str(a) for a in written), written
+
+    def test_a_plan_to_enter_now_on_the_right_side_goes_as_before(self, monkeypatch):
+        monkeypatch.setattr(strategy_llm.llm_decide, 'decide', lambda *a, **k: approving_verdict(min_stop_pct=1.5))
+        frame = self._now_frame(101.0)
+        strategy_llm.scan_for_setups(['LTCUSDT'], gate=None, candles=lambda pair: frame)
+        strategy_llm.join(15)
+        out = strategy_llm.scan_for_setups([], gate=None, candles=lambda pair: frame)
+        assert len(out) == 1
+        assert out[0]['signal']['params']['entry'] == 100.0
+        assert out[0]['signal']['market_price'] == pytest.approx(101.0)

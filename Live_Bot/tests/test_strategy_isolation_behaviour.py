@@ -171,6 +171,7 @@ class TestDecisionParamsAreIsolated:
             'KILLZONE_AS_GATE': True, 'MIN_CONFLUENCE_SCORE': 0.5, 'RISK_PER_TRADE_PCT': 3.0,
             'POI_ENTRY_DEPTH': 0.5, 'REQUIRE_PREMIUM_DISCOUNT': False,
             'PENDING_ORDER_MAX_HOURS': 1.0, 'COOLDOWN_HOURS': 99.0, 'MAX_ENTRY_COST_SHARE_PCT': 50.0,
+            'FILL_THROUGH_MARKET': True,
         }.items():
             assert name in params.DECISION, f'{name} не объявлен решением SMC'
             monkeypatch.setattr(params, name, value)
@@ -181,6 +182,7 @@ class TestDecisionParamsAreIsolated:
         # Свои величины исполнения у SMC сдвинулись, чужие — нет.
         import strategy_profile
         assert strategy_profile.cooldown_hours('SMC') == 99.0
+        assert strategy_profile.fills_through_market('SMC') is True
         for other in ('LEVELS', 'RSIBB', 'LLM'):
             assert _fp(strategy_profile.describe(other)) == _fp(json.loads(baseline['профили'])[other])
 
@@ -190,7 +192,7 @@ class TestDecisionParamsAreIsolated:
             'TRIGGER_ATR': 5.0, 'MIN_GAP_ATR': 0.0, 'PIERCE_ATR': 1.0, 'RECLAIM_BARS': 20,
             'VOLUME_RATIO': 0.1, 'MIN_STOP_PCT': 5.0, 'MIN_TARGET_R': 0.1, 'RISK_PCT': 5.0,
             'EXPIRY_HOURS': 1.0, 'COOLDOWN_HOURS': 99.0, 'MAX_ENTRY_COST_SHARE_PCT': 50.0,
-            'MAX_HOLD_HOURS': 1.0,
+            'MAX_HOLD_HOURS': 1.0, 'FILL_THROUGH_MARKET': True,
         }.items():
             monkeypatch.setattr(params, name, value)
         assert levels_decisions(df) != baseline['LEVELS'], 'правка уровней должна менять уровни — иначе тест пуст'
@@ -204,6 +206,7 @@ class TestDecisionParamsAreIsolated:
             'RSI_LOW': 90.0, 'RSI_HIGH': 10.0, 'RSI_MODE': 'level', 'ADX_MAX': 5.0,
             'ENTRY_MODE': 'reclaim', 'TARGET_FRAC': 0.2, 'EXPIRY_BARS': 1,
             'COOLDOWN_HOURS': 99.0, 'MAX_ENTRY_COST_SHARE_PCT': 50.0,
+            'FILL_THROUGH_MARKET': True,
         }.items():
             monkeypatch.setattr(params, name, value)
         assert rsibb_decisions(df) != baseline['RSIBB'], 'правка Боллинджера должна менять Боллинджер — иначе тест пуст'
@@ -217,6 +220,7 @@ class TestDecisionParamsAreIsolated:
         for name, value in {
             'LLM_COOLDOWN_HOURS': 99.0, 'LLM_MAX_ENTRY_COST_SHARE_PCT': 50.0,
             'LLM_TRIGGER_TTL_H': 1, 'LLM_LIMIT_ENTRY_OFFSET_PCT': 0.01,
+            'LLM_FILL_THROUGH_MARKET': False,
         }.items():
             monkeypatch.setattr(cfg, name, value, raising=False)
         for name, fn in READERS.items():
@@ -231,10 +235,12 @@ class TestDecisionParamsAreIsolated:
         for name, value in {
             'MAX_ENTRY_COST_SHARE_PCT': 0.01, 'COOLDOWN_HOURS': 0.01,
             'PENDING_ORDER_MAX_HOURS': 0.01, 'MAX_POSITION_HOLD_HOURS': 0.01,
+            'FIBO_FILL_THROUGH_MARKET': True,
         }.items():
             monkeypatch.setattr(cfg, name, value)
         assert profiles() == baseline['профили']
         assert strategy_profile.cost_limit_pct('FIBO') == pytest.approx(0.01)
+        assert strategy_profile.fills_through_market('FIBO') is True
 
 
 # ── Общий слой: настройки оператора не пишутся в структуру ───────────────────

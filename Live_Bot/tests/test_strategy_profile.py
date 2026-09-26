@@ -103,6 +103,50 @@ class TestACommonParameterCannotLockOneStrategy:
         assert pricey is False
 
 
+class TestALimitThroughTheMarketIsEachStrategysOwn:
+    """
+    Лимит, оказавшийся при постановке за рынком, брокер исполняет по рынку
+    только у стратегии, которая это объявила. Общего значения нет — правка
+    одной стратегии не сдвигает других (CLAUDE.md, изоляция стратегий).
+    """
+
+    def test_each_strategy_reads_its_own_value(self):
+        from levels import params as lv
+        from rsibb import params as rb
+        from smc import params as smc
+        assert sp.fills_through_market('LEVELS') is bool(lv.FILL_THROUGH_MARKET)
+        assert sp.fills_through_market('RSIBB') is bool(rb.FILL_THROUGH_MARKET)
+        assert sp.fills_through_market('SMC') is bool(smc.FILL_THROUGH_MARKET)
+        assert sp.fills_through_market('LLM') is bool(sp._config().LLM_FILL_THROUGH_MARKET)
+        assert sp.fills_through_market('FIBO') is bool(sp._config().FIBO_FILL_THROUGH_MARKET)
+
+    def test_only_the_ai_has_it_on_until_the_others_are_measured(self):
+        assert sp.fills_through_market('LLM') is True
+        for name in ('FIBO', 'SMC', 'LEVELS', 'RSIBB'):
+            assert sp.fills_through_market(name) is False, name
+
+    def test_an_unknown_strategy_keeps_the_old_behaviour(self):
+        assert sp.fills_through_market('WHATEVER') is False
+
+    @pytest.mark.parametrize('owner,module,key', [
+        ('SMC', 'smc', 'FILL_THROUGH_MARKET'),
+        ('LEVELS', 'levels', 'FILL_THROUGH_MARKET'),
+        ('RSIBB', 'rsibb', 'FILL_THROUGH_MARKET'),
+        ('LLM', None, 'LLM_FILL_THROUGH_MARKET'),
+        ('FIBO', None, 'FIBO_FILL_THROUGH_MARKET'),
+    ])
+    def test_one_switch_moves_only_its_owner(self, monkeypatch, owner, module, key):
+        import importlib
+        before = {n: sp.fills_through_market(n) for n in ALL}
+        target = importlib.import_module(f'{module}.params') if module else sp._config()
+        monkeypatch.setattr(target, key, not before[owner])
+        after = {n: sp.fills_through_market(n) for n in ALL}
+        assert after[owner] is (not before[owner])
+        for n in ALL:
+            if n != owner:
+                assert after[n] is before[n], f'{n} сдвинулся от переключателя {owner}'
+
+
 class TestBrokenStrategyParamsFallBackToTheCommonValue:
 
     def test_missing_attribute(self, monkeypatch):
@@ -124,8 +168,8 @@ class TestDescribeListsEverything:
             d = sp.describe(name)
             assert set(d) == {'expiry_hours', 'cooldown_hours', 'cost_limit_pct',
                               'limit_offset_pct', 'max_hold_hours', 'min_stop_pct',
-                              'min_stop_knob', 'drops_at_target'}
-            flags = ('min_stop_knob', 'drops_at_target')
+                              'min_stop_knob', 'drops_at_target', 'fills_through_market'}
+            flags = ('min_stop_knob', 'drops_at_target', 'fills_through_market')
             assert all(isinstance(v, float) for k, v in d.items() if k not in flags)
             assert all(isinstance(d[k], bool) for k in flags)
 

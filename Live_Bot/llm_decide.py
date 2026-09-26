@@ -59,7 +59,12 @@ CODE_GATES = ('нет законного стопа', 'нет законного
               'вход на пуле стопов', 'обоснование не о том плане', 'мало конфлюенса',
               'ожидание не положительно', 'уровень не найден', 'критик отклонил',
               'вердикт устарел', 'рынок обогнал план', 'цель достигнута без входа',
-              'условие не наступило')
+              'условие не наступило', 'вход уже за ценой')
+
+# Вход плана к моменту заявки оказался по ту сторону цены, а пересчёт от цены
+# не прошёл проверок (reprice_at_market). Имя одно на стратегию, журнал сетапов
+# и панель.
+PAST_ENTRY = 'вход уже за ценой'
 
 # Отказы, которые код выносит ДО вопроса модели: модель этой пары не видела.
 # Их не показывают ей как «прошлый разбор» и не приписывают им токены вызова.
@@ -108,6 +113,74 @@ def expected_value(probability, rr, cost_r):
     платятся в обоих случаях.
     """
     return probability * rr - (1 - probability) * 1.0 - cost_r
+
+
+def past_entry(side, entry, price):
+    """
+    Лимит на entry исполнился бы сразу, по рынку: у лонга вход не ниже цены,
+    у шорта — не выше. Лимит «ждёт цену» только с другой стороны от неё.
+    """
+    if not entry or not price:
+        return False
+    return entry >= price if side == 'LONG' else entry <= price
+
+
+def reprice_at_market(verdict, price):
+    """
+    План, чей вход к моменту заявки уже за ценой, — заново от цены рынка.
+
+    -> (вердикт, '') — как был, если вход по нужную сторону цены или сверять
+       нечего; пересчитанный от цены, если прошёл проверки;
+       (None, причина) — отказ.
+
+    ОТКУДА. 26.09.2026 DOGE: LONG от L8 0.09869, условие — вынос под L11
+    0.09756 и возврат. Условие наступило при цене 0.0979: лимит на покупку
+    встал на 0.8% ВЫШЕ рынка, биржа исполнила бы его сразу, по рынку. Стоп
+    от настоящей цены вышел 0.77% при минимуме ИИ 1.5% — такую сделку
+    проверки не пропустили бы, а план принимался по входу, которого уже не
+    было. В тот же день XLM — зеркально, шорт от 0.2177 при цене 0.2200.
+
+    Стоп и цели остаются где были: они за структурой, и двигать их ради
+    отношения нельзя. Вход — цена рынка. Проверки — те же, что у плана:
+    минимальный стоп, издержки, R:R, ожидание. Издержки — входа ПО РЫНКУ:
+    тейкер туда и обратно, а не мейкер на входе, как у лимита.
+    """
+    side, entry, stop = verdict.get('side'), verdict.get('entry'), verdict.get('stop')
+    targets = [t for t in (verdict.get('targets') or []) if t]
+    if not side or not entry or not stop or not targets or not price:
+        return verdict, ''
+    if not past_entry(side, entry, price):
+        return verdict, ''
+    lead = (f'{side} от {entry:.6g}, а цена уже {price:.6g} — лимит исполнился бы '
+            f'сразу по рынку')
+    if not _geometry_ok(side, price, stop, targets):
+        return None, f'{lead}; от цены стоп или цель уже по другую сторону'
+    distance = abs(price - stop)
+    stop_pct = distance / price * 100
+    floor = verdict.get('min_stop_pct') or llm_context.min_stop_pct()
+    if floor and stop_pct < floor:
+        return None, f'{lead}; стоп от цены {stop_pct:.2f}% при минимуме {floor:.2f}%'
+    import strategy_profile
+    round_trip = 2 * config.PAPER_FEE_TAKER
+    share = price / distance * round_trip * 100
+    limit = strategy_profile.cost_limit_pct('LLM')
+    if limit and share > limit:
+        return None, (f'{lead}; комиссии входа по рынку — {share:.1f}% риска при '
+                      f'пределе {limit:.1f}% (стоп от цены {stop_pct:.2f}%)')
+    rr = abs(targets[0] - price) / distance
+    if rr < MIN_RR:
+        return None, f'{lead}; R:R от цены {rr:.2f} при минимуме {MIN_RR}'
+    cost_r = round_trip / (distance / price)
+    p_real, n_real = empirical_p()
+    ev = expected_value(p_real, rr, cost_r) if p_real is not None else None
+    if ev is not None and ev <= 0:
+        return None, (f'{lead}; ожидание от цены {ev:.3f}R при нашей доле цели '
+                      f'{p_real:.2f} по {n_real} наблюдениям')
+    out = dict(verdict)
+    out.update({'entry': price, 'entry_plan': entry, 'rr': round(rr, 2),
+                'cost_r': round(cost_r, 4), 'stop_pct': round(stop_pct, 2),
+                'ev': round(ev, 4) if ev is not None else ''})
+    return out, ''
 
 
 # С какого дня планы строятся по нынешним правилам: стоп за сломом
@@ -963,6 +1036,9 @@ def check(parsed, levels, answer=None, market=None, min_stop=None, atr_pct=None)
                'rr': round(rr, 2), 'cost_r': round(cost_r, 4),
                'ev': round(ev, 4) if ev is not None else '',
                'stop_pct': round(stop_pct, 2),
+               # Минимум, которым план проверен: им же сверяется вход, если
+               # к заявке он окажется за ценой (reprice_at_market).
+               'min_stop_pct': floor,
                'ids': parsed.get('ids', {})}
     if ev is not None and ev <= 0:
         return _refusal('ожидание не положительно',

@@ -1405,8 +1405,8 @@ def _llm_outcomes_summary(days=7):
     from datetime import datetime, timedelta, timezone
     since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat(timespec='seconds')
     out = {'days': days, 'accepted': 0, 'entered': 0, 'target_without_entry': 0,
-           'overtaken': 0, 'expired': 0, 'observed': 0, 'tp_first': 0, 'sl_first': 0,
-           'neither': 0, 'refused_tp': 0, 'refused_sl': 0}
+           'overtaken': 0, 'expired': 0, 'past_entry': 0, 'observed': 0, 'tp_first': 0,
+           'sl_first': 0, 'neither': 0, 'refused_tp': 0, 'refused_sl': 0}
     try:
         import llm_journal
         for row in llm_journal.last(400, mode=config.TRADING_MODE):
@@ -1427,6 +1427,8 @@ def _llm_outcomes_summary(days=7):
                     out['overtaken'] += 1
                 elif 'условие не наступило' in gate:
                     out['expired'] += 1
+                elif 'вход уже за ценой' in gate:
+                    out['past_entry'] += 1
     except Exception:                                  # noqa: BLE001
         pass
     try:

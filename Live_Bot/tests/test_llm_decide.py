@@ -1421,3 +1421,90 @@ class TestRevisionsAreSwitchedOff:
         llm_journal.record('BTCUSDT', '', out, {})
         row = next(csv.DictReader(open(llm_journal.CSV_PATH, encoding='utf-8')))
         assert row['revision'] == 'выключена' and row['gate'] == 'геометрия неверна'
+
+
+class TestAnEntryPastThePriceIsRepricedOrRefused:
+    """
+    26.09.2026 DOGE: LONG от 0.09869, условие — вынос под 0.09756 и возврат.
+    Условие наступило при цене 0.0979: лимит на покупку встал выше рынка, и
+    биржа исполнила бы его сразу, по рынку. Стоп от настоящей цены — 0.77%
+    при минимуме 1.5%; план принимался по входу, которого уже не было.
+
+    Такой план пересчитывается от цены с теми же стопом и целями и проходит
+    те же проверки; издержки — входа ПО РЫНКУ (тейкер туда и обратно).
+    """
+
+    @staticmethod
+    def plan(**over):
+        out = {'ok': True, 'gate': '', 'side': 'LONG', 'entry': 100.0, 'stop': 90.0,
+               'targets': [130.0, 140.0], 'rr': 3.0, 'votes': 4, 'min_stop_pct': 1.5}
+        out.update(over)
+        return out
+
+    @pytest.fixture(autouse=True)
+    def _no_statistics(self, monkeypatch):
+        monkeypatch.setattr(dec, 'empirical_p', lambda *a, **k: (None, 0))
+        monkeypatch.setattr(config, 'PAPER_FEE_TAKER', 0.00055)
+
+    def test_which_side_is_past(self):
+        assert dec.past_entry('LONG', 100.0, 99.0) and dec.past_entry('LONG', 100.0, 100.0)
+        assert not dec.past_entry('LONG', 100.0, 101.0)
+        assert dec.past_entry('SHORT', 100.0, 101.0) and not dec.past_entry('SHORT', 100.0, 99.0)
+        assert not dec.past_entry('LONG', 100.0, None)
+
+    def test_an_entry_on_the_right_side_is_left_alone(self):
+        plan = self.plan()
+        out, why = dec.reprice_at_market(plan, 101.0)
+        assert out is plan and why == ''
+
+    def test_no_price_means_nothing_to_check(self):
+        plan = self.plan()
+        assert dec.reprice_at_market(plan, None) == (plan, '')
+
+    def test_a_wide_plan_is_repriced_from_the_market(self):
+        out, why = dec.reprice_at_market(self.plan(), 98.0)
+        assert why == ''
+        assert out['entry'] == 98.0 and out['entry_plan'] == 100.0
+        assert out['stop'] == 90.0 and out['targets'] == [130.0, 140.0], 'стоп и цели не двигаются'
+        assert out['rr'] == pytest.approx((130 - 98) / 8, abs=0.01)
+        assert out['stop_pct'] == pytest.approx(8 / 98 * 100, abs=0.01)
+        assert out['cost_r'] == pytest.approx(2 * 0.00055 / (8 / 98), abs=1e-4)
+
+    def test_the_doge_plan_is_refused_by_its_own_minimum(self):
+        doge = self.plan(entry=0.09869, stop=0.09714507732, targets=[0.101948], rr=2.11)
+        out, why = dec.reprice_at_market(doge, 0.0979)
+        assert out is None
+        assert 'стоп от цены 0.77%' in why and 'минимуме 1.50%' in why
+
+    def test_market_costs_are_the_taker_ones(self):
+        """Стоп 1.8% проходит минимум 1.5%, но тейкер туда и обратно — 6.1% риска > 5%."""
+        out, why = dec.reprice_at_market(self.plan(stop=96.0, targets=[112.0]), 97.76)
+        assert out is None and 'комиссии входа по рынку' in why
+
+    def test_a_short_mirrors_it(self):
+        short = self.plan(side='SHORT', entry=100.0, stop=110.0, targets=[70.0])
+        out, why = dec.reprice_at_market(short, 102.0)
+        assert why == '' and out['entry'] == 102.0
+        assert out['rr'] == pytest.approx((102 - 70) / 8, abs=0.01)
+
+    def test_a_price_already_past_the_stop_is_refused(self):
+        out, why = dec.reprice_at_market(self.plan(), 89.0)
+        assert out is None and 'по другую сторону' in why
+
+    def test_a_negative_expectation_from_the_market_is_refused(self, monkeypatch):
+        monkeypatch.setattr(dec, 'empirical_p', lambda *a, **k: (0.10, 44))
+        out, why = dec.reprice_at_market(self.plan(), 98.0)
+        assert out is None and 'ожидание' in why
+
+    def test_a_plan_from_before_the_field_uses_the_ai_floor(self, monkeypatch):
+        """Взведённые до выкатки планы не несут min_stop_pct — берётся минимум ИИ."""
+        monkeypatch.setattr(dec.llm_context, 'min_stop_pct', lambda atr_pct=None: 9.0)
+        plan = self.plan()
+        plan.pop('min_stop_pct')
+        out, why = dec.reprice_at_market(plan, 98.0)
+        assert out is None and 'минимуме 9.00%' in why
+
+    def test_check_hands_the_floor_it_used_to_the_plan(self, monkeypatch):
+        monkeypatch.setattr(dec.llm_context, 'min_stop_pct', lambda atr_pct=None: 1.5)
+        out = verdict()
+        assert out['ok'] and out['min_stop_pct'] == 1.5

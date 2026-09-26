@@ -761,7 +761,8 @@ def _start_paper():
         d = strategy_profile.describe(name)
         log(f"   {name}: заявка {d['expiry_hours']:.0f} ч | кулдаун {d['cooldown_hours']:.0f} ч | "
             f"издержки ≤ {d['cost_limit_pct']:.0f}% риска | смещение лимита {d['limit_offset_pct'] * 100:.2f}% | "
-            f"держать ≤ {d['max_hold_hours']:.0f} ч")
+            f"держать ≤ {d['max_hold_hours']:.0f} ч"
+            + (" | лимит за рынком — по рынку" if d.get('fills_through_market') else ""))
     if getattr(config, 'PAPER_EXCLUSIVE_PAIRS', True):
         log("   Одна пара — одна позиция на все стратегии, как на бирже "
             "(результаты завышены меньше, сравнение честнее)")

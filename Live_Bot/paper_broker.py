@@ -853,7 +853,58 @@ class PaperBroker:
 
         log(f"   👻 [{strategy}] {pair} {direction}: лимит ${_fmt_p(limit_price)} | "
             f"стоп ${_fmt_p(stop)} | цель ${_fmt_p(targets[0])} | RR {record['rr']:.2f}")
+
+        market = self._through_market(strategy, signal, record)
+        if market is not None:
+            self._fill_at_market(strategy, pair, record, now, market)
+            self._save_state()
         return True
+
+    @staticmethod
+    def _through_market(strategy, signal, order):
+        """
+        Цена рынка, если лимит заявки уже стоит ПО ТУ СТОРОНУ рынка и
+        стратегия исполняет такой лимит сразу (strategy_profile.
+        fills_through_market); иначе None — заявка ждёт, как любой лимит.
+
+        Лимит на покупку не ниже цены биржа исполняет сразу и по рынку: вход
+        лучше лимита, но с комиссией тейкера. Брокер же наливал его по цене
+        лимита на следующей свече. 26.09.2026 ИИ так «купил» DOGE по 0.09869
+        при цене 0.0979, и позиция с первой минуты стояла на −0.7R, которых
+        на бирже не было бы.
+
+        Цену называет стратегия в сигнале (market_price) — ту, по которой она
+        только что считала. Брокер за ней в сеть не ходит: нет цены — нет и
+        правила, заявка ставится как раньше.
+        """
+        import strategy_profile
+        if not strategy_profile.fills_through_market(strategy):
+            return None
+        if str(order.get('entry_type', '')).upper() in ('MARKET', 'STOP'):
+            return None             # вход по ходу движения — у него своё правило
+        try:
+            market = float(signal.get('market_price') or 0)
+        except (TypeError, ValueError):
+            return None
+        if market <= 0:
+            return None
+        limit = order['limit_price']
+        through = (limit >= market) if order['direction'] == 'LONG' else (limit <= market)
+        return market if through else None
+
+    def _fill_at_market(self, strategy, pair, order, ts, market):
+        """
+        Исполнение лимита за рынком: по цене рынка с проскальзыванием против
+        нас, но не хуже самого лимита — на то он и лимит; комиссия тейкера.
+        """
+        is_long = order['direction'] == 'LONG'
+        slip = market * (config.PAPER_SLIPPAGE_PCT or 0.0)
+        limit = order['limit_price']
+        price = min(limit, market + slip) if is_long else max(limit, market - slip)
+        log(f"   👻 [{strategy}] {pair}: лимит ${_fmt_p(limit)} уже за рынком "
+            f"(${_fmt_p(market)}) — исполнен по рынку, как на бирже")
+        self._fill(strategy, pair, order, ts, price, taker=True,
+                   note=f'по рынку: лимит {_fmt_p(limit)} за ценой {_fmt_p(market)}')
 
     @staticmethod
     def _invalidation(strategy, signal, is_long):
@@ -1333,7 +1384,7 @@ class PaperBroker:
         except Exception:                              # noqa: BLE001
             pass
 
-    def _fill(self, strategy, pair, order, ts, price, taker=False):
+    def _fill(self, strategy, pair, order, ts, price, taker=False, note=''):
         """
         Заявка заполнена: превращаем её в позицию и списываем комиссию.
 
@@ -1341,6 +1392,8 @@ class PaperBroker:
         добавляет ликвидность и платит мейкера, вход по ходу движения её
         забирает и платит тейкера. Разница почти втрое, и при стопе около
         процента это заметная доля результата.
+
+        note — как исполнен вход, если не обычным наливом (журнал, разбор).
         """
         self.state['pending'][strategy].pop(pair, None)
 
@@ -1390,6 +1443,7 @@ class PaperBroker:
             'balance_before': order['balance_before'],
             'zone': order['context'].get('zone', '—'),
             'context': order['context'],
+            'entry_note': note,
         }
         self.state['positions'][strategy][pair] = position
         log(f"   👻 [{strategy}] {pair} {order['direction']}: ВХОД @ ${_fmt_p(price)} "
@@ -1652,6 +1706,10 @@ class PaperBroker:
             'llm_critic': ((ctx.get('llm') or {}).get('critic') or {}).get('verdict', ''),
             # Все цели плана: в колонках CSV помещаются две, у SMC их три.
             'targets_all': ';'.join(f'{float(t):.10g}' for t in targets),
+            # Вход не обычным наливом (лимит за рынком — по рынку) и вход,
+            # который назвала модель, если стратегия пересчитала план от цены.
+            'entry_note': pos.get('entry_note', ''),
+            'llm_entry_plan': (ctx.get('llm') or {}).get('entry_plan', ''),
             'exit_reason_ru': glossary.exit_reason(reason),
             'confirmed_ru': '; '.join(ctx.get('confirmed') or []),
             'missing_ru': '; '.join(ctx.get('missing') or []),

@@ -448,6 +448,13 @@ CANCEL_PENDING_AT_TARGET = _b('CANCEL_PENDING_AT_TARGET', False)
 # Оставлено выключенным и покрыто тестами, чтобы не пробовать вслепую снова.
 SKIP_TARGET_TAKEN = _b('SKIP_TARGET_TAKEN', False)
 
+# Лимит, оказавшийся при постановке за рынком, — исполнять сразу по рынку
+# тейкером, как биржа (strategy_profile.fills_through_market). У SMC — НЕТ,
+# пока не измерено: её движок (research/smc_engine) такой лимит наливает по
+# цене лимита на следующей свече, как брокер до 26.09.2026, и включение без
+# замера разведёт живую SMC с бэктестом, по которому она настроена.
+FILL_THROUGH_MARKET = _b('FILL_THROUGH_MARKET', False)
+
 # ── Лимитный ордер на вход (агрессивный режим, выбор пользователя) ───────────
 ENTRY_MODE = os.getenv('SMC_ENTRY_MODE', 'POI_LIMIT')  # POI_LIMIT | CONFIRMATION
 PENDING_ORDER_MAX_HOURS = _f('PENDING_ORDER_MAX_HOURS', 48.0)
@@ -519,7 +526,7 @@ DECISION = frozenset((
     'MAX_POSITION_HOLD_HOURS', 'COOLDOWN_HOURS',
     'MAX_SAME_DIRECTION', 'RANKED_POOL', 'MIN_VOLUME_24H_USD',
     'BREAKEVEN_AFTER_TP1', 'TP1_R_MULTIPLE', 'SKIP_TARGET_TAKEN',
-    'CANCEL_PENDING_AT_TARGET',
+    'CANCEL_PENDING_AT_TARGET', 'FILL_THROUGH_MARKET',
 ))
 
 

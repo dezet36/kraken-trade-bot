@@ -1,6 +1,7 @@
 """
 Что у стратегии СВОЁ в исполнении: срок заявки, кулдаун, предел издержек,
-смещение лимита, предел удержания позиции, снятие заявки у цели.
+смещение лимита, предел удержания позиции, снятие заявки у цели, исполнение
+лимита, оказавшегося за рынком.
 
 ЗАЧЕМ ОДНО МЕСТО. Правило проекта: общий параметр не имеет права запирать
 одну стратегию. Пока ответ «своё или общее» лежал в трёх модулях
@@ -147,6 +148,38 @@ def drops_at_target(strategy):
     return bool(getattr(_config(), 'CANCEL_PENDING_AT_TARGET', True))
 
 
+def fills_through_market(strategy):
+    """
+    Лимит, который при постановке уже стоит ПО ТУ СТОРОНУ рынка (покупка не
+    ниже цены, продажа не выше), исполняется сразу и по рынку, с комиссией
+    тейкера, — как на бирже. Выключено — брокер ставит такой лимит ждать и
+    наливает по цене лимита на следующей свече: на бумаге вход хуже рынка
+    на весь зазор.
+
+    ОБЩЕГО ЗНАЧЕНИЯ НЕТ: каждая стратегия объявляет своё, незнакомая —
+    выключено, как брокер жил всегда. Правило меняет исполнение, а исполнение
+    обязано совпадать с замером стратегии. У ИИ включено по разбору
+    26.09.2026: DOGE и XLM налиты по лимиту на 0.8–1% хуже рынка, у восьми
+    закрытых сделок переплата 1.63R. Остальным — только после замера на своём
+    движке: у Боллинджера заявка стоит на полосе или на закрытии бара, то
+    есть часто у самой цены, и правило перевело бы его на входы тейкером.
+    """
+    try:
+        if strategy == 'LEVELS':
+            return bool(_levels().FILL_THROUGH_MARKET)
+        if strategy == 'RSIBB':
+            return bool(_rsibb().FILL_THROUGH_MARKET)
+        if strategy == 'SMC':
+            return bool(_smc().FILL_THROUGH_MARKET)
+        if strategy == 'LLM':
+            return bool(getattr(_config(), 'LLM_FILL_THROUGH_MARKET', True))
+        if strategy == 'FIBO':
+            return bool(getattr(_config(), 'FIBO_FILL_THROUGH_MARKET', False))
+    except Exception:                              # noqa: BLE001
+        pass
+    return False
+
+
 # Кто читает ручку оператора «минимальный стоп» (settings_store). Уровни и
 # Боллинджер считают по своему params.MIN_STOP_PCT, ИИ — по издержкам; для
 # них ручка мертва, и панель обязана это показывать, а не рисовать 0.8%.
@@ -186,4 +219,5 @@ def describe(strategy):
         'min_stop_pct': min_stop_pct(strategy),
         'min_stop_knob': strategy in MIN_STOP_KNOB_READERS,
         'drops_at_target': drops_at_target(strategy),
+        'fills_through_market': fills_through_market(strategy),
     }

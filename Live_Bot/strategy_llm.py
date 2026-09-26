@@ -646,15 +646,61 @@ def _check_armed(candles):
         _save_armed()
         log(f'   {NAME} {pair}: условие наступило — {met}; '
             f'{verdict["side"]} от {verdict["entry"]:.6g}')
-        out.append({
-            'pair': pair,
-            'signal': _reshape(pair, verdict, df),
-            'score': verdict.get('votes', 0),
-            'rr': verdict['rr'],
-            'poi_type': 'LLM',
-            'df_1h': df,
-        })
+        ready = _at_price(pair, verdict, df)
+        if ready is not None:
+            out.append(ready)
     return out
+
+
+def _price_now(df):
+    """Последняя цена — закрытие идущей свечи; None, если свечей нет."""
+    try:
+        if df is None or not hasattr(df, 'columns') or not len(df):
+            return None
+        price = float(df['close'].iloc[-1])
+        return price if price > 0 else None
+    except Exception:                              # noqa: BLE001
+        return None
+
+
+def _at_price(pair, verdict, df, sig=frozenset()):
+    """
+    План — в заявку по цене рынка сейчас. -> элемент выдачи сканера или None.
+
+    Вход, оказавшийся ЗА ценой, лимитом уже не будет: биржа исполнила бы
+    такой лимит сразу, по рынку. План пересчитывается от цены и проходит те
+    же проверки (llm_decide.reprice_at_market); не прошёл — отказ с причиной
+    в воронке, план снят. 26.09.2026 DOGE и XLM вошли так на 0.8–1% хуже
+    рынка, а стоп от настоящей цены был вдвое теснее минимума.
+
+    Цена уходит в сигнал (market_price): по ней брокер исполняет заявку,
+    которая оказалась за рынком, сразу и тейкером (strategy_profile.
+    fills_through_market).
+    """
+    price = _price_now(df)
+    priced, why = llm_decide.reprice_at_market(verdict, price)
+    if priced is None:
+        gate = llm_decide.PAST_ENTRY
+        log(f'   {NAME} {pair}: {gate} — {why}; план снят')
+        _refuse(pair, {'gate': gate, 'detail': why})
+        _refused[pair] = {'at': time.time(), 'sig': sig}
+        _notify_rejected(pair, {**verdict, 'gate': gate, 'detail': why})
+        return None
+    if priced is not verdict:
+        log(f'   {NAME} {pair}: вход {verdict["entry"]:.6g} уже за ценой {price:.6g} — '
+            f'пересчёт от цены прошёл (стоп {priced["stop_pct"]}%, R:R {priced["rr"]}), '
+            f'вход по рынку')
+    signal = _reshape(pair, priced, df)
+    if price:
+        signal['market_price'] = price
+    return {
+        'pair': pair,
+        'signal': signal,
+        'score': priced.get('votes', 0),
+        'rr': priced['rr'],
+        'poi_type': 'LLM',
+        'df_1h': df,
+    }
 
 
 # Свечи других таймфреймов для графика в сообщении: frames(pair, tf, limit).
@@ -750,6 +796,9 @@ def _reshape(pair, verdict, df=None):
             'trigger_id': verdict.get('trigger_id'),
             'critic': verdict.get('critic') or {},
             'bias': verdict.get('bias', ''),
+            # Вход, который назвала модель, если к заявке он оказался за ценой
+            # и план пересчитан от цены (llm_decide.reprice_at_market).
+            'entry_plan': verdict.get('entry_plan', ''),
             # Уровни, из которых модель выбирала: график рисует по ним
             # подписи «L3 · пивот-максимум · вход».
             'levels': [{'id': lv.get('id'), 'price': lv.get('price'), 'kind': lv.get('kind')}
@@ -985,23 +1034,23 @@ def _collect(finished, candles=None):
             _notify_rejected(pair, {**verdict, 'gate': 'рынок обогнал план', 'detail': gone})
             continue
 
-        _refused.pop(pair, None)
-        signal = _reshape(pair, verdict, df)
-        _notify_setup(signal, df)
-
         if verdict.get('trigger_when', 'now') != 'now' and verdict.get('trigger_level'):
+            _refused.pop(pair, None)
+            _notify_setup(_reshape(pair, verdict, df), df)
             _arm(pair, verdict)
             continue
 
-        log(f'   {NAME} {pair}: {verdict["side"]} от {verdict["entry"]:.6g}, '
-            f'R:R {verdict["rr"]}, EV {verdict["ev"]}, '
+        # Лимит сразу — но по цене СЕЙЧАС: пока модель думала, цена могла
+        # уйти за вход, и тогда лимит исполнился бы по рынку (_at_price).
+        ready = _at_price(pair, verdict, fresh, sig=_asked_sig.get(pair, frozenset()))
+        if ready is None:
+            continue
+        _refused.pop(pair, None)
+        _notify_setup(ready['signal'], df)
+        placed = ready['signal']['params']
+        log(f'   {NAME} {pair}: {verdict["side"]} от {placed["entry"]:.6g}, '
+            f'R:R {ready["rr"]}, EV {ready["signal"]["llm"]["ev"]}, '
             f'конфлюенс {verdict["votes"]}/5 (разбор занял {age:.0f} с)')
-        out.append({
-            'pair': pair,
-            'signal': signal,
-            'score': verdict.get('votes', 0),
-            'rr': verdict['rr'],
-            'poi_type': 'LLM',
-            'df_1h': df,
-        })
+        ready['df_1h'] = df
+        out.append(ready)
     return out
