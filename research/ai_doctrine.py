@@ -92,6 +92,14 @@ VARIANTS = {
     # модели (sweep_reclaim, 42 плана из 91), но на уровне слома, а не где попало.
     'sweep': {'entry': 'sweep'},
     'sweep_1r': {'entry': 'sweep', 'min_rr': 1.0},
+    # Наши ограничения по одному: не они ли делают доктрину убыточной?
+    'min_stop_08': {'min_stop': 0.8},          # минимум стопа как у SMC/фибо на сервере
+    'no_reach': {'reach': False},              # без «цель дальше дневного размаха»
+    'rr15': {'min_rr': 1.5},                   # порог R:R 1.5 вместо 2
+    # Что показал замер признаков (research/ai_filter_study.py): убыток — от
+    # входов по ходу последних суток и туда, куда толпа платит фандинг.
+    'no_chase': {'no_chase': True},
+    'no_chase_funding': {'no_chase': True, 'funding_contra': True},
 }
 
 
@@ -205,13 +213,24 @@ class Liquidity:
 
 
 # ── План по правилам доктрины ────────────────────────────────────────────────
-def plan_at(i, side, t1h, t4h, liq, v, arr1h, atr1, adr, extra_levels):
+def plan_at(i, side, t1h, t4h, liq, v, arr1h, atr1, adr, extra_levels, funding=None):
     """-> dict(entry, stop, targets, market) или (None, причина)."""
     long_ = side == 'LONG'
     close = arr1h[i, 4]
     want = S.BULLISH if long_ else S.BEARISH
     if t1h.trend(i) != want:
         return None, 'часовой слом не в сторону'
+    if v.get('no_chase') and i >= 24:
+        # Не догонять: вход только против хода последних суток — откат на
+        # дневном масштабе, а не на часовом внутри суточного рывка.
+        moved = (close / arr1h[i - 24, 4] - 1) * (1 if long_ else -1)
+        if moved > 0:
+            return None, 'догоняет ход за сутки'
+    if v.get('funding_contra') and funding is not None:
+        # Толпа платит в нашу сторону: лонг при ставке выше базовой 0.01%,
+        # шорт при отрицательной.
+        if (long_ and funding > 0.0001) or (not long_ and funding < 0):
+            return None, 'толпа платит в сторону сделки'
     inval = t1h.last['HL' if long_ else 'LH']
     if inval is None:
         return None, 'нет HL/LH'
@@ -248,7 +267,7 @@ def plan_at(i, side, t1h, t4h, liq, v, arr1h, atr1, adr, extra_levels):
         return None, 'стоп за входом'
     risk = abs(entry - stop)
     stop_pct = risk / entry * 100
-    floor = max(MIN_STOP_COST_PCT, STOP_ATR_SHARE * a)
+    floor = max(v.get('min_stop', MIN_STOP_COST_PCT), STOP_ATR_SHARE * a)
     if stop_pct < floor:
         return None, 'стоп теснее минимума'
     if isinstance(v['tp'], float):
@@ -361,6 +380,18 @@ def execute(order, a5, t_order, v):
 
 
 # ── Прогон одной пары ────────────────────────────────────────────────────────
+def load_funding(cache, pair):
+    """Фандинг из <кэш>/funding/<PAIR>.csv (research/fetch_positioning.py) или None."""
+    path = os.path.join(ROOT, 'research', cache, 'funding', f'{pair}.csv')
+    if not os.path.exists(path):
+        return None
+    frame = pd.read_csv(path)
+    stamps = pd.to_datetime(frame['timestamp'], utc=True)
+    ts = ((stamps - pd.Timestamp('1970-01-01', tz='UTC')) // pd.Timedelta(milliseconds=1)).to_numpy(dtype='int64')
+    order = np.argsort(ts)
+    return ts[order], frame['funding_rate'].to_numpy(dtype=float)[order]
+
+
 def prepare(cache, pair):
     a1 = load(cache, pair, '1h')
     a5 = load(cache, pair, '5m')
@@ -369,7 +400,7 @@ def prepare(cache, pair):
     a4 = resample(a1, 4 * H)
     ad = resample(a1, 24 * H)
     return {'pair': pair, 'a1': a1, 'a4': a4, 'ad': ad, 'a5': a5,
-            'atr1': atr_pct(a1), 'adr': day_range_pct(a1)}
+            'atr1': atr_pct(a1), 'adr': day_range_pct(a1), 'fr': load_funding(cache, pair)}
 
 
 def run_pair(d, v, start_ms=None, end_ms=None):
@@ -411,8 +442,12 @@ def run_pair(d, v, start_ms=None, end_ms=None):
             reasons['сторона не разрешена'] += 1
             continue
         extra = [ad[jd, 2], ad[jd, 3]]            # вчерашние максимум и минимум
+        rate = None
+        if d.get('fr') is not None:
+            k = int(np.searchsorted(d['fr'][0], t_close, side='right')) - 1
+            rate = d['fr'][1][k] if k >= 0 else None
         for side in sides:
-            plan, why = plan_at(i, side, t1, t4, liq, v, a1, d['atr1'], d['adr'], extra)
+            plan, why = plan_at(i, side, t1, t4, liq, v, a1, d['atr1'], d['adr'], extra, rate)
             if plan is None:
                 reasons[why] += 1
                 continue
