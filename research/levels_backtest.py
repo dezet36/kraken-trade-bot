@@ -11,6 +11,22 @@
 Портфельные настройки берутся из Live_Bot/levels/params. Разойтись больше
 нечему — реализация одна.
 
+УРОВНИ — ПО ОКНУ, КАК В БОЮ (26.09.2026). До этого build_levels звался ОДИН
+раз по всей истории, и в решение на свече i протекало будущее: касания,
+случившиеся позже, склеивались с прошлыми, а уровень, которому ещё предстояло
+получить касание, прятался до того момента. Бот так не может — он строит
+уровни каждый час по последним LOOKBACK+4 закрытым свечам. Точная симуляция
+(levels_live_sim.py) на одних свечах и одних правилах брокера:
+
+    период             прежний замер              как в бою
+    2022-23 падение    224 сд, +0.434R/сд        132 сд, +0.378R/сд
+    2025-26 падение    290 сд, +0.348R/сд        201 сд, +0.036R/сд
+    2025-11…2026-09     56 сд, +0.540R/сд         44 сд, −0.416R/сд
+
+Числа в levels/params (сумма R по порогу MIN_TARGET_R и т.п.) сняты прежним
+способом и к бою отношения не имеют. causal=False — прежний способ, только
+для сравнения. Страж — tests/test_levels_backtest_is_causal.py.
+
 Запуск:
     python research/levels_backtest.py
 """
@@ -42,13 +58,38 @@ def diff_ci(a, b):
     return np.percentile(d, [2.5, 97.5]), float((d > 0).mean())
 
 
-def build_orders(pair, df):
-    """
-    Ордера по паре: боевая evaluate вызывается на КАЖДОЙ свече.
+def live_window():
+    """Сколько закрытых свечей видит бой: LOOKBACK+5 запрошено, идущая отброшена."""
+    return LP.LOOKBACK + 4
 
-    Живой бот зовёт её на последней закрытой свече раз в цикл. Здесь — на
-    всех по очереди, но с теми же аргументами и тем же смыслом: свеча, на
-    закрытии которой принимается решение.
+
+def decide(high, low, close, volume, i, causal=True, full=None):
+    """
+    Решение на свече i. causal — как в бою: уровни и ATR по окну из
+    live_window() свечей, кончающемуся на i. Иначе — по всей истории (full —
+    заранее посчитанные (уровни, ATR)), то есть с будущим; только для
+    сравнения. Индексы в ответе — по всей серии.
+    """
+    if not causal:
+        levels, atr_values = full if full is not None else (core.build_levels(high, low),
+                                                             core.atr(high, low, close))
+        return core.evaluate(high, low, close, volume, i, levels=levels, atr_values=atr_values)
+    lo = max(0, i - live_window() + 1)
+    h, l, c, v = high[lo:i + 1], low[lo:i + 1], close[lo:i + 1], volume[lo:i + 1]
+    setup, why = core.evaluate(h, l, c, v, len(c) - 1,
+                               levels=core.build_levels(h, l), atr_values=core.atr(h, l, c))
+    if setup is not None:
+        setup = dict(setup)
+        for key in ('reclaim_index', 'pierce_index', 'first_index'):
+            if key in setup:
+                setup[key] = int(setup[key]) + lo
+    return setup, why
+
+
+def build_orders(pair, df, causal=True):
+    """
+    Ордера по паре: боевая evaluate вызывается на КАЖДОЙ свече — по окну,
+    как в бою (см. decide). causal=False — прежний способ с будущим.
     """
     ts = pd.to_datetime(df['timestamp'])
     if getattr(ts.dt, 'tz', None) is not None:
@@ -60,15 +101,13 @@ def build_orders(pair, df):
     volume = (df['volume'].to_numpy(dtype=float) if 'volume' in df.columns
               else np.ones(len(df)))
 
-    levels = core.build_levels(high, low)
-    atr_values = core.atr(high, low, close)
+    full = None if causal else (core.build_levels(high, low), core.atr(high, low, close))
     bar_ns = int(np.median(np.diff(ts).astype('int64'))) if len(ts) > 2 else 0
     expiry = np.timedelta64(int(LP.EXPIRY_HOURS * 3600), 's')
 
     orders, seen = [], set()
     for i in range(60, len(df)):
-        setup, _ = core.evaluate(high, low, close, volume, i,
-                                 levels=levels, atr_values=atr_values)
+        setup, _ = decide(high, low, close, volume, i, causal=causal, full=full)
         if setup is None:
             continue
         # Один прокол одного уровня торгуется один раз.
@@ -97,9 +136,10 @@ def build_orders(pair, df):
 
 
 def run(period, orders):
+    # Слотов без предела — как в бою (settings_store: max_slots 0).
     result = run_portfolio(
         orders, {p: period['data'][p]['5m'] for p in period['data']},
-        risk_pct=LP.RISK_PCT, max_positions=LP.MAX_POSITIONS,
+        risk_pct=LP.RISK_PCT, max_positions=99,
         cooldown_hours=LP.COOLDOWN_HOURS,
         max_same_direction=LP.MAX_SAME_DIRECTION,
         max_hold_hours=LP.MAX_HOLD_HOURS,
@@ -138,7 +178,7 @@ def main():
     print(f'настройки: объём >= {LP.VOLUME_RATIO}x, уровней {LP.NEAREST_LEVELS}, '
           f'касаний {LP.MIN_TOUCHES}, стоп >= {LP.MIN_STOP_PCT}%, '
           f'цель >= {LP.MIN_TARGET_R}R')
-    print(f'портфель: слотов {LP.MAX_POSITIONS}, кулдаун {LP.COOLDOWN_HOURS} ч, '
+    print(f'портфель: слотов без предела, кулдаун {LP.COOLDOWN_HOURS} ч, '
           f'риск {LP.RISK_PCT}%')
     print()
     head = (f'{"период":<20}{"заявок":>8}{"сделок":>8}{"винрейт":>9}{"R/сделку":>10}'
