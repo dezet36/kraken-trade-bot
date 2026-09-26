@@ -101,6 +101,9 @@ COLUMNS = [
     ('llm_stop_why', 'ИИ: почему стоп здесь'), ('llm_tp_why', 'ИИ: почему цель здесь'),
     ('llm_p', 'ИИ: вероятность'), ('llm_votes', 'ИИ: факторов из 5'),
     ('llm_critic', 'ИИ: критик'),
+    # «сделана» / «выключена» (с 26.09.2026 переделки выключены: отказ,
+    # который раньше ушёл бы на вторую попытку) — llm_calls.revision.
+    ('llm_revision', 'ИИ: переделка'),
 
     ('exit_price', 'цена выхода'), ('exit_reason', 'причина выхода'),
     ('tps_hit', 'целей взято'), ('tp_min', 'цели взяты на минуте'),
@@ -629,6 +632,7 @@ def _llm_plans(orders, text=True):
             'llm_stop_why': call.get('stop_why', ''), 'llm_tp_why': call.get('tp_why', ''),
             'llm_p': call.get('p', ''), 'llm_votes': call.get('votes', ''),
             'llm_critic': call.get('critic', ''),
+            'llm_revision': call.get('revision') or ('сделана' if call.get('revised_from') else ''),
             'mfe_r': o.get('best_r'), 'mae_r': o.get('worst_r'),
             'min_gap_pct': o.get('min_dist_entry_pct'), 'best_run_r': o.get('missed_move_r'),
             'entry_touched': o.get('entry_touched'), 'entry_hours': o.get('entry_hours'),

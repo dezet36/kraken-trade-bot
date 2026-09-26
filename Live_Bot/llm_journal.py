@@ -69,6 +69,11 @@ COLUMNS = [
     # видно, умеет ли модель исправляться, и из неё потом собирается набор
     # для обучения предпочтениям. Пусто, если переделки не было.
     'revised_from', 'rejected_raw',
+    # Была ли переделка: 'сделана' — второй ответ в этой строке, первый в
+    # rejected_raw; 'выключена' — план отвергнут правилом, по которому до
+    # 26.09.2026 ушёл бы на переделку, но она выключена (config.LLM_REVISIONS):
+    # второй попытки не было по настройке. Пусто — отказ не из переделываемых.
+    'revision',
     # Цена разбора и его границы — см. шапку модуля. При вызове критика
     # токены и finish — его вызова (последнего), seconds — обоих вместе.
     'model', 'ctx', 'prompt_tokens', 'answer_tokens', 'limit', 'finish',
@@ -140,6 +145,7 @@ def record(pair, donor, verdict, stats=None):
             'raw': str(verdict.get('raw') or '')[:6000],
             'revised_from': verdict.get('revised_from', ''),
             'rejected_raw': str(verdict.get('rejected_raw') or '')[:6000],
+            'revision': verdict.get('revision', ''),
             'model': stats.get('model', ''),
             'ctx': stats.get('ctx', ''),
             'prompt_tokens': stats.get('prompt_tokens', ''),

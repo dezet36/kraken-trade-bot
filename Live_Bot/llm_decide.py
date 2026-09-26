@@ -1106,7 +1106,14 @@ def decide(pair, df, ask, news=None, at=None, max_tokens=None, market=None,
     # ВТОРАЯ ПОПЫТКА. Отказ по суждению возвращается модели с причиной: у
     # неё нет памяти между вызовами, и без этого она повторяет ту же ошибку
     # на следующей паре. Попытка ровно одна — иначе разбор растянется.
-    if verdict.get('gate') in REVISABLE_GATES:
+    #
+    # С 26.09.2026 ВЫКЛЮЧЕНА (config.LLM_REVISIONS): ни одна из ~19 не
+    # исправила план. Отказ, который ушёл бы на переделку, помечается
+    # revision='выключена' — журнал и признаки разбора это хранят.
+    if verdict.get('gate') in REVISABLE_GATES and not getattr(config, 'LLM_REVISIONS', False):
+        verdict['revision'] = 'выключена'
+        log(f"   LLM {pair}: план отвергнут ({verdict['gate']}) — переделка выключена, отказ окончателен")
+    elif verdict.get('gate') in REVISABLE_GATES:
         first_gate, first_detail = verdict['gate'], verdict.get('detail', '')
         # СТРОКА ДЛЯ СТОРОЖЕЙ, А НЕ ДЛЯ ЧЕЛОВЕКА. llm_guard.sh и
         # restart_when_idle.sh определяют «разбор в полёте» по паре строк
@@ -1140,6 +1147,7 @@ def decide(pair, df, ask, news=None, at=None, max_tokens=None, market=None,
                          llm_grammar.answer_only(grammar), max_tokens)
             retry = judge(second)
             retry['revised_from'] = f'{first_gate}: {first_detail}'[:300]
+            retry['revision'] = 'сделана'
             # ОТВЕРГНУТЫЙ ОТВЕТ СОХРАНЯЕМ ЦЕЛИКОМ. Пара «что модель написала
             # сперва» + «что после замечания» — это и есть материал для
             # обучения предпочтениям: не «вот правильный ответ», а «вот этот

@@ -1170,6 +1170,7 @@ class TestAPlanTheCodeWouldRefuseCannotBeWritten:
         monkeypatch.setattr(llm_context, 'build', with_legal_stops)
         monkeypatch.setattr(dec, 'branch_filter', lambda *a, **k: None)
         monkeypatch.setattr(dec, 'entry_on_pool', lambda *a, **k: '')   # в случайной разметке L3 бывает пулом
+        monkeypatch.setattr(config, 'LLM_REVISIONS', True)              # переделка выключена с 26.09
         asked = []
         mismatch = answer(stop_why='стоп за L5 — там умирает идея')      # в плане стоп L4
 
@@ -1185,6 +1186,7 @@ class TestAPlanTheCodeWouldRefuseCannotBeWritten:
         """Переделка без мысли: с ней вопрос ~10.4 тыс. не оставлял места плану (п. 46)."""
         import llm_grammar
         monkeypatch.setattr(config, 'LLM_THINK_CHARS', 2400)
+        monkeypatch.setattr(config, 'LLM_REVISIONS', True)
         grammars = []
         answers = [answer(stop='L2'), answer()]
 
@@ -1236,7 +1238,14 @@ class TestARefusedPlanGoesBackToTheModel:
     одном месте плана. Памяти между вызовами у неё нет, поэтому отказ её
     ничему не учит; возврат с причиной — единственный способ дать исправить.
     Попытка ровно одна.
+
+    С 26.09.2026 переделка выключена настройкой (config.LLM_REVISIONS): здесь
+    проверяется, что включённая работает как прежде.
     """
+
+    @pytest.fixture(autouse=True)
+    def _revisions_on(self, monkeypatch):
+        monkeypatch.setattr(config, 'LLM_REVISIONS', True)
 
     def _decide(self, answers, **over):
         """Прогон decide с очередью ответов модели."""
@@ -1358,3 +1367,57 @@ class TestARefusedPlanGoesBackToTheModel:
         out, asked = self._decide([answer(d='skip', why='нечего')])
         assert len(asked) == 1
         assert not out.get('rejected_raw') and not out.get('revised_from')
+        assert not out.get('revision')
+
+    def test_a_done_revision_is_marked(self):
+        out, _ = self._decide([answer(stop='L2'), answer()])
+        assert out['revision'] == 'сделана'
+
+
+class TestRevisionsAreSwitchedOff:
+    """
+    С 26.09.2026 переделка выключена (config.LLM_REVISIONS): из ~19 попыток
+    23–25.09 не исправилась ни одна, а каждая стоила модели ~8 минут. Отказ
+    окончателен, но помечен — разбор и обучение модели видят, что второй
+    попытки не было по настройке.
+    """
+
+    def _decide(self, answers):
+        import numpy as np
+        import pandas as pd
+        asked = []
+
+        def ask(prompt, grammar, max_tokens):
+            asked.append(prompt)
+            return answers[len(asked) - 1]
+
+        n = 300
+        close = 100 + np.cumsum(np.random.default_rng(3).normal(0, 0.4, n))
+        df = pd.DataFrame({'timestamp': pd.date_range('2026-01-01', periods=n, freq='h'),
+                           'open': close, 'high': close + 0.5, 'low': close - 0.5,
+                           'close': close, 'volume': np.ones(n) * 10})
+        return dec.decide('BTCUSDT', df, ask), asked
+
+    def test_it_is_off_by_default(self):
+        assert config.LLM_REVISIONS is False
+
+    def test_a_fixable_refusal_is_final_and_marked(self):
+        out, asked = self._decide([answer(stop='L2'), answer()])
+        assert len(asked) == 1, 'модель спросили второй раз, хотя переделка выключена'
+        assert out['gate'] == 'геометрия неверна'
+        assert out['revision'] == 'выключена'
+        assert not out.get('revised_from') and not out.get('rejected_raw')
+
+    def test_a_refusal_that_never_was_revisable_is_not_marked(self):
+        out, asked = self._decide([answer(d='skip', why='нечего')])
+        assert len(asked) == 1 and out['gate'] == 'модель пропустила'
+        assert not out.get('revision')
+
+    def test_the_mark_reaches_the_journal(self, tmp_path, monkeypatch):
+        import csv
+        import llm_journal
+        monkeypatch.setattr(llm_journal, 'CSV_PATH', str(tmp_path / 'llm_calls.csv'))
+        out, _ = self._decide([answer(stop='L2')])
+        llm_journal.record('BTCUSDT', '', out, {})
+        row = next(csv.DictReader(open(llm_journal.CSV_PATH, encoding='utf-8')))
+        assert row['revision'] == 'выключена' and row['gate'] == 'геометрия неверна'

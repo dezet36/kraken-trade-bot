@@ -179,6 +179,8 @@ def features(pair, df, facts, market, verdict, stats=None, now=None, at=''):
     # ── решение модели ───────────────────────────────────────────────────
     out['decision'] = 'enter' if verdict.get('ok') else 'skip'
     out['gate'] = verdict.get('gate', '')
+    # 'сделана' / 'выключена' / '' — см. llm_journal, колонка revision.
+    out['revision'] = verdict.get('revision', '')
     out['side'] = verdict.get('side') or ''
     out['bias'] = verdict.get('bias', '')
     out['p'] = _num(verdict.get('p'))
