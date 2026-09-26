@@ -18,6 +18,12 @@ fetch_ohlcv('1h') С ФОРМИРУЮЩЕЙСЯ свечой и считает �
     (drops_at_target), срок 72 ч, безубыток на уровне B, удержание до 336 ч;
     слотов и направленного кэпа у фибо нет (сверено с сервером 26.09.2026).
 
+Отбор — БОЕВОЙ СКАНЕР целиком: pair_scanner.scan_for_setups получает свечи
+вместо запроса к бирже, дальше — как bot._build_signal (analyze_market и
+разрешённые стороны). Первая версия этого файла повторяла проверки сканера
+вручную и пропустила одну — «цена ещё не откатила глубже 38.2%» (W11): сетапы
+с откатом 38.2–50% живой бот отбрасывает. Поэтому теперь — вызов, а не копия.
+
 Код стратегии — БОЕВОЙ (strategy.find_recent_impulse, analyze_market,
 get_htf_trend). Подменена одна функция — strategy.find_local_extremes: она
 перебирает строки таблицы по одной (df.iloc[i] в цикле) и съедала 33 мс из 70
@@ -104,8 +110,22 @@ def naive(series):
     return pd.DatetimeIndex(pd.to_datetime(series, utc=True)).tz_convert('UTC').tz_localize(None).to_numpy()
 
 
+class _NoCooldown:
+    """Паузы по паре считает портфель (smc_engine), не сканер."""
+    @staticmethod
+    def check_cooldown(pair):
+        return True
+
+
 def orders_for_pair(args):
-    """Все заявки пары: сигнал на каждом 5-минутном шаге по формирующейся свече."""
+    """
+    Все заявки пары: на каждом 5-минутном шаге — БОЕВОЙ сканер
+    (pair_scanner.scan_for_setups) по свечам с формирующейся, затем, как
+    bot._build_signal, analyze_market и разрешённые стороны. Сканер получает
+    подставленные свечи вместо запроса к бирже — и только.
+    """
+    import pair_scanner
+    import settings_store
     cache, pair = args
     bt.CACHE_DIR = os.path.join(HERE, cache)
     strategy.find_local_extremes = fast_local_extremes
@@ -115,48 +135,46 @@ def orders_for_pair(args):
     t5 = naive(m5['timestamp'])
     o5, hi5, lo5, c5, v5 = (m5[c].to_numpy(dtype=float) for c in ('open', 'high', 'low', 'close', 'volume'))
     cols = ['open', 'high', 'low', 'close', 'volume']
-    arr1 = h1[cols].to_numpy(dtype=float)
     ts1 = h1['timestamp']
     h4 = data['4h']
     t4 = naive(h4['timestamp'])
-    arr4 = h4[cols].to_numpy(dtype=float)
     ts4 = h4['timestamp']
     lb = config.LOOKBACK_CANDLES
+    n1 = lb + 20                                               # столько часов берёт сканер
+    n4 = config.HTF_EMA_SLOW + 20                              # и столько 4-часовых
     expiry = np.timedelta64(int(strategy_profile.expiry_hours('FIBO') * 3600), 's')
     blocked = set(getattr(config, 'BLOCK_ENTRY_HOURS_UTC', ()) or ())
+    feed = {}
+    pair_scanner.fetch_ohlcv = lambda timeframe, limit=None, symbol=None, client=None, since=None: feed[timeframe]
 
     orders, seen = [], set()
     for i in range(lb + 10, len(h1)):
         hour = t1[i]
         a = int(np.searchsorted(t5, hour, side='left'))
         b = int(np.searchsorted(t5, hour + HOUR, side='left'))
-        closed = h1.iloc[i - lb + 1:i]                         # 47 закрытых часов
+        closed = h1.iloc[max(0, i - n1 + 1):i]                 # закрытые часы
         # 4ч: закрытые свечи до начала текущей четырёхчасовки + формирующаяся.
         k4 = int(np.searchsorted(t4, hour, side='right')) - 1
         start4 = t4[k4] if k4 >= 0 else hour
         a4 = int(np.searchsorted(t5, start4, side='left'))
+        closed4 = h4.iloc[max(0, k4 - n4 + 1):max(k4, 0)]
         for k in range(1, b - a + 1):                          # k закрытых 5-минуток часа
             now = hour + k * STEP
             if int(pd.Timestamp(now).hour) in blocked:
                 continue
             j = a + k
             part = [o5[a], hi5[a:j].max(), lo5[a:j].min(), c5[j - 1], v5[a:j].sum()]
-            window = pd.concat([closed, pd.DataFrame([[ts1.iloc[i], *part]], columns=['timestamp', *cols])],
-                               ignore_index=True)
-            setup = strategy.find_recent_impulse(window, lookback_candles=lb)
-            if not setup:
-                continue
-            if setup['size'] / setup['end_price'] * 100 < config.MIN_IMPULSE_PCT:
-                continue
+            feed['1h'] = pd.concat([closed, pd.DataFrame([[ts1.iloc[i], *part]], columns=['timestamp', *cols])],
+                                   ignore_index=True)
             part4 = [o5[a4], hi5[a4:j].max(), lo5[a4:j].min(), c5[j - 1], v5[a4:j].sum()]
-            closed4 = h4.iloc[max(0, k4 - 219):k4]
-            win4 = pd.concat([closed4, pd.DataFrame([[ts4.iloc[k4] if k4 >= 0 else ts1.iloc[i], *part4]],
-                                                    columns=['timestamp', *cols])], ignore_index=True)
-            trend = strategy.get_htf_trend(win4)
-            if (trend == 'BULLISH' and setup['type'] == 'SHORT') or (trend == 'BEARISH' and setup['type'] == 'LONG'):
+            feed[config.HTF_TIMEFRAME] = pd.concat(
+                [closed4, pd.DataFrame([[ts4.iloc[k4] if k4 >= 0 else ts1.iloc[i], *part4]],
+                                       columns=['timestamp', *cols])], ignore_index=True)
+            candidates = pair_scanner.scan_for_setups([pair], _NoCooldown())
+            if not candidates:
                 continue
-            signal = strategy.analyze_market(window, None, pair, 10_000)
-            if not signal:
+            signal = strategy.analyze_market(candidates[0]['df_1h'], None, pair, 10_000)
+            if not signal or not settings_store.allows('FIBO', signal['setup']['type']):
                 continue
             key = (pair, signal['setup']['type'], round(signal['setup']['start_price'], 8),
                    round(signal['setup']['end_price'], 8))

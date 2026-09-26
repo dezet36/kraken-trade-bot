@@ -1,0 +1,31 @@
+копия find_local_extremes совпала с оригиналом на 3000 окнах
+   backtest_cache_12m BTCUSDT: 331 заявок
+   backtest_cache_12m XRPUSDT: 621 заявок
+   backtest_cache_12m ETHUSDT: 647 заявок
+   backtest_cache_12m SOLUSDT: 775 заявок
+   backtest_cache_12m BNBUSDT: 374 заявок
+   backtest_cache_12m DOGEUSDT: 875 заявок
+   backtest_cache_12m ADAUSDT: 836 заявок
+   backtest_cache_12m AVAXUSDT: 816 заявок
+   backtest_cache_12m LTCUSDT: 529 заявок
+   backtest_cache_12m LINKUSDT: 890 заявок
+   backtest_cache_bear BTCUSDT: 735 заявок
+   backtest_cache_bear ETHUSDT: 1002 заявок
+   backtest_cache_bear XRPUSDT: 1147 заявок
+   backtest_cache_bear SOLUSDT: 1544 заявок
+   backtest_cache_bear BNBUSDT: 849 заявок
+   backtest_cache_bear DOGEUSDT: 1215 заявок
+   backtest_cache_bear ADAUSDT: 1193 заявок
+   backtest_cache_bear AVAXUSDT: 1382 заявок
+   backtest_cache_bear LINKUSDT: 1368 заявок
+   backtest_cache_bear LTCUSDT: 1177 заявок
+
+== backtest_cache_12m: заявок 6694, в пределе издержек 5338
+   ЖИВАЯ ФИБО: предел издержек 5%, снятие у цели     1117 сд     -13.5R  -0.012 R/сд  PF 0.956  просадка  57.1%
+   то же без снятия у цели                           1026 сд     -31.0R  -0.030 R/сд  PF 0.921  просадка  54.9%
+   без предела издержек, снятие у цели               1322 сд      -2.3R  -0.002 R/сд  PF 0.980  просадка  45.5%
+
+== backtest_cache_bear: заявок 11612, в пределе издержек 9696
+   ЖИВАЯ ФИБО: предел издержек 5%, снятие у цели     1882 сд    -148.4R  -0.079 R/сд  PF 0.884  просадка  85.2%
+   то же без снятия у цели                           1710 сд    -121.6R  -0.071 R/сд  PF 0.884  просадка  76.1%
+   без предела издержек, снятие у цели               2167 сд    -152.2R  -0.070 R/сд  PF 0.866  просадка  86.1%
