@@ -50,6 +50,14 @@ SLIPPAGE_PCT = 0.0005   # 0.05%
 # берём среднюю величину как расход для обеих сторон — консервативно.
 FUNDING_PCT_PER_DAY = 0.0003
 
+# Лимит наливается, только если цена прошла его НАСКВОЗЬ на эту долю. 0 —
+# налив при касании (как бумажный брокер). На бирже заявка у уровня стоит в
+# очереди, и касание с разворотом её часто не исполняет — а это ровно лучшие
+# сделки отката. Переключатель мерит, сколько результата держится на касаниях
+# (27.09.2026, research/ai_rules_backtest.py). По умолчанию выключен: прежние
+# замеры не меняются.
+FILL_THROUGH_PCT = 0.0
+
 INITIAL_BALANCE = 10_000.0
 
 
@@ -150,7 +158,8 @@ def simulate_order(order, exec_arrays, start_pos, risk_amount,
         if is_stop_entry:
             touched = high[i] >= order.entry if is_long else low[i] <= order.entry
         else:
-            touched = low[i] <= order.entry if is_long else high[i] >= order.entry
+            through = order.entry * FILL_THROUGH_PCT
+            touched = (low[i] <= order.entry - through) if is_long else (high[i] >= order.entry + through)
         if touched:
             fill_pos = i
             break
