@@ -35,7 +35,8 @@ docs/ИИ_исследование_2026-09.md.
 
 research/results/llm_exp/: карточки и исходы (`fibo_*` — опыты A и B,
 `smc_*` — опыт C), ответы модели по пачкам (`results_A.jsonl`,
-`results_B.jsonl`, `results_C.jsonl`; поле `raw` — дословный ответ), журнал
-прогона на сервере (`exp_*.log`). Пересчёт: скопировать нужные
+`results_B.jsonl`, `results_C.jsonl`; поле `raw` — дословный ответ, `seconds`
+— время пачки). Журнал прогона на сервере (`exp_*.log`) в git не идёт
+(правило `*.log`) — в нём то же, что в ответах. Пересчёт: скопировать нужные
 `*_outcomes.json` в рабочую папку как `outcomes.json` и запустить там
 `evaluate.py results_X.jsonl`.
