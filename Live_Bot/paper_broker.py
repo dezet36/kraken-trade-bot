@@ -227,6 +227,10 @@ class StrategyGate:
     def has_position_or_order(self, pair):
         return self._broker.has_position_or_order(self._strategy, pair)
 
+    def held(self):
+        """Пары своей стратегии в позициях и заявках — ИИ-трейдеру: что держит и сколько мест занято."""
+        return sorted(set(self._broker.positions(self._strategy)) | set(self._broker.pending(self._strategy)))
+
 
 def _locked(method):
     """Метод под замком брокера (PaperBroker._lock): его зовут и из других потоков."""
@@ -861,6 +865,9 @@ class PaperBroker:
             'fractions': fractions,
             'be_level': params.get('be_level'),
             'breakeven_after_tp': wants_breakeven(params),
+            # Срок удержания ЭТОЙ позиции, если стратегия его назвала (ИИ по тетради:
+            # у каждой закономерности свой). Нет — действует срок стратегии.
+            'max_hold_hours': params.get('max_hold_hours'),
             'risk_amount': risk_amount,
             'cost_share_pct': round(cost_share, 3),
             'size': size,
@@ -1481,6 +1488,7 @@ class PaperBroker:
             'fractions': order['fractions'],
             'be_level': order['be_level'],
             'breakeven_after_tp': order.get('breakeven_after_tp', True),
+            'max_hold_hours': order.get('max_hold_hours'),
             'risk_amount': order['risk_amount'],
             'rr': order['rr'],
             'opened_ts': ts,
@@ -1554,7 +1562,7 @@ class PaperBroker:
                 pos['r1_ts'] = ts
 
         import strategy_profile
-        max_hold = strategy_profile.max_hold_hours(strategy)
+        max_hold = pos.get('max_hold_hours') or strategy_profile.max_hold_hours(strategy)
         if max_hold and (ts - pos['opened_ts']) / 3_600_000 > max_hold:
             self._close(strategy, pair, pos, ts, close, 'TIME', slip=True)
             return

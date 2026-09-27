@@ -875,6 +875,12 @@ def scan_for_setups(pairs, gate, client=None, balance=None, candles=None,
     if llm_rules.enabled():
         return llm_rules.scan(pairs, gate, client=client, balance=balance)
 
+    # РЕЖИМ ТЕТРАДИ: модель торгует сама по закономерностям, найденным и
+    # проверенным на истории (llm_notebook, config.LLM_MODE=notebook).
+    import llm_notebook
+    if llm_notebook.enabled():
+        return llm_notebook.scan(pairs, gate, client=client, balance=balance)
+
     if not llm_local.available():
         log(f'   {NAME}: модель недоступна — стратегия простаивает')
         return []

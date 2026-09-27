@@ -1,0 +1,270 @@
+"""
+ИИ-трейдер по тетради (llm_notebook, LLM_MODE=notebook): признаки общего слоя,
+сигналы закономерностей, решение модели, сигнал брокеру, срок позиции.
+
+Тетрадь и признаки обязаны совпадать с историческим прогоном
+(research/ai_pattern_lab.py, research/ai_model_trader_bt.py): иначе живая
+модель торговала бы не то, что проверялось.
+"""
+
+import json
+import os
+import sys
+
+import numpy as np
+import pandas as pd
+import pytest
+
+HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, HERE)
+RESEARCH = os.path.join(os.path.dirname(HERE), 'research')
+
+import config  # noqa: E402
+import flow_features  # noqa: E402
+import llm_notebook  # noqa: E402
+
+H = 3_600_000
+T0 = pd.Timestamp('2026-06-01', tz='UTC')
+
+
+def raw_frame(n=500, seed=0, drop_at=None, drop=0.0):
+    """
+    Синтетические часы пары. drop_at — час, в который разгрузка ВПЕРВЫЕ проходит
+    порог: за час до него цена и ОИ −3% (ниже порога 4.3%), в нём — ещё до drop.
+    """
+    rng = np.random.default_rng(seed)
+    c = 100 * np.exp(np.cumsum(rng.normal(0, 0.002, n)))
+    oi = 1e6 * np.exp(np.cumsum(rng.normal(0, 0.001, n)))
+    if drop_at is not None:
+        rest = (1 - drop) / 0.97
+        for arr in (c, oi):
+            arr[drop_at - 1:] *= 0.97
+            arr[drop_at:] *= rest
+    o = np.r_[c[0], c[:-1]]
+    idx = pd.date_range(T0, periods=n, freq='h')
+    v = rng.uniform(900, 1100, n)
+    return pd.DataFrame({'o': o, 'h': np.maximum(o, c) * 1.002, 'l': np.minimum(o, c) * 0.998, 'c': c,
+                         'v': v, 'qv': v * c, 'trades': rng.integers(900, 1100, n),
+                         'tb': v * rng.uniform(0.45, 0.55, n), 'tbq': v * c * 0.5,
+                         'buy_ratio': rng.uniform(0.5, 0.8, n), 'oi': oi,
+                         'funding': np.full(n, 0.0001)}, index=idx)
+
+
+def market_with_cascade(n=500, t_idx=450, dumped=('AVAXUSDT', 'ADAUSDT', 'DOTUSDT', 'NEARUSDT', 'SOLUSDT')):
+    frames = {}
+    for k, p in enumerate(llm_notebook.POOL):
+        frames[p] = raw_frame(n, seed=k, drop_at=t_idx if p in dumped else None, drop=0.07)
+    return frames
+
+
+class Gate:
+    def __init__(self, held=()):
+        self._held = list(held)
+
+    def has_position_or_order(self, pair):
+        return pair in self._held
+
+    def check_cooldown(self, pair):
+        return True
+
+    def held(self):
+        return list(self._held)
+
+
+@pytest.fixture
+def notebook_mode(monkeypatch, tmp_path):
+    monkeypatch.setattr(config, 'LLM_MODE', 'notebook', raising=False)
+    monkeypatch.setattr(config, 'DATA_DIR', str(tmp_path))
+    import settings_store
+    monkeypatch.setattr(settings_store, 'risk_pct', lambda name: 0.5)
+
+
+def hour_ms(idx):
+    return int((T0 + pd.Timedelta(hours=idx)).timestamp() * 1000)
+
+
+class TestParityWithResearch:
+    def test_features_match_research(self):
+        path = os.path.join(RESEARCH, 'ai_pattern_lab.py')
+        if not os.path.exists(path):
+            pytest.skip('нет research/')
+        sys.path.insert(0, RESEARCH)
+        import ai_pattern_lab
+        btc, coin = raw_frame(900, seed=1), raw_frame(900, seed=2)
+        ours = flow_features.features(coin, btc)
+        theirs = ai_pattern_lab.features(coin, btc)[ours.columns]
+        assert np.allclose(ours.to_numpy(float), theirs.to_numpy(float), equal_nan=True)
+
+    def test_notebook_question_and_patterns_match_the_tested_ones(self):
+        if not os.path.exists(os.path.join(RESEARCH, 'ai_model_trader_bt.py')):
+            pytest.skip('нет research/')
+        sys.path.insert(0, RESEARCH)
+        import ai_model_trader_bt as bt
+        assert llm_notebook.NOTEBOOK == bt.NOTEBOOK
+        assert llm_notebook.QUESTION == bt.QUESTION
+        assert llm_notebook.PATTERNS == bt.PATTERNS
+        assert llm_notebook.SLOTS == bt.SLOTS
+
+
+class TestAlerts:
+    def test_wide_cascade_gives_p1_only_on_the_first_hour(self):
+        frames = market_with_cascade()
+        data = llm_notebook.market(frames)
+        t = T0 + pd.Timedelta(hours=450)
+        first = {p for p, k in llm_notebook.alerts_at(data, t) if k == 'P1'}
+        assert first == {'AVAXUSDT', 'ADAUSDT', 'DOTUSDT', 'NEARUSDT', 'SOLUSDT'}
+        later = {p for p, k in llm_notebook.alerts_at(data, t + pd.Timedelta(hours=1)) if k == 'P1'}
+        assert not (later & first)            # серия продолжается — это не новый сигнал
+
+    def test_single_coin_dump_is_not_a_cascade(self):
+        frames = market_with_cascade(dumped=('AVAXUSDT',))
+        data = llm_notebook.market(frames)
+        t = T0 + pd.Timedelta(hours=450)
+        assert not [p for p, k in llm_notebook.alerts_at(data, t) if k == 'P1']
+
+
+class TestScan:
+    def test_model_picks_become_broker_signals(self, notebook_mode):
+        frames = market_with_cascade()
+        asked = []
+
+        def ask(question):
+            asked.append(question)
+            return '{"buy": ["AVAX", "ADA"], "reason": "broad cascade, high volume"}'
+
+        out = llm_notebook.scan(list(llm_notebook.POOL), Gate(held=['BTCUSDT']), now_ms=hour_ms(451) + 60_000,
+                                frames_of=lambda p: frames[p], ask=ask)
+        assert len(asked) == 1 and 'Free position slots: 3' in asked[0] and 'Already holding: BTC' in asked[0]
+        assert [c['pair'] for c in out] == ['AVAXUSDT', 'ADAUSDT']
+        sig = out[0]['signal']
+        p = sig['params']
+        f = llm_notebook.market(frames)['AVAXUSDT'][1].loc[T0 + pd.Timedelta(hours=450)]
+        price = frames['AVAXUSDT'].loc[T0 + pd.Timedelta(hours=450), 'c']
+        assert sig['market_price'] == pytest.approx(price)
+        assert p['entry'] > price                                   # лимит за рынком — вход сразу
+        assert p['stop_loss'] == pytest.approx(price * (1 - 1.0 * f['atr_d'] / 100))
+        assert p['max_hold_hours'] == 24 and p['tp_fractions'] == [1.0]
+        assert p['be_level'] is None and p['breakeven_after_tp'] is False
+        assert sig['llm']['mode'] == 'notebook' and sig['llm']['pattern'] == 'P1'
+
+    def test_same_hour_is_decided_once(self, notebook_mode):
+        frames = market_with_cascade()
+        calls = []
+        kw = dict(now_ms=hour_ms(451) + 60_000, frames_of=lambda p: frames[p],
+                  ask=lambda q: calls.append(q) or '{"buy": [], "reason": "skip"}')
+        llm_notebook.scan(list(llm_notebook.POOL), Gate(), **kw)
+        llm_notebook.scan(list(llm_notebook.POOL), Gate(), **kw)
+        assert len(calls) == 1
+
+    def test_no_free_slots_no_question(self, notebook_mode):
+        frames = market_with_cascade()
+        held = ['BTCUSDT', 'ETHUSDT', 'XRPUSDT', 'BNBUSDT']
+        out = llm_notebook.scan(list(llm_notebook.POOL), Gate(held=held), now_ms=hour_ms(451) + 60_000,
+                                frames_of=lambda p: frames[p],
+                                ask=lambda q: (_ for _ in ()).throw(AssertionError('мест нет — модель не спрашиваем')))
+        assert out == []
+
+    def test_model_failure_skips_the_hour(self, notebook_mode):
+        frames = market_with_cascade()
+
+        def broken(question):
+            raise RuntimeError('llama-server не отвечает')
+
+        out = llm_notebook.scan(list(llm_notebook.POOL), Gate(), now_ms=hour_ms(451) + 60_000,
+                                frames_of=lambda p: frames[p], ask=broken)
+        assert out == []
+        state = json.load(open(os.path.join(config.DATA_DIR, 'llm_notebook_state.json'), encoding='utf-8'))
+        assert 'error' in state
+
+    def test_only_pairs_of_the_bot_are_traded(self, notebook_mode):
+        frames = market_with_cascade()
+        out = llm_notebook.scan(['ADAUSDT'], Gate(), now_ms=hour_ms(451) + 60_000, frames_of=lambda p: frames[p],
+                                ask=lambda q: '{"buy": ["AVAX", "ADA"], "reason": "x"}')
+        assert [c['pair'] for c in out] == ['ADAUSDT']
+
+
+class TestExecutionProfile:
+    def test_notebook_mode_profile(self, notebook_mode):
+        import strategy_profile as sp
+        e = llm_notebook.EXECUTION
+        assert sp.expiry_hours('LLM') == e.PENDING_ORDER_MAX_HOURS
+        assert sp.cooldown_hours('LLM') == e.COOLDOWN_HOURS
+        assert sp.cost_limit_pct('LLM') == e.MAX_ENTRY_COST_SHARE_PCT
+        assert sp.max_hold_hours('LLM') == e.MAX_POSITION_HOLD_HOURS
+        assert sp.fills_through_market('LLM') is True
+
+    def test_routing(self, notebook_mode, monkeypatch):
+        import strategy_llm
+        monkeypatch.setattr(llm_notebook, 'scan', lambda pairs, gate, client=None, balance=None: ['из тетради'])
+        monkeypatch.setattr(strategy_llm.llm_local, 'available',
+                            lambda: (_ for _ in ()).throw(AssertionError('режим планов не нужен')))
+        assert strategy_llm.scan_for_setups(['BTCUSDT'], Gate()) == ['из тетради']
+
+
+class TestPositionHold:
+    """Брокер: срок позиции из сигнала; без него — срок стратегии, как раньше."""
+
+    @pytest.fixture()
+    def broker(self, tmp_path, monkeypatch):
+        monkeypatch.setenv('BOT_DATA_DIR', str(tmp_path))
+        monkeypatch.setenv('TRADING_MODE', 'PAPER')
+        monkeypatch.setenv('PAPER_FUNDING', 'false')
+        for module in ('config', 'paper_broker', 'dashboard', 'shadow', 'setup_journal'):
+            sys.modules.pop(module, None)
+        import config as cfg
+        import paper_broker
+        for name, value in (('PAPER_FEE_MAKER', 0.0), ('PAPER_FEE_TAKER', 0.0), ('PAPER_SLIPPAGE_PCT', 0.0),
+                            ('LIMIT_ENTRY_OFFSET_PCT', 0.0), ('MAX_POSITION_HOLD_HOURS', 0.0)):
+            monkeypatch.setattr(cfg, name, value)
+
+        class Client:
+            candles = {}
+
+            def fetch_ohlcv(self, symbol, timeframe, since=None, limit=None):
+                rows = [c for c in self.candles.get(symbol, []) if since is None or c[0] >= since]
+                return rows[:limit] if limit else rows
+
+            def fetch_funding_rate(self, symbol):
+                raise RuntimeError('нет')
+
+        client = Client()
+        yield paper_broker.PaperBroker(client, strategies=('FIBO',)), client, paper_broker
+        for module in ('config', 'paper_broker'):
+            sys.modules.pop(module, None)
+
+    @staticmethod
+    def _signal(hold=None):
+        params = {'entry': 100.0, 'stop_loss': 90.0, 'take_profit_1': 130.0, 'take_profit_2': 130.0,
+                  'tp_targets': [130.0], 'tp_fractions': [1.0], 'be_level': None, 'breakeven_after_tp': False,
+                  'max_same_direction': 0, 'rr': 3.0}
+        if hold is not None:
+            params['max_hold_hours'] = hold
+        return {'trading_pair': 'BTCUSDT', 'strategy': 'FIBO', 'setup': {'type': 'LONG'},
+                'trigger': {'zone': 'x'}, 'htf_trend': 'BULLISH', 'params': params, 'scan': {}}
+
+    @staticmethod
+    def _run(broker, client, pb):
+        start, bar = 1_700_000_000_000, 5 * 60 * 1000
+        pb._now_ms = lambda: start
+        client.candles['BTCUSDT'] = [[start, 100, 100, 100, 100, 0]]
+        pb._now_ms = lambda: start + 2 * bar
+        broker.update()
+        later = start + 2 * H
+        client.candles['BTCUSDT'].append([later, 100, 101, 99, 100, 0])
+        pb._now_ms = lambda: later + 2 * bar
+        broker.update()
+
+    def test_position_hold_from_signal(self, broker):
+        b, client, pb = broker
+        pb._now_ms = lambda: 1_700_000_000_000
+        assert b.open('FIBO', self._signal(hold=1))
+        self._run(b, client, pb)
+        rows = pb.read_journal()
+        assert rows and rows[0]['exit_reason'] == 'TIME'
+
+    def test_without_the_field_strategy_hold_applies(self, broker):
+        b, client, pb = broker
+        pb._now_ms = lambda: 1_700_000_000_000
+        assert b.open('FIBO', self._signal())
+        self._run(b, client, pb)
+        assert b.positions('FIBO') and not pb.read_journal()

@@ -43,7 +43,11 @@ def _smc():
 def _llm_rules():
     """Правила ИИ, если он в режиме «правила» (config.LLM_MODE=rules), иначе None."""
     import llm_rules
-    return llm_rules.DECISION if llm_rules.enabled() else None
+    if llm_rules.enabled():
+        return llm_rules.DECISION
+    # Режим тетради (LLM_MODE=notebook) объявляет исполнение теми же именами.
+    import llm_notebook
+    return llm_notebook.EXECUTION if llm_notebook.enabled() else None
 
 
 def _bar_hours(timeframe):
