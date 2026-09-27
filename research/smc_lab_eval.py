@@ -71,13 +71,22 @@ LIVE = dict(min_conf=4.5, long_premium=0.0, min_rr=4.0, max_rr=0.0, min_stop=0.8
 _rows = {}
 
 
-def rows(period):
-    if period not in _rows:
-        f = pd.read_pickle(os.path.join(OUT, f'smc_lab_rows_{period}.pkl'))
+BAR_H = {'1h': 1.0, '4h': 4.0, '15m': 0.25}
+
+
+def rows(period, layout='1h'):
+    """Срабатывания ядра; layout — рабочий ТФ зон (research/smc_lab.LAYOUTS)."""
+    if (period, layout) not in _rows:
+        suffix = '' if layout == '1h' else f'_{layout}'
+        f = pd.read_pickle(os.path.join(OUT, f'smc_lab_rows_{period}{suffix}.pkl'))
         f = f.sort_values(['t', 'pair']).reset_index(drop=True)
-        f['key'] = list(zip(f['pair'], f['poi_type'], f['poi_index'], f['dir']))
-        _rows[period] = f
-    return _rows[period]
+        # Ключ зоны — с таймфреймом: блок 4 ч и блок 1 ч — разные заявки.
+        if layout == '1h':
+            f['key'] = list(zip(f['pair'], f['poi_type'], f['poi_index'], f['dir']))
+        else:
+            f['key'] = list(zip(f['pair'], f['poi_type'], f['poi_index'], f['dir'], [layout] * len(f)))
+        _rows[(period, layout)] = f
+    return _rows[(period, layout)]
 
 
 _exec = {}
@@ -123,8 +132,25 @@ def features(period, pair, t, side, entry, stop, tp1):
 
 # ── Вариант → заявки ─────────────────────────────────────────────────────────
 def orders_for(period, spec):
-    f = rows(period)
+    """Заявки варианта; spec['layouts'] — рабочие ТФ зон одним счётом (по умолчанию только 1h)."""
+    out = []
+    for layout in spec.get('layouts') or ('1h',):
+        out += _orders_layout(period, spec, layout)
+    # run_portfolio сортирует по времени устойчиво — порядок равных задаём здесь.
+    if spec['tiebreak'] == 'pool':
+        rank = {p: n for n, p in enumerate(spec['pairs'])}
+        out.sort(key=lambda o: (o.created, rank.get(o.pair, 99)))
+    else:
+        out.sort(key=lambda o: (o.created, -o.meta['row'].confluence, -o.meta['rr']))
+    return out
+
+
+def _orders_layout(period, spec, layout):
+    f = rows(period, layout)
     f = f[f['pair'].isin(spec['pairs'])]
+    # Срок заявки: у часовой — spec['expiry'] часов (как у бота); у других ТФ —
+    # столько же СВЕЧЕЙ своего ТФ (как в research/ai_mtf_smc.py).
+    expiry_h = spec['expiry'] * BAR_H[layout]
     depth = spec['depth']
     entry = f['entry_near'] * (1 - depth) + f['entry_mid'] * depth
     sl = (entry - f['stop']).abs()
@@ -174,14 +200,9 @@ def orders_for(period, spec):
         created = np.datetime64(int(r.t), 'ms')
         out.append(Order(pair=r.pair, direction='BULLISH' if r.dir > 0 else 'BEARISH', entry=float(limit),
                          stop=float(r.stop), targets=tg, fractions=fr, created=created,
-                         expires=created + np.timedelta64(int(spec['expiry'] * 3600), 's'), key=r.key,
-                         meta={'row': r, 'stop_pct': float(sp), 'rr': float(q), 'feats': feats}))
-    # run_portfolio сортирует по времени устойчиво — порядок равных задаём здесь.
-    if spec['tiebreak'] == 'pool':
-        rank = {p: n for n, p in enumerate(spec['pairs'])}
-        out.sort(key=lambda o: (o.created, rank.get(o.pair, 99)))
-    else:
-        out.sort(key=lambda o: (o.created, -o.meta['row'].confluence, -o.meta['rr']))
+                         expires=created + np.timedelta64(int(expiry_h * 3600), 's'), key=r.key,
+                         meta={'row': r, 'stop_pct': float(sp), 'rr': float(q), 'feats': feats,
+                               'layout': layout}))
     return out
 
 

@@ -24,6 +24,8 @@
 Запуск:
     python research/smc_lab.py gen            # все периоды (≈15–30 мин на 4 ядрах)
     python research/smc_lab.py gen bear mid1  # выбранные
+    python research/smc_lab.py gen 4h         # зоны на 4 ч (слом и направление — день)
+    python research/smc_lab.py gen 15m --pool10   # зоны на 15 мин, только 10 пар пула
 Строки: research/results/smc_lab_rows_<период>.pkl (в .gitignore).
 """
 import os
@@ -58,8 +60,22 @@ def permissive_decision():
     return d
 
 
+# Раскладки кадров: зоны — рабочий ТФ; слом и направление — старше
+# (как в research/ai_mtf_smc.py). '1h' — боевая SMC.
+LAYOUTS = {
+    '1h': ({'bias': '1d', 'htf': '4h', 'poi': '1h'}, 1.0),
+    '4h': ({'bias': '1d', 'htf': '1d', 'poi': '4h'}, 4.0),
+    '15m': ({'bias': '1d', 'htf': '4h', 'poi': '15m'}, 0.25),
+}
+
+
+def rows_path(period, layout='1h'):
+    suffix = '' if layout == '1h' else f'_{layout}'
+    return os.path.join(OUT, f'smc_lab_rows_{period}{suffix}.pkl')
+
+
 def _job(args):
-    period, cache, pair = args
+    period, cache, pair, layout = args
     import logger
     logger.log = lambda *a, **k: None
     import backtest_smc as bt
@@ -70,8 +86,9 @@ def _job(args):
         return period, pair, [], 0.0
     started = time.time()
     decision = permissive_decision()
-    ctx = smc_signal.build_context({'bias': data['1d'], 'htf': data['4h'], 'poi': data['1h']}, pair=pair)
-    df = data['1h']
+    frames_of, bar_h = LAYOUTS[layout]
+    ctx = smc_signal.build_context({k: data[v] for k, v in frames_of.items()}, pair=pair)
+    df = data[frames_of['poi']]
     stamps = df['timestamp']
     rows = []
     for i in range(60, len(df)):
@@ -80,8 +97,10 @@ def _job(args):
             continue
         poi, leg, trade = setup['poi'], setup['leg'], setup['params']
         swept, fvg, brk = setup.get('sweep'), setup.get('fvg'), setup.get('structure') or {}
-        t_ms = int(pd.Timestamp(stamps.iloc[i]).value // 10 ** 6) + 3_600_000   # заявка — на закрытии часа
+        # заявка — на закрытии свечи рабочего ТФ
+        t_ms = int(pd.Timestamp(stamps.iloc[i]).value // 10 ** 6) + int(bar_h * 3_600_000)
         row = {
+            'layout': layout,
             'period': period, 'pair': pair, 'i': i, 't': t_ms,
             'dir': 1 if setup['direction'] == 'BULLISH' else -1,
             'poi_type': poi['type'], 'poi_index': int(poi['index']),
@@ -107,24 +126,33 @@ def _job(args):
     return period, pair, rows, time.time() - started
 
 
-def generate(periods):
+def generate(periods, layout='1h', pairs=None):
     import ai_doctrine as D
-    jobs = [(p, D.PERIODS[p], pair) for p in periods for pair in D.PAIRS]
+    pairs = pairs or D.PAIRS
+    jobs = [(p, D.PERIODS[p], pair, layout) for p in periods for pair in pairs]
     by_period = {p: [] for p in periods}
     with Pool(4) as pool:
         for period, pair, rows, sec in pool.imap_unordered(_job, jobs):
             by_period[period] += rows
-            print(f'  {period:6s} {pair:13s} срабатываний {len(rows):6d}  {sec:6.1f} с', flush=True)
+            print(f'  {layout} {period:6s} {pair:13s} срабатываний {len(rows):6d}  {sec:6.1f} с', flush=True)
     for period, rows in by_period.items():
         frame = pd.DataFrame(rows)
-        path = os.path.join(OUT, f'smc_lab_rows_{period}.pkl')
+        path = rows_path(period, layout)
         frame.to_pickle(path + '.tmp')
         os.replace(path + '.tmp', path)
-        print(f'{period}: {len(frame)} срабатываний → {path}', flush=True)
+        print(f'{layout} {period}: {len(frame)} срабатываний → {path}', flush=True)
 
 
 if __name__ == '__main__':
     sys.stdout.reconfigure(encoding='utf-8')
     if sys.argv[1:2] == ['gen']:
         import ai_doctrine as D
-        generate(sys.argv[2:] or list(D.PERIODS))
+        args = sys.argv[2:]
+        layout = '1h'
+        if args and args[0] in LAYOUTS:
+            layout, args = args[0], args[1:]
+        pool10 = None
+        if '--pool10' in args:
+            import backtest_smc as bt
+            pool10, args = list(bt.DEFAULT_PAIRS), [a for a in args if a != '--pool10']
+        generate(args or list(D.PERIODS), layout, pool10)
