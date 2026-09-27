@@ -20,6 +20,18 @@
   • входы в сутках вокруг решения ФРС у этого каркаса хуже: −0.476R против
     +0.207R [разность −1.19; −0.08], хуже в 4 периодах из 5.
 
+ПОВЕРХ ЯДРА (27.09.2026, docs/ИИ_аудит_2026-09-27.md, п. 67): сетап берётся,
+только если перед блоком снята ликвидность и толпа не стоит в сторону сделки
+(фандинг в сторону сделки ≤ −1 б.п.). Стенд с живыми правилами брокера и
+исполнением ИИ, пул из 10 пар, окно ФРС (research/ai_own_stream.py final):
+    без отбора (как мерился режим 26.09)   +0.015R на сделку [−0.160; +0.201]
+    толпа −1 + ФРС                          +0.346R [−0.002; +0.720], минус в bear и mid2
+    толпа −1 + снятие + ФРС (так торгует)   164 сделки, +0.482R [+0.067; +0.907],
+                                            плюс во всех пяти периодах, насквозь +0.456R
+Это те же сетапы, что у SMC на её пуле (у неё — без условия снятия): ИИ в этом
+режиме удваивает ставку на лучших из них, своего потока у него нет — на 10
+других парах тот же отбор не прошёл (H1, H2 в research/results/ai_own_stream.txt).
+
 ИЗОЛЯЦИЯ (CLAUDE.md). Структура — общий слой (market_structure, smc/ часть I).
 Правила решений — СВОИ: ниже замороженная копия значений smc/params.DECISION
 на 26.09.2026. Ядро smc.signal принимает их аргументом (evaluate(decision=)),
@@ -88,13 +100,18 @@ DECISION = SimpleNamespace(
     SKIP_TARGET_TAKEN=False,
     CANCEL_PENDING_AT_TARGET=False,
     FILL_THROUGH_MARKET=False,
-    # Добавлены у SMC 27.09.2026 и читаются только её адаптером (strategy_smc),
-    # не ядром: режим «правила» мерился без них и их не применяет. Имена здесь —
-    # потому что копия обязана содержать все решения SMC (test_llm_rules).
+    # Пул ИИ — POOL ниже (TRADE_POOL читает только адаптер SMC). Против толпы —
+    # своя копия правила SMC, применяет её scan() ниже, а не ядро: сетап
+    # берётся при фандинге в сторону сделки ≤ FUNDING_MAX_BP (с 27.09.2026).
     TRADE_POOL=(),
-    FUNDING_AGAINST_CROWD=False,
-    FUNDING_MAX_BP=0.0,
+    FUNDING_AGAINST_CROWD=True,
+    FUNDING_MAX_BP=-1.0,
 )
+
+# Сетап — только после снятия ликвидности перед блоком (фактор ядра
+# liquidity_swept). Правило адаптера ИИ, а не ядра, поэтому не в DECISION:
+# копия DECISION повторяет имена SMC один в один (test_llm_rules).
+REQUIRE_LIQUIDITY_SWEEP = True
 
 # Свой пул: плюс каркаса живёт на крупных ликвидных монетах. На десяти
 # остальных парах общего списка те же правила дали −45.3R (−0.072R на сделку,
@@ -148,6 +165,45 @@ def _warn_if_calendar_ends(now_ms=None):
         last = (datetime.fromtimestamp(future[-1] / 1000, tz=timezone.utc).strftime('%Y-%m-%d')
                 if future else 'нет')
         log(f'   {NAME}: календарь решений ФРС кончается ({last}) — продлите LLM_EVENT_DATES')
+
+
+# ── Отбор поверх ядра ─────────────────────────────────────────────────────────
+def swept(setup):
+    """Была ли перед блоком снята ликвидность (фактор ядра, иначе — сам вынос)."""
+    factors = setup.get('factors') or {}
+    if 'liquidity_swept' in factors:
+        return bool(factors['liquidity_swept'])
+    return bool(setup.get('sweep'))
+
+
+def funding_rate(pair):
+    """Последняя выплаченная ставка фандинга пары (доля за 8 ч) из общего слоя или None."""
+    try:
+        import positioning
+        rate = positioning.latest('funding', pair)
+        return None if rate is None else float(rate)
+    except Exception as exc:                       # noqa: BLE001
+        log(f'   {NAME} {pair}: фандинг не прочитан ({exc})')
+        return None
+
+
+def crowd_reason(direction, rate):
+    """
+    Причина отказа «толпа за сделку» или None — своя копия правила SMC.
+
+    Толпа стоит в сторону сделки, если платит за неё: у лонга ставка выше
+    порога, у шорта — ниже минус порога. Порог −1 б.п. считается от середины
+    ставки Bybit (+1 б.п.): шорт — только при ставке от +1 б.п., лонг — только
+    при ставке до −1 б.п. Нет ставки — нет и отказа: торговля от источника не
+    зависит (CLAUDE.md, «Данные»).
+    """
+    if not DECISION.FUNDING_AGAINST_CROWD or rate is None:
+        return None
+    side = 1.0 if direction in ('BULLISH', 'LONG') else -1.0
+    if rate * 1e4 * side <= DECISION.FUNDING_MAX_BP:
+        return None
+    crowd = 'в лонгах' if rate > 0 else 'в шортах'
+    return f'толпа за сделку (фандинг {rate * 1e4:+.2f} б.п., толпа {crowd})'
 
 
 # ── Сигнал брокеру ────────────────────────────────────────────────────────────
@@ -219,13 +275,16 @@ def to_signal(setup, pair):
 
 
 # ── Сканер ────────────────────────────────────────────────────────────────────
-def scan(pairs, gate, client=None, balance=None, now_ms=None, context_of=None):
+def scan(pairs, gate, client=None, balance=None, now_ms=None, context_of=None, funding_of=None):
     """
     Сетапы по своим правилам на своём пуле. -> список кандидатов для bot.
 
     context_of(pair) -> MarketContext — откуда брать структуру (тесты
-    подменяют; в бою — общий слой market_structure).
+    подменяют; в бою — общий слой market_structure). funding_of(pair) ->
+    ставка фандинга или None (в бою — общий слой positioning).
     """
+    if funding_of is None:
+        funding_of = funding_rate
     import scan_report as report
     if context_of is None:
         import market_structure
@@ -265,10 +324,26 @@ def scan(pairs, gate, client=None, balance=None, now_ms=None, context_of=None):
                 log(f'   {NAME} {pair}: {reason}')
                 report.record(NAME, pair, reason)
                 continue
+            if REQUIRE_LIQUIDITY_SWEEP and not swept(setup):
+                report.record(NAME, pair, 'перед блоком не снята ликвидность')
+                continue
+            rate = funding_of(pair) if DECISION.FUNDING_AGAINST_CROWD else None
+            if DECISION.FUNDING_AGAINST_CROWD and rate is None:
+                log(f'   {NAME} {pair}: фандинг неизвестен — фильтр толпы пропущен')
+            blocked = crowd_reason(setup['direction'], rate)
+            if blocked:
+                log(f'   {NAME} {pair}: {blocked}')
+                report.record(NAME, pair, blocked)
+                continue
             signal = to_signal(setup, pair)
+            # Ставка на момент решения — в сигнал: по ней фильтр проверяется вживую.
+            funding_bp = None if rate is None else round(rate * 1e4, 3)
+            signal['llm']['funding_bp'] = funding_bp
+            signal['smc']['funding_bp'] = funding_bp
             report.record(NAME, pair, None)
             log(f"   {NAME} {pair}: {signal['setup']['type']} от блока, конфлюенс "
-                f"{setup['confluence']}, R:R {setup['params']['rr']:.2f}")
+                f"{setup['confluence']}, R:R {setup['params']['rr']:.2f}"
+                + (f', фандинг {funding_bp:+.2f} б.п.' if funding_bp is not None else ''))
             candidates.append({'pair': pair, 'signal': signal, 'score': setup['confluence'],
                                'rr': setup['params']['rr'], 'poi_type': setup['poi']['type'],
                                'df_1h': context.frames['poi']})

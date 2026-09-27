@@ -71,6 +71,8 @@ class Ctx:
 def rules_mode(monkeypatch):
     monkeypatch.setattr(config, 'LLM_MODE', 'rules', raising=False)
     monkeypatch.setattr(config, 'LLM_EVENT_DATES', '', raising=False)
+    # Фандинг по умолчанию неизвестен: тесты не читают файлы positioning.
+    monkeypatch.setattr(llm_rules, 'funding_rate', lambda pair: None)
 
 
 class TestSwitch:
@@ -135,6 +137,58 @@ class TestScan:
                        balance=10_000, now_ms=ms('2026-10-10T00:00:00'),
                        context_of=lambda pair: asked.append(pair) or Ctx())
         assert asked == ['SOLUSDT']
+
+
+def scan_one(sample, funding=None, now='2026-10-10T00:00:00'):
+    ctx = Ctx(sample)
+    return llm_rules.scan(['BTCUSDT'], Gate(), balance=10_000, now_ms=ms(now),
+                          context_of=lambda pair: ctx, funding_of=lambda pair: funding)
+
+
+class TestSelectionOnTopOfTheCore:
+    """Снятие ликвидности и «против толпы» — отбор ИИ поверх ядра (27.09.2026)."""
+
+    def test_no_sweep_no_trade(self, rules_mode):
+        sample = setup()
+        sample['factors']['liquidity_swept'] = False
+        sample['sweep'] = None
+        assert scan_one(sample) == []
+
+    def test_sweep_factor_decides_over_the_sweep_object(self, rules_mode):
+        sample = setup()
+        sample['factors']['liquidity_swept'] = False
+        assert scan_one(sample) == []
+        sample['factors']['liquidity_swept'] = True
+        assert len(scan_one(sample)) == 1
+
+    @pytest.mark.parametrize('direction,rate_bp,taken', [
+        ('BULLISH', +1.0, False),     # лонг, толпа в лонгах платит
+        ('BULLISH', 0.0, False),      # лонг при нуле: до −1 б.п. не дотягивает
+        ('BULLISH', -1.0, True),      # лонг, толпа в шортах
+        ('BEARISH', +1.0, True),      # шорт при ставке на середине Bybit
+        ('BEARISH', 0.0, False),      # шорт, толпа клонится в шорт
+        ('BEARISH', -2.0, False),     # шорт, толпа в шортах платит
+    ])
+    def test_against_the_crowd(self, rules_mode, direction, rate_bp, taken):
+        out = scan_one(setup(direction), funding=rate_bp / 1e4)
+        assert (len(out) == 1) is taken
+
+    def test_unknown_funding_does_not_block(self, rules_mode):
+        out = scan_one(setup('BULLISH'), funding=None)
+        assert len(out) == 1 and out[0]['signal']['llm']['funding_bp'] is None
+
+    def test_funding_goes_into_the_signal(self, rules_mode):
+        out = scan_one(setup('BEARISH'), funding=1.5 / 1e4)
+        assert out[0]['signal']['llm']['funding_bp'] == pytest.approx(1.5)
+        assert out[0]['signal']['smc']['funding_bp'] == pytest.approx(1.5)
+
+    def test_rule_is_own_copy_not_smc(self):
+        """Порог — в копии ИИ; правило не импортируется из стратегии SMC."""
+        import re
+        assert llm_rules.DECISION.FUNDING_AGAINST_CROWD is True
+        assert llm_rules.DECISION.FUNDING_MAX_BP == -1.0
+        source = open(llm_rules.__file__, encoding='utf-8').read()
+        assert not re.search(r'^\s*(import|from)\s+strategy_smc\b', source, re.M)
 
 
 class TestExecutionComesFromOwnRules:
