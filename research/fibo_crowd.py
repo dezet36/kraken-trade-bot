@@ -73,6 +73,8 @@ def main():
         ('F1 против толпы', lambda o, f: f <= 0),
         ('F2 только шорты (после просмотра)', lambda o, f: o.direction == 'SHORT'),
         ('F3 шорты против толпы (после просмотра)', lambda o, f: o.direction == 'SHORT' and f <= 0),
+        ('F4 шорты при ставке от середины +1 б.п. (второй круг)', lambda o, f: o.direction == 'SHORT' and not (f > -1.0)),
+        ('F5 против толпы от середины, обе стороны (второй круг)', lambda o, f: not (f > -1.0)),
     ]
     for period, cache in CACHES.items():
         with open(os.path.join(HERE, 'results', f'fibo_live_orders_{cache}.pkl'), 'rb') as fh:

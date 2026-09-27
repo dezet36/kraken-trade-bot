@@ -119,6 +119,16 @@ class TestPool:
             'BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'XRPUSDT', 'BNBUSDT',
             'DOGEUSDT', 'ADAUSDT', 'AVAXUSDT', 'LINKUSDT', 'LTCUSDT'}
 
+    def test_default_threshold_is_the_bybit_midpoint(self):
+        """Порог по умолчанию — −1 б.п.: середина ставки Bybit +1 б.п. (docs/SMC_исследование_2026-09.md)."""
+        if os.getenv('SMC_FUNDING_MAX_BP'):
+            pytest.skip('порог переопределён окружением')
+        import params_env
+        _f, _i, _b, _s = params_env.reader('SMC')
+        assert _f('FUNDING_MAX_BP', -1.0) == -1.0
+        src = open(params.__file__, encoding='utf-8').read()
+        assert "FUNDING_MAX_BP = _f('FUNDING_MAX_BP', -1.0)" in src
+
     def test_new_names_are_decisions_not_structure(self):
         for name in ('TRADE_POOL', 'FUNDING_AGAINST_CROWD', 'FUNDING_MAX_BP'):
             assert name in params.DECISION and name not in params.STRUCTURAL
