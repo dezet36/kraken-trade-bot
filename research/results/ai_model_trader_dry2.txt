@@ -1,0 +1,23 @@
+train: срезов 1961, возможных сделок 3772
+механика    668 сд  5.1/нед R +0.098 t +2.6 сумма  +65.3R просадка -19.3R плюс  51%  (P1 262 сд +0.148R, P2 406 сд +0.066R)
+valid: срезов 626, возможных сделок 1168
+механика    192 сд  4.4/нед R +0.194 t +2.5 сумма  +37.3R просадка -12.1R плюс  52%  (P1 61 сд +0.490R, P2 131 сд +0.057R)
+--- пример вопроса:
+It is 2024-07-05 04:00 UTC. New alerts this hour: 7.
+Already holding: nothing. Free position slots: 4.
+
+MARKET: BTC -3.2% in 4h, -6.6% in 24h, -10.7% in 7d. Coins in a liquidation cascade in the last 3h: 7.
+
+ALERTS - pattern, coin, then: change 4h %, change 24h %, change 7d %, strength vs BTC 24h %, open interest 4h % / 24h %,
+24h volume vs normal, aggressive-buy share 24h, funding bp, retail long share percentile 30d:
+P1 ARB        -13.1  -20.3  -28.7  -13.8  -5.4/ -5.4  2.61 0.469 +0.49 0.90
+P1 COTI       -12.5  -20.9  -29.8  -14.3  -7.6/-11.4  1.67 0.460 +1.00 0.61
+P1 ZEC        -10.8  -17.8  -21.2  -11.2  -7.4/ -8.3  3.13 0.481 +1.00 0.95
+P1 XLM        -10.0  -11.9  -14.6   -5.4  -9.5/ +1.6  3.06 0.486 +0.39 0.97
+P1 BNB         -8.7  -13.2  -19.6   -6.6  -6.8/ -7.7  2.14 0.473 -1.22 0.30
+P1 AAVE        -7.3  -13.6  -21.3   -7.0  -5.9/-11.9  2.04 0.494 +0.48 0.86
+P1 ETH         -4.6   -9.9  -15.6   -3.4  -6.8/ -6.0  2.15 0.468 +0.62 0.82
+
+Which alerts do you trade now (at most 4)? Answer with JSON only:
+{"buy": ["COIN", ...], "reason": "one sentence"}
+--- тетрадь, символов 1887

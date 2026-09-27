@@ -1,0 +1,7 @@
+{"name": "btc_divergence_accum", "side": "long", "conditions": [["rel_24h", ">=", 2.5], ["btc_ret_24h", "<=", -1.0], ["oi_chg_24h", ">=", 4.0], ["vol_z", ">=", 1.5]], "hold_hours": 48, "stop_atr": 1.3, "why": "Coin decouples from BTC weakness with rising OI and volume, signaling smart money accumulation ahead of broader market recovery."}
+по полугодиям: 2022H1: 95 -0.082 | 2022H2: 92 +0.056 | 2023H1: 81 +0.104 | 2023H2: 117 +0.150 | 2024H1: 101 +0.258 | 2024H2: 118 +0.276 | 2025H1: 39 -0.319
+пар в плюсе: 13 из 19
+вход позже на 1 ч, train: 483 сд R +0.116 t +2.3
+вход позже на 1 ч, valid: 157 сд R +0.072 t +0.9
+вход позже на 2 ч, train: 488 сд R +0.118 t +2.4
+вход позже на 2 ч, valid: 157 сд R +0.065 t +0.8

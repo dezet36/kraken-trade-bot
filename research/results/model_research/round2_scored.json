@@ -1,0 +1,502 @@
+[
+ {
+  "rule": {
+   "name": "trend_oi_accel_long",
+   "side": "long",
+   "conditions": [
+    [
+     "ret_4h",
+     ">=",
+     1.5
+    ],
+    [
+     "oi_chg_24h",
+     ">=",
+     4.0
+    ],
+    [
+     "size_z",
+     ">=",
+     1.25
+    ]
+   ],
+   "hold_hours": 48,
+   "stop_atr": 1.2,
+   "why": "Ride institutional buying waves confirmed by rising open interest and large trade size while avoiding late-stage retail pumps."
+  },
+  "train": {
+   "n": 387,
+   "per_week": 2.9703947368421053,
+   "pct": 0.617633636375076,
+   "r": 0.09997797209914461,
+   "t": 1.8362948384198392,
+   "win": 0.4780361757105943
+  },
+  "valid": {
+   "n": 199,
+   "per_week": 4.582236842105263,
+   "pct": 1.7975355489588198,
+   "r": 0.16454143238888952,
+   "t": 2.1863804152372137,
+   "win": 0.5276381909547738
+  },
+  "test": {
+   "n": 215,
+   "per_week": 2.9223300970873787,
+   "pct": 1.4536263963621805,
+   "r": 0.2229492412083058,
+   "t": 2.2338765728481613,
+   "win": 0.48372093023255813
+  }
+ },
+ {
+  "rule": {
+   "name": "liq_cascade_bounce_long",
+   "side": "long",
+   "conditions": [
+    [
+     "ret_1h",
+     "<=",
+     -1.8
+    ],
+    [
+     "oi_chg_4h",
+     "<=",
+     -3.0
+    ],
+    [
+     "range_pos_7d",
+     "<",
+     0.15
+    ]
+   ],
+   "hold_hours": 24,
+   "stop_atr": 1.5,
+   "why": "Capture post-liquidation short covering bounces triggered by rapid OI washouts without chasing full capitulation."
+  },
+  "train": {
+   "n": 429,
+   "per_week": 3.292763157894737,
+   "pct": 0.019290939489642906,
+   "r": -0.0250712907203609,
+   "t": -0.7580817521125535,
+   "win": 0.5174825174825175
+  },
+  "valid": {
+   "n": 138,
+   "per_week": 3.177631578947368,
+   "pct": 2.837969184760661,
+   "r": 0.24327068714060804,
+   "t": 3.2555698580816586,
+   "win": 0.6304347826086957
+  },
+  "test": {
+   "n": 95,
+   "per_week": 1.2912621359223302,
+   "pct": 0.22248423435839432,
+   "r": -0.009897605609960398,
+   "t": -0.19430155104443692,
+   "win": 0.5684210526315789
+  }
+ },
+ {
+  "rule": {
+   "name": "funding_decay_reversal_short",
+   "side": "short",
+   "conditions": [
+    [
+     "range_pos_7d",
+     ">=",
+     0.9
+    ],
+    [
+     "funding_pct_30d",
+     "<=",
+     0.2
+    ],
+    [
+     "taker_1h",
+     "<=",
+     0.46
+    ]
+   ],
+   "hold_hours": 36,
+   "stop_atr": 1.4,
+   "why": "Price at extremes with funding dropping to bottom decile signals crowded longs exhausting without new money to support prices."
+  },
+  "train": {
+   "n": 151,
+   "per_week": 1.1589912280701755,
+   "pct": -0.24567577376818878,
+   "r": -0.04312542127531052,
+   "t": -1.0446955801630495,
+   "win": 0.48344370860927155
+  },
+  "valid": {
+   "n": 88,
+   "per_week": 2.026315789473684,
+   "pct": -0.6634063346156275,
+   "r": -0.07198027951575624,
+   "t": -1.4019921529385893,
+   "win": 0.4772727272727273
+  },
+  "test": {
+   "n": 103,
+   "per_week": 1.4000000000000001,
+   "pct": -1.0118273832655917,
+   "r": -0.15136615385476812,
+   "t": -2.7908517960000294,
+   "win": 0.39805825242718446
+  }
+ },
+ {
+  "rule": {
+   "name": "btc_divergence_accum_long",
+   "side": "long",
+   "conditions": [
+    [
+     "rel_24h",
+     ">=",
+     2.0
+    ],
+    [
+     "btc_ret_24h",
+     "<=",
+     -1.0
+    ],
+    [
+     "oi_chg_24h",
+     ">=",
+     3.5
+    ]
+   ],
+   "hold_hours": 48,
+   "stop_atr": 1.2,
+   "why": "Exploit idiosyncratic strength when the asset outperforms BTC despite broader market weakness, indicating accumulation."
+  },
+  "train": {
+   "n": 1018,
+   "per_week": 7.813596491228071,
+   "pct": 0.37786209247889657,
+   "r": 0.04204933263715469,
+   "t": 1.4323584280329926,
+   "win": 0.4764243614931238
+  },
+  "valid": {
+   "n": 332,
+   "per_week": 7.644736842105263,
+   "pct": 0.5958069293549076,
+   "r": 0.03337096992529462,
+   "t": 0.642752570338416,
+   "win": 0.47289156626506024
+  },
+  "test": {
+   "n": 319,
+   "per_week": 4.3359223300970875,
+   "pct": 0.3860980499754209,
+   "r": 0.04307287615882434,
+   "t": 0.720841894877813,
+   "win": 0.45141065830721006
+  }
+ },
+ {
+  "rule": {
+   "name": "retail_flush_momentum_short",
+   "side": "short",
+   "conditions": [
+    [
+     "buy_ratio_chg_24h",
+     "<=",
+     -5.0
+    ],
+    [
+     "vol_z",
+     ">=",
+     2.0
+    ],
+    [
+     "ret_24h",
+     "<=",
+     -2.0
+    ]
+   ],
+   "hold_hours": 36,
+   "stop_atr": 1.4,
+   "why": "Momentum continuation after retail long flush and volume spike suggests institutional distribution and trend persistence."
+  },
+  "train": {
+   "n": 244,
+   "per_week": 1.8728070175438598,
+   "pct": -1.477076955735211,
+   "r": -0.13861903961151342,
+   "t": -2.9701432193320265,
+   "win": 0.4180327868852459
+  },
+  "valid": {
+   "n": 52,
+   "per_week": 1.1973684210526314,
+   "pct": -5.774738757773617,
+   "r": -0.5026478137415359,
+   "t": -6.438743853249008,
+   "win": 0.23076923076923078
+  },
+  "test": {
+   "n": 35,
+   "per_week": 0.47572815533980584,
+   "pct": -4.066816648931538,
+   "r": -0.4365818155655086,
+   "t": -4.797381108679904,
+   "win": 0.22857142857142856
+  }
+ },
+ {
+  "rule": {
+   "name": "extreme_funding_stall_short",
+   "side": "short",
+   "conditions": [
+    [
+     "funding_bp",
+     ">=",
+     3.0
+    ],
+    [
+     "ret_1h",
+     "<",
+     0.2
+    ],
+    [
+     "taker_1h",
+     "<=",
+     0.48
+    ]
+   ],
+   "hold_hours": 12,
+   "stop_atr": 1.0,
+   "why": "Extreme positive funding combined with stalling momentum and balanced taker flow indicates longs are overextended and poised to unwind."
+  },
+  "train": {
+   "n": 1861,
+   "per_week": 14.283991228070176,
+   "pct": -0.2420692282899955,
+   "r": -0.04070299829399269,
+   "t": -3.7270128525425945,
+   "win": 0.5056421278882322
+  },
+  "valid": {
+   "n": 556,
+   "per_week": 12.802631578947368,
+   "pct": -0.6131609466290158,
+   "r": -0.06118303730740489,
+   "t": -3.3890760936023074,
+   "win": 0.4784172661870504
+  },
+  "test": {
+   "n": 32,
+   "per_week": 0.4349514563106796,
+   "pct": 0.42578100152658704,
+   "r": 0.013726154469478814,
+   "t": 0.1410903487412433,
+   "win": 0.59375
+  }
+ },
+ {
+  "rule": {
+   "name": "weekly_deep_drawdown_long",
+   "side": "long",
+   "conditions": [
+    [
+     "ret_7d",
+     "<=",
+     -14.0
+    ],
+    [
+     "range_pos_7d",
+     "<",
+     0.1
+    ],
+    [
+     "oi_chg_72h",
+     "<=",
+     -4.5
+    ]
+   ],
+   "hold_hours": 72,
+   "stop_atr": 1.6,
+   "why": "Mean reversion play targeting severe weekly drawdowns where OI washout and range compression precede institutional bounce."
+  },
+  "train": {
+   "n": 350,
+   "per_week": 2.68640350877193,
+   "pct": -0.7447673952856272,
+   "r": -0.07576154934542614,
+   "t": -1.9169185186052586,
+   "win": 0.5028571428571429
+  },
+  "valid": {
+   "n": 156,
+   "per_week": 3.5921052631578947,
+   "pct": 2.08518249811526,
+   "r": 0.1990527570078412,
+   "t": 2.1349329104683386,
+   "win": 0.5192307692307693
+  },
+  "test": {
+   "n": 151,
+   "per_week": 2.0524271844660196,
+   "pct": -0.11737254236305876,
+   "r": -0.025696981977662035,
+   "t": -0.48454010508092055,
+   "win": 0.5033112582781457
+  }
+ },
+ {
+  "rule": {
+   "name": "taker_absorption_swing_long",
+   "side": "long",
+   "conditions": [
+    [
+     "ret_24h",
+     "<=",
+     -1.5
+    ],
+    [
+     "taker_24h",
+     ">=",
+     0.54
+    ],
+    [
+     "buy_ratio_pct_30d",
+     "<=",
+     0.15
+    ]
+   ],
+   "hold_hours": 24,
+   "stop_atr": 1.2,
+   "why": "Hidden accumulation by aggressive market buyers diverging from price while retail positioning remains deeply sidelined."
+  },
+  "train": {
+   "n": 0,
+   "per_week": 0.0,
+   "pct": null,
+   "r": null,
+   "t": null,
+   "win": null
+  },
+  "valid": {
+   "n": 1,
+   "per_week": 0.023026315789473683,
+   "pct": 0.9401757765101427,
+   "r": 0.09515187958784883,
+   "t": null,
+   "win": 1.0
+  },
+  "test": {
+   "n": 0,
+   "per_week": 0.0,
+   "pct": null,
+   "r": null,
+   "t": null,
+   "win": null
+  }
+ },
+ {
+  "rule": {
+   "name": "oi_expansion_exhaustion_short",
+   "side": "short",
+   "conditions": [
+    [
+     "range_pos_7d",
+     ">=",
+     0.92
+    ],
+    [
+     "oi_chg_72h",
+     ">=",
+     8.0
+    ],
+    [
+     "funding_bp",
+     "<",
+     0.5
+    ]
+   ],
+   "hold_hours": 48,
+   "stop_atr": 1.5,
+   "why": "Rapid OI buildup at range highs without funding support signals smart money building shorts against late longs ahead of reversal."
+  },
+  "train": {
+   "n": 249,
+   "per_week": 1.911184210526316,
+   "pct": -0.10171662183322903,
+   "r": -0.036846596302158995,
+   "t": -0.8753786239226865,
+   "win": 0.5341365461847389
+  },
+  "valid": {
+   "n": 92,
+   "per_week": 2.1184210526315788,
+   "pct": -0.9361344132320866,
+   "r": -0.10199122213828014,
+   "t": -1.6013052506379133,
+   "win": 0.3804347826086957
+  },
+  "test": {
+   "n": 152,
+   "per_week": 2.066019417475728,
+   "pct": -1.6496406936375745,
+   "r": -0.17683415825120924,
+   "t": -3.2726162778899863,
+   "win": 0.4342105263157895
+  }
+ },
+ {
+  "rule": {
+   "name": "intraday_momentum_btc_fail_short",
+   "side": "short",
+   "conditions": [
+    [
+     "ret_1h",
+     ">=",
+     1.2
+    ],
+    [
+     "taker_1h",
+     ">=",
+     0.58
+    ],
+    [
+     "btc_ret_4h",
+     "<=",
+     -0.8
+    ]
+   ],
+   "hold_hours": 12,
+   "stop_atr": 0.8,
+   "why": "Exploit intraday momentum exhaustion when local pumps fail to overcome broader BTC weakness, triggering coordinated long liquidations."
+  },
+  "train": {
+   "n": 71,
+   "per_week": 0.5449561403508772,
+   "pct": -0.4226387999476113,
+   "r": -0.05479476477428742,
+   "t": -0.8373864580306934,
+   "win": 0.4225352112676056
+  },
+  "valid": {
+   "n": 61,
+   "per_week": 1.4046052631578947,
+   "pct": 0.4127199716210652,
+   "r": 0.027705365298327796,
+   "t": 0.29991953386421366,
+   "win": 0.4918032786885246
+  },
+  "test": {
+   "n": 74,
+   "per_week": 1.0058252427184466,
+   "pct": -1.3039244085428912,
+   "r": -0.19860778375517904,
+   "t": -3.187544462615986,
+   "win": 0.4189189189189189
+  }
+ }
+]

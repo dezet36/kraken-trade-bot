@@ -1,0 +1,492 @@
+[
+ {
+  "rule": {
+   "name": "funding_crowd_squeeze",
+   "side": "short",
+   "conditions": [
+    [
+     "funding_bp",
+     ">=",
+     3.0
+    ],
+    [
+     "buy_ratio_pct_30d",
+     ">=",
+     0.95
+    ]
+   ],
+   "hold_hours": 24,
+   "stop_atr": 1.5,
+   "why": "Harvest high funding payments and fade over-leveraged longs when retail positioning is at extreme percentiles, anticipating a squeeze or profit-taking reversal."
+  },
+  "train": {
+   "n": 501,
+   "per_week": 3.8453947368421053,
+   "pct": -0.04307371897361723,
+   "r": -0.0028425078851842074,
+   "t": -0.14993547537712207,
+   "win": 0.5369261477045908
+  },
+  "valid": {
+   "n": 210,
+   "per_week": 4.8355263157894735,
+   "pct": -0.7451776144939265,
+   "r": -0.05317596988097734,
+   "t": -1.7300426198949563,
+   "win": 0.4666666666666667
+  },
+  "test": {
+   "n": 2,
+   "per_week": 0.027184466019417475,
+   "pct": 1.8313612947834614,
+   "r": 0.057890633666999564,
+   "t": 0.37146368741481944,
+   "win": 0.5
+  }
+ },
+ {
+  "rule": {
+   "name": "whale_trend_follow",
+   "side": "long",
+   "conditions": [
+    [
+     "ret_24h",
+     ">=",
+     2.0
+    ],
+    [
+     "size_z",
+     ">=",
+     1.27
+    ],
+    [
+     "oi_chg_24h",
+     ">=",
+     3.0
+    ]
+   ],
+   "hold_hours": 48,
+   "stop_atr": 1.0,
+   "why": "Confirm momentum with large trade sizes and open interest expansion; new money driving the trend increases probability of continuation."
+  },
+  "train": {
+   "n": 399,
+   "per_week": 3.0625,
+   "pct": 0.5206632417524251,
+   "r": 0.08723417132568538,
+   "t": 1.448195439076011,
+   "win": 0.45864661654135336
+  },
+  "valid": {
+   "n": 203,
+   "per_week": 4.6743421052631575,
+   "pct": 1.4491215619851403,
+   "r": 0.17303168134779706,
+   "t": 1.8509279752923615,
+   "win": 0.458128078817734
+  },
+  "test": {
+   "n": 245,
+   "per_week": 3.330097087378641,
+   "pct": 0.9128994051693003,
+   "r": 0.1966314642092455,
+   "t": 1.8362998965589956,
+   "win": 0.4448979591836735
+  }
+ },
+ {
+  "rule": {
+   "name": "capitulation_reversal",
+   "side": "long",
+   "conditions": [
+    [
+     "range_pos_7d",
+     "<=",
+     0.1
+    ],
+    [
+     "oi_chg_24h",
+     "<=",
+     -3.0
+    ],
+    [
+     "ret_24h",
+     "<=",
+     -2.0
+    ]
+   ],
+   "hold_hours": 48,
+   "stop_atr": 1.5,
+   "why": "Enter at range lows after OI collapse signals long liquidation/capitulation; mean-reverting bounce expected as selling pressure exhausts."
+  },
+  "train": {
+   "n": 967,
+   "per_week": 7.422149122807018,
+   "pct": -0.8603735957992961,
+   "r": -0.08746507972603662,
+   "t": -4.227547295921765,
+   "win": 0.4788004136504654
+  },
+  "valid": {
+   "n": 370,
+   "per_week": 8.519736842105262,
+   "pct": 0.5031596146948706,
+   "r": 0.027008740778662513,
+   "t": 0.5804203877031134,
+   "win": 0.5135135135135135
+  },
+  "test": {
+   "n": 530,
+   "per_week": 7.203883495145631,
+   "pct": 0.6140610634011323,
+   "r": 0.04047950451442838,
+   "t": 1.564744001817433,
+   "win": 0.5452830188679245
+  }
+ },
+ {
+  "rule": {
+   "name": "absorption_long",
+   "side": "long",
+   "conditions": [
+    [
+     "taker_24h_dev",
+     ">=",
+     0.018
+    ],
+    [
+     "ret_24h",
+     "<=",
+     -1.0
+    ],
+    [
+     "vol_z",
+     ">=",
+     1.5
+    ]
+   ],
+   "hold_hours": 24,
+   "stop_atr": 1.2,
+   "why": "Aggressive buying fails to push price up despite high volume, indicating hidden limit demand absorbing supply; price likely to rise as sellers exhaust."
+  },
+  "train": {
+   "n": 71,
+   "per_week": 0.5449561403508772,
+   "pct": 1.5226396383398602,
+   "r": 0.03241508439935573,
+   "t": 0.28719871607720554,
+   "win": 0.5070422535211268
+  },
+  "valid": {
+   "n": 24,
+   "per_week": 0.5526315789473684,
+   "pct": 0.21559547009159966,
+   "r": -0.0019168963460841858,
+   "t": -0.015039462367369841,
+   "win": 0.4583333333333333
+  },
+  "test": {
+   "n": 47,
+   "per_week": 0.6388349514563108,
+   "pct": -0.6806403447437063,
+   "r": -0.12196568212248785,
+   "t": -1.0643905656908321,
+   "win": 0.3617021276595745
+  }
+ },
+ {
+  "rule": {
+   "name": "alpha_weakness_short",
+   "side": "short",
+   "conditions": [
+    [
+     "btc_ret_24h",
+     ">=",
+     2.0
+    ],
+    [
+     "rel_24h",
+     "<=",
+     -2.0
+    ],
+    [
+     "oi_chg_24h",
+     "<=",
+     -3.0
+    ]
+   ],
+   "hold_hours": 24,
+   "stop_atr": 1.5,
+   "why": "Short underperformers that lag significantly during strong BTC rallies; relative weakness confirms lack of demand and OI drop suggests unwinding."
+  },
+  "train": {
+   "n": 1014,
+   "per_week": 7.782894736842105,
+   "pct": -0.07728711655051052,
+   "r": -0.005264342393933686,
+   "t": -0.3802473024835906,
+   "win": 0.5216962524654832
+  },
+  "valid": {
+   "n": 327,
+   "per_week": 7.529605263157895,
+   "pct": -0.5564501662556468,
+   "r": -0.050789088577684036,
+   "t": -2.2221669268467132,
+   "win": 0.47706422018348627
+  },
+  "test": {
+   "n": 215,
+   "per_week": 2.9223300970873787,
+   "pct": -0.348570102648288,
+   "r": -0.0811842667159073,
+   "t": -2.4765677909046344,
+   "win": 0.48372093023255813
+  }
+ },
+ {
+  "rule": {
+   "name": "neg_funding_short_squeeze",
+   "side": "long",
+   "conditions": [
+    [
+     "funding_bp",
+     "<=",
+     -2.0
+    ],
+    [
+     "buy_ratio_pct_30d",
+     "<=",
+     0.03
+    ]
+   ],
+   "hold_hours": 48,
+   "stop_atr": 1.5,
+   "why": "Harvest negative funding (shorts pay longs) and play short squeeze when retail is maximally short and funding is deeply negative."
+  },
+  "train": {
+   "n": 255,
+   "per_week": 1.9572368421052633,
+   "pct": 0.4739378317130725,
+   "r": 0.04398602306651543,
+   "t": 0.8746890905503734,
+   "win": 0.4588235294117647
+  },
+  "valid": {
+   "n": 38,
+   "per_week": 0.875,
+   "pct": 1.7389134134290714,
+   "r": 0.12073047575372148,
+   "t": 1.0725127318497572,
+   "win": 0.47368421052631576
+  },
+  "test": {
+   "n": 46,
+   "per_week": 0.625242718446602,
+   "pct": 5.6150263604987005,
+   "r": 0.6280044154151816,
+   "t": 2.793652699350623,
+   "win": 0.6086956521739131
+  }
+ },
+ {
+  "rule": {
+   "name": "intraday_surge_cont",
+   "side": "long",
+   "conditions": [
+    [
+     "ret_1h",
+     ">=",
+     1.0
+    ],
+    [
+     "taker_1h",
+     ">=",
+     0.55
+    ],
+    [
+     "vol_z",
+     ">=",
+     2.0
+    ]
+   ],
+   "hold_hours": 12,
+   "stop_atr": 1.0,
+   "why": "Capture short-term momentum from extreme hourly spikes driven by aggressive flow and exceptional volume; fast exit to avoid reversal."
+  },
+  "train": {
+   "n": 585,
+   "per_week": 4.490131578947369,
+   "pct": 0.2651600629798925,
+   "r": 0.04530773829828287,
+   "t": 1.7649797047886633,
+   "win": 0.4700854700854701
+  },
+  "valid": {
+   "n": 368,
+   "per_week": 8.473684210526315,
+   "pct": 0.12972587024651516,
+   "r": 0.008292170614800944,
+   "t": 0.25335982324413164,
+   "win": 0.4375
+  },
+  "test": {
+   "n": 604,
+   "per_week": 8.209708737864078,
+   "pct": -0.25389442447214555,
+   "r": -0.030816125228520626,
+   "t": -1.072532278568221,
+   "win": 0.4105960264900662
+  }
+ },
+ {
+  "rule": {
+   "name": "retail_panic_reversal",
+   "side": "long",
+   "conditions": [
+    [
+     "buy_ratio_chg_24h",
+     "<=",
+     -7.0
+    ],
+    [
+     "range_pos_7d",
+     "<=",
+     0.25
+    ],
+    [
+     "oi_chg_4h",
+     "<=",
+     -1.5
+    ]
+   ],
+   "hold_hours": 48,
+   "stop_atr": 1.5,
+   "why": "Contrarian entry on rapid retail long liquidation (ratio drop) at range lows with OI decline, marking capitulation and potential bounce."
+  },
+  "train": {
+   "n": 195,
+   "per_week": 1.4967105263157896,
+   "pct": 0.9527472418570352,
+   "r": 0.04153119940010572,
+   "t": 0.8374149903579784,
+   "win": 0.5641025641025641
+  },
+  "valid": {
+   "n": 9,
+   "per_week": 0.20723684210526314,
+   "pct": 5.908800078578877,
+   "r": 0.4258456867374751,
+   "t": 2.0072081616203556,
+   "win": 0.6666666666666666
+  },
+  "test": {
+   "n": 2,
+   "per_week": 0.027184466019417475,
+   "pct": -5.6213399363238,
+   "r": -0.46440706202860854,
+   "t": -0.8506094502709962,
+   "win": 0.5
+  }
+ },
+ {
+  "rule": {
+   "name": "weekly_crap_shakeout",
+   "side": "long",
+   "conditions": [
+    [
+     "ret_7d",
+     "<=",
+     -11.0
+    ],
+    [
+     "range_pos_7d",
+     "<=",
+     0.15
+    ],
+    [
+     "oi_chg_72h",
+     ">=",
+     4.0
+    ]
+   ],
+   "hold_hours": 72,
+   "stop_atr": 2.0,
+   "why": "Deep weekly drawdown with OI expansion suggests short covering or accumulation; mean-reverting bounce likely after severe shakeout."
+  },
+  "train": {
+   "n": 503,
+   "per_week": 3.8607456140350878,
+   "pct": -0.5929215481962165,
+   "r": -0.07781702066150586,
+   "t": -2.6648741179532487,
+   "win": 0.49304174950298213
+  },
+  "valid": {
+   "n": 158,
+   "per_week": 3.638157894736842,
+   "pct": 0.6198778819756197,
+   "r": 0.0583095444836686,
+   "t": 0.8559256217456336,
+   "win": 0.5
+  },
+  "test": {
+   "n": 303,
+   "per_week": 4.118446601941748,
+   "pct": -0.8960271087284416,
+   "r": -0.0873684497921921,
+   "t": -2.2419738516857564,
+   "win": 0.429042904290429
+  }
+ },
+ {
+  "rule": {
+   "name": "flow_range_divergence_short",
+   "side": "short",
+   "conditions": [
+    [
+     "taker_24h_dev",
+     "<=",
+     -0.018
+    ],
+    [
+     "range_pos_7d",
+     ">=",
+     0.85
+    ],
+    [
+     "buy_ratio_pct_30d",
+     ">=",
+     0.85
+    ]
+   ],
+   "hold_hours": 24,
+   "stop_atr": 1.5,
+   "why": "Sell at range highs where heavy selling pressure accumulates and retail is max long; divergence signals resistance and imminent breakdown."
+  },
+  "train": {
+   "n": 38,
+   "per_week": 0.2916666666666667,
+   "pct": 0.12264860464950872,
+   "r": -0.0015354127070473437,
+   "t": -0.029550321325215883,
+   "win": 0.6052631578947368
+  },
+  "valid": {
+   "n": 7,
+   "per_week": 0.1611842105263158,
+   "pct": 1.0818902311522085,
+   "r": 0.13782844424320354,
+   "t": 1.5209893918376705,
+   "win": 0.5714285714285714
+  },
+  "test": {
+   "n": 24,
+   "per_week": 0.3262135922330097,
+   "pct": 0.9481012012401712,
+   "r": 0.06973037550772522,
+   "t": 0.6070044245245642,
+   "win": 0.6666666666666666
+  }
+ }
+]
