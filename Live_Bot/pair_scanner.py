@@ -72,6 +72,33 @@ def _score(setup, rr, htf_strength, proximity):
             config.SCORE_WEIGHT_PROXIMITY * proximity_score)
 
 
+def _funding_rate(pair):
+    """Последняя выплаченная ставка фандинга (доля за 8 ч) из общего слоя или None."""
+    try:
+        import positioning
+        rate = positioning.latest('funding', pair)
+        return None if rate is None else float(rate)
+    except Exception as exc:                                  # noqa: BLE001
+        log(f"   {pair}: фандинг не прочитан ({exc})")
+        return None
+
+
+def crowd_reason(direction, rate):
+    """
+    Причина отказа «толпа за сделку» для фибо или None (config.FIBO_FUNDING_*).
+
+    Своя копия правила, а не импорт из SMC: стратегия не импортирует другую
+    стратегию (CLAUDE.md, «Изоляция стратегий»), и порог у каждой свой.
+    """
+    if not config.FIBO_FUNDING_AGAINST_CROWD or rate is None:
+        return None
+    side = 1.0 if str(direction).upper() in ('LONG', 'BULLISH') else -1.0
+    if rate * 1e4 * side <= config.FIBO_FUNDING_MAX_BP:
+        return None
+    crowd = 'в лонгах' if rate > 0 else 'в шортах'
+    return f'толпа за сделку (фандинг {rate * 1e4:+.2f} б.п., толпа {crowd})'
+
+
 def scan_for_setups(liquid_pairs, trade_manager, client=None):
     """
     Loads 1H data for each liquid pair, checks for an active Fibonacci
@@ -175,6 +202,14 @@ def scan_for_setups(liquid_pairs, trade_manager, client=None):
                 report.record('FIBO', pair, 'нет направления на старшем таймфрейме')
                 continue
 
+            # Против толпы (config.FIBO_FUNDING_AGAINST_CROWD, research/fibo_crowd.py)
+            funding = _funding_rate(pair) if config.FIBO_FUNDING_AGAINST_CROWD else None
+            blocked = crowd_reason(setup_dir, funding)
+            if blocked:
+                log(f"   {pair}: {setup_dir} пропущен — {blocked}")
+                report.record('FIBO', pair, blocked)
+                continue
+
             params_est = calculate_trade_params(setup, entry_level, config.SCORE_NOMINAL_BALANCE,
                                                  log_reject=False)
             rr_est = params_est['rr'] if params_est else 0.0
@@ -201,6 +236,8 @@ def scan_for_setups(liquid_pairs, trade_manager, client=None):
                 'proximity':    round(proximity, 2),
                 'size_pct':     round(size_pct, 1),
                 'htf_trend':    htf_trend,
+                # Ставка в момент решения — чтобы фильтр толпы проверялся вживую.
+                'funding_bp':   None if funding is None else round(funding * 1e4, 3),
             })
             report.record('FIBO', pair, None)
             log(f"   {pair}: {setup_dir} {active_zone['name']} | HTF={htf_trend}({htf_strength:.3f}) | "
