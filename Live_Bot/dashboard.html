@@ -560,6 +560,17 @@
               border-radius: var(--r-md); padding: 6px 8px 2px; }
   .tc-chart svg { width: 100%; height: auto; display: block; }
   .tc-tf { text-align: right; font-size: 11px; color: var(--ink-4); padding: 2px 4px; }
+  /* Легенда структуры под графиком: номер на графике — подпись и цена здесь,
+     где им хватает места (27.09.2026: подписи у левого края лежали друг на
+     друге и на свечах). */
+  .tc-legend { display: flex; flex-wrap: wrap; gap: 6px 14px; padding: 8px 4px 2px;
+               font-size: 12px; color: var(--ink-2); line-height: 1.35; }
+  .tc-li { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+  .tc-li.tc-li-main { font-weight: 600; color: var(--ink); }
+  .tc-n { display: inline-flex; align-items: center; justify-content: center; flex: none;
+          min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px;
+          color: var(--surface); font-size: 10.5px; font-weight: 700; }
+  .tc-lp { color: var(--ink-3); font-weight: 400; font-variant-numeric: tabular-nums; }
   /* Пояснение про несохранённую разметку. Цвет предупреждения, а не ошибки:
      это не поломка, а свойство старых записей. */
   .tc-tf .warn { color: var(--warn); }
@@ -3199,7 +3210,11 @@ function openTrade(id, quiet) {
   // Список прокручивается в своей рамке высотой в пол-экрана. Раскрытая
   // карточка занимает её почти целиком, и соседние сделки уезжали за нижний
   // край — выглядело так, будто список обрезался. Подводим карточку к глазам.
-  scrollRowIntoBox(table, row);
+  // ТОЛЬКО ПО НАЖАТИЮ. Панель обновляется раз в 15 с и после каждого
+  // обновления тихо раскрывает сделку заново (quiet); прокрутка стояла без
+  // условия и каждые 15 с утаскивала список обратно к раскрытой строке —
+  // владелец 27.09.2026: «графики постоянно сползают».
+  if (!quiet) scrollRowIntoBox(table, row);
   if (!quiet) syncTradeUrl(id);
   if (!cached) loadTradeChart(t);
 }
@@ -3317,13 +3332,14 @@ function posChartHtml(pos, data) {
   // tradeChart ждёт поля закрытой сделки; у открытой позиции выхода ещё нет,
   // и подсовывать вместо него текущую цену нельзя — на графике появилась бы
   // линия «выход», которой не существует.
+  // Все цели плана, а не две первые: у SMC их три, и третьей на графике не было.
+  // live — позиция открыта: на графике текущая цена «сейчас».
   const targets = pos.targets && pos.targets.length ? pos.targets : [pos.tp1];
   return tradeChart({
-    entry: pos.entry, stop: pos.stop, tp1: targets[0],
-    tp2: targets.length > 1 ? targets[1] : null,
-    exit: 0, direction: pos.direction,
+    entry: pos.entry, stop: pos.stop, targets: targets,
+    exit: 0, direction: pos.direction, live: true, now: pos.price,
     opened: pos.opened, closed: null, geometry: pos.geometry,
-  }, data, { W: 420, H: 230 });
+  }, data, { W: 420, H: 300 });
 }
 
 /* ── Раскрытый ордер ────────────────────────────────────────────────────── */
@@ -3375,8 +3391,8 @@ function openOrder(id, quiet) {
   renderOrderCard(order, cached || null, cached ? null : 'загружаю график…');
   // К глазам подводится СТРОКА, а не карточка: карточка высокая, и
   // прокрутка к ней уводила саму строку за верхний край — было непонятно,
-  // что именно раскрылось.
-  scrollRowIntoBox(table, row);
+  // что именно раскрылось. Только по нажатию — см. openTrade.
+  if (!quiet) scrollRowIntoBox(table, row);
   if (!cached) loadOrderChart(order);
 }
 
@@ -3414,9 +3430,9 @@ function renderOrderCard(o, data, note) {
   // Ордер ещё не сделка: выхода нет, и подставлять вместо него текущую цену
   // нельзя — на графике появилась бы линия «выход», которой не существует.
   const chart = note ? '<div class="tc-note">' + esc(note) + '</div>'
-    : tradeChart({ entry: o.entry, stop: o.stop, tp1: o.tp1, tp2: null, exit: 0,
+    : tradeChart({ entry: o.entry, stop: o.stop, targets: o.targets, tp1: o.tp1, exit: 0,
                    direction: o.direction, opened: o.opened, closed: null,
-                   geometry: o.geometry }, data);
+                   geometry: o.geometry, pending: true, live: true, now: o.price }, data);
 
   cell.innerHTML = '<div class="tc-box">'
     + '<div class="tc-left">' + chart + '</div>'
@@ -3449,286 +3465,342 @@ function renderOrderCard(o, data, note) {
   if (hide) hide.onclick = () => closeOrder();
 }
 
+/* ── График сделки, позиции и ордера ────────────────────────────────────────
+   Переписан 27.09.2026 по просьбе владельца: «графики корявые, ничего не
+   понятно; должна быть понятная информация о точках входа, выхода и
+   структуре, по которой открывается позиция». Что было не так на живом
+   графике ETH (снимок панели):
+     • подписи структуры стояли у левого края друг на друге и на свечах;
+     • «цель 2 788,07» читалось как «цель 2 · 788» — цена сливалась с номером,
+       а третьей цели не было вовсе;
+     • где налилась позиция — не видно: только вертикальная черта «вход»
+       наверху, поверх линий целей;
+     • у открытой позиции не было текущей цены.
+   Как теперь:
+     • справа — колонка подписей плана: цель 1/2/3, вход (лимит), стоп, выход,
+       сейчас; название и цена раздельно, подписи не налезают друг на друга,
+       сдвинутая подпись связана со своей линией выноской; уровень далеко за
+       окном — стрелкой у края, а не сжатием всех свечей в полоску;
+     • на свечах — треугольник входа там, где налилась позиция, точка выхода и
+       пунктир пути сделки между ними;
+     • структура (ордер-блок, имбаланс, слом, снятие ликвидности, импульс) —
+       полосами и линиями от начала сетапа с номерами, а подписи с ценами —
+       легендой под графиком, где им хватает места;
+     • внизу — ось времени: начало окна, сетап, вход, выход / сейчас.
+   t: entry, stop, targets (или tp1/tp2/tp3), exit, direction, opened, closed,
+      geometry, mfe_r, mae_r, pnl; live — открытая позиция (рисуется «сейчас»),
+      pending — ордер (вход ещё не налился: «лимит», без треугольника). */
 function tradeChart(t, data, size) {
   const candles = (data && data.candles) || [];
   if (!candles.length) return '';
 
-  // Картинка тянется по ширине места, а шрифт внутри неё задан в координатах
-  // холста — значит, чем шире холст, тем мельче текст на экране. Карточка
-  // позиции втрое уже строки истории, и один холст на двоих давал там
-  // нечитаемые подписи. Поэтому холст подбирается под место.
-  const W = (size && size.W) || 720, H = (size && size.H) || 300;
-  // Правое поле — под самую длинную подпись цены. Замерено: при 112 текст
-  // «стоп 63 343,678» вылезал за холст на 15 точек, и SVG получал
-  // горизонтальное переполнение. Считаем от длины самой цены, а не на глаз.
-  const priceLen = Math.max(...[t.entry, t.stop, t.tp1, t.exit]
-    .filter(v => v > 0).map(v => price(v).length), 8);
-  const PL = 8, PR = Math.min(W * 0.28, 46 + priceLen * 6.2), PT = 12, PB = 22;
-  const lows = candles.map(c => c[3]), highs = candles.map(c => c[2]);
-  const levels = [t.entry, t.stop, t.tp1, t.tp2, t.exit].filter(v => v > 0);
-  let lo = Math.min(...lows, ...levels), hi = Math.max(...highs, ...levels);
-  const pad = (hi - lo) * 0.06 || hi * 0.01;
+  const W = (size && size.W) || 640, H = (size && size.H) || 340;
+  // Шрифт в координатах холста: холст тянется по ширине места, и на узкой
+  // карточке позиции крупнее выглядел бы тот же размер.
+  const FS = W < 500 ? 11 : 12;
+  const CH = FS * 0.58;                                  // средняя ширина знака
+  const long = (t.direction || '').toUpperCase() === 'LONG';
+  const geo = t.geometry || {};
+  const stamps = candles.map(c => new Date(c[0]).getTime());
+  const t0 = stamps[0], t1 = stamps[stamps.length - 1];
+  const lastClose = Number(candles[candles.length - 1][4]);
+  const ms = iso => { const v = new Date(iso).getTime(); return isFinite(v) ? v : null; };
+
+  // ── Уровни плана ─────────────────────────────────────────────────────────
+  const tg = (Array.isArray(t.targets) && t.targets.length ? t.targets : [t.tp1, t.tp2, t.tp3])
+    .map(Number).filter((v, i, a) => v > 0 && a.indexOf(v) === i);
+  const plan = [];
+  tg.forEach((v, i) => plan.push({ v, color: 'var(--good)', name: tg.length > 1 ? 'цель ' + (i + 1) : 'цель', dash: '5 4' }));
+  if (t.stop > 0) plan.push({ v: Number(t.stop), color: 'var(--bad)', name: 'стоп', dash: '5 4' });
+  if (t.entry > 0) plan.push({ v: Number(t.entry), color: 'var(--ink)', name: t.pending ? 'лимит' : 'вход', strong: true });
+  // Выход окрашен исходом, как и его точка на свечах: зелёный — в плюс, красный — в минус.
+  const won = (t.pnl != null ? t.pnl : (long ? t.exit - t.entry : t.entry - t.exit)) >= 0;
+  if (t.exit > 0) plan.push({ v: Number(t.exit), color: won ? 'var(--good)' : 'var(--bad)', name: 'выход', strong: true });
+  // «Сейчас» — цена из карточки, если она пришла: свечи подтягиваются раз в две
+  // минуты, и подпись с закрытием последней свечи расходилась бы с карточкой.
+  const nowPrice = Number(t.now) > 0 ? Number(t.now) : lastClose;
+  if (t.live && nowPrice > 0) plan.push({ v: nowPrice, color: 'var(--ink-3)', name: 'сейчас', dash: '2 3' });
+
+  // ── Масштаб цены ─────────────────────────────────────────────────────────
+  // Окно — свечи и то, что решает сделку: вход, стоп, выход, текущая цена.
+  // Цели добавляются, пока не сжимают свечи больше чем в полтора раза; дальняя
+  // цель рисуется стрелкой у края, а не превращает график в полоску.
+  let lo = Math.min(...candles.map(c => c[3])), hi = Math.max(...candles.map(c => c[2]));
+  plan.filter(p => p.name.indexOf('цель') !== 0).forEach(p => { lo = Math.min(lo, p.v); hi = Math.max(hi, p.v); });
+  const base = hi - lo || hi * 0.01;
+  tg.forEach(v => {
+    if (v > hi && v - lo <= base * 1.6) hi = v;
+    if (v < lo && hi - v <= base * 1.6) lo = v;
+  });
+  const pad = (hi - lo) * 0.05 || hi * 0.005;
   lo -= pad; hi += pad;
 
-  const x = i => PL + i * (W - PL - PR) / Math.max(candles.length - 1, 1);
-  const y = v => PT + (hi - v) / (hi - lo || 1) * (H - PT - PB);
-  const bw = Math.max(1.5, (W - PL - PR) / candles.length * 0.62);
+  // Крайние цены внутри сделки (mfe/mae) — подписью «макс/мин R» без цены: цена
+  // здесь расчётная и длинная, смысл — сколько R было на руках. Считаются ДО
+  // ширины правой колонки: иначе их подписи не входили в неё и обрезались краем.
+  const risk = Math.abs((t.entry || 0) - (t.stop || 0));
+  const sgn = long ? 1 : -1;
+  const best = risk > 0 && t.mfe_r != null ? t.entry + sgn * Math.abs(t.mfe_r) * risk : null;
+  const worst = risk > 0 && t.mae_r != null ? t.entry - sgn * Math.abs(t.mae_r) * risk : null;
+  if (best !== null && best >= lo && best <= hi) {
+    plan.push({ v: best, color: 'var(--good)', name: 'макс ' + fx(t.mfe_r, 2, true) + 'R', faint: true });
+  }
+  if (worst !== null && worst >= lo && worst <= hi) {
+    plan.push({ v: worst, color: 'var(--bad)', name: 'мин ' + fx(-Math.abs(t.mae_r), 2, true) + 'R', faint: true });
+  }
 
+  // Правая колонка — под самую длинную подпись «цель 3  2 815,572».
+  const tagText = p => p.name + (p.faint ? '' : '  ' + price(p.v));
+  const longest = Math.max(...plan.map(p => tagText(p).length), 10);
+  const PL = 6, PT = 10, PB = 30;
+  const PR = Math.min(Math.round(longest * CH + 22), Math.round(W * 0.42));
+  const XR = W - PR;                                        // правый край свечей
+  const y = v => PT + (hi - v) / (hi - lo || 1) * (H - PT - PB);
+  const xt = v => PL + (v - t0) / ((t1 - t0) || 1) * (XR - PL);
+  const inside = v => v >= lo && v <= hi;
+  const bw = Math.max(1.2, (XR - PL) / candles.length * 0.64);
+
+  // ── Время событий ────────────────────────────────────────────────────────
+  const clampX = x => Math.max(PL, Math.min(XR, x));
+  const tOpen = t.opened ? ms(t.opened) : null;
+  const tClose = t.closed ? ms(t.closed) : null;
+  const tSetup = geo.from ? ms(geo.from) : null;
+  const xOpen = tOpen !== null ? clampX(xt(tOpen)) : null;
+  const xClose = tClose !== null ? clampX(xt(tClose)) : null;
+  const xSetup = tSetup !== null && tSetup >= t0 && tSetup <= t1 ? xt(tSetup) : null;
+  const xFrom = xSetup !== null ? xSetup : PL;              // структура — от начала сетапа
+
+  // ── Свечи ────────────────────────────────────────────────────────────────
   const body = candles.map((c, i) => {
-    const [ts, o, h, l, cl] = c;
-    const up = cl >= o;
-    const col = up ? 'var(--good)' : 'var(--bad)';
-    const yo = y(o), yc = y(cl);
-    const top = Math.min(yo, yc), height = Math.max(Math.abs(yc - yo), 1);
-    return '<line x1="' + x(i) + '" y1="' + y(h) + '" x2="' + x(i) + '" y2="' + y(l)
-      + '" stroke="' + col + '" stroke-width="1" opacity=".55"/>'
-      + '<rect x="' + (x(i) - bw / 2) + '" y="' + top + '" width="' + bw
-      + '" height="' + height + '" fill="' + col + '" opacity=".85"/>';
+    const [, o, h, l, cl] = c;
+    const col = cl >= o ? 'var(--good)' : 'var(--bad)';
+    const xx = xt(stamps[i]);
+    const top = Math.min(y(o), y(cl)), height = Math.max(Math.abs(y(cl) - y(o)), 1);
+    return '<line x1="' + xx + '" y1="' + y(h) + '" x2="' + xx + '" y2="' + y(l)
+      + '" stroke="' + col + '" stroke-width="1" opacity=".6"/>'
+      + '<rect x="' + (xx - bw / 2) + '" y="' + top + '" width="' + bw + '" height="' + height
+      + '" fill="' + col + '" opacity=".9"/>';
   }).join('');
 
-  // Уровни рисуем в два прохода: сначала линии, потом подписи. Стоп и выход
-  // сплошь и рядом стоят почти на одной цене — по стопу и выходят, — и их
-  // подписи ложились друг на друга: не читалась ни та, ни другая. Разводим
-  // их по вертикали, линии при этом остаются на своих местах.
-  const marks = [];
-  const line = (v, color, label, dash) => {
-    if (!(v > 0) || v < lo || v > hi) return '';
-    const yy = y(v);
-    marks.push({ y: yy, color: color, text: label + ' ' + price(v) });
-    return '<line x1="' + PL + '" y1="' + yy + '" x2="' + (W - PR) + '" y2="' + yy
-      + '" stroke="' + color + '" stroke-width="1.2"'
-      + (dash ? ' stroke-dasharray="4 3"' : '') + ' opacity=".9"/>';
+  // ── Структура: полосы, линии, импульс, касания — под свечами ────────────
+  // Номер ставится на линии у начала сетапа; подпись с ценой — в легенде.
+  const legend = [], badges = [];
+  let n = 0;
+  const badge = (yy, color) => {
+    n += 1;
+    // Номера на близких линиях разводятся по горизонтали, чтобы не лечь друг
+    // на друга: каждый следующий правее на свою ширину.
+    let bx = xFrom + 10;
+    badges.forEach(b => { if (Math.abs(b.y - yy) < 15 && Math.abs(b.x - bx) < 16) bx = b.x + 17; });
+    badges.push({ x: bx, y: yy, n, color });
+    return n;
   };
-
-  const labels = () => {
-    marks.sort((a, b) => a.y - b.y);
-    let prev = -99;
-    return marks.map(m => {
-      const yy = Math.max(m.y, prev + 12);
-      prev = yy;
-      return '<text x="' + (W - PR + 6) + '" y="' + (yy + 3.5) + '" fill="' + m.color
-        + '" font-size="10.5">' + m.text + '</text>';
-    }).join('');
-  };
-
-  // Вертикальные отметки входа и выхода: без них непонятно, в какой момент
-  // окна сделка началась и закончилась.
-  const stamps = candles.map(c => new Date(c[0]).getTime());
-  const nearest = iso => {
-    if (!iso) return null;
-    const target = new Date(iso).getTime();
-    let best = 0, diff = Infinity;
-    stamps.forEach((v, i) => {
-      const d = Math.abs(v - target);
-      if (d < diff) { diff = d; best = i; }
-    });
-    return best;
-  };
-  const mark = (idx, color, label) => {
-    if (idx === null) return '';
-    // Выход обычно у правого края окна, и подпись справа от черты залезала
-    // в колонку с ценами уровней. У правого края пишем слева от черты.
-    const right = x(idx) > (W - PR) * 0.75;
-    return '<line x1="' + x(idx) + '" y1="' + PT + '" x2="' + x(idx) + '" y2="'
-      + (H - PB) + '" stroke="' + color + '" stroke-width="1" stroke-dasharray="2 4"'
-      + ' opacity=".7"/><text x="' + (x(idx) + (right ? -4 : 4)) + '" y="' + (PT + 11)
-      + '" fill="' + color + '" font-size="10"'
-      + (right ? ' text-anchor="end"' : '') + '>' + label + '</text>';
-  };
-
-  // Разметка, по которой стратегия принимала решение: зона коррекции,
-  // ордер-блок, уровень. Без неё непонятно главное — вошли ли там, где
-  // собирались. Полосы и линии рисуются ПОД свечами, чтобы не закрывать их.
-  const geo = t.geometry || {};
-  const inView = v => v > lo && v < hi;
-  // Подписи разметки стоят у левого края, а там свечи. Обводка цветом фона
-  // под текстом — тот же приём, что у подписей на картах: буквы читаются
-  // поверх любого рисунка, и при этом ничего не закрашивается прямоугольником.
-  const HALO = ' paint-order="stroke" stroke="var(--surface)" stroke-width="2.6"'
-    + ' stroke-linejoin="round"';
-  // Разметка обрезается по окну, а окно под неё НЕ расширяется: зона B и
-  // начало импульса бывают далеко от цены, и ради них пришлось бы сжать все
-  // свечи в полоску. Что не поместилось — не рисуем.
-  // Полосы и линии идут ПОД свечами, а подписи к ним — НАД. Иначе свечи
-  // закрашивают текст: обводка от этого не спасает, потому что рисуется
-  // раньше. Именно так и пропадала подпись зоны B — её съедала первая же
-  // свеча у левого края.
-  // ЗОНА СДЕЛКИ И ЗОНА КОНТЕКСТА РИСУЮТСЯ ПО-РАЗНОМУ. Раньше все полосы были
-  // одинаково бледными (заливка .07), и на картинке нельзя было отличить то,
-  // ВО ЧТО входим, от того, что просто рядом. У Фибоначчи это зона A против
-  // зоны B, у SMC — ордер-блок против имбаланса.
-  const bandFills = [], bandLabels = [];
-  (geo.bands || []).forEach(b => {
+  const bandsSvg = (geo.bands || []).map(b => {
     const top = Math.min(b.top, hi), bottom = Math.max(b.bottom, lo);
-    if (top <= bottom) return;
+    if (!(top > bottom)) return '';
     const main = !!b.main;
-    const fill = main ? '.15' : '.06';
-    const edge = main ? '.85' : '.30';
-    const w = main ? '1.3' : '.8';
-    bandFills.push('<rect x="' + PL + '" y="' + y(top) + '" width="' + (W - PR - PL)
-      + '" height="' + Math.max(y(bottom) - y(top), 1) + '" fill="var(--accent)"'
-      + ' opacity="' + fill + '"/>'
-      + '<line x1="' + PL + '" y1="' + y(top) + '" x2="' + (W - PR) + '" y2="' + y(top)
-      + '" stroke="var(--accent)" stroke-width="' + w + '" opacity="' + edge + '"/>'
-      + '<line x1="' + PL + '" y1="' + y(bottom) + '" x2="' + (W - PR) + '" y2="'
-      + y(bottom) + '" stroke="var(--accent)" stroke-width="' + w
-      + '" opacity="' + edge + '"'
-      + (main ? '' : ' stroke-dasharray="5 4"') + '/>');
-    bandLabels.push('<text x="' + (PL + 4) + '" y="' + (y(top) + (main ? 11 : 10))
-      + '" fill="var(--accent)" font-size="' + (main ? '10.5' : '9.5') + '"'
-      + (main ? ' font-weight="600"' : '') + ' opacity="' + (main ? '1' : '.85')
-      + '"' + HALO + '>' + esc(b.label || '') + '</text>');
-  });
-  const shown = (geo.lines || []).filter(g => inView(g.price));
-  // Главная линия сетапа рисуется иначе, чем вспомогательная. У стратегии
-  // уровней сам уровень — это и есть повод для сделки, а рисовался он тем же
-  // бледным пунктиром, что и края импульса у соседей: на графике его
-  // приходилось искать глазами, хотя всё построено вокруг него.
-  const guideLines = shown.map(g => g.main
-    ? '<line x1="' + PL + '" y1="' + y(g.price) + '" x2="' + (W - PR) + '" y2="'
-      + y(g.price) + '" stroke="var(--accent)" stroke-width="1.6" opacity=".85"/>'
-    : '<line x1="' + PL + '" y1="' + y(g.price) + '" x2="' + (W - PR) + '" y2="'
-      + y(g.price) + '" stroke="var(--ink-4)" stroke-width=".8"'
-      + ' stroke-dasharray="1 4" opacity=".7"/>').join('');
-  const guideLabels = shown.map(g =>
-    '<text x="' + (PL + 4) + '" y="' + (y(g.price) - 4) + '" fill="'
-    + (g.main ? 'var(--accent)' : 'var(--ink-3)') + '" font-size="'
-    + (g.main ? '10.5' : '9.5') + '"'
-    + (g.main ? ' font-weight="600"' : '') + HALO + '>'
-    + esc(g.label || '') + '</text>').join('');
-  const bands = bandFills.join(''), guides = guideLines;
-  const geoLabels = bandLabels.join('') + guideLabels;
-
-  // ПУСТАЯ РАЗМЕТКА ОБЪЯСНЯЕТСЯ, А НЕ ПОКАЗЫВАЕТСЯ МОЛЧА. Разметка пишется в
-  // момент входа и задним числом не пересчитывается — иначе разбор сделки
-  // превратился бы в разбор сегодняшних настроек. Следствие: у сделок,
-  // записанных до появления разбора, её нет вовсе, и график выглядел так,
-  // будто стратегия ни на чём не основана. Отличить «не сохраняли» от «не
-  // нарисовалось» было нечем, и именно на этом сложилось впечатление, что у
-  // SMC не показывают ордер-блок.
-  const geoEmpty = !(geo.bands || []).length && !(geo.lines || []).length
-    && !geo.leg && !(geo.touches || []).length;
-  const geoNote = geoEmpty
-    ? ' · <span class="warn">разметка сетапа не сохранена: сделка записана'
-      + ' до появления разбора</span>'
-    : '';
-
-  // Сам импульс — отрезком из точки A в точку B. Горизонтали выше дают цены,
-  // но именно наклонная отвечает на вопрос «по какому сетапу вошли»: видно,
-  // откуда и куда сходила цена, а вход стоит на откате от этого хода.
-  // Рисуется по времени, а не по номеру свечи: точка A часто левее первой
-  // свечи окна, и тогда отрезок честно начинается за краем.
-  const legLine = (() => {
+    const num = badge(y(top) + Math.min(9, (y(bottom) - y(top)) / 2), 'var(--accent)');
+    legend.push({ n: num, color: 'var(--accent)', text: b.label || 'зона',
+                  price: price(b.bottom) + '–' + price(b.top), strong: main });
+    return '<rect x="' + xFrom + '" y="' + y(top) + '" width="' + Math.max(XR - xFrom, 1)
+      + '" height="' + Math.max(y(bottom) - y(top), 1) + '" fill="var(--accent)" opacity="'
+      + (main ? '.16' : '.07') + '"/>'
+      + '<line x1="' + xFrom + '" y1="' + y(top) + '" x2="' + XR + '" y2="' + y(top)
+      + '" stroke="var(--accent)" stroke-width="' + (main ? 1.3 : .8) + '" opacity="' + (main ? '.8' : '.35')
+      + '"' + (main ? '' : ' stroke-dasharray="5 4"') + '/>'
+      + '<line x1="' + xFrom + '" y1="' + y(bottom) + '" x2="' + XR + '" y2="' + y(bottom)
+      + '" stroke="var(--accent)" stroke-width="' + (main ? 1.3 : .8) + '" opacity="' + (main ? '.8' : '.35')
+      + '"' + (main ? '' : ' stroke-dasharray="5 4"') + '/>';
+  }).join('');
+  // Начало и конец импульса уже стоят точками A и B — отдельные линии с
+  // номерами на тех же ценах дублировали их и ложились сверху.
+  const legEnds = geo.leg ? [Number(geo.leg.from_price), Number(geo.leg.to_price)] : [];
+  const sameAsLeg = p => legEnds.some(v => v > 0 && Math.abs(v - p) <= v * 1e-9);
+  const linesSvg = (geo.lines || []).map(g => {
+    const p = Number(g.price);
+    if (!inside(p) || sameAsLeg(p)) return '';
+    const color = g.main ? 'var(--accent)' : 'var(--ink-3)';
+    const num = badge(y(p), color);
+    legend.push({ n: num, color, text: g.label || 'уровень', price: price(p), strong: !!g.main });
+    return '<line x1="' + xFrom + '" y1="' + y(p) + '" x2="' + XR + '" y2="' + y(p)
+      + '" stroke="' + color + '" stroke-width="' + (g.main ? 1.6 : .9) + '"'
+      + (g.main ? '' : ' stroke-dasharray="1.5 3.5"') + ' opacity="' + (g.main ? '.85' : '.75') + '"/>';
+  }).join('');
+  const legSvg = (() => {
     const lg = geo.leg;
     if (!lg || !lg.from || !lg.to) return '';
-    const t0 = stamps[0], t1 = stamps[stamps.length - 1];
-    if (!(t1 > t0)) return '';
-    const xt = iso => {
-      const v = new Date(iso).getTime();
-      if (!isFinite(v)) return null;
-      return PL + (v - t0) / (t1 - t0) * (W - PL - PR);
-    };
-    const xa = xt(lg.from), xb = xt(lg.to);
-    if (xa === null || xb === null) return '';
-    const ya = y(lg.from_price), yb = y(lg.to_price);
-    // Целиком за пределами холста — не рисуем: обрезанный по краю отрезок
-    // выглядел бы как разметка, которой не было.
-    if (Math.max(xa, xb) < PL || Math.min(xa, xb) > W - PR) return '';
+    const a = ms(lg.from), b = ms(lg.to);
+    if (a === null || b === null) return '';
+    const xa = xt(a), xb = xt(b);
+    if (Math.max(xa, xb) < PL || Math.min(xa, xb) > XR) return '';
     const up = lg.to_price >= lg.from_price;
     const col = up ? 'var(--good)' : 'var(--bad)';
-    // Отрезок сделан заметным намеренно: это ОСНОВАНИЕ сделки, а рисовался
-    // он тоньше и бледнее линий плана. Концы подписаны A и B — по ним
-    // строится вся сетка, и без подписей приходится догадываться, где начало.
-    const dot = (x, yy, text) =>
-      '<circle cx="' + x + '" cy="' + yy + '" r="4.2" fill="var(--surface)"'
-      + ' stroke="' + col + '" stroke-width="2"/>'
-      + '<text x="' + x + '" y="' + (yy + 3.4) + '" fill="' + col
-      + '" font-size="8" font-weight="700" text-anchor="middle">' + text + '</text>';
-    return '<line x1="' + xa + '" y1="' + ya + '" x2="' + xb + '" y2="' + yb
-      + '" stroke="' + col + '" stroke-width="2.4" opacity=".8"'
-      + ' stroke-linecap="round"/>'
-      + (xa > PL - 20 ? dot(xa, ya, 'A') : '')
-      + dot(xb, yb, 'B');
+    const move = lg.from_price > 0 ? (lg.to_price / lg.from_price - 1) * 100 : null;
+    legend.push({ n: 'A→B', color: col, text: 'импульс',
+                  price: price(lg.from_price) + ' → ' + price(lg.to_price)
+                    + (move === null ? '' : ' (' + (move >= 0 ? '+' : '') + move.toFixed(1) + '%)') });
+    const dot = (x, yy, text) => '<circle cx="' + x + '" cy="' + yy + '" r="5" fill="var(--surface)"'
+      + ' stroke="' + col + '" stroke-width="2"/><text x="' + x + '" y="' + (yy + 3.3) + '" fill="' + col
+      + '" font-size="8.5" font-weight="700" text-anchor="middle">' + text + '</text>';
+    return '<line x1="' + xa + '" y1="' + y(lg.from_price) + '" x2="' + xb + '" y2="' + y(lg.to_price)
+      + '" stroke="' + col + '" stroke-width="2.2" opacity=".75" stroke-linecap="round"/>'
+      + (xa >= PL ? dot(xa, y(lg.from_price), 'A') : '') + dot(xb, y(lg.to_price), 'B');
   })();
+  const touchSvg = (geo.touches || []).map(p => {
+    const v = ms(p.at);
+    if (v === null || v < t0 || v > t1 || !inside(p.price)) return '';
+    return '<circle cx="' + xt(v) + '" cy="' + y(p.price) + '" r="3.8" fill="var(--surface)"'
+      + ' stroke="var(--accent)" stroke-width="1.6"/>';
+  }).join('');
+  const badgeSvg = badges.map(b => '<circle cx="' + b.x + '" cy="' + b.y + '" r="7.5" fill="' + b.color
+    + '" stroke="var(--surface)" stroke-width="1.5"/><text x="' + b.x + '" y="' + (b.y + 3.4)
+    + '" fill="var(--surface)" font-size="9.5" font-weight="700" text-anchor="middle">' + b.n + '</text>').join('');
 
-  // Касания уровня. Для стратегии уровней это и есть сетап: линия говорит
-  // «касаний 3», а кружки показывают, где именно, — и видно, настоящий это
-  // уровень или три случайные точки, попавшие в допуск.
-  const touchMarks = (() => {
-    const points = geo.touches || [];
-    if (!points.length || stamps.length < 2) return '';
-    const t0 = stamps[0], t1 = stamps[stamps.length - 1];
-    if (!(t1 > t0)) return '';
-    return points.map(p => {
-      const v = new Date(p.at).getTime();
-      if (!isFinite(v)) return '';
-      const px = PL + (v - t0) / (t1 - t0) * (W - PL - PR);
-      // Касания старше окна не рисуем у самого края: кружок на границе
-      // выглядит как касание, которого в этом окне не было.
-      if (px < PL || px > W - PR) return '';
-      const py = y(p.price);
-      if (py < PT || py > H - PB) return '';
-      return '<circle cx="' + px + '" cy="' + py + '" r="3.6"'
-        + ' fill="var(--surface)" stroke="var(--accent)" stroke-width="1.6"'
-        + ' opacity=".95"/>';
-    }).join('');
-  })();
+  // ── Линии плана: от входа (или начала окна) до правого края ─────────────
+  const planFrom = xOpen !== null ? xOpen : PL;
+  const planSvg = plan.map(p => {
+    if (!inside(p.v) || p.faint) return '';
+    const from = p.name === 'выход' && xClose !== null ? xClose
+      : p.name === 'сейчас' ? xt(t1) : planFrom;
+    return '<line x1="' + from + '" y1="' + y(p.v) + '" x2="' + XR + '" y2="' + y(p.v)
+      + '" stroke="' + p.color + '" stroke-width="' + (p.strong ? 1.5 : 1.2) + '"'
+      + (p.dash ? ' stroke-dasharray="' + p.dash + '"' : '') + ' opacity=".9"/>';
+  }).join('');
 
-  // ХОД ЦЕНЫ ВНУТРИ СДЕЛКИ. В карточке он есть числами — «ходила в плюс
-  // +2.40 R», — но ради этих двух чисел и открывают график: было ли до цели
-  // два шага или стоп зацепило тенью и цена ушла куда надо. Числа заставляют
-  // достраивать картинку в голове, хотя картинка прямо перед глазами.
-  //
-  // Цены считаются ТОЧНО, а не приблизительно: R задан расстоянием до стопа,
-  // поэтому максимум хода это вход плюс mfe_r таких расстояний.
+  // ── Ход цены внутри сделки (закрытые сделки: mfe/mae) ────────────────────
   const excursion = (() => {
-    const risk = Math.abs((t.entry || 0) - (t.stop || 0));
-    if (!(risk > 0) || (t.mfe_r == null && t.mae_r == null)) return '';
-    const long = (t.direction || '').toUpperCase() === 'LONG';
-    const sign = long ? 1 : -1;
-    const best = t.mfe_r != null ? t.entry + sign * Math.abs(t.mfe_r) * risk : null;
-    const worst = t.mae_r != null ? t.entry - sign * Math.abs(t.mae_r) * risk : null;
-    const from = nearest(t.opened), to = nearest(t.closed);
-    if (from === null) return '';
-    const x1 = x(from), x2 = to === null ? (W - PR) : x(to);
-    if (x2 <= x1) return '';
-
-    const edge = (price, color, text) => {
-      if (!(price > 0) || price < lo || price > hi) return '';
-      return '<line x1="' + x1 + '" y1="' + y(price) + '" x2="' + x2 + '" y2="'
-        + y(price) + '" stroke="' + color + '" stroke-width="1.1"'
-        + ' stroke-dasharray="3 3" opacity=".75"/>'
-        + '<text x="' + (x1 + 4) + '" y="' + (y(price) - 3) + '" fill="' + color
-        + '" font-size="9"' + HALO + '>' + text + '</text>';
-    };
+    if (xOpen === null || (best === null && worst === null)) return '';
+    const x2 = xClose !== null ? xClose : XR;
+    if (!(x2 > xOpen)) return '';
     const top = Math.min(Math.max(best ?? -Infinity, worst ?? -Infinity), hi);
     const bottom = Math.max(Math.min(best ?? Infinity, worst ?? Infinity), lo);
-    const fill = (top > bottom)
-      ? '<rect x="' + x1 + '" y="' + y(top) + '" width="' + (x2 - x1)
-        + '" height="' + Math.max(y(bottom) - y(top), 1)
-        + '" fill="var(--ink-4)" opacity=".05"/>' : '';
-    return fill
-      + edge(best, 'var(--good)', 'дошла до ' + fx(t.mfe_r, 2, true) + ' R')
-      + edge(worst, 'var(--bad)', 'проседала до ' + fx(-Math.abs(t.mae_r), 2, true) + ' R');
+    return top > bottom ? '<rect x="' + xOpen + '" y="' + y(top) + '" width="' + (x2 - xOpen)
+      + '" height="' + Math.max(y(bottom) - y(top), 1) + '" fill="var(--ink-4)" opacity=".06"/>' : '';
   })();
 
-  const isLong = (t.direction || '').toUpperCase() === 'LONG';
+  // ── Вход, выход, путь сделки — поверх свечей ─────────────────────────────
+  const tri = (x, yy, up, fill, stroke) => {
+    const s = 7;
+    const pts = up ? [[x, yy - s * 0.2], [x - s, yy + s * 1.35], [x + s, yy + s * 1.35]]
+      : [[x, yy + s * 0.2], [x - s, yy - s * 1.35], [x + s, yy - s * 1.35]];
+    return '<polygon points="' + pts.map(p => p.join(',')).join(' ') + '" fill="' + fill
+      + '" stroke="' + stroke + '" stroke-width="1.6" stroke-linejoin="round"/>';
+  };
+  let marks = '';
+  if (xOpen !== null && t.entry > 0 && inside(t.entry)) {
+    marks += t.pending
+      ? tri(xOpen, y(t.entry), long, 'var(--surface)', 'var(--ink)')
+      : tri(xOpen, y(t.entry), long, 'var(--ink)', 'var(--surface)');
+  }
+  if (xClose !== null && t.exit > 0 && inside(t.exit)) {
+    const col = won ? 'var(--good)' : 'var(--bad)';
+    if (xOpen !== null && inside(t.entry)) {
+      marks = '<line x1="' + xOpen + '" y1="' + y(t.entry) + '" x2="' + xClose + '" y2="' + y(t.exit)
+        + '" stroke="' + col + '" stroke-width="1.4" stroke-dasharray="4 3" opacity=".8"/>' + marks;
+    }
+    marks += '<circle cx="' + xClose + '" cy="' + y(t.exit) + '" r="5.5" fill="' + col
+      + '" stroke="var(--surface)" stroke-width="1.8"/>';
+  }
+  if (t.live && nowPrice > 0 && inside(nowPrice)) {
+    marks += '<circle cx="' + xt(t1) + '" cy="' + y(nowPrice) + '" r="3.2" fill="var(--ink-3)"/>';
+  }
+
+  // ── Подписи плана справа: без наложений, со стрелкой для дальних уровней ─
+  const GAP = FS + 3;
+  const tags = plan.map(p => ({ ...p, y0: inside(p.v) ? y(p.v) : (p.v > hi ? PT + 4 : H - PB - 4),
+                                off: !inside(p.v), up: p.v > hi }));
+  tags.sort((a, b) => a.y0 - b.y0);
+  let prev = -1e9;
+  tags.forEach(tag => { tag.y = Math.max(tag.y0, prev + GAP); prev = tag.y; });
+  // Нижние подписи, выехавшие за ось, подтягиваются вверх той же цепочкой.
+  let next = H - PB + FS * 0.2;
+  for (let i = tags.length - 1; i >= 0; i--) {
+    if (tags[i].y > next) tags[i].y = next;
+    next = tags[i].y - GAP;
+  }
+  const tagSvg = tags.map(tag => {
+    const tx = XR + 12;
+    const lead = Math.abs(tag.y - tag.y0) > 2 && !tag.off
+      ? '<polyline points="' + XR + ',' + tag.y0 + ' ' + (XR + 6) + ',' + tag.y0 + ' ' + (XR + 10) + ',' + tag.y
+        + '" fill="none" stroke="' + tag.color + '" stroke-width=".9" opacity=".6"/>' : '';
+    const arrow = tag.off ? (tag.up ? '↑ ' : '↓ ') : '';
+    return lead + '<text x="' + tx + '" y="' + (tag.y + FS * 0.35) + '" font-size="' + (tag.faint ? FS - 1.5 : FS)
+      + '" opacity="' + (tag.faint ? '.8' : '1') + '">'
+      + '<tspan fill="' + tag.color + '"' + (tag.strong ? ' font-weight="700"' : ' font-weight="600"') + '>'
+      + arrow + esc(tag.name) + '</tspan>'
+      + (tag.faint ? '' : '<tspan fill="var(--ink-2)" dx="' + (CH * 0.9) + '" style="font-variant-numeric: tabular-nums">'
+        + price(tag.v) + '</tspan>') + '</text>';
+  }).join('');
+
+  // ── Ось времени и отметки событий ────────────────────────────────────────
+  const two = v => String(v).padStart(2, '0');
+  const when = v => { const d = new Date(v); return two(d.getDate()) + '.' + two(d.getMonth() + 1) + ' ' + two(d.getHours()) + ':' + two(d.getMinutes()); };
+  const hm = v => { const d = new Date(v); return two(d.getHours()) + ':' + two(d.getMinutes()); };
+  const events = [];
+  events.push({ x: PL, texts: [when(t0)], anchor: 'start', rank: 0 });
+  if (xSetup !== null) events.push({ x: xSetup, texts: ['сетап'], rank: 1, line: true });
+  const inName = t.pending ? 'лимит' : 'вход';
+  if (xOpen !== null && tOpen >= t0 && tOpen <= t1) {
+    events.push({ x: xOpen, texts: [inName + ' ' + when(tOpen), inName + ' ' + hm(tOpen), inName], rank: 4, line: true });
+  }
+  if (xClose !== null && tClose >= t0 && tClose <= t1) {
+    events.push({ x: xClose, texts: ['выход ' + when(tClose), 'выход ' + hm(tClose), 'выход'], rank: 3, line: true });
+  }
+  events.push({ x: XR, texts: [t.live || t.pending ? 'сейчас' : when(t1)], anchor: 'end', rank: 2 });
+  // Подписи внизу не налезают: при тесноте подпись сокращается («выход 23:40»,
+  // потом «выход»), и только если не входит и так — прячется менее важная.
+  // Короткая сделка иначе теряла время выхода: оно пряталось за подписью входа.
+  // Вход и выход сокращаются ВМЕСТЕ: «вход 21:15 … выход 23:40» читается лучше,
+  // чем полная дата у одного и голое слово у другого.
+  const span = (ev, level) => {
+    const text = ev.texts[Math.min(level, ev.texts.length - 1)];
+    const w = text.length * (FS - 1) * 0.58;
+    let left = ev.anchor === 'start' ? ev.x : ev.anchor === 'end' ? ev.x - w : ev.x - w / 2;
+    if (!ev.anchor) left = Math.max(0, Math.min(XR - w, left));      // не за край холста
+    return { text, left, right: left + w };
+  };
+  const hits = (a, b) => a.left < b.right + 6 && a.right > b.left - 6;
+  const key = events.filter(ev => ev.rank >= 3);
+  const deepest = Math.max(0, ...key.map(ev => ev.texts.length - 1));
+  let level = 0;
+  while (level < deepest
+         && key.some((a, i) => key.some((b, j) => j > i && hits(span(a, level), span(b, level))))) level++;
+  const placed = [];
+  events.slice().sort((a, b) => b.rank - a.rank).forEach(ev => {
+    let spot = null;
+    for (let L = ev.rank >= 3 ? level : 0; L < ev.texts.length && !spot; L++) {
+      const s = span(ev, L);
+      if (!placed.some(p => !p.hidden && hits(s, p))) spot = s;
+    }
+    placed.push(spot ? { ...ev, ...spot, hidden: false } : { ...ev, text: '', left: 0, right: 0, hidden: true });
+  });
+  const axisSvg = '<line x1="' + PL + '" y1="' + (H - PB) + '" x2="' + XR + '" y2="' + (H - PB)
+    + '" stroke="var(--hairline)" stroke-width="1"/>'
+    + placed.map(ev => (ev.line ? '<line x1="' + ev.x + '" y1="' + PT + '" x2="' + ev.x + '" y2="' + (H - PB + 4)
+        + '" stroke="var(--ink-4)" stroke-width="1" stroke-dasharray="2 4" opacity=".7"/>' : '')
+      + (ev.hidden ? '' : '<text x="' + (ev.anchor ? ev.x : (ev.left + ev.right) / 2) + '" y="' + (H - PB + FS + 4) + '" font-size="' + (FS - 1)
+        + '" fill="var(--ink-3)" text-anchor="' + (ev.anchor || 'middle') + '">' + esc(ev.text) + '</text>')).join('');
+
+  // ── Легенда структуры под графиком ───────────────────────────────────────
+  const geoEmpty = !(geo.bands || []).length && !(geo.lines || []).length
+    && !geo.leg && !(geo.touches || []).length;
+  const legendHtml = legend.length
+    ? '<div class="tc-legend">' + legend.map(it => '<span class="tc-li' + (it.strong ? ' tc-li-main' : '') + '">'
+        + '<b class="tc-n" style="background:' + it.color + '">' + esc(String(it.n)) + '</b>'
+        + esc(it.text) + (it.price ? ' <span class="tc-lp">' + it.price + '</span>' : '') + '</span>').join('')
+      + '</div>'
+    : '';
+  // ПУСТАЯ РАЗМЕТКА ОБЪЯСНЯЕТСЯ, А НЕ ПОКАЗЫВАЕТСЯ МОЛЧА: разметка пишется в
+  // момент входа, у сделок, записанных до появления разбора, её нет.
+  const geoNote = geoEmpty
+    ? ' · <span class="warn">разметка сетапа не сохранена: сделка записана до появления разбора</span>' : '';
+
   return '<div class="tc-chart"><svg viewBox="0 0 ' + W + ' ' + H
     + '" preserveAspectRatio="xMidYMid meet" role="img" aria-label="график сделки">'
-    + bands + guides + legLine
+    + bandsSvg + linesSvg + legSvg + excursion
     + body
-    + excursion + touchMarks
-    + geoLabels
-    + line(t.stop, 'var(--bad)', 'стоп', true)
-    + line(t.entry, 'var(--ink-3)', 'вход', false)
-    + line(t.tp1, 'var(--good)', 'цель', true)
-    + (t.tp2 && t.tp2 !== t.tp1 ? line(t.tp2, 'var(--good)', 'цель 2', true) : '')
-    + line(t.exit, isLong ? 'var(--accent)' : 'var(--accent)', 'выход', false)
-    + mark(nearest(geo.from), 'var(--ink-4)', 'сетап')
-    + mark(nearest(t.opened), 'var(--ink-4)', 'вход')
-    + mark(nearest(t.closed), 'var(--ink-4)', 'выход')
-    + labels()
-    + '</svg><div class="tc-tf">' + esc(data.timeframe) + ' · '
+    + touchSvg + planSvg + marks + badgeSvg + tagSvg + axisSvg
+    + '</svg>' + legendHtml + '<div class="tc-tf">' + esc(data.timeframe || '') + ' · '
     + candles.length + ' свечей' + geoNote + '</div></div>';
 }
 
@@ -3787,7 +3859,8 @@ function renderTradeCard(t, data, note) {
     + group('Уровни',
         row('Вход', price(t.entry))
         + row('Стоп', price(t.stop), 'neg')
-        + row('Цель', price(t.tp1), 'pos')
+        + (t.tp2 > 0 ? row('Цели', price(t.tp1) + ' · ' + price(t.tp2), 'pos')
+                     : row('Цель', price(t.tp1), 'pos'))
         + row('Выход', price(t.exit)))
     + group('Время',
         row('Открыта', fmtWhen(t.opened))

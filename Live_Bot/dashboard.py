@@ -185,6 +185,9 @@ def _read_closed_trades():
             'entry': _to_float(row.get('entry_price')),
             'stop': _to_float(row.get('stop_loss')),
             'tp1': _to_float(row.get('tp1')),
+            # Вторая цель плана: без неё на графике закрытой сделки SMC выход
+            # на второй-третьей цели висел над единственной линией «цель».
+            'tp2': _to_float(row.get('tp2')),
             'exit': _to_float(row.get('exit_price')),
             'pnl': _to_float(row.get('pnl_usd')),
             'pnl_pct': _to_float(row.get('pnl_pct')),
@@ -269,6 +272,9 @@ def _read_paper_trades():
             'entry': _to_float(row.get('entry_price')),
             'stop': _to_float(row.get('stop_loss')),
             'tp1': _to_float(row.get('tp1')),
+            # Вторая цель плана: без неё на графике закрытой сделки SMC выход
+            # на второй-третьей цели висел над единственной линией «цель».
+            'tp2': _to_float(row.get('tp2')),
             'exit': _to_float(row.get('exit_price')),
             'pnl': pnl,
             'pnl_pct': _to_float(row.get('pnl_pct')),
