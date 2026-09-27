@@ -257,6 +257,25 @@ def crowd_reason(direction, rate):
     return f'толпа за сделку (фандинг {rate * 1e4:+.2f} б.п., толпа {crowd})'
 
 
+def _shadow_crowd_refusal(setup, pair, balance, risk_scale, reason):
+    """
+    Отказ «толпа за сделку» — в тени (shadow.py): чем кончился бы сетап.
+
+    Своих сделок у SMC с фильтром толпы ~45 в год, и проверять фильтр только по
+    ним — год ожидания. Отказов больше, чем сделок, и исход каждого пишется в
+    shadow_trades.csv: живое сравнение «против толпы» и «за толпу» копится на
+    всех сетапах (docs/SMC_исследование_2026-09.md). Тень — не деньги: ни
+    депозит, ни пределы, ни кулдаун бота она не трогает; её ошибка торговле не
+    мешает.
+    """
+    try:
+        import shadow
+        signal = _to_bot_signal(setup, pair, balance, risk_scale=risk_scale)
+        shadow.watch('SMC', signal, 'толпа за сделку', reason)
+    except Exception as exc:                                  # noqa: BLE001
+        log(f"   {pair}: тень отказа по толпе не заведена ({exc})")
+
+
 def analyze_market(pair, balance, client=None, risk_scale=None):
     """
     Проверяет одну пару и возвращает сигнал либо None.
@@ -291,6 +310,7 @@ def analyze_market(pair, balance, client=None, risk_scale=None):
     if blocked:
         _last_reason[pair] = blocked
         log(f"   {pair}: нет сигнала — {blocked}")
+        _shadow_crowd_refusal(setup, pair, balance, risk_scale, blocked)
         return None
 
     log(f"   {pair}: {setup['direction']} {setup['poi']['type']} | "

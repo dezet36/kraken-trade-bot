@@ -77,8 +77,29 @@ class TestAnalyzeMarket:
 
     def test_crowd_with_the_trade_is_refused_with_a_reason(self, monkeypatch):
         self._patch(monkeypatch, make_setup('BULLISH'), +0.0001)
+        import shadow
+        monkeypatch.setattr(shadow, 'watch', lambda *a, **k: None)
         assert strategy_smc.analyze_market('BTCUSDT', 10_000, risk_scale=1.0) is None
         assert strategy_smc._last_reason['BTCUSDT'].startswith('толпа за сделку')
+
+    def test_the_refused_setup_goes_to_the_shadows(self, monkeypatch):
+        """Отказ по толпе — в тени: чем кончился бы сетап, пишется вживую."""
+        self._patch(monkeypatch, make_setup('BULLISH'), +0.0001)
+        import shadow
+        seen = []
+        monkeypatch.setattr(shadow, 'watch', lambda strategy, signal, gate, detail='', **k:
+                            seen.append((strategy, signal['setup']['type'], signal['params']['entry'], gate)))
+        strategy_smc.analyze_market('BTCUSDT', 10_000, risk_scale=1.0)
+        assert seen == [('SMC', 'LONG', 101.0, 'толпа за сделку')]
+
+    def test_a_broken_shadow_does_not_break_the_scan(self, monkeypatch):
+        self._patch(monkeypatch, make_setup('BULLISH'), +0.0001)
+        import shadow
+
+        def boom(*a, **k):
+            raise RuntimeError('диск')
+        monkeypatch.setattr(shadow, 'watch', boom)
+        assert strategy_smc.analyze_market('BTCUSDT', 10_000, risk_scale=1.0) is None
 
     def test_crowd_against_passes_and_rate_goes_to_the_journal(self, monkeypatch):
         self._patch(monkeypatch, make_setup('BEARISH', targets=(90.0, 85.0, 80.0)), +0.0001)
