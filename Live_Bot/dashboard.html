@@ -3337,7 +3337,7 @@ function posChartHtml(pos, data) {
   const targets = pos.targets && pos.targets.length ? pos.targets : [pos.tp1];
   return tradeChart({
     entry: pos.entry, stop: pos.stop, targets: targets,
-    exit: 0, direction: pos.direction, live: true, now: pos.price,
+    exit: 0, direction: pos.direction, live: true, now: pos.price, strategy: pos.strategy,
     opened: pos.opened, closed: null, geometry: pos.geometry,
   }, data, { W: 420, H: 300 });
 }
@@ -3432,7 +3432,8 @@ function renderOrderCard(o, data, note) {
   const chart = note ? '<div class="tc-note">' + esc(note) + '</div>'
     : tradeChart({ entry: o.entry, stop: o.stop, targets: o.targets, tp1: o.tp1, exit: 0,
                    direction: o.direction, opened: o.opened, closed: null,
-                   geometry: o.geometry, pending: true, live: true, now: o.price }, data);
+                   geometry: o.geometry, pending: true, live: true, now: o.price,
+                   strategy: o.strategy }, data);
 
   cell.innerHTML = '<div class="tc-box">'
     + '<div class="tc-left">' + chart + '</div>'
@@ -3488,7 +3489,8 @@ function renderOrderCard(o, data, note) {
        легендой под графиком, где им хватает места;
      • внизу — ось времени: начало окна, сетап, вход, выход / сейчас.
    t: entry, stop, targets (или tp1/tp2/tp3), exit, direction, opened, closed,
-      geometry, mfe_r, mae_r, pnl; live — открытая позиция (рисуется «сейчас»),
+      geometry, mfe_r, mae_r, pnl, strategy (у FIBO импульс — точками A и B,
+      без линии); live — открытая позиция (рисуется «сейчас»),
       pending — ордер (вход ещё не налился: «лимит», без треугольника). */
 function tradeChart(t, data, size) {
   const candles = (data && data.candles) || [];
@@ -3642,9 +3644,13 @@ function tradeChart(t, data, size) {
     const dot = (x, yy, text) => '<circle cx="' + x + '" cy="' + yy + '" r="5" fill="var(--surface)"'
       + ' stroke="' + col + '" stroke-width="2"/><text x="' + x + '" y="' + (yy + 3.3) + '" fill="' + col
       + '" font-size="8.5" font-weight="700" text-anchor="middle">' + text + '</text>';
-    return '<line x1="' + xa + '" y1="' + y(lg.from_price) + '" x2="' + xb + '" y2="' + y(lg.to_price)
-      + '" stroke="' + col + '" stroke-width="2.2" opacity=".75" stroke-linecap="round"/>'
-      + (xa >= PL ? dot(xa, y(lg.from_price), 'A') : '') + dot(xb, y(lg.to_price), 'B');
+    // У Фибоначчи — только точки A и B, без линии между ними: диагональ шла
+    // через свечи и зоны коррекции и мешала их читать (владелец 27.09.2026:
+    // «убери на графиках фибо линию от точки A до точки B»).
+    const line = (t.strategy || '').toUpperCase() === 'FIBO' ? ''
+      : '<line x1="' + xa + '" y1="' + y(lg.from_price) + '" x2="' + xb + '" y2="' + y(lg.to_price)
+        + '" stroke="' + col + '" stroke-width="2.2" opacity=".75" stroke-linecap="round"/>';
+    return line + (xa >= PL ? dot(xa, y(lg.from_price), 'A') : '') + dot(xb, y(lg.to_price), 'B');
   })();
   const touchSvg = (geo.touches || []).map(p => {
     const v = ms(p.at);
