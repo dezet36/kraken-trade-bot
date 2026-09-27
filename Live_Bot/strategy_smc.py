@@ -226,6 +226,37 @@ def _to_bot_signal(setup, pair, balance, risk_scale=1.0):
     }
 
 
+def _funding_rate(pair):
+    """Последняя выплаченная ставка фандинга пары (доля за 8 ч) или None."""
+    try:
+        import positioning
+        rate = positioning.latest('funding', pair)
+        return None if rate is None else float(rate)
+    except Exception as exc:                                  # noqa: BLE001
+        log(f"   {pair}: фандинг не прочитан ({exc})")
+        return None
+
+
+def crowd_reason(direction, rate):
+    """
+    Причина отказа «толпа за сделку» или None (smc/params.FUNDING_AGAINST_CROWD).
+
+    Толпа стоит в сторону сделки, если платит за неё фандинг: у лонга ставка
+    выше порога (лонги платят шортам), у шорта — ниже минус порога. Такие
+    сетапы SMC не берёт: на пяти периодах истории они в минусе, а против толпы —
+    в плюсе во всех пяти (docs/SMC_исследование_2026-09.md). Нет ставки — нет и
+    отказа: торговля от источника не зависит (CLAUDE.md, «Данные»).
+    """
+    if not smc_params.FUNDING_AGAINST_CROWD or rate is None:
+        return None
+    side = 1.0 if direction in ('BULLISH', 'LONG') else -1.0
+    signed_bp = rate * 1e4 * side
+    if signed_bp <= smc_params.FUNDING_MAX_BP:
+        return None
+    crowd = 'в лонгах' if rate > 0 else 'в шортах'
+    return f'толпа за сделку (фандинг {rate * 1e4:+.2f} б.п., толпа {crowd})'
+
+
 def analyze_market(pair, balance, client=None, risk_scale=None):
     """
     Проверяет одну пару и возвращает сигнал либо None.
@@ -251,9 +282,24 @@ def analyze_market(pair, balance, client=None, risk_scale=None):
         log(f"   {pair}: нет сигнала — {reason}")
         return None
 
+    # Против толпы — решение SMC, а не ядра: ядро не знает про биржу, а
+    # фандинг лежит в общем слое (positioning).
+    rate = _funding_rate(pair) if smc_params.FUNDING_AGAINST_CROWD else None
+    if smc_params.FUNDING_AGAINST_CROWD and rate is None:
+        log(f"   {pair}: фандинг неизвестен — фильтр толпы пропущен")
+    blocked = crowd_reason(setup['direction'], rate)
+    if blocked:
+        _last_reason[pair] = blocked
+        log(f"   {pair}: нет сигнала — {blocked}")
+        return None
+
     log(f"   {pair}: {setup['direction']} {setup['poi']['type']} | "
-        f"confluence {setup['confluence']} | RR {setup['params']['rr']:.2f}")
-    return _to_bot_signal(setup, pair, balance, risk_scale=risk_scale)
+        f"confluence {setup['confluence']} | RR {setup['params']['rr']:.2f}"
+        + (f" | фандинг {rate * 1e4:+.2f} б.п." if rate is not None else ''))
+    signal = _to_bot_signal(setup, pair, balance, risk_scale=risk_scale)
+    # Ставка в момент решения — в журнал: по ней проверяется фильтр вживую.
+    signal['smc']['funding_bp'] = None if rate is None else round(rate * 1e4, 3)
+    return signal
 
 
 def scan_for_setups(pairs, trade_manager, client=None, balance=None):
@@ -273,7 +319,13 @@ def scan_for_setups(pairs, trade_manager, client=None, balance=None):
     _, risk_scale, regime_text = market_regime(client=client)
     log(f"   рынок: {regime_text}")
 
+    pool = smc_params.TRADE_POOL
     for pair in pairs:
+        if pool and pair not in pool:
+            # Свой пул SMC (smc/params.TRADE_POOL): вне его стратегия на
+            # истории теряла. В лог не пишем — это каждая пара каждый цикл.
+            report.record('SMC', pair, 'вне пула SMC')
+            continue
         try:
             if not trade_manager.check_cooldown(pair):
                 log(f"   {pair}: кулдаун активен, пропускаем")

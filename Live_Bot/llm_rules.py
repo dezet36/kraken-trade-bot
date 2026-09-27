@@ -88,6 +88,12 @@ DECISION = SimpleNamespace(
     SKIP_TARGET_TAKEN=False,
     CANCEL_PENDING_AT_TARGET=False,
     FILL_THROUGH_MARKET=False,
+    # Добавлены у SMC 27.09.2026 и читаются только её адаптером (strategy_smc),
+    # не ядром: режим «правила» мерился без них и их не применяет. Имена здесь —
+    # потому что копия обязана содержать все решения SMC (test_llm_rules).
+    TRADE_POOL=(),
+    FUNDING_AGAINST_CROWD=False,
+    FUNDING_MAX_BP=0.0,
 )
 
 # Свой пул: плюс каркаса живёт на крупных ликвидных монетах. На десяти
