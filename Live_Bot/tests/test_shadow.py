@@ -208,11 +208,21 @@ class TestTheBrokersCooldown:
         assert len(shadow._load()) == 1
 
     def test_the_pause_survives_a_restart(self):
+        # Фибо: у неё заявка у цели снимается — «цель без входа» закрывает тень
+        # и ставит паузу. У SMC у цели ничего не закрывается (тест ниже).
         shadow.watch('FIBO', signal(), 'предел портфеля', now_ms=START)
         run([(1, 104.5, 102.0, 104.2)])
         shadow._shadows = None                         # «перезапуск»
         shadow.watch('FIBO', signal(), 'предел портфеля', now_ms=START + 2 * H)
         assert shadow._load() == []
+
+    def test_the_smc_pause_after_an_exit_survives_a_restart(self):
+        """У SMC пауза ставится выходом из налившейся тени — и тоже переживает перезапуск."""
+        shadow.watch('SMC', signal(), 'направленный кэп', now_ms=START)
+        run([(0.5, 101.0, 99.9, 100.5), (10, 100.2, 97.5, 98.0)])   # вход, стоп на 10-м часу
+        shadow._shadows = None                         # «перезапуск»
+        shadow.watch('SMC', signal(), 'направленный кэп', now_ms=START + 13 * H)
+        assert shadow._load() == [], 'пауза от выхода (10 ч + 12 ч) пережила перезапуск'
 
 
 class TestShadowsOfTheOldRulesAreReplayed:
@@ -222,9 +232,31 @@ class TestShadowsOfTheOldRulesAreReplayed:
         Тень, заведённая по прежним правилам, переигрывается с начала: брокер
         отдаёт свечи с её start_ts, и она закрывается, как закрылась бы заявка.
         """
+        shadow._shadows = None
+        self._write_legacy('FIBO', 'предел портфеля')
+        assert shadow.pairs() == {'LTCUSDT': START}, 'свечи нужны с начала тени'
+        done = run([(1, 68.0, 67.2, 67.9), (3, 69.6, 67.8, 69.5)], pair='LTCUSDT')
+        assert [s['outcome'] for s in done] == ['цель без входа']
+        assert closed_rows()[0]['refusals'] == '24'
+
+    def test_an_smc_shadow_is_replayed_and_keeps_waiting_past_its_target(self):
+        """
+        Старая тень SMC переигрывается с начала так же, но у цели не закрывается:
+        заявка SMC ждёт отката весь срок (strategy_profile.drops_at_target).
+        """
+        self._write_legacy('SMC', 'направленный кэп')
+        assert shadow.pairs() == {'LTCUSDT': START}, 'свечи нужны с начала тени'
+        done = run([(1, 68.0, 67.2, 67.9), (3, 69.6, 67.8, 69.5)], pair='LTCUSDT')
+        assert done == []
+        left = shadow._load()
+        assert len(left) == 1 and not left[0]['filled'] and not left[0]['outcome']
+
+    @staticmethod
+    def _write_legacy(strategy, gate):
+        """Тень по правилам версии 1 — без поля rules, как лежала до 25.09.2026."""
         import json
-        legacy = [{'key': ['FIBO', 'LTCUSDT', 'LONG', 66.91, 65.930955], 'strategy': 'FIBO',
-                   'pair': 'LTCUSDT', 'direction': 'LONG', 'gate': 'предел портфеля',
+        legacy = [{'key': [strategy, 'LTCUSDT', 'LONG', 66.91, 65.930955], 'strategy': strategy,
+                   'pair': 'LTCUSDT', 'direction': 'LONG', 'gate': gate,
                    'detail': '', 'first_at': '2026-09-25T10:32:05Z', 'refusals': 24,
                    'start_ts': START, 'last_ts': START + 7 * H, 'last_close': 69.66,
                    'entry': 66.91, 'limit': 66.91, 'stop0': 65.930955, 'stop': 65.930955,
@@ -236,10 +268,6 @@ class TestShadowsOfTheOldRulesAreReplayed:
         with open(shadow.STATE_PATH, 'w', encoding='utf-8') as fh:
             json.dump(legacy, fh)
         shadow._shadows = None
-        assert shadow.pairs() == {'LTCUSDT': START}, 'свечи нужны с начала тени'
-        done = run([(1, 68.0, 67.2, 67.9), (3, 69.6, 67.8, 69.5)], pair='LTCUSDT')
-        assert [s['outcome'] for s in done] == ['цель без входа']
-        assert closed_rows()[0]['refusals'] == '24'
 
 
 class TestAnOpenedSetupLeavesTheShadow:
