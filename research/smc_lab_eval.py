@@ -11,6 +11,7 @@
     depth                     глубина входа в блок: 0 — ближний край, 0.5 — середина
     fill_through              налив только насквозь на эту долю цены (0 — касанием)
     fractions                 доли частичной фиксации (None — как у ядра)
+    fixed_r                   одна цель на этом R от входа вместо целей ядра (None — цели ядра)
     breakeven, max_hold, expiry, cancel_at_target
     cap, cooldown, occupy, cool_from_place, max_positions   правила портфеля
     pairs                     набор пар
@@ -56,7 +57,7 @@ H = 3_600_000
 LIVE = dict(min_conf=4.5, long_premium=0.0, min_rr=4.0, max_rr=0.0, min_stop=0.8, cost_limit=10.0,
             offset=0.001, depth=0.0, fill_through=0.0, fractions=None, breakeven=False, max_hold=336.0,
             expiry=48.0, cancel_at_target=False, cap=3, cooldown=12.0, occupy=True, cool_from_place=True,
-            max_positions=5, pairs=POOL10, filt=None, tiebreak='live')
+            max_positions=5, pairs=POOL10, filt=None, tiebreak='live', fixed_r=None)
 # ПОРЯДОК ОДНОВРЕМЕННЫХ ЗАЯВОК. Сигналы нескольких пар в один час портфель
 # разбирает по очереди, а мест (кэп 3 в сторону, 5 позиций) мало. Живой бот
 # сортирует кандидатов цикла по конфлюенсу, затем по R:R
@@ -161,10 +162,15 @@ def orders_for(period, spec):
         share = limit / abs(limit - r.stop) * ROUND_TRIP * 100
         if spec['cost_limit'] and share > spec['cost_limit']:
             continue                                   # брокер: «вход слишком дорог»
-        fr = list(spec['fractions'] or r.fractions)
-        tg = list(r.targets[:len(fr)])
-        fr = fr[:len(tg)]
-        fr[-1] += 1.0 - sum(fr)
+        if spec.get('fixed_r'):
+            # Одна цель на заданном R от фактического входа (лимита) — сетап «3 к 1».
+            tg = [float(limit + r.dir * spec['fixed_r'] * abs(limit - r.stop))]
+            fr = [1.0]
+        else:
+            fr = list(spec['fractions'] or r.fractions)
+            tg = list(r.targets[:len(fr)])
+            fr = fr[:len(tg)]
+            fr[-1] += 1.0 - sum(fr)
         created = np.datetime64(int(r.t), 'ms')
         out.append(Order(pair=r.pair, direction='BULLISH' if r.dir > 0 else 'BEARISH', entry=float(limit),
                          stop=float(r.stop), targets=tg, fractions=fr, created=created,
