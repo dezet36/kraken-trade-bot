@@ -129,6 +129,38 @@ class TestParityWithResearch:
         assert llm_notebook.EXTRA == bt.EXTRA
 
 
+class TestNotebookFlags:
+    """«Лучше/хуже» тетради флагами (п. 71): те же, что в research/ai_notebook_flags.py, и в журнале решений."""
+
+    def test_flags_match_research(self):
+        if not os.path.exists(os.path.join(RESEARCH, 'ai_notebook_flags.py')):
+            pytest.skip('нет research/')
+        sys.path.insert(0, RESEARCH)
+        import ai_notebook_flags as research
+        assert llm_notebook.FLAGS == research.FLAGS
+        rng = np.random.default_rng(3)
+        for _ in range(200):
+            f = pd.Series({'cascade_count_3h': rng.integers(0, 12), 'vol_z': rng.uniform(0, 4),
+                           'btc_ret_24h': rng.normal(0, 3), 'ret_7d': rng.normal(0, 20), 'funding_bp': rng.normal(0.5, 2),
+                           'btc_ret_7d': rng.normal(0, 5), 'buy_ratio_pct_30d': rng.uniform(), 'btc_ret_30d': rng.normal(0, 10)})
+            for key in ('P1', 'P2', 'B3'):
+                assert llm_notebook.flags_of(f, key)['score'] == research.score(f, key)
+
+    def test_alerts_in_the_decision_log_carry_the_score(self, notebook_mode):
+        frames = market_with_cascade()
+        llm_notebook.scan(list(llm_notebook.POOL), Gate(), now_ms=hour_ms(451) + 60_000,
+                          frames_of=lambda p: frames[p], ask=lambda q: '{"trade": [], "reason": "x"}',
+                          price_of=lambda p: 100.0)
+        alert = json.loads(open(os.path.join(config.DATA_DIR, 'llm_notebook_log.jsonl'), encoding='utf-8')
+                           .readline())['alerts'][0]
+        assert isinstance(alert['score'], int) and {'better', 'worse'} <= set(alert)
+        assert any(x.startswith('cascade_count_3h') or x.startswith('vol_z') or x.startswith('abs_btc')
+                   for x in alert['better'] + alert['worse']) or alert['score'] == 0
+
+    def test_pattern_without_flags_gets_none(self):
+        assert llm_notebook.flags_of(pd.Series({'btc_ret_24h': 0.0}), 'X') == {}
+
+
 class TestAlerts:
     def test_wide_cascade_gives_p1_only_on_the_first_hour(self):
         frames = market_with_cascade()

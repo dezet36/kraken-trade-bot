@@ -133,6 +133,32 @@ Which alerts do you trade now (at most {free})? Answer with JSON only:
 
 OPS = {'<': np.less, '<=': np.less_equal, '>': np.greater, '>=': np.greater_equal}
 
+# «Лучше/хуже» тетради флагами — как в research/ai_notebook_flags.py (docs п. 71, совпадение держит тест).
+# Только в журнал решений: модели счёт не показывается. Вживую проверяется, держатся ли флаги P1
+# (на valid держались, t 2.5; у P2 пусты).
+FLAGS = {
+    'P1': {'better': [('cascade_count_3h', '>=', 6), ('vol_z', '>', 1.5), ('btc_ret_24h', '<', -2.0),
+                      ('ret_7d', '<', -25.0), ('funding_bp', '>', 1.0)],
+           'worse': [('abs_btc_ret_24h', '<', 1.0), ('vol_z', '<', 1.2)]},
+    'P2': {'better': [('btc_ret_7d', '>', 3.4), ('btc_ret_24h', '<', -2.1), ('ret_7d', '>', 16.0), ('vol_z', '>', 2.8)],
+           'worse': [('btc_ret_7d', '<', 0.0)]},
+    'B3': {'better': [('buy_ratio_pct_30d', '>', 0.5), ('funding_bp', '<=', 0.0), ('btc_ret_30d', '>', -9.0)],
+           'worse': [('btc_ret_30d', '<=', -9.0), ('vol_z', '>', 2.1)]},
+}
+
+
+def flags_of(f, key):
+    """Сигнал -> {'score': «лучше» − «хуже», 'better': [...], 'worse': [...]}; нет флагов у закономерности — {}."""
+    if key not in FLAGS:
+        return {}
+    got = {'better': [], 'worse': []}
+    for side in got:
+        for name, op, value in FLAGS[key][side]:
+            x = abs(f['btc_ret_24h']) if name == 'abs_btc_ret_24h' else f.get(name)
+            if x is not None and pd.notna(x) and OPS[op](float(x), value):
+                got[side].append(f'{name} {op} {value}')
+    return {'score': len(got['better']) - len(got['worse']), **got}
+
 
 def _mask(feat, conditions):
     m = np.ones(len(feat), bool)
@@ -538,7 +564,8 @@ def _new_hour(hour_ms, gate, now_ms, frames_of, ask):
     if items:
         record = {'hour': t.isoformat(), 'held': held, 'free': free,
                   'alerts': [{'pair': p, 'pattern': k, 'price': float(data[p][0].loc[t, 'c']),
-                              'atr_d': float(data[p][1].at[t, 'atr_d'])} for p, k in items],
+                              'atr_d': float(data[p][1].at[t, 'atr_d']), **flags_of(data[p][1].loc[t], k)}
+                             for p, k in items],
                   # Что взяла бы механика (сигналы по порядку тетради): против неё меряется выбор модели.
                   'mechanical': [p for p, _ in items][:max(0, free)]}
         if free <= 0:

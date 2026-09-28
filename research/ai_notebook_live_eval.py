@@ -67,6 +67,7 @@ def decisions(folder):
     path = os.path.join(folder, 'llm_notebook_log.jsonl')
     rows = [json.loads(x) for x in open(path, encoding='utf-8') if x.strip()]
     got = {'модель': [], 'механика': [], 'все сигналы': []}
+    p1_by_score = {'счёт ≥ 3': [], 'счёт ≤ 2': []}          # п. 71: держатся ли флаги P1 вживую
     for r in rows:
         res = {}
         for a in r['alerts']:
@@ -74,15 +75,20 @@ def decisions(folder):
                 res[a['pair']] = outcome(a, r['hour'])
             except Exception as exc:                  # noqa: BLE001
                 print('  нет свечей', a['pair'], exc)
+            if a.get('pattern') == 'P1' and a.get('score') is not None and res.get(a['pair']) is not None:
+                p1_by_score['счёт ≥ 3' if a['score'] >= 3 else 'счёт ≤ 2'].append(res[a['pair']])
         res = {p: v for p, v in res.items() if v is not None}
         got['все сигналы'] += list(res.values())
         got['механика'] += [res[p] for p in r.get('mechanical') or [] if p in res]
         got['модель'] += [res[p] for p in (r.get('picks') or []) if p in res]
     print(f'решений: {len(rows)}')
-    for name, rs in got.items():
+    for name, rs in list(got.items()) + [(f'P1, {k}', v) for k, v in p1_by_score.items()]:
         rs = np.array(rs)
         if len(rs):
             print(f'  {name:12s} {len(rs):4d} сд  R {rs.mean():+.3f}  сумма {rs.sum():+.1f}R  плюс {np.mean(rs > 0) * 100:.0f}%')
+    n_p1 = sum(len(v) for v in p1_by_score.values())
+    if n_p1:
+        print(f'  п. 71: сигналов P1 со счётом {n_p1} (проверка знака — после 40)')
 
 
 def reviews(folder):
