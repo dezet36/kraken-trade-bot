@@ -64,5 +64,7 @@ interest change over 24h; "buy share" = aggressive (taker) buying as a share of 
 Write a short market review for the owner IN RUSSIAN (at most 900 characters): 1) the market regime and what
 drives it now; 2) where the crowd and the aggressive flow are; 3) which coins are close to the patterns of your
 notebook (P1, P2, B3) and what you will do if they trigger; 4) the main risk for the next 24 hours. Plain text,
-no tables. Then on the LAST line write JSON only:
+no tables. The owner does not know the codes: in the text call the patterns by their Russian names -
+P1 «Отскок после ликвидаций», P2 «Накопление при слабом BTC», B3 «Продажа на отскоке».
+Then on the LAST line write JSON only:
 {{"regime": "rising|falling|sideways", "btc_24h": "up|down|flat", "watch": [{{"coin": "XXX", "side": "long|short", "why": "few words"}}]}}

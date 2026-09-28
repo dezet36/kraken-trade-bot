@@ -60,6 +60,20 @@ class TestTheEntryReadsLikeATrade:
         text, _kb = outbox[-1]
         assert 'по плану 100.0000' in text and 'по рынку' in text
 
+    def test_a_notebook_entry_says_when_it_leaves_instead_of_a_fake_target(self, outbox):
+        # ИИ по тетради: цели нет, выход по сроку; далёкая цель в сигнале — заглушка брокеру.
+        tg.paper_entry('LLM', 'DOGEUSDT', position(
+            targets=[160.0], fractions=[1.0], max_hold_hours=24,
+            context={'why': 'Отскок после ликвидаций (лонг, 24 ч): x', 'llm': {'mode': 'notebook'}}))
+        text, _kb = outbox[-1]
+        assert '⏱ Выход через 24 ч' in text and 'Цель' not in text and 'Отскок после ликвидаций' in text
+
+    def test_the_decision_names_patterns_not_codes(self, outbox):
+        tg.llm_notebook_decision(['Отскок после ликвидаций (лонг, 24 ч): AVAX, ADA'], ['AVAX'], 'broad cascade')
+        text, _kb = outbox[-1]
+        assert 'Отскок после ликвидаций (лонг, 24 ч): AVAX, ADA' in text and 'Берёт: <b>AVAX</b>' in text
+        assert 'Почему: broad cascade' in text
+
     def test_the_event_switch_and_the_strategy_switch_silence_it(self, outbox, monkeypatch):
         monkeypatch.setattr(tg, '_allowed', lambda event: event != 'trade_opened')
         assert tg.paper_entry('LLM', 'DOGEUSDT', position()) is False

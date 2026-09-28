@@ -570,6 +570,34 @@ class TestDecisionLogAndReview:
         assert len(ran) == 1
 
 
+class TestHumanNames:
+    """Человеку — имена закономерностей, не коды (28.09.2026: «что за P1?»)."""
+
+    def test_codes_in_model_text_become_names(self):
+        text = 'Это не P1, нет ликвидаций; P2 у SEI. Р1 кириллицей и В3 тоже; P3 и B1 — не наши.'
+        out = llm_notebook.humanize(text)
+        assert '«Отскок после ликвидаций»' in out and '«Накопление при слабом BTC»' in out
+        assert out.count('«Отскок после ликвидаций»') == 2 and '«Продажа на отскоке»' in out
+        assert 'P3' in out and 'B1' in out and 'SEI' in out
+
+    def test_decision_message_groups_coins_by_pattern_name(self, monkeypatch):
+        import telegram_notify
+        got = []
+        monkeypatch.setattr(telegram_notify, 'llm_notebook_decision', lambda a, p, r: got.append((a, p, r)))
+        llm_notebook._notify_decision([('AVAXUSDT', 'P1'), ('ADAUSDT', 'P1'), ('ZECUSDT', 'B3')],
+                                      ['AVAXUSDT'], 'P1 cascade is broad')
+        alerts, picks, reason = got[0]
+        assert alerts == ['Отскок после ликвидаций (лонг, 24 ч): AVAX, ADA', 'Продажа на отскоке (шорт, 48 ч): ZEC']
+        assert picks == ['AVAX'] and reason == '«Отскок после ликвидаций» cascade is broad'
+
+    def test_signal_why_and_zone_are_named(self, notebook_mode):
+        f = pd.Series({'atr_d': 5.0, 'ret_4h': 0, 'ret_24h': 0, 'ret_7d': 0, 'rel_24h': 0, 'oi_chg_4h': 0,
+                       'oi_chg_24h': 0, 'vol_z': 1, 'taker_24h': 0.5, 'funding_bp': 1, 'buy_ratio_pct_30d': 0.5})
+        sig = llm_notebook.to_signal('AVAXUSDT', 'P1', f, 100.0, 'fits P1')
+        assert sig['llm']['why'] == 'Отскок после ликвидаций (лонг, 24 ч): fits «Отскок после ликвидаций»'
+        assert sig['trigger']['zone'] == 'Отскок после ликвидаций' and sig['llm']['pattern'] == 'P1'
+
+
 class TestPromptExport:
     def test_docs_export_matches_the_prompt(self):
         """Правило проекта: промт меняется только с экспортом (docs/Промт_ИИ_тетрадь.txt)."""

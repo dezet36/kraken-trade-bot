@@ -133,6 +133,25 @@ Which alerts do you trade now (at most {free})? Answer with JSON only:
 
 OPS = {'<': np.less, '<=': np.less_equal, '>': np.greater, '>=': np.greater_equal}
 
+# Имена закономерностей для человека: в Telegram, в «почему» сделки и в обзоре — они, а не коды
+# (28.09.2026 владелец: «читаю сообщение от ИИ и не понимаю, что за P»). Коды остаются в журналах.
+TITLES = {'P1': 'Отскок после ликвидаций', 'P2': 'Накопление при слабом BTC', 'B3': 'Продажа на отскоке'}
+_CODES = re.compile(r'(?<!\w)([PРBВ])([123])(?!\w)')     # латиница и кириллица: модель пишет и «Р1»
+
+
+def title(key):
+    """«Отскок после ликвидаций (лонг, 24 ч)»."""
+    pat = PATTERNS[key]
+    return f"{TITLES.get(key, key)} ({'лонг' if pat['side'] == 'long' else 'шорт'}, {pat['hold']} ч)"
+
+
+def humanize(text):
+    """Коды закономерностей в тексте модели -> имена: «P1» -> «Отскок после ликвидаций»."""
+    def name(m):
+        key = {'P': 'P', 'Р': 'P', 'B': 'B', 'В': 'B'}[m.group(1)] + m.group(2)
+        return f'«{TITLES[key]}»' if key in TITLES else m.group(0)
+    return _CODES.sub(name, str(text or ''))
+
 # «Лучше/хуже» тетради флагами — как в research/ai_notebook_flags.py (docs п. 71, совпадение держит тест).
 # Только в журнал решений: модели счёт не показывается. Вживую проверяется, держатся ли флаги P1
 # (на valid держались, t 2.5; у P2 пусты).
@@ -329,14 +348,14 @@ def to_signal(pair, key, feat, price, reason):
     entry = price * (1 + sgn * 0.001)        # лимит за рынком — исполняется сразу, тейкером
     stop = price * (1 - sgn * dist)
     target = price * (1 + sgn * 20 * dist)   # цели нет: выход по сроку, цель лишь далеко
-    why = f"{key} {pat['label'].lower()}: {reason}"
+    why = f"{title(key)}: {humanize(reason)}"
     return {
         'trading_pair': pair,
         'strategy': NAME,
         'market_price': price,
         'setup': {'type': 'LONG' if sgn > 0 else 'SHORT', 'start_price': price, 'end_price': price, 'size': 0.0,
                   'start_time': None, 'end_time': None},
-        'trigger': {'zone': key, 'entry_type': 'LIMIT', 'trigger_price': entry},
+        'trigger': {'zone': TITLES.get(key, key), 'entry_type': 'LIMIT', 'trigger_price': entry},
         'params': {
             'entry': entry, 'stop_loss': stop, 'take_profit_1': target, 'take_profit_2': target,
             'tp_targets': [target], 'tp_fractions': [1.0],
@@ -375,11 +394,15 @@ def _log_decision(record):
 
 
 def _notify_decision(items, picks, reason):
+    """Сигналы — строкой на закономерность, по имени: «Отскок после ликвидаций (лонг, 24 ч): AVAX, ADA»."""
     try:
         import telegram_notify
+        coins = {}
+        for p, k in items:
+            coins.setdefault(k, []).append(p.replace('USDT', ''))
         telegram_notify.llm_notebook_decision(
-            [f"{k} {p.replace('USDT', '')} ({PATTERNS[k]['side']})" for p, k in items],
-            [p.replace('USDT', '') for p in picks], reason)
+            [f"{title(k)}: {', '.join(c)}" for k, c in coins.items()],
+            [p.replace('USDT', '') for p in picks], humanize(reason))
     except Exception as exc:                          # noqa: BLE001
         log(f'   {NAME}: сообщение о решении не отправлено ({exc})')
 
@@ -436,7 +459,9 @@ interest change over 24h; "buy share" = aggressive (taker) buying as a share of 
 Write a short market review for the owner IN RUSSIAN (at most 900 characters): 1) the market regime and what
 drives it now; 2) where the crowd and the aggressive flow are; 3) which coins are close to the patterns of your
 notebook (P1, P2, B3) and what you will do if they trigger; 4) the main risk for the next 24 hours. Plain text,
-no tables. Then on the LAST line write JSON only:
+no tables. The owner does not know the codes: in the text call the patterns by their Russian names -
+P1 «Отскок после ликвидаций», P2 «Накопление при слабом BTC», B3 «Продажа на отскоке».
+Then on the LAST line write JSON only:
 {{"regime": "rising|falling|sideways", "btc_24h": "up|down|flat", "watch": [{{"coin": "XXX", "side": "long|short", "why": "few words"}}]}}"""
 
 _review = {'slot': None, 'busy': False}
@@ -492,6 +517,7 @@ def _run_review(question, slot, held):
                                       'top_p': 0.9, 'stop': ['<|im_end|>'], 'cache_prompt': True}, 900)
         body, parsed = parse_review((out.get('content') or '').strip())
         _append_jsonl('llm_notebook_reviews.jsonl', {'hour': slot, 'held': held, 'text': body, 'view': parsed})
+        body = humanize(body)                          # человеку — имена закономерностей, не коды
         log(f'   {NAME}: обзор рынка — {body[:160]}')
         try:
             import telegram_notify

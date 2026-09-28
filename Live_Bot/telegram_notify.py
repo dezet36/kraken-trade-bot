@@ -632,16 +632,19 @@ def llm_setups_text(setups: dict) -> str:
 def llm_notebook_decision(alerts, picks, reason: str = ''):
     """
     ИИ-трейдер по тетради (llm_notebook) решил по сигналам часа: что было, что
-    взял, почему. Тот же тумблер, что у планов ИИ (llm_setup).
+    взял, почему. alerts — строкой на закономерность, по имени, а не коду:
+    «Отскок после ликвидаций (лонг, 24 ч): AVAX, ADA» (28.09.2026 владелец не
+    понял, что за «P1»). Тот же тумблер, что у планов ИИ (llm_setup).
     """
     import tg_format as fmt
     if not _allowed('llm_setup'):
         return False
     return _send(
-        f"🤖 <b>ИИ по тетради</b> · сигналы: {fmt.esc(', '.join(alerts))}\n"
-        f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"Берёт: <b>{fmt.esc(', '.join(picks) or 'ничего')}</b>"
-        + (f"\n{fmt.esc(str(reason)[:400])}" if reason else '')
+        "🤖 <b>ИИ по тетради: новые сигналы</b>\n"
+        "━━━━━━━━━━━━━━━━━━━━\n"
+        + '\n'.join(fmt.esc(a) for a in alerts)
+        + f"\nБерёт: <b>{fmt.esc(', '.join(picks) or 'ничего')}</b>"
+        + (f"\n<i>Почему: {fmt.esc(str(reason)[:400])}</i>" if reason else '')
     )
 
 
@@ -745,9 +748,15 @@ def paper_entry(strategy, pair, pos, balance=None):
             if pos.get('planned_entry') and abs(float(pos['planned_entry']) - entry) / entry > 0.0001 else ''),
         f"Стоп {fmt.price(stop)} · {fmt.pct((stop - entry) / entry * 100)}",
     ]
-    for k, t in enumerate(targets):
-        share = f" · {float(fractions[k]) * 100:.0f}%" if k < len(fractions) and len(targets) > 1 else ''
-        lines.append(f"🎯 Цель {k + 1} {fmt.price(t)}{share} · {fmt.r(_r_of(pos, t))}")
+    hold = pos.get('max_hold_hours')
+    if hold and ((pos.get('context') or {}).get('llm') or {}).get('mode') == 'notebook':
+        # ИИ по тетради: цели нет, выход по сроку закономерности; далёкая цель в сигнале — заглушка
+        # для брокера, и «Цель +20R» в сообщении была бы неправдой.
+        lines.append(f"⏱ Выход через {float(hold):.0f} ч — цели нет, стоп — страховка")
+    else:
+        for k, t in enumerate(targets):
+            share = f" · {float(fractions[k]) * 100:.0f}%" if k < len(fractions) and len(targets) > 1 else ''
+            lines.append(f"🎯 Цель {k + 1} {fmt.price(t)}{share} · {fmt.r(_r_of(pos, t))}")
     lines.append(f"Риск {fmt.money(risk, signed=False)}"
                  + (f" ({risk / balance * 100:.2f}% депозита)" if balance else '')
                  + f" · позиция {fmt.money(float(pos['size']) * entry, signed=False)}")
