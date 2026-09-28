@@ -534,6 +534,29 @@ class TestDecisionLogAndReview:
         assert len(ran) == 1
 
 
+class TestAnswerParsing:
+    ITEMS = [('AVAXUSDT', 'P1'), ('ADAUSDT', 'P1'), ('ZECUSDT', 'B3')]
+
+    def test_full_json_with_either_key(self):
+        assert llm_notebook.picks_from('{"buy": ["AVAX"], "reason": "x"}', self.ITEMS) == (['AVAXUSDT'], 'x')
+        assert llm_notebook.picks_from('{"trade": ["ZEC", "ADA"], "reason": "y"}', self.ITEMS) == \
+            (['ZECUSDT', 'ADAUSDT'], 'y')
+        assert llm_notebook.picks_from('{"trade": [], "reason": "skip"}', self.ITEMS) == ([], 'skip')
+
+    def test_answer_cut_inside_reason_keeps_the_list(self):
+        # Так модель упирается в n_predict: рассуждает в причине, закрывающей скобки нет (test v2, 8 из 261).
+        text = '{\n"buy": [\n"AVAX",\n"ZEC"\n],\n"reason": "AVAX fits P1 with broad cascade. Let\'s re-read carefully'
+        picks, reason = llm_notebook.picks_from(text, self.ITEMS)
+        assert picks == ['AVAXUSDT', 'ZECUSDT'] and reason.startswith('AVAX fits P1')
+
+    def test_list_cut_in_the_middle_is_not_trusted(self):
+        assert llm_notebook.picks_from('{"trade": ["AVAX", "AD', self.ITEMS) == (None, '')
+        assert llm_notebook.picks_from('no json at all', self.ITEMS) == (None, '')
+
+    def test_unknown_coins_are_dropped(self):
+        assert llm_notebook.picks_from('{"trade": ["SOL", "avaxusdt"], "reason": ""}', self.ITEMS)[0] == ['AVAXUSDT']
+
+
 class TestShortPattern:
     def test_short_signal_is_mirrored(self, notebook_mode, monkeypatch):
         patterns = dict(llm_notebook.PATTERNS)

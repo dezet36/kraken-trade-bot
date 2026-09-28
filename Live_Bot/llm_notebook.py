@@ -28,6 +28,7 @@ research/ai_model_trader_bt.py (совпадение текста держит �
 import json
 import os
 import queue
+import re
 import threading
 import time
 from concurrent.futures import Future
@@ -250,15 +251,28 @@ def _price_now(pair, client=None):
 
 
 def picks_from(text, items):
+    """
+    Ответ модели -> (пары, причина); (None, '') — списка сделок в ответе нет.
+
+    Модель без мысли рассуждает прямо в «reason» и упирается в n_predict: на
+    test v2 так обрезаны 8 ответов из 261 — без закрывающей скобки, но со
+    списком целиком (он идёт первым). Такой список берётся, причина — как есть.
+    Ключ списка — "trade" или "buy" (прежнее имя).
+    """
     try:
-        body = text[text.index('{'):text.rindex('}') + 1]
-        parsed = json.loads(body)
+        parsed = json.loads(text[text.index('{'):text.rindex('}') + 1])
+        chosen = parsed.get('trade', parsed.get('buy'))
+        reason = str(parsed.get('reason') or '')
     except Exception:                                  # noqa: BLE001
-        return None, ''
+        found = re.search(r'"(?:trade|buy)"\s*:\s*\[([^\]]*)\]', text)
+        if not found:
+            return None, ''
+        chosen = re.findall(r'"([^"]*)"', found.group(1))
+        cut = re.search(r'"reason"\s*:\s*"(.*)', text, re.S)
+        reason = cut.group(1).strip() + '…' if cut else ''
     names = {p.replace('USDT', ''): p for p, _ in items}
-    buy = [names[str(x).upper().replace('USDT', '')] for x in (parsed.get('buy') or [])
-           if str(x).upper().replace('USDT', '') in names]
-    return buy, str(parsed.get('reason') or '')
+    return [names[str(x).upper().replace('USDT', '')] for x in (chosen or [])
+            if str(x).upper().replace('USDT', '') in names], reason
 
 
 def to_signal(pair, key, feat, price, reason):
