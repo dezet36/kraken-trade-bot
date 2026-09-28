@@ -39,7 +39,7 @@ Which alerts do you trade now (at most {free})? Answer with JSON only:
 {{"trade": ["COIN", ...], "reason": "one sentence"}}"""
 
 
-def brief_v31(data, t, items, held, free):
+def brief_v31(data, t, items, held, free, template=None):
     btc = data['BTCUSDT'][1].loc[t]
     rows = []
     for p, key in items:
@@ -48,7 +48,7 @@ def brief_v31(data, t, items, held, free):
                     f"{f['ret_24h']:+6.1f} {f['ret_7d']:+6.1f} {f['rel_24h']:+6.1f} "
                     f"{f['oi_chg_4h']:+5.1f}/{f['oi_chg_24h']:+5.1f} {f['vol_z']:5.2f} "
                     f"{f['taker_24h']:5.3f} {f['funding_bp']:+5.2f} {f['buy_ratio_pct_30d']:.2f}")
-    return QUESTION_V31.format(time=(t + B.pd.Timedelta(hours=1)).strftime('%Y-%m-%d %H:%M'), n=len(items),
+    return (template or QUESTION_V31).format(time=(t + B.pd.Timedelta(hours=1)).strftime('%Y-%m-%d %H:%M'), n=len(items),
                                held=', '.join(p.replace('USDT', '') for p in held) or 'nothing', free=free,
                                btc4=btc['btc_ret_4h'], btc24=btc['btc_ret_24h'], btc7=btc['btc_ret_7d'],
                                btc30=btc['btc_ret_30d'], breadth=int(btc['cascade_count_3h']), table='\n'.join(rows))
@@ -84,7 +84,8 @@ def slices(data, split):
     return out, res
 
 
-def plan():
+def sets():
+    """Данные и наборы срезов S_B3, S_P (п. 70) — одни и те же для всех версий вопроса."""
     data = B.prepare()
     all_slices, res = [], {}
     for split in ('train', 'valid'):
@@ -95,6 +96,11 @@ def plan():
     only_p = [s for s in all_slices if all(k != 'B3' for _, k in s['items'])]
     rng = np.random.default_rng(11)
     s_p = [only_p[i] for i in sorted(rng.choice(len(only_p), size=min(SAMPLE_P, len(only_p)), replace=False))]
+    return data, all_slices, s_b3, only_p, s_p, res
+
+
+def plan():
+    data, all_slices, s_b3, only_p, s_p, res = sets()
     jobs = ([('b3', 'v31', s) for s in s_b3] + [('p', 'v3', s) for s in s_p] + [('p', 'v31', s) for s in s_p])
     prompts = [(B.brief if v == 'v3' else brief_v31)(data, s['t'], s['items'], s['held'], s['free'])
                for _, v, s in jobs]
@@ -108,7 +114,8 @@ def mean(x):
     return float(np.mean(x)) if len(x) else float('nan')
 
 
-def evaluate(jobs, answers, res):
+def evaluate(jobs, answers, res, cand='v31', name='v3.1', result=None, title=None):
+    """Условия п. 70 для версии-кандидата cand; основа на S_P — ответы v3. Ответов меньше, чем заданий, — считаем что есть."""
     lines = []
 
     def say(text=''):
@@ -139,34 +146,43 @@ def evaluate(jobs, answers, res):
     def r_of(st, part, keys):
         return mean([r for k in keys for r in st[part].get(k, [])])
 
-    say('Вопрос v3.1 против v3 на train + valid (п. 70)')
+    say(title or f'Вопрос {name} против v3 на train + valid (п. 70)')
     for (kind, version), st in sorted(stats.items()):
         parts = ', '.join(f"{k}: взято {st['taken'].get(k, 0)}/{st['shown'][k]} "
                           f"R взятых {r_of(st, 'r_taken', [k]):+.3f} (всех {r_of(st, 'r_all', [k]):+.3f})"
                           for k in sorted(st['shown']))
         say(f"  {'S_B3' if kind == 'b3' else 'S_P '} {version:4s} срезов {st['n']:3d}, без JSON {st['bad']}: {parts}")
 
-    b3 = stats.get(('b3', 'v31'))
-    p_old, p_new = stats.get(('p', 'v3')), stats.get(('p', 'v31'))
+    b3 = stats.get(('b3', cand))
+    p_old, p_new = stats.get(('p', 'v3')), stats.get(('p', cand))
+    if not (b3 and p_old and p_new):
+        say(f'\nНе хватает ответов для условий: S_B3 {cand} {bool(b3)}, S_P v3 {bool(p_old)}, S_P {cand} {bool(p_new)}')
+        write(lines, result)
+        return None
     c1 = rate(b3, ['B3'])
     c2 = r_of(b3, 'r_taken', ['B3']) - r_of(b3, 'r_all', ['B3'])
     c3a = abs(rate(p_new, ['P1', 'P2']) - rate(p_old, ['P1', 'P2']))
     c3b = r_of(p_new, 'r_taken', ['P1', 'P2']) - r_of(p_old, 'r_taken', ['P1', 'P2'])
     c4 = (b3['bad'] + p_new['bad']) / (b3['n'] + p_new['n'])
-    checks = [(f'1. v3.1 берёт B3: {c1 * 100:.0f}% (нужно ≥ 50%)', c1 >= 0.5),
+    checks = [(f'1. {name} берёт B3: {c1 * 100:.0f}% (нужно ≥ 50%)', c1 >= 0.5),
               (f'2. R взятых B3 − R всех B3: {c2:+.3f} (нужно ≥ −0.10)', c2 >= -0.10),
-              (f'3. S_P: доля взятых P1/P2 v3.1 − v3: {c3a * 100:.0f} п. п. (нужно ≤ 15); '
-               f'R взятых v3.1 − v3: {c3b:+.3f} (нужно ≥ −0.10)', c3a <= 0.15 and c3b >= -0.10),
-              (f'4. без JSON у v3.1: {c4 * 100:.1f}% (нужно ≤ 5%)', c4 <= 0.05)]
+              (f'3. S_P: доля взятых P1/P2 {name} − v3: {c3a * 100:.0f} п. п. (нужно ≤ 15); '
+               f'R взятых {name} − v3: {c3b:+.3f} (нужно ≥ −0.10)', c3a <= 0.15 and c3b >= -0.10),
+              (f'4. без JSON у {name}: {c4 * 100:.1f}% (нужно ≤ 5%)', c4 <= 0.05)]
     say()
     for text, ok in checks:
         say(f"  {'да ' if ok else 'НЕТ'} {text}")
     verdict = all(ok for _, ok in checks)
-    say(f"\nИтог: {'v3.1 принят — идёт вживую' if verdict else 'v3.1 не принят — остаётся v3'}")
-    os.makedirs(os.path.dirname(RESULT), exist_ok=True)
-    with open(RESULT, 'w', encoding='utf-8') as fh:
-        fh.write('\n'.join(lines) + '\n')
+    say(f"\nИтог: {name} {'принят — идёт вживую' if verdict else 'не принят — остаётся v3'}")
+    write(lines, result)
     return verdict
+
+
+def write(lines, result=None):
+    result = result or RESULT
+    os.makedirs(os.path.dirname(result), exist_ok=True)
+    with open(result, 'w', encoding='utf-8') as fh:
+        fh.write('\n'.join(lines) + '\n')
 
 
 if __name__ == '__main__':
