@@ -38,7 +38,8 @@ import ai_model_research as R                         # noqa: E402
 
 OUT = os.path.join(HERE, 'results', 'model_trader')
 SLOTS = 6
-VERSION = 'v3.2'        # тетрадь и вопрос: имена файлов ответов не пересекаются с прошлой версией
+VERSION = 'v3.3'        # тетрадь и вопрос: имена файлов ответов не пересекаются с прошлой версией
+# v3.3 (28.09.2026, docs п. 72): RISK — «бери все подходящие сигналы каскада», причина — по-русски.
 # v3.2 (28.09.2026, docs п. 70): в вопросе — сторона сигнала, BTC за 30 дней, «каждый сигнал уже выполнил
 # условие», ключ ответа "trade", причина ≤ 25 слов, шкала ранга доли розницы; в тетради — порог «high» у B3.
 
@@ -90,8 +91,9 @@ B3. DISTRIBUTION ON MARKET BOUNCE (short, hold 48h, stop = 1.3 x the coin's aver
            BTC 30d decline mild, above -9% (+0.38R).
    Worse:  BTC 30d decline deeper than -9% (+0.13R); very high volume above 2.1x normal (+0.12R).
 
-RISK: at most 6 open positions. Positions opened together in one market move are one bet - prefer the
-strongest alerts, and skip when your notebook says the conditions are the weak ones.
+RISK: at most 6 open positions. Take every alert that fits your notebook - a liquidation cascade usually gives
+several good trades at once, and on history taking them all earned more than picking one or two. Skip an
+alert only when your notebook says its conditions are the weak ones.
 """
 
 QUESTION = """It is {time} UTC. New alerts this hour: {n}.
@@ -104,8 +106,8 @@ ALERTS - pattern, side, coin, then: change 4h %, change 24h %, change 7d %, stre
 {table}
 
 Every alert already meets its pattern's trigger. The side of each alert is fixed by its pattern (long = buy the coin, short = sell it).
-Which alerts do you trade now (at most {free})? Answer with JSON only, the reason in at most 25 words:
-{{"trade": ["COIN", ...], "reason": "one sentence"}}"""
+Which alerts do you trade now (at most {free})? Answer with JSON only, the reason in Russian, at most 25 words:
+{{"trade": ["COIN", ...], "reason": "одно короткое предложение"}}"""
 
 RUNNER = r'''import json, sys, urllib.request
 src, dst = sys.argv[1], sys.argv[2]

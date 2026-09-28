@@ -128,14 +128,14 @@ class TestParityWithResearch:
         assert llm_notebook.SLOTS == bt.SLOTS
         assert llm_notebook.EXTRA == bt.EXTRA
 
-    def test_live_question_is_the_validated_v32(self):
-        """Вживую — ровно тот вопрос и та тетрадь, что прошли проверку п. 70 (research/ai_question_v32.py)."""
-        if not os.path.exists(os.path.join(RESEARCH, 'ai_question_v32.py')):
+    def test_live_question_is_the_validated_v33(self):
+        """Вживую — ровно тот вопрос и та тетрадь, что прошли проверку п. 72 (research/ai_question_v33.py)."""
+        if not os.path.exists(os.path.join(RESEARCH, 'ai_question_v33.py')):
             pytest.skip('нет research/')
         sys.path.insert(0, RESEARCH)
-        import ai_question_v32 as v32
-        assert llm_notebook.QUESTION == v32.QUESTION_V32
-        assert llm_notebook.NOTEBOOK == v32.NOTEBOOK_V32
+        import ai_question_v33 as v33
+        assert llm_notebook.QUESTION == v33.QUESTION_V33
+        assert llm_notebook.NOTEBOOK == v33.NOTEBOOK_V33
 
     def test_question_shows_side_and_btc_30d(self):
         data = llm_notebook.market(market_with_cascade(n=900, t_idx=850))
