@@ -85,7 +85,7 @@ backtest_cache*/
 research/universe_cache/
 # Часовой набор для закономерностей ИИ (research/ai_flow_fetch.py) — ~80 МБ,
 # восстановим тем же загрузчиком.
-research/flow_cache/
+research/flow_cache*/
 # Заявки точной симуляции (research/fibo_live_sim.py) — пересоздаются прогоном,
 # по 3–5 МБ на период; текстовые итоги рядом с ними в git.
 research/results/*.pkl

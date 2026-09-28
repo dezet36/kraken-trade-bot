@@ -26,7 +26,7 @@ import numpy as np
 import pandas as pd
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-CACHE = os.path.join(HERE, 'flow_cache')
+CACHE = os.path.join(HERE, os.getenv('FLOW_CACHE', 'flow_cache'))
 
 FEE = 0.00055
 SLIP = 0.0003

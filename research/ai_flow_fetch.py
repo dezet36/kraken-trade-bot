@@ -24,7 +24,7 @@ from concurrent.futures import ThreadPoolExecutor
 import pandas as pd
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-OUT = os.path.join(HERE, 'flow_cache')
+OUT = os.path.join(HERE, os.getenv('FLOW_CACHE', 'flow_cache'))
 START = int(pd.Timestamp('2022-01-01', tz='UTC').timestamp() * 1000)
 H = 3_600_000
 

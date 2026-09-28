@@ -52,7 +52,7 @@ def raw_frame(n=500, seed=0, drop_at=None, drop=0.0):
 
 def market_with_cascade(n=500, t_idx=450, dumped=('AVAXUSDT', 'ADAUSDT', 'DOTUSDT', 'NEARUSDT', 'SOLUSDT')):
     frames = {}
-    for k, p in enumerate(llm_notebook.POOL):
+    for k, p in enumerate(llm_notebook.UNIVERSE):
         frames[p] = raw_frame(n, seed=k, drop_at=t_idx if p in dumped else None, drop=0.07)
     return frames
 
@@ -107,6 +107,7 @@ class TestParityWithResearch:
         assert llm_notebook.QUESTION == bt.QUESTION
         assert llm_notebook.PATTERNS == bt.PATTERNS
         assert llm_notebook.SLOTS == bt.SLOTS
+        assert llm_notebook.EXTRA == bt.EXTRA
 
 
 class TestAlerts:
@@ -179,11 +180,33 @@ class TestScan:
         state = json.load(open(os.path.join(config.DATA_DIR, 'llm_notebook_state.json'), encoding='utf-8'))
         assert 'error' in state
 
-    def test_only_pairs_of_the_bot_are_traded(self, notebook_mode):
+    def test_own_universe_is_traded_not_the_bot_list(self, notebook_mode):
         frames = market_with_cascade()
-        out = llm_notebook.scan(['ADAUSDT'], Gate(), now_ms=hour_ms(451) + 60_000, frames_of=lambda p: frames[p],
+        out = llm_notebook.scan(['ADAUSDT'], Gate(), now_ms=hour_ms(451) + 60_000,
+                                frames_of=lambda p: frames.get(p),
                                 ask=lambda q: '{"buy": ["AVAX", "ADA"], "reason": "x"}')
-        assert [c['pair'] for c in out] == ['ADAUSDT']
+        assert [c['pair'] for c in out] == ['AVAXUSDT', 'ADAUSDT']
+
+    def test_breadth_counts_only_core_pairs(self):
+        frames = market_with_cascade(dumped=('AVAXUSDT', 'ADAUSDT', 'DOTUSDT'))
+        for k, p in enumerate(llm_notebook.EXTRA[:3]):      # три новые пары тоже обваливаются
+            frames[p] = raw_frame(500, seed=100 + k, drop_at=450, drop=0.07)
+        data = llm_notebook.market(frames)
+        t = T0 + pd.Timedelta(hours=450)
+        assert data['BTCUSDT'][1].at[t, 'cascade_count_3h'] == 3        # новые пары широту не добавляют
+        assert not [p for p, k in llm_notebook.alerts_at(data, t) if k == 'P1']
+
+    def test_core_only_pattern_skips_extra_pairs(self, monkeypatch):
+        patterns = {'X': {'label': 'ANY DUMP', 'side': 'long', 'hold': 24, 'stop': 1.0, 'rank': ('ret_4h', 1),
+                          'universe': 'core', 'conditions': [['ret_4h', '<', -4.2604], ['oi_chg_4h', '<', -4.7381]]}}
+        patterns['P1'] = llm_notebook.PATTERNS['P1']        # market() берёт условие разгрузки у P1
+        monkeypatch.setattr(llm_notebook, 'PATTERNS', patterns)
+        frames = market_with_cascade(dumped=('AVAXUSDT', 'ADAUSDT'))
+        for k, p in enumerate(llm_notebook.EXTRA[:2]):
+            frames[p] = raw_frame(500, seed=200 + k, drop_at=450, drop=0.07)
+        data = llm_notebook.market(frames)
+        got = {p for p, k in llm_notebook.alerts_at(data, T0 + pd.Timedelta(hours=450)) if k == 'X'}
+        assert got == {'AVAXUSDT', 'ADAUSDT'}
 
 
 class TestExecutionProfile:

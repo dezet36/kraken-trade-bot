@@ -59,6 +59,13 @@ POOL = ('AAVEUSDT', 'ADAUSDT', 'ARBUSDT', 'AVAXUSDT', 'BNBUSDT', 'BTCUSDT', 'COT
         'DOGEUSDT', 'DOTUSDT', 'ETHUSDT', 'LINKUSDT', 'LTCUSDT', 'NEARUSDT', 'SHIB1000USDT',
         'SOLUSDT', 'SUIUSDT', 'UNIUSDT', 'XLMUSDT', 'XRPUSDT', 'ZECUSDT')
 
+# Тетрадь v3 (28.09.2026): P1 и P2 перенесены на 10 пар сверх базовых 20 (research/ai_extra_pairs.py:
+# на новых парах R > 0 и в train, и в valid). Широта разгрузки (P1) считается только по базовым 20,
+# B3 на новых парах не подтвердилась — торгуется только на базовых.
+EXTRA = ('BCHUSDT', 'ETCUSDT', 'ATOMUSDT', 'FILUSDT', 'TRXUSDT', 'OPUSDT', 'APTUSDT', 'INJUSDT',
+         '1000PEPEUSDT', 'SEIUSDT')
+UNIVERSE = POOL + EXTRA
+
 PATTERNS = {
     'P1': {'label': 'CASCADE BOUNCE', 'side': 'long', 'hold': 24, 'stop': 1.0, 'rank': ('ret_4h', 1),
            'conditions': [['ret_4h', '<', -4.2604], ['oi_chg_4h', '<', -4.7381], ['cascade_count_3h', '>=', 4]]},
@@ -66,18 +73,19 @@ PATTERNS = {
            'conditions': [['rel_24h', '>=', 2.5], ['btc_ret_24h', '<=', -1.0], ['oi_chg_24h', '>=', 4.0],
                           ['vol_z', '>=', 1.5]]},
     'B3': {'label': 'DISTRIBUTION ON MARKET BOUNCE', 'side': 'short', 'hold': 48, 'stop': 1.3, 'rank': ('rel_24h', 1),
+           'universe': 'core',
            'conditions': [['btc_ret_30d', '<', 0.0], ['rel_24h', '<=', -2.5], ['btc_ret_24h', '>=', 1.0],
                           ['oi_chg_24h', '>=', 4.0], ['vol_z', '>=', 1.5]]},
 }
 
-NOTEBOOK = """YOU ARE THE TRADER of a crypto futures bot (20 liquid USDT perpetuals, long and short).
+NOTEBOOK = """YOU ARE THE TRADER of a crypto futures bot (30 liquid USDT perpetuals, long and short).
 Below is YOUR NOTEBOOK: patterns you found and verified on 2022-01..2024-06 hourly data, results after costs.
 R = profit in units of the risk taken (stop distance). You decide which alerts to trade.
 
 P1. CASCADE BOUNCE (long, hold 24h, stop = 1.0 x the coin's average daily range)
    Trigger: 4 or more of the 20 coins fell more than 4.3% within 4 hours while their open interest
    dropped more than 4.7% - leveraged longs liquidated across the market. Buy the dropped coins.
-   Result: +0.166R per trade over 637 trades, 59% winners.
+   Result: +0.157R per trade over 892 trades, 58% winners.
    Better: many coins dumping at once; 24h volume above 1.5x normal (+0.15..0.22R); BTC down >2% in 24h
            (+0.11..0.18R); coin down >25% in 7 days (+0.28R); funding above +1 bp (+0.23R).
    Worse:  a single coin dumping alone (-0.11R, usually its own bad news); BTC almost flat while coins dump
@@ -86,7 +94,7 @@ P1. CASCADE BOUNCE (long, hold 24h, stop = 1.0 x the coin's average daily range)
 P2. BTC DIVERGENCE ACCUMULATION (long, hold 48h, stop = 1.3 x the coin's average daily range)
    Trigger: the coin is 2.5%+ stronger than BTC over 24h while BTC fell 1%+, open interest grew 4%+ in 24h
    and 24h volume is above 1.5x normal - someone accumulates the coin while the market is weak.
-   Result: +0.102R per trade over 486 trades, 48% winners (winners are bigger than losers).
+   Result: +0.111R per trade over 770 trades, 47% winners (winners are bigger than losers).
    Better: BTC up more than 3.4% over 7 days (+0.25R); BTC down more than 2.1% today (+0.19R);
            coin up more than 16% over 7 days (+0.21R); 24h volume above 2.8x normal (+0.22R).
    Worse:  BTC down over 7 days (~0R) - in a falling market the strength usually fades.
@@ -152,8 +160,9 @@ def market(frames):
     btc = frames.get('BTCUSDT')
     data = {p: (df, flow_features.features(df, btc)) for p, df in frames.items() if df is not None and len(df)}
     cascade = PATTERNS['P1']['conditions'][:2]
+    # Широта — только по базовым 20: на них она мерилась (порог ≥ 4 из 20).
     breadth = flow_features.cascade_count(
-        {p: pd.Series(_mask(f, cascade), index=f.index) for p, (df, f) in data.items()})
+        {p: pd.Series(_mask(f, cascade), index=f.index) for p, (df, f) in data.items() if p in POOL})
     for p, (df, f) in data.items():
         f['cascade_count_3h'] = breadth.reindex(f.index).to_numpy()
     return data
@@ -171,7 +180,7 @@ def alerts_at(data, t):
     items = []
     for key, pat in PATTERNS.items():
         for p, (df, f) in data.items():
-            if t not in f.index:
+            if t not in f.index or (pat.get('universe') == 'core' and p not in POOL):
                 continue
             i = f.index.get_loc(t)
             m = _mask(f.iloc[max(0, i - 1):i + 1], pat['conditions'])
@@ -289,7 +298,7 @@ def _notify_decision(items, picks, reason):
 # ── Обзор рынка: модель анализирует рынок для человека ──────────────────────
 REVIEW_EVERY_H = 4
 
-REVIEW = """It is {time} UTC. MARKET DASHBOARD of your 20 coins (hourly data, closed hour).
+REVIEW = """It is {time} UTC. MARKET DASHBOARD of your coins (hourly data, closed hour).
 BTC: {btc24:+.1f}% in 24h, {btc7:+.1f}% in 7d, {btc30:+.1f}% in 30d. Coins in a liquidation cascade in the last 3h: {breadth}.
 Columns: coin, change 24h %, 7d %, 30d %, vs BTC 24h %, open interest 24h %, aggressive-buy share 24h,
 funding bp, retail long share percentile 30d, 24h volume vs normal:
@@ -307,7 +316,7 @@ _review = {'slot': None, 'busy': False}
 def review_question(data, t):
     btc = data['BTCUSDT'][1].loc[t]
     rows = []
-    for p in POOL:
+    for p in UNIVERSE:
         if p not in data or t not in data[p][1].index:
             continue
         f = data[p][1].loc[t]
@@ -393,12 +402,11 @@ def scan(pairs, gate, client=None, balance=None, now_ms=None, frames_of=None, as
         return []
     frames_of = frames_of or (lambda p: flow_data.frame(p, now_ms))
     ask = ask or ask_model
-    # Данные — по всем 20 парам тетради: широта разгрузки считалась по ним. Торгуем —
-    # только пары из списка бота. Четыре потока: первое чтение после перезапуска —
-    # 1000 часов по каждой паре, по очереди это минуты.
+    # Данные — по всей вселенной тетради (30 пар; широта разгрузки — по базовым 20).
+    # Четыре потока: первое чтение после перезапуска — 1000 часов по каждой паре.
     from concurrent.futures import ThreadPoolExecutor
     with ThreadPoolExecutor(max_workers=4) as pool:
-        frames = dict(zip(POOL, pool.map(frames_of, POOL)))
+        frames = dict(zip(UNIVERSE, pool.map(frames_of, UNIVERSE)))
     if frames.get('BTCUSDT') is None:
         log(f'   {NAME}: нет часовых данных BTC — пропуск часа')
         return []
@@ -410,7 +418,9 @@ def scan(pairs, gate, client=None, balance=None, now_ms=None, frames_of=None, as
         news_feed.poll()
     except Exception as exc:                          # noqa: BLE001
         log(f'   {NAME}: новости не записаны ({exc})')
-    items = [(p, k) for p, k in alerts_at(data, t) if p in pairs and not gate.has_position_or_order(p)]
+    # Торгует своя вселенная тетради (UNIVERSE), а не общий список ликвидных пар бота:
+    # это настройка стратегии ИИ, на другие стратегии она не влияет.
+    items = [(p, k) for p, k in alerts_at(data, t) if p in UNIVERSE and not gate.has_position_or_order(p)]
     state = {'hour': hour_ms, 'alerts': [f'{k} {p}' for p, k in items]}
     held = list(gate.held()) if hasattr(gate, 'held') else []
     free = SLOTS - len(held)

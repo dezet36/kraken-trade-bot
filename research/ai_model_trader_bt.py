@@ -38,6 +38,13 @@ import ai_model_research as R                         # noqa: E402
 
 OUT = os.path.join(HERE, 'results', 'model_trader')
 SLOTS = 6
+VERSION = 'v3'          # тетрадь: имена файлов ответов не пересекаются с прошлой версией
+
+# Тетрадь v3 (28.09.2026): P1 и P2 перенесены на 10 пар сверх базовых 20 (research/ai_extra_pairs.py:
+# на новых парах R > 0 и в train, и в valid). Широта разгрузки (P1) считается только по базовым 20,
+# B3 на новых парах не подтвердилась — торгуется только на базовых.
+EXTRA = ('BCHUSDT', 'ETCUSDT', 'ATOMUSDT', 'FILUSDT', 'TRXUSDT', 'OPUSDT', 'APTUSDT', 'INJUSDT',
+         '1000PEPEUSDT', 'SEIUSDT')
 
 PATTERNS = {
     'P1': {'label': 'CASCADE BOUNCE', 'side': 'long', 'hold': 24, 'stop': 1.0, 'rank': ('ret_4h', 1),
@@ -46,18 +53,19 @@ PATTERNS = {
            'conditions': [['rel_24h', '>=', 2.5], ['btc_ret_24h', '<=', -1.0], ['oi_chg_24h', '>=', 4.0],
                           ['vol_z', '>=', 1.5]]},
     'B3': {'label': 'DISTRIBUTION ON MARKET BOUNCE', 'side': 'short', 'hold': 48, 'stop': 1.3, 'rank': ('rel_24h', 1),
+           'universe': 'core',
            'conditions': [['btc_ret_30d', '<', 0.0], ['rel_24h', '<=', -2.5], ['btc_ret_24h', '>=', 1.0],
                           ['oi_chg_24h', '>=', 4.0], ['vol_z', '>=', 1.5]]},
 }
 
-NOTEBOOK = """YOU ARE THE TRADER of a crypto futures bot (20 liquid USDT perpetuals, long and short).
+NOTEBOOK = """YOU ARE THE TRADER of a crypto futures bot (30 liquid USDT perpetuals, long and short).
 Below is YOUR NOTEBOOK: patterns you found and verified on 2022-01..2024-06 hourly data, results after costs.
 R = profit in units of the risk taken (stop distance). You decide which alerts to trade.
 
 P1. CASCADE BOUNCE (long, hold 24h, stop = 1.0 x the coin's average daily range)
    Trigger: 4 or more of the 20 coins fell more than 4.3% within 4 hours while their open interest
    dropped more than 4.7% - leveraged longs liquidated across the market. Buy the dropped coins.
-   Result: +0.166R per trade over 637 trades, 59% winners.
+   Result: +0.157R per trade over 892 trades, 58% winners.
    Better: many coins dumping at once; 24h volume above 1.5x normal (+0.15..0.22R); BTC down >2% in 24h
            (+0.11..0.18R); coin down >25% in 7 days (+0.28R); funding above +1 bp (+0.23R).
    Worse:  a single coin dumping alone (-0.11R, usually its own bad news); BTC almost flat while coins dump
@@ -66,7 +74,7 @@ P1. CASCADE BOUNCE (long, hold 24h, stop = 1.0 x the coin's average daily range)
 P2. BTC DIVERGENCE ACCUMULATION (long, hold 48h, stop = 1.3 x the coin's average daily range)
    Trigger: the coin is 2.5%+ stronger than BTC over 24h while BTC fell 1%+, open interest grew 4%+ in 24h
    and 24h volume is above 1.5x normal - someone accumulates the coin while the market is weak.
-   Result: +0.102R per trade over 486 trades, 48% winners (winners are bigger than losers).
+   Result: +0.111R per trade over 770 trades, 47% winners (winners are bigger than losers).
    Better: BTC up more than 3.4% over 7 days (+0.25R); BTC down more than 2.1% today (+0.19R);
            coin up more than 16% over 7 days (+0.21R); 24h volume above 2.8x normal (+0.22R).
    Worse:  BTC down over 7 days (~0R) - in a falling market the strength usually fades.
@@ -114,11 +122,21 @@ os.replace(dst + ".part", dst)
 '''
 
 
-def prepare():
-    data = L.load_all()
+def prepare(extra=True):
+    """Базовые 20 пар (flow_cache) и, с v3, пары EXTRA (flow_cache_extra); широта — по базовым."""
+    data = dict(L.load_all())
     cascade = PATTERNS['P1']['conditions'][:2]
     trig = pd.DataFrame({p: pd.Series(L.signal_mask(f, cascade), index=f.index) for p, (d, f) in data.items()}).fillna(False)
     breadth = trig.rolling(3, min_periods=1).max().sum(axis=1)
+    folder = os.path.join(HERE, 'flow_cache_extra')
+    if extra and os.path.isdir(folder):
+        btc = data['BTCUSDT'][0]
+        for p in EXTRA:
+            path = os.path.join(folder, f'{p}.pkl')
+            if os.path.exists(path):
+                df = pd.read_pickle(path)
+                df = df[df['v'] > 0]
+                data[p] = (df, L.features(df, btc))
     for p, (d, f) in data.items():
         f['cascade_count_3h'] = breadth.reindex(f.index).to_numpy()
     return data
@@ -130,6 +148,8 @@ def alerts(data, split):
     by_hour = {}
     for key, pat in PATTERNS.items():
         for p, (df, f) in data.items():
+            if pat.get('universe') == 'core' and p in EXTRA:
+                continue
             m = L.signal_mask(f, pat['conditions'])
             # Решение — один раз на серию: только первый час, когда сигнал появился
             # (вживую модель спрашивается о новом сигнале, а не каждый час, пока он держится).
@@ -283,7 +303,7 @@ def run(split, limit=None):
         for p, _ in cand[:max(0, SLOTS - len(held))]:
             if (t, p) in res:
                 held[p] = res[(t, p)][1]
-    tag = f'{split}{limit or ""}'
+    tag = f'{VERSION}_{split}{limit or ""}'
     answers = ask_model(prompts, tag)
     chosen = {t: picks_from(text, items) for (t, items), text in zip(evs, answers)}
     bad = sum(1 for v in chosen.values() if v is None)
