@@ -595,6 +595,14 @@ class TestHumanNames:
         assert out.count('«Отскок после ликвидаций»') == 2 and '«Продажа на отскоке»' in out
         assert 'P3' in out and 'B1' in out and 'SEI' in out
 
+    def test_code_before_the_name_is_dropped_not_doubled(self):
+        # Обзор 16:00 28.09: модель пишет и код, и имя — имя не должно идти дважды.
+        text = ('P1 «Отскок после ликвидаций» не сработал. P2 «Накопление при слабом BTC» подходит для LINK. '
+                'B3 — «Продажа на отскоке» не актуален; паттерн P1 ждём.')
+        out = llm_notebook.humanize(text)
+        assert out == ('«Отскок после ликвидаций» не сработал. «Накопление при слабом BTC» подходит для LINK. '
+                       '«Продажа на отскоке» не актуален; паттерн «Отскок после ликвидаций» ждём.')
+
     def test_decision_message_groups_coins_by_pattern_name(self, monkeypatch):
         import telegram_notify
         got = []

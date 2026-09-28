@@ -147,11 +147,21 @@ def title(key):
 
 
 def humanize(text):
-    """Коды закономерностей в тексте модели -> имена: «P1» -> «Отскок после ликвидаций»."""
+    """
+    Коды закономерностей в тексте модели -> имена: «P1» -> «Отскок после ликвидаций».
+
+    Код, за которым модель сама написала имя («P1 «Отскок после ликвидаций»», обзор 16:00
+    28.09), просто убирается — иначе имя шло бы дважды подряд.
+    """
+    text = str(text or '')
+    for key, title_ru in TITLES.items():
+        letter = {'P': '[PР]', 'B': '[BВ]'}[key[0]]
+        text = re.sub(rf'(?<!\w){letter}{key[1]}(?!\w)\s*[—–:-]?\s*(?=«?{re.escape(title_ru)})', '', text)
+
     def name(m):
         key = {'P': 'P', 'Р': 'P', 'B': 'B', 'В': 'B'}[m.group(1)] + m.group(2)
         return f'«{TITLES[key]}»' if key in TITLES else m.group(0)
-    return _CODES.sub(name, str(text or ''))
+    return _CODES.sub(name, text)
 
 # «Лучше/хуже» тетради флагами — как в research/ai_notebook_flags.py (docs п. 71, совпадение держит тест).
 # Только в журнал решений: модели счёт не показывается. Вживую проверяется, держатся ли флаги P1
@@ -460,8 +470,9 @@ interest change over 24h; "buy share" = aggressive (taker) buying as a share of 
 Write a short market review for the owner IN RUSSIAN (at most 900 characters): 1) the market regime and what
 drives it now; 2) where the crowd and the aggressive flow are; 3) which coins are close to the patterns of your
 notebook (P1, P2, B3) and what you will do if they trigger; 4) the main risk for the next 24 hours. Plain text,
-no tables. The owner does not know the codes: in the text call the patterns by their Russian names -
-P1 «Отскок после ликвидаций», P2 «Накопление при слабом BTC», B3 «Продажа на отскоке».
+no tables. The owner does not know the codes: do not write P1, P2, B3 - call the patterns only by their Russian
+names: «Отскок после ликвидаций» (P1), «Накопление при слабом BTC» (P2), «Продажа на отскоке» (B3). No English
+labels from the table either - say «доля розничных лонгов», «доля агрессивных покупок», «открытый интерес».
 Then on the LAST line write JSON only:
 {{"regime": "rising|falling|sideways", "btc_24h": "up|down|flat", "watch": [{{"coin": "XXX", "side": "long|short", "why": "few words"}}]}}"""
 
