@@ -1,0 +1,123 @@
+{"content": "{\n\"trade\": [\n\"ZEC\"\n],\n\"reason\": \"Fits B3 perfectly: strong BTC downtrend, weak ZEC on bounce, high OI/volume, low retail interest.\"\n}"}
+{"content": "{\n\"trade\": [\n\"ZEC\"\n],\n\"reason\": \"B3 trigger met; mild 30d decline and high retail long share boost expected profitability.\"\n}"}
+{"content": "{\n\"trade\": [\n\"DOGE\"\n],\n\"reason\": \"B3 trigger met. BTC 30d decline (-16.9%) is worse than optimal (>-9%), but high volume and weak performance justify the short.\"\n}"}
+{"content": "{\n\"trade\": [\n\"NEAR\",\n\"AVAX\"\n],\n\"reason\": \"BTC 30d decline >-9% favors B3. NEAR has low volume and negative funding (better). AVAX has high volume (worse) but strong OI growth.\"\n}"}
+{"content": "{\n\"trade\": [\n\"AAVE\"\n],\n\"reason\": \"Strong B3 signal: BTC down >9% over 30d, high retail long share, and negative funding boost expected profitability.\"\n}"}
+{"content": "{\n\"trade\": [\n\"SOL\",\n\"AAVE\",\n\"SHIB1000\"\n],\n\"reason\": \"SOL and AAVE show high volume and positive funding for P1; SHIB1000 fits B3 with low retail interest.\"\n}"}
+{"content": "{\n\"trade\": [\n\"LINK\"\n],\n\"reason\": \"B3 trigger met. BTC 30d decline >-9% hurts edge, but high volume and negative funding support shorting the bounce.\"\n}"}
+{"content": "{\n\"trade\": [\n\"AVAX\"\n],\n\"reason\": \"B3 trigger met; mild 30d decline and high retail long share boost expected profitability significantly.\"\n}"}
+{"content": "{\n\"trade\": [\n\"SOL\"\n],\n\"reason\": \"Strong B3 signal: BTC 30d down mild, low retail long share, and negative funding boost expected profitability.\"\n}"}
+{"content": "{\n\"trade\": [\n\"AAVE\"\n],\n\"reason\": \"Strong B3 setup: BTC 30d decline mild (-25.5% > -9%), low retail participation, and negative funding boost expected profitability.\"\n}"}
+{"content": "{\n\"trade\": [\n\"ADA\"\n],\n\"reason\": \"B3 trigger met; mild 30d decline and high retail long share boost expected profitability.\"\n}"}
+{"content": "{\n\"trade\": [\n\"LINK\"\n],\n\"reason\": \"B3 trigger met; mild 30d decline and high retail long share boost expected returns significantly.\"\n}"}
+{"content": "{\n\"trade\": [\n\"LTC\"\n],\n\"reason\": \"B3 trigger met with strong tailwinds: high retail long share (+0.35R boost) and mild 30d decline (+0.38R boost).\"\n}"}
+{"content": "{\n\"trade\": [\n\"AAVE\"\n],\n\"reason\": \"B3 trigger met; high retail long share and mild 30d decline boost expected returns to +0.38R.\"\n}"}
+{"content": "{\n\"trade\": [\n\"NEAR\"\n],\n\"reason\": \"B3 triggers: BTC down >9% over 30d weakens signal, but mild decline and high retail long share support the short.\"\n}"}
+{"content": "{\n\"trade\": [\n\"LINK\"\n],\n\"reason\": \"B3 triggers with high retail buying and mild BTC decline, indicating strong distribution into the bounce.\"\n}"}
+{"content": "{\n\"trade\": [],\n\"reason\": \"Cascade Bounce requires >4 coins liquidated; only 1 present. B3 trigger fails as BTC is up >1% in 24h, not down.\"\n}"}
+{"content": "{\n\"trade\": [\n\"XLM\"\n],\n\"reason\": \"B3 triggers perfectly: BTC down >9% over 30d, weak coin vs strong BTC, high OI/volume, low retail long share.\"\n}"}
+{"content": "{\n\"trade\": [\n\"XRP\"\n],\n\"reason\": \"Strong B3 signal: weak coin on bounce, high volume, low retail interest, and mild BTC decline favor short.\"\n}"}
+{"content": "{\n\"trade\": [\n\"XLM\"\n],\n\"reason\": \"Funding is negative and retail long share is high, aligning with B3's 'Better' conditions for a short on bounce.\"\n}"}
+{"content": "{\n\"trade\": [\n\"LINK\"\n],\n\"reason\": \"Strong B3 setup: mild 30d drop, high retail buying, positive funding, and weak price action on bounce.\"\n}"}
+{"content": "{\n\"trade\": [\n\"NEAR\"\n],\n\"reason\": \"B3 conditions are optimal: mild 30d decline, high retail long share, and negative funding boost expected profitability.\"\n}"}
+{"content": "{\n\"trade\": [\n\"COTI\"\n],\n\"reason\": \"Strong B3 signal: high retail long share and mild 30d decline boost expected returns.\"\n}"}
+{"content": "{\n\"trade\": [\n\"BNB\"\n],\n\"reason\": \"B3 triggers with mild 30d decline and high retail buying, indicating strong distribution on bounce.\"\n}"}
+{"content": "{\n\"trade\": [\n\"COTI\"\n],\n\"reason\": \"B3 conditions are optimal: mild 30d decline, high retail buying, and negative funding boost expected profitability.\"\n}"}
+{"content": "{\n\"trade\": [\n\"LTC\"\n],\n\"reason\": \"Strong B3 signal: BTC 30d decline mild (-7.9%), high retail long share (0.66), and negative funding boost profitability.\"\n}"}
+{"content": "{\n\"trade\": [\n\"XRP\"\n],\n\"reason\": \"Strong B3 signal: weak coin on BTC bounce, high volume, low retail interest, and mild 30d decline favor the short.\"\n}"}
+{"content": "{\n\"trade\": [\n\"UNI\"\n],\n\"reason\": \"Fits B3 perfectly: BTC down >9% over 30d, coin weak vs BTC, OI up, volume high. Retail long share is low (0.24), avoiding the 'worse' condition of high retail buying.\"\n}"}
+{"content": "{\n\"trade\": [\n\"UNI\"\n],\n\"reason\": \"B3 trigger met; mild 30d decline and low retail participation enhance edge, fitting risk limits.\"\n}"}
+{"content": "{\n\"trade\": [\n\"UNI\"\n],\n\"reason\": \"B3 trigger met; mild 30d decline and high retail long share boost expected returns.\"\n}"}
+{"content": "{\n\"trade\": [\n\"COTI\"\n],\n\"reason\": \"COTI fits B3 perfectly: weak vs BTC, high OI/volume, mild 30d drop, and low retail interest boosts expected return.\"\n}"}
+{"content": "{\n\"trade\": [\n\"BNB\"\n],\n\"reason\": \"B3 trigger met; mild 30d decline and low retail rank enhance expected return.\"\n}"}
+{"content": "{\n\"trade\": [\n\"ADA\"\n],\n\"reason\": \"B3 trigger met; mild 30d decline and high retail long share boost expected profitability.\"\n}"}
+{"content": "{\n\"trade\": [\n\"NEAR\"\n],\n\"reason\": \"NEAR fits B3 perfectly: weak vs BTC, rising OI/volume, high retail long share, and mild 30d drop.\"\n}"}
+{"content": "{\n\"trade\": [\n\"COTI\"\n],\n\"reason\": \"COTI fits B3 perfectly: mild 30d drop, high retail buying, negative funding, and weak price action on bounce.\"\n}"}
+{"content": "{\n\"trade\": [\n\"AAVE\"\n],\n\"reason\": \"B3 on AAVE is stronger: lower retail interest and negative funding align better with optimal conditions than DOT's high retail buying.\"\n}"}
+{"content": "{\n\"trade\": [\n\"BNB\"\n],\n\"reason\": \"B3 triggers: BTC down >9% over 30d is worse (-0.13R), but high volume also hurts (+0.12R). Net effect slightly negative. However, no other alerts exist. P1/P2 not triggered. B3 has positive base expectancy (+0.255R) and 61% win rate. The 'worse' conditions reduce but don't negate edge. Given no alternatives, take the best available signal.\"\n}"}
+{"content": "{\n\"trade\": [\n\"SOL\"\n],\n\"reason\": \"SOL fits B3 perfectly: weak vs BTC, rising OI/volume, mild 30d drop, and low retail long share.\"\n}"}
+{"content": "{\n\"trade\": [\n\"LINK\"\n],\n\"reason\": \"B3 triggers with mild BTC decline and low retail interest, fitting high-probability short conditions.\"\n}"}
+{"content": "{\n\"trade\": [\n\"DOGE\"\n],\n\"reason\": \"B3 triggers: BTC down 30d, coin weak vs BTC, OI up, high volume. Retail long share high (+0.35R boost), funding positive but mild.\"\n}"}
+{"content": "{\n\"trade\": [\n\"UNI\"\n],\n\"reason\": \"B3 triggers with high retail long share and mild BTC decline, indicating strong distribution into the bounce.\"\n}"}
+{"content": "{\n\"trade\": [\n\"LTC\"\n],\n\"reason\": \"B3 conditions are optimal: mild 30d decline, high retail long share, and neutral funding boost expected profitability.\"\n}"}
+{"content": "{\n\"trade\": [\n\"AVAX\"\n],\n\"reason\": \"B3 trigger met; mild 30d decline and high retail long share boost expected profitability significantly.\"\n}"}
+{"content": "{\n\"trade\": [\n\"DOT\"\n],\n\"reason\": \"B3 trigger met; mild 30d decline and low retail rank favor shorting into the bounce.\"\n}"}
+{"content": "{\n\"trade\": [\n\"XLM\"\n],\n\"reason\": \"XLM fits B3 perfectly: weak vs BTC, rising OI/volume, mild 30d drop, low retail longs, and negative funding.\"\n}"}
+{"content": "{\n\"trade\": [\n\"ETH\"\n],\n\"reason\": \"B3 triggers on weak coin vs BTC bounce. High retail long share and positive funding confirm distribution into the rally, aligning with better conditions.\"\n}"}
+{"content": "{\n\"trade\": [\n\"AAVE\"\n],\n\"reason\": \"Strong B3 signal: high retail long share and mild BTC decline boost expected returns.\"\n}"}
+{"content": "{\n\"trade\": [\n\"ZEC\"\n],\n\"reason\": \"ZEC fits B3 perfectly: weak vs BTC, high volume/OI, mild 30d drop, and high retail long share.\"\n}"}
+{"content": "{\n\"trade\": [\n\"UNI\"\n],\n\"reason\": \"Strong B3 setup: extreme weakness vs BTC, high volume, and high retail long share indicate distribution into the bounce.\"\n}"}
+{"content": "{\n\"trade\": [\n\"AAVE\"\n],\n\"reason\": \"B3 triggers with high retail long share and mild BTC decline, indicating strong distribution on bounce.\"\n}"}
+{"content": "{\n\"trade\": [\n\"AVAX\"\n],\n\"reason\": \"AVAX fits B3 perfectly: BTC down 30d, weak vs BTC, rising OI/volume, high retail longs, mild 30d decline.\"\n}"}
+{"content": "{\n\"trade\": [\n\"ZEC\"\n],\n\"reason\": \"B3 trigger met; mild 30d decline and high retail long share boost expected profitability significantly.\"\n}"}
+{"content": "{\n\"trade\": [\n\"XLM\"\n],\n\"reason\": \"XLM fits B3 perfectly: weak vs BTC, high volume/OI, mild 30d drop, and low retail participation boosts edge.\"\n}"}
+{"content": "{\n\"trade\": [\n\"UNI\"\n],\n\"reason\": \"B3 triggers on weak coin vs strong BTC bounce. High volume and low retail rank reduce edge, but conditions are better than worse.\"\n}"}
+{"content": "{\n\"trade\": [\n\"ZEC\"\n],\n\"reason\": \"B3 triggers strongly: BTC falling 30d, ZEC weak vs BTC, high OI/volume, low retail long share.\"\n}"}
+{"content": "{\n\"trade\": [\n\"UNI\"\n],\n\"reason\": \"B3 trigger met; mild 30d decline and low retail rank boost expected profitability.\"\n}"}
+{"content": "{\n\"trade\": [\n\"AVAX\"\n],\n\"reason\": \"AVAX fits B3 perfectly: weak vs BTC, rising OI/volume, mild 30d drop, low funding, and high retail long share.\"\n}"}
+{"content": "{\n\"trade\": [\n\"LTC\"\n],\n\"reason\": \"B3 triggers with high retail long share and mild BTC decline, indicating strong distribution into the bounce.\"\n}"}
+{"content": "{\n\"trade\": [\n\"UNI\"\n],\n\"reason\": \"B3 conditions are optimal: mild BTC decline, high retail long share, and positive funding favor the short.\"\n}"}
+{"content": "{\n\"trade\": [\n\"COTI\"\n],\n\"reason\": \"COTI fits B3 better conditions: mild BTC decline and low retail long share increase expected profitability.\"\n}"}
+{"content": "{\n\"trade\": [\n\"XLM\"\n],\n\"reason\": \"Strong B3 setup: mild 30d decline, high retail long share, and positive funding favor shorting the bounce.\"\n}"}
+{"content": "{\n\"trade\": [\n\"ADA\"\n],\n\"reason\": \"B3 triggers strongly: BTC falling 30d, ADA weak vs bounce, high OI/volume, and retail long share is elevated (0.74), boosting expected return.\"\n}"}
+{"content": "{\n\"trade\": [\n\"BNB\"\n],\n\"reason\": \"B3 trigger met with strong tailwinds: high retail long share (+0.35R) and mild BTC decline (+0.38R), maximizing expected return.\"\n}"}
+{"content": "{\n\"trade\": [\n\"SOL\"\n],\n\"reason\": \"Strong B3 setup: deep BTC downtrend (-19.4%), high retail long share (0.504), and mild 30d decline favor shorts.\"\n}"}
+{"content": "{\n\"trade\": [\n\"NEAR\"\n],\n\"reason\": \"B3 conditions are optimal: mild 30d decline, high retail long share, and negative funding boost expected profitability.\"\n}"}
+{"content": "{\n\"trade\": [\n\"XLM\"\n],\n\"reason\": \"B3 triggers with high volume and mild BTC decline, fitting optimal short conditions.\"\n}"}
+{"content": "{\n\"trade\": [\n\"LTC\"\n],\n\"reason\": \"B3 trigger met with strong tailwinds: high retail long share and mild BTC decline boost expected returns.\"\n}"}
+{"content": "{\n\"trade\": [\n\"ETH\"\n],\n\"reason\": \"B3 triggers strongly: BTC 30d decline is mild (-8.9%), high retail long share (+0.35R), and funding is low (+0.38R).\"\n}"}
+{"content": "{\n\"trade\": [\n\"SHIB1000\"\n],\n\"reason\": \"B3 triggers strongly: BTC 30d decline is mild (-9.0%), retail long share is high (0.86), and funding is low, aligning with optimal conditions.\"\n}"}
+{"content": "{\n\"trade\": [\n\"SOL\"\n],\n\"reason\": \"SOL fits B3 better: mild 30d decline (+0.38R) and low retail long share (+0.35R), unlike XRP's high retail interest.\"\n}"}
+{"content": "{\n\"trade\": [\n\"UNI\"\n],\n\"reason\": \"B3 trigger met; strong BTC bounce with weak UNI performance and rising OI confirms distribution into the rally.\"\n}"}
+{"content": "{\n\"trade\": [\"DOT\"],\n\"reason\": \"Fits B3 perfectly: strong BTC bounce, weak DOT, rising OI/volume, high retail longs, and mild 30d decline.\"\n}"}
+{"content": "{\n\"trade\": [\n\"NEAR\"\n],\n\"reason\": \"Strong B3 signal: deep 30d drop, high volume, low funding, and weak price action on bounce.\"\n}"}
+{"content": "{\n\"trade\": [\n\"NEAR\"\n],\n\"reason\": \"Fits B3 short: BTC down 30d, NEAR weak vs BTC, OI up, high volume. No better long opportunities available.\"\n}"}
+{"content": "{\n\"trade\": [\n\"COTI\"\n],\n\"reason\": \"B3 trigger met; mild 30d decline and high retail long share boost expected returns significantly.\"\n}"}
+{"content": "{\n\"trade\": [\n\"NEAR\"\n],\n\"reason\": \"NEAR fits B3 perfectly: weak vs BTC, rising OI/volume, mild 30d drop, and high retail long share.\"\n}"}
+{"content": "{\n\"trade\": [\n\"DOT\"\n],\n\"reason\": \"Strong B3 setup: deep 30d drop, high retail longs, negative funding, and weak price action on bounce.\"\n}"}
+{"content": "{\n\"trade\": [\n\"AVAX\"\n],\n\"reason\": \"AVAX fits B3 perfectly: strong BTC drop, weak coin, high volume, low retail interest, and mild 30d decline.\"\n}"}
+{"content": "{\n\"trade\": [\n\"XRP\"\n],\n\"reason\": \"Strong B3 signal: BTC 30d decline is mild (-11.1% > -9%), retail long share is high (0.03 is low rank, wait, 0.03 is very low retail long share, which contradicts 'Better: retail long share high'. Let me re-read P2/B3 notes carefully. P2 says 'retail long share high (30-day rank above 0.5: +0.35R)'. The alert shows 0.03. This is a 'Worse' condition for B3? No, B3 Better says 'retail long share high... +0.35R'."}
+{"content": "{\n\"trade\": [\n\"SUI\"\n],\n\"reason\": \"B3 conditions are optimal: mild 30d decline, low retail participation, and negative funding boost expected profitability.\"\n}"}
+{"content": "{\n\"trade\": [\n\"ZEC\"\n],\n\"reason\": \"ZEC fits B3 perfectly: weak vs BTC, rising OI/volume, mild 30d drop, low retail interest, and negative funding.\"\n}"}
+{"content": "{\n\"trade\": [\n\"ZEC\"\n],\n\"reason\": \"B3 trigger met. Mild 30d decline and high retail long share boost expected profitability significantly.\"\n}"}
+{"content": "{\n\"trade\": [\n\"NEAR\"\n],\n\"reason\": \"B3 triggers strongly: BTC falling 30d, NEAR weak vs BTC, high OI/volume, and extreme retail long share boosts expectancy.\"\n}"}
+{"content": "{\n\"trade\": [\n\"DOGE\",\n\"AVAX\"\n],\n\"reason\": \"High volume and strong BTC drop favor P1. AVAX has extreme volume; DOGE has positive funding.\"\n}"}
+{"content": "{\n\"trade\": [\n\"ZEC\"\n],\n\"reason\": \"ZEC shows strong accumulation vs BTC with high volume and positive 7-day momentum, fitting P2 better conditions.\"\n}"}
+{"content": "{\n\"trade\": [\n\"XLM\"\n],\n\"reason\": \"Strong P2 setup: XLM outperforms weak BTC with rising OI and high volume, fitting better-than-average conditions.\"\n}"}
+{"content": "{\n\"trade\": [\"ADA\"],\n\"reason\": \"Strong P2 signal with high volume and OI growth during BTC dump; favorable 7-day trend supports accumulation.\"\n}"}
+{"content": "{\n\"trade\": [\n\"ADA\"\n],\n\"reason\": \"Strong P2 signal: ADA outperforms weak BTC with rising OI and high volume, fitting accumulation criteria.\"\n}"}
+{"content": "{\n\"trade\": [\n\"DOT\"\n],\n\"reason\": \"Highest volume and retail interest suggest accumulation; FIL/SHIB lack sufficient momentum confirmation.\"\n}"}
+{"content": "{\n\"trade\": [\n\"SHIB1000\"\n],\n\"reason\": \"BTC crash confirms cascade; SHIB shows relative strength and low retail interest, avoiding the worst P1 conditions.\"\n}"}
+{"content": "{\n\"trade\": [\n\"DOGE\"\n],\n\"reason\": \"Strong P2 setup with high volume and positive 7-day trend, despite mild BTC weakness.\"\n}"}
+{"content": "{\n\"trade\": [\n\"DOGE\",\n\"OP\"\n],\n\"reason\": \"DOGE and OP show strong accumulation signals with high volume and positive 7-day trends. SHIB1000 has weak momentum and high retail long share, indicating potential distribution.\"\n}"}
+{"content": "{\n\"trade\": [\n\"COTI\"\n],\n\"reason\": \"P2 trigger met with extreme volume and strength vs BTC; P1s are weak due to low volume and flat BTC trend.\"\n}"}
+{"content": "{\n\"trade\": [\n\"ZEC\"\n],\n\"reason\": \"P2 trigger met; BTC down >2% today (+0.19R boost) and 7d decline is mild enough to avoid the ~0R worse condition.\"\n}"}
+{"content": "{\n\"trade\": [\n\"INJ\"\n],\n\"reason\": \"Strong P2 setup with high OI growth and volume; BTC downtrend supports accumulation play.\"\n}"}
+{"content": "{\n\"trade\": [\n\"BCH\"\n],\n\"reason\": \"Strong P2 setup with high volume and positive 7-day trend, avoiding weak BTC divergence context.\"\n}"}
+{"content": "{\n\"trade\": [\n\"SOL\",\n\"SUI\",\n\"AVAX\"\n],\n\"reason\": \"Strong P1 cascade bounce candidates with high volume and mild retail buying; SOL shows best relative strength and volume support.\"\n}"}
+{"content": "{\n\"trade\": [\n\"AAVE\"\n],\n\"reason\": \"P2 trigger met with exceptional volume (6.3x) and strong BTC divergence; P1 is risky due to ongoing cascade.\"\n}"}
+{"content": "{\n\"trade\": [\n\"SOL\"\n],\n\"reason\": \"P2 trigger met with strong BTC divergence, high volume, and favorable 7-day trend.\"\n}"}
+{"content": "{\n\"trade\": [\n\"LTC\",\n\"XRP\",\n\"BCH\",\n\"SUI\",\n\"COTI\",\n\"APT\"\n],\n\"reason\": \"Strong cascade bounce with high volume and negative funding; avoid single-coin dumps and flat BTC conditions.\"\n}"}
+{"content": "{\n\"trade\": [\n\"SHIB1000\"\n],\n\"reason\": \"Strong P2 setup with high volume and OI growth; BTC weakness supports accumulation despite poor 7d trend.\"\n}"}
+{"content": "{\n\"trade\": [\n\"ATOM\"\n],\n\"reason\": \"P2 trigger met; strong relative strength and OI growth. However, BTC 7d decline is negative (-3.3%), which is a 'Worse' condition reducing edge, but still positive expectancy.\"\n}"}
+{"content": "{\n\"trade\": [\n\"APT\",\n\"LINK\"\n],\n\"reason\": \"Both P2 longs show strong accumulation vs BTC. APT has superior volume and 7d momentum, enhancing expected returns.\"\n}"}
+{"content": "{\n\"trade\": [\n\"ARB\"\n],\n\"reason\": \"P2 trigger met with strong volume and OI growth. BTC 7d up supports accumulation thesis; fits remaining slot.\"\n}"}
+{"content": "{\n\"trade\": [\n\"COTI\"\n],\n\"reason\": \"COTI shows superior volume (2.83x) and stronger 7d momentum (+12.3%) vs ATOM, aligning better with P2 'Better' conditions.\"\n}"}
+{"content": "{\n\"trade\": [\n\"NEAR\",\n\"UNI\"\n],\n\"reason\": \"NEAR and UNI show strong P2 signals with high volume and OI growth; others are weaker or have conflicting macro conditions.\"\n}"}
+{"content": "{\n\"trade\": [\n\"SUI\"\n],\n\"reason\": \"SUI shows stronger momentum (+15.2% vs BTC) and lower retail interest than APT, fitting P2 better despite similar volume.\"\n}"}
+{"content": "{\n\"trade\": [\n\"1000PEPE\",\n\"SEI\"\n],\n\"reason\": \"Both show strong P2 signals with high 7d gains and volume. ETH is weaker vs BTC and has lower momentum.\"\n}"}
+{"content": "{\n\"trade\": [\n\"FIL\",\n\"ZEC\"\n],\n\"reason\": \"Both P2 longs show strong BTC divergence and high volume. FIL has superior 7d momentum (+37.5%) and higher volume multiple (7.0x), making it the strongest signal. ZEC is also valid with good volume (7.2x) and positive divergence. 1000PEPE is weak (-2.8% 7d, low volume 1.77x) and risky.\"\n}"}
+{"content": "{\n\"trade\": [\n\"UNI\"\n],\n\"reason\": \"Highest volume (8.5x) and strongest relative strength (+9.4%) maximize P1 cascade bounce profitability.\"\n}"}
+{"content": "{\n\"trade\": [\n\"DOGE\"\n],\n\"reason\": \"DOGE shows strong P2 accumulation signals: outperforms weak BTC, rising OI, and high volume.\"\n}"}
+{"content": "{\n\"trade\": [\n\"XRP\"\n],\n\"reason\": \"P2 trigger met with strong relative strength and volume; BTC downtrend supports accumulation thesis.\"\n}"}
+{"content": "{\n\"trade\": [\n\"XRP\"\n],\n\"reason\": \"Highest retail long share (0.99) and positive funding align with P1 'Better' conditions for strong bounce potential.\"\n}"}
+{"content": "{\n\"trade\": [\n\"TRX\"\n],\n\"reason\": \"TRX shows strong P2 divergence with high volume and positive BTC trend context, avoiding weak cascade conditions.\"\n}"}
+{"content": "{\n\"trade\": [\n\"AAVE\"\n],\n\"reason\": \"Strong P2 setup: AAVE outperforms weak BTC with rising OI and high volume, indicating accumulation.\"\n}"}
+{"content": "{\n\"trade\": [\n\"SEI\"\n],\n\"reason\": \"SEI shows strong P2 signals: high 7d gain, extreme volume, and positive divergence against weak BTC.\"\n}"}
+{"content": "{\n\"trade\": [\"ATOM\"],\n\"reason\": \"Fits P1 Cascade Bounce with high volume and negative BTC trend, boosting expected return.\"\n}"}
+{"content": "{\n\"trade\": [\n\"SEI\"\n],\n\"reason\": \"Strong P2 setup with high volume and OI growth during BTC dip; 7d uptrend supports accumulation.\"\n}"}
+{"content": "{\n\"trade\": [\"ETH\"],\n\"reason\": \"Strong P2 setup: high volume, OI growth, and positive 7-day trend boost expected returns significantly.\"\n}"}
+{"content": "{\n\"trade\": [\n\"LTC\"\n],\n\"reason\": \"LTC shows superior P2 signals: higher volume, stronger BTC divergence, and positive funding. TRX lacks volume and has weak 7d performance.\"\n}"}
+{"content": "{\n\"trade\": [\n\"ARB\",\n\"SUI\",\n\"OP\"\n],\n\"reason\": \"Strong cascade bounce with high volume and positive funding; OP shows best volume spike (+1.76x) among candidates.\"\n}"}
+{"content": "{\n\"trade\": [\n\"1000PEPE\"\n],\n\"reason\": \"P2 trigger met; strong 7d trend and volume support entry despite weak BTC.\"\n}"}
+{"content": "{\n\"trade\": [\n\"BNB\"\n],\n\"reason\": \"P2 trigger met with strong BTC divergence and rising OI. BTC 7d drop >2.1% boosts expectancy. Fits risk limits.\"\n}"}

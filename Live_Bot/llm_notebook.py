@@ -111,7 +111,7 @@ B3. DISTRIBUTION ON MARKET BOUNCE (short, hold 48h, stop = 1.3 x the coin's aver
    than BTC, while its open interest grew 4%+ and 24h volume is above 1.5x normal - someone is selling the coin
    into the market bounce. Sell it.
    Result: +0.255R per trade over 62 trades, 61% winners; positive in 6 of 7 half-years.
-   Better: retail long share high (+0.35R, the crowd is buying the bounce); funding not positive (+0.38R);
+   Better: retail long share high (30-day rank above 0.5: +0.35R, the crowd is buying the bounce); funding not positive (+0.38R);
            BTC 30d decline mild, above -9% (+0.38R).
    Worse:  BTC 30d decline deeper than -9% (+0.13R); very high volume above 2.1x normal (+0.12R).
 
@@ -122,14 +122,15 @@ strongest alerts, and skip when your notebook says the conditions are the weak o
 QUESTION = """It is {time} UTC. New alerts this hour: {n}.
 Already holding: {held}. Free position slots: {free}.
 
-MARKET: BTC {btc4:+.1f}% in 4h, {btc24:+.1f}% in 24h, {btc7:+.1f}% in 7d. Coins in a liquidation cascade in the last 3h: {breadth}.
+MARKET: BTC {btc4:+.1f}% in 4h, {btc24:+.1f}% in 24h, {btc7:+.1f}% in 7d, {btc30:+.1f}% in 30d. Coins in a liquidation cascade in the last 3h: {breadth}.
 
-ALERTS - pattern, coin, then: change 4h %, change 24h %, change 7d %, strength vs BTC 24h %, open interest 4h % / 24h %,
-24h volume vs normal, aggressive-buy share 24h, funding bp, retail long share percentile 30d:
+ALERTS - pattern, side, coin, then: change 4h %, change 24h %, change 7d %, strength vs BTC 24h %, open interest 4h % / 24h %,
+24h volume vs normal, aggressive-buy share 24h, funding bp, retail long share rank vs its last 30 days (0 = lowest, 1 = highest):
 {table}
 
-Which alerts do you trade now (at most {free})? Answer with JSON only:
-{{"buy": ["COIN", ...], "reason": "one sentence"}}"""
+Every alert already meets its pattern's trigger. The side of each alert is fixed by its pattern (long = buy the coin, short = sell it).
+Which alerts do you trade now (at most {free})? Answer with JSON only, the reason in at most 25 words:
+{{"trade": ["COIN", ...], "reason": "one sentence"}}"""
 
 OPS = {'<': np.less, '<=': np.less_equal, '>': np.greater, '>=': np.greater_equal}
 
@@ -252,12 +253,12 @@ def brief(data, t, items, held, free):
     rows = []
     for p, key in items:
         f = data[p][1].loc[t]
-        rows.append(f"{key} {p.replace('USDT', ''):9s} {f['ret_4h']:+6.1f} {f['ret_24h']:+6.1f} {f['ret_7d']:+6.1f} "
+        rows.append(f"{key} {PATTERNS[key]['side']:5s} {p.replace('USDT', ''):9s} {f['ret_4h']:+6.1f} {f['ret_24h']:+6.1f} {f['ret_7d']:+6.1f} "
                     f"{f['rel_24h']:+6.1f} {f['oi_chg_4h']:+5.1f}/{f['oi_chg_24h']:+5.1f} {f['vol_z']:5.2f} "
                     f"{f['taker_24h']:5.3f} {f['funding_bp']:+5.2f} {f['buy_ratio_pct_30d']:.2f}")
     return QUESTION.format(time=(t + pd.Timedelta(hours=1)).strftime('%Y-%m-%d %H:%M'), n=len(items),
                            held=', '.join(p.replace('USDT', '') for p in held) or 'nothing', free=free,
-                           btc4=btc['btc_ret_4h'], btc24=btc['btc_ret_24h'], btc7=btc['btc_ret_7d'],
+                           btc4=btc['btc_ret_4h'], btc24=btc['btc_ret_24h'], btc7=btc['btc_ret_7d'], btc30=btc['btc_ret_30d'],
                            breadth=int(btc['cascade_count_3h']), table='\n'.join(rows))
 
 

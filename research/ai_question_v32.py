@@ -31,14 +31,14 @@ TAG = 'v32_check'
 V31_DONE = 123            # ответов прогона v3.1 до конца ответов v3 на S_P
 RESULT = os.path.join(HERE, 'results', 'ai_question_v32.txt')
 
-NOTEBOOK_V32 = B.NOTEBOOK.replace(
+NOTEBOOK_V32 = Q.NOTEBOOK_V3.replace(
     'Better: retail long share high (+0.35R, the crowd is buying the bounce)',
     'Better: retail long share high (30-day rank above 0.5: +0.35R, the crowd is buying the bounce)')
 QUESTION_V32 = Q.QUESTION_V31.replace(
     'retail long share percentile 30d:',
     'retail long share rank vs its last 30 days (0 = lowest, 1 = highest):').replace(
     'Answer with JSON only:', 'Answer with JSON only, the reason in at most 25 words:')
-assert NOTEBOOK_V32 != B.NOTEBOOK
+assert NOTEBOOK_V32 != Q.NOTEBOOK_V3
 assert 'rank vs its last 30 days' in QUESTION_V32 and 'at most 25 words' in QUESTION_V32
 
 CHAIN = r'''#!/usr/bin/env bash

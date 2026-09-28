@@ -22,6 +22,70 @@ sys.path.insert(0, HERE)
 import ai_model_trader_bt as B                        # noqa: E402
 
 TAG = 'v31_check'
+
+# Тексты v3 — застывшие копии: стенд (ai_model_trader_bt) с 28.09.2026 несёт v3.2, а прогон v3.1
+# обязан воспроизводиться с тем, что спрашивали тогда.
+NOTEBOOK_V3 = """YOU ARE THE TRADER of a crypto futures bot (30 liquid USDT perpetuals, long and short).
+Below is YOUR NOTEBOOK: patterns you found and verified on 2022-01..2024-06 hourly data, results after costs.
+R = profit in units of the risk taken (stop distance). You decide which alerts to trade.
+
+P1. CASCADE BOUNCE (long, hold 24h, stop = 1.0 x the coin's average daily range)
+   Trigger: 4 or more of the 20 coins fell more than 4.3% within 4 hours while their open interest
+   dropped more than 4.7% - leveraged longs liquidated across the market. Buy the dropped coins.
+   Result: +0.157R per trade over 892 trades, 58% winners.
+   Better: many coins dumping at once; 24h volume above 1.5x normal (+0.15..0.22R); BTC down >2% in 24h
+           (+0.11..0.18R); coin down >25% in 7 days (+0.28R); funding above +1 bp (+0.23R).
+   Worse:  a single coin dumping alone (-0.11R, usually its own bad news); BTC almost flat while coins dump
+           (-0.12R); normal volume (~0R); the 2022 bear market after FTX (~0R, cascades kept going).
+
+P2. BTC DIVERGENCE ACCUMULATION (long, hold 48h, stop = 1.3 x the coin's average daily range)
+   Trigger: the coin is 2.5%+ stronger than BTC over 24h while BTC fell 1%+, open interest grew 4%+ in 24h
+   and 24h volume is above 1.5x normal - someone accumulates the coin while the market is weak.
+   Result: +0.111R per trade over 770 trades, 47% winners (winners are bigger than losers).
+   Better: BTC up more than 3.4% over 7 days (+0.25R); BTC down more than 2.1% today (+0.19R);
+           coin up more than 16% over 7 days (+0.21R); 24h volume above 2.8x normal (+0.22R).
+   Worse:  BTC down over 7 days (~0R) - in a falling market the strength usually fades.
+
+B3. DISTRIBUTION ON MARKET BOUNCE (short, hold 48h, stop = 1.3 x the coin's average daily range)
+   Trigger: BTC is down over 30 days (falling market), BTC bounced 1%+ in 24h, but the coin is 2.5%+ weaker
+   than BTC, while its open interest grew 4%+ and 24h volume is above 1.5x normal - someone is selling the coin
+   into the market bounce. Sell it.
+   Result: +0.255R per trade over 62 trades, 61% winners; positive in 6 of 7 half-years.
+   Better: retail long share high (+0.35R, the crowd is buying the bounce); funding not positive (+0.38R);
+           BTC 30d decline mild, above -9% (+0.38R).
+   Worse:  BTC 30d decline deeper than -9% (+0.13R); very high volume above 2.1x normal (+0.12R).
+
+RISK: at most 6 open positions. Positions opened together in one market move are one bet - prefer the
+strongest alerts, and skip when your notebook says the conditions are the weak ones.
+"""
+
+QUESTION_V3 = """It is {time} UTC. New alerts this hour: {n}.
+Already holding: {held}. Free position slots: {free}.
+
+MARKET: BTC {btc4:+.1f}% in 4h, {btc24:+.1f}% in 24h, {btc7:+.1f}% in 7d. Coins in a liquidation cascade in the last 3h: {breadth}.
+
+ALERTS - pattern, coin, then: change 4h %, change 24h %, change 7d %, strength vs BTC 24h %, open interest 4h % / 24h %,
+24h volume vs normal, aggressive-buy share 24h, funding bp, retail long share percentile 30d:
+{table}
+
+Which alerts do you trade now (at most {free})? Answer with JSON only:
+{{"buy": ["COIN", ...], "reason": "one sentence"}}"""
+
+
+def brief_v3(data, t, items, held, free):
+    btc = data['BTCUSDT'][1].loc[t]
+    rows = []
+    for p, key in items:
+        f = data[p][1].loc[t]
+        rows.append(f"{key} {p.replace('USDT', ''):9s} {f['ret_4h']:+6.1f} {f['ret_24h']:+6.1f} {f['ret_7d']:+6.1f} "
+                    f"{f['rel_24h']:+6.1f} {f['oi_chg_4h']:+5.1f}/{f['oi_chg_24h']:+5.1f} {f['vol_z']:5.2f} "
+                    f"{f['taker_24h']:5.3f} {f['funding_bp']:+5.2f} {f['buy_ratio_pct_30d']:.2f}")
+    return QUESTION_V3.format(time=(t + B.pd.Timedelta(hours=1)).strftime('%Y-%m-%d %H:%M'), n=len(items),
+                              held=', '.join(p.replace('USDT', '') for p in held) or 'nothing', free=free,
+                              btc4=btc['btc_ret_4h'], btc24=btc['btc_ret_24h'], btc7=btc['btc_ret_7d'],
+                              breadth=int(btc['cascade_count_3h']), table='\n'.join(rows))
+
+
 SAMPLE_P = 40
 RESULT = os.path.join(HERE, 'results', 'ai_question_v31.txt')
 
@@ -102,7 +166,7 @@ def sets():
 def plan():
     data, all_slices, s_b3, only_p, s_p, res = sets()
     jobs = ([('b3', 'v31', s) for s in s_b3] + [('p', 'v3', s) for s in s_p] + [('p', 'v31', s) for s in s_p])
-    prompts = [(B.brief if v == 'v3' else brief_v31)(data, s['t'], s['items'], s['held'], s['free'])
+    prompts = [(brief_v3 if v == 'v3' else brief_v31)(data, s['t'], s['items'], s['held'], s['free'])
                for _, v, s in jobs]
     n_b3 = sum(1 for s in s_b3 for _, k in s['items'] if k == 'B3')
     print(f'срезов: всего {len(all_slices)}, с B3 {len(s_b3)} (сигналов B3 {n_b3}), только P1/P2 {len(only_p)}, '
@@ -192,5 +256,6 @@ if __name__ == '__main__':
     if mode == 'dry':
         print(prompts[0])
         sys.exit(0)
+    B.NOTEBOOK = NOTEBOOK_V3                          # v3.1 спрашивали с тетрадью v3
     answers = B.collect(TAG, len(prompts)) if mode == 'collect' else B.ask_model(prompts, TAG)
     evaluate(jobs, answers, res)
