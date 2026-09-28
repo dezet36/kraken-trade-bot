@@ -400,18 +400,25 @@ def _submit(fn, *args):
 REVIEW_EVERY_H = 4
 
 REVIEW = """It is {time} UTC. MARKET DASHBOARD of your coins (hourly data, closed hour).
-BTC: {btc24:+.1f}% in 24h, {btc7:+.1f}% in 7d, {btc30:+.1f}% in 30d. Coins in a liquidation cascade in the last 3h: {breadth}.
-Columns: coin, change 24h %, 7d %, 30d %, vs BTC 24h %, open interest 24h %, aggressive-buy share 24h,
-funding bp, retail long share percentile 30d, 24h volume vs normal:
+BTC: {btc24}% in 24h, {btc7}% in 7d, {btc30}% in 30d. Coins in a liquidation cascade in the last 3h: {breadth}.
+How to read a row: price change over 24h, 7d, 30d; "vs BTC" = the coin's 24h change minus BTC's; "OI" = open
+interest change over 24h; "buy share" = aggressive (taker) buying as a share of 24h volume, 0.50 = balance;
+"funding" in bp per 8h, +1.0 = the normal rate; "retail rank" = share of retail accounts in longs vs its own last
+30 days (0 = lowest, 1 = highest); "volume" = 24h volume vs normal.
 {table}
 
 Write a short market review for the owner IN RUSSIAN (at most 900 characters): 1) the market regime and what
 drives it now; 2) where the crowd and the aggressive flow are; 3) which coins are close to the patterns of your
-notebook and what you will do if they trigger; 4) the main risk for the next 24 hours. Plain text, no tables.
-Then on the LAST line write JSON only:
+notebook (P1, P2, B3) and what you will do if they trigger; 4) the main risk for the next 24 hours. Plain text,
+no tables. Then on the LAST line write JSON only:
 {{"regime": "rising|falling|sideways", "btc_24h": "up|down|flat", "watch": [{{"coin": "XXX", "side": "long|short", "why": "few words"}}]}}"""
 
 _review = {'slot': None, 'busy': False}
+
+
+def _v(x, fmt):
+    """Число для обзора; нет значения — прочерк, а не «nan»."""
+    return '—' if x is None or pd.isna(x) else format(float(x), fmt)
 
 
 def review_question(data, t):
@@ -421,11 +428,16 @@ def review_question(data, t):
         if p not in data or t not in data[p][1].index:
             continue
         f = data[p][1].loc[t]
-        rows.append(f"{p.replace('USDT', ''):9s} {f['ret_24h']:+6.1f} {f['ret_7d']:+6.1f} {f['ret_30d']:+6.1f} "
-                    f"{f['rel_24h']:+6.1f} {f['oi_chg_24h']:+6.1f} {f['taker_24h']:5.3f} {f['funding_bp']:+5.2f} "
-                    f"{f['buy_ratio_pct_30d']:.2f} {f['vol_z']:5.2f}")
-    return REVIEW.format(time=(t + pd.Timedelta(hours=1)).strftime('%Y-%m-%d %H:%M'), btc24=btc['btc_ret_24h'],
-                         btc7=btc['btc_ret_7d'], btc30=btc['btc_ret_30d'], breadth=int(btc['cascade_count_3h']),
+        # Подписи у каждого числа: столбцы из голых чисел модель путала (12:00 28.09 приняла фандинг
+        # +1.00 bp за долю агрессивных покупок, ранг 0..1 — за «экстремальные зоны»).
+        rows.append(f"{p.replace('USDT', '')}: 24h {_v(f['ret_24h'], '+.1f')}% | 7d {_v(f['ret_7d'], '+.1f')}% | "
+                    f"30d {_v(f['ret_30d'], '+.1f')}% | vs BTC {_v(f['rel_24h'], '+.1f')}% | "
+                    f"OI {_v(f['oi_chg_24h'], '+.1f')}% | buy share {_v(f['taker_24h'], '.2f')} | "
+                    f"funding {_v(f['funding_bp'], '+.1f')}bp | retail rank {_v(f['buy_ratio_pct_30d'], '.2f')} | "
+                    f"volume {_v(f['vol_z'], '.1f')}x")
+    return REVIEW.format(time=(t + pd.Timedelta(hours=1)).strftime('%Y-%m-%d %H:%M'),
+                         btc24=_v(btc['btc_ret_24h'], '+.1f'), btc7=_v(btc['btc_ret_7d'], '+.1f'),
+                         btc30=_v(btc['btc_ret_30d'], '+.1f'), breadth=int(btc['cascade_count_3h']),
                          table='\n'.join(rows))
 
 

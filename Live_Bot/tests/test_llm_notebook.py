@@ -515,7 +515,11 @@ class TestDecisionLogAndReview:
         data = llm_notebook.market(market_with_cascade())
         t = T0 + pd.Timedelta(hours=450)
         q = llm_notebook.review_question(data, t)
-        assert 'AVAX' in q and 'IN RUSSIAN' in q and '"regime"' in q
+        assert 'AVAX' in q and 'IN RUSSIAN' in q and '"regime"' in q and '(P1, P2, B3)' in q
+        # У каждого числа подпись: голые столбцы модель путала (фандинг за долю покупок).
+        row = next(x for x in q.splitlines() if x.startswith('AVAX:'))
+        assert 'buy share 0.' in row and 'funding +' in row and 'retail rank ' in row and row.endswith('x')
+        assert 'nan' not in q
         text = 'Рынок падает, толпа в лонгах.\nРиск — продолжение разгрузки.\n' \
                '{"regime": "falling", "btc_24h": "down", "watch": [{"coin": "SOL", "side": "long", "why": "x"}]}'
         body, view = llm_notebook.parse_review(text)
