@@ -13,10 +13,12 @@
         шорт 48 ч, стоп 1.3 суточного размаха.
 Раз в час, на закрытии, код ищет НОВЫЕ сигналы (первый час серии) по парам
 пула; есть — модель видит тетрадь, сводку по рынку и сигналам, что уже держит
-и сколько мест свободно (всего SLOTS), и решает, что взять. Вход — сразу по
-рынку, выход — по стопу или по сроку закономерности. Раз в 4 часа модель
-пишет обзор рынка для владельца (журнал, Telegram); каждое решение пишется
-в llm_notebook_log.jsonl вместе с выбором механики — для замера её вклада.
+и сколько мест свободно (всего SLOTS), и решает, что взять. Вопрос уходит в
+свой поток, ответ забирает ближайший цикл: общий цикл бота модель не ждёт.
+Вход — сразу по рынку по цене биржи на момент входа, выход — по стопу или по
+сроку закономерности. Раз в 4 часа модель пишет обзор рынка для владельца
+(журнал, Telegram); каждое решение пишется в llm_notebook_log.jsonl вместе с
+выбором механики — для замера её вклада.
 
 Тетрадь, вопрос и исполнение — те же, что в историческом прогоне
 research/ai_model_trader_bt.py (совпадение текста держит тест). Данные и
@@ -25,7 +27,10 @@ research/ai_model_trader_bt.py (совпадение текста держит �
 """
 import json
 import os
+import queue
+import threading
 import time
+from concurrent.futures import Future
 from types import SimpleNamespace
 
 import numpy as np
@@ -36,6 +41,7 @@ from logger import log
 
 NAME = 'LLM'
 SLOTS = 6
+HOUR_MS = 3_600_000
 
 
 def enabled():
@@ -219,6 +225,30 @@ def ask_model(question, timeout=600):
     return out.get('content') or ''
 
 
+def _decide_job(ask, question, items):
+    """
+    В потоке тетради: вопрос модели -> её ответ, как есть.
+
+    Строка «модель: N вход» — для ops/restart_when_idle.sh: готовый ответ ждёт
+    цикла, и выкатка не перезапускает бота, пока цикл его не забрал.
+    """
+    text = ask(question)
+    picks, _ = picks_from(text, items)
+    log(f'   {NAME}: модель: {len(picks or [])} вход из {len(items)} сигналов — ответ заберёт ближайший цикл')
+    return text
+
+
+def _price_now(pair, client=None):
+    """Цена сейчас — закрытие идущей 5-минутной свечи на бирже бота; None — цены нет."""
+    try:
+        from exchange import fetch_ohlcv
+        df = fetch_ohlcv('5m', limit=12, symbol=pair, client=client)
+        price = float(df['close'].iloc[-1]) if df is not None and len(df) else 0.0
+        return price if price > 0 else None
+    except Exception:                                  # noqa: BLE001
+        return None
+
+
 def picks_from(text, items):
     try:
         body = text[text.index('{'):text.rindex('}') + 1]
@@ -295,6 +325,44 @@ def _notify_decision(items, picks, reason):
         log(f'   {NAME}: сообщение о решении не отправлено ({exc})')
 
 
+# ── Модель — сбоку от цикла ──────────────────────────────────────────────────
+# Цикл бота один на все стратегии: bot.trading_cycle — одна задача планировщика
+# раз в 5 минут, второй её экземпляр он не запускает. Ответ модели на сигналы —
+# 1.5–4 минуты, а в час обзора вопрос встал бы в очередь за обзором (ещё 5–7
+# минут). Цикл, который ждёт модель дольше пяти минут, — пропущенный такт у
+# ВСЕХ стратегий: ни их заявок, ни стопов. Поэтому вопросы тетради идут в её
+# собственный поток, ответ забирает ближайший цикл (_collect). Поток один:
+# модель одна (llama-server -np 1), и вопрос о сделке встаёт в очередь раньше
+# обзора. Поток — daemon: остановка бота не ждёт модель (пул потоков ждал бы
+# её при выходе до конца вопроса, до 15 минут).
+ANSWER_MAX_MIN = 30       # ответ позже — вход уже не тот, что мерили (вход на открытии часа)
+_queue = queue.Queue()
+_worker = {'thread': None}
+_asked = []               # вопросы в пути и готовые ответы, которые ждут цикла
+
+
+def _serve():
+    while True:
+        future, fn, args = _queue.get()
+        if not future.set_running_or_notify_cancel():
+            continue
+        try:
+            future.set_result(fn(*args))
+        except BaseException as exc:                   # noqa: BLE001 — ошибку увидит тот, кто заберёт ответ
+            future.set_exception(exc)
+
+
+def _submit(fn, *args):
+    """Работа для модели — в очередь потока тетради. -> Future (цикл его не ждёт)."""
+    future = Future()
+    _queue.put((future, fn, args))
+    thread = _worker['thread']
+    if thread is None or not thread.is_alive():
+        _worker['thread'] = threading.Thread(target=_serve, name='llm-notebook', daemon=True)
+        _worker['thread'].start()
+    return future
+
+
 # ── Обзор рынка: модель анализирует рынок для человека ──────────────────────
 REVIEW_EVERY_H = 4
 
@@ -366,7 +434,7 @@ def _run_review(question, slot, held):
 
 
 def _maybe_review(data, t, gate, run=None):
-    """Раз в REVIEW_EVERY_H часов — обзор рынка в отдельном потоке: цикл бота его не ждёт."""
+    """Раз в REVIEW_EVERY_H часов — обзор рынка в потоке тетради: цикл бота его не ждёт."""
     close = t + pd.Timedelta(hours=1)
     if close.hour % REVIEW_EVERY_H or _review['busy'] or _review['slot'] == close.isoformat():
         return False
@@ -382,26 +450,30 @@ def _maybe_review(data, t, gate, run=None):
     if run is not None:                                # тесты: без потока
         run(question, close.isoformat(), held)
         return True
-    import threading
-    threading.Thread(target=_run_review, args=(question, close.isoformat(), held), daemon=True).start()
+    _submit(_run_review, question, close.isoformat(), held)
     return True
 
 
-def scan(pairs, gate, client=None, balance=None, now_ms=None, frames_of=None, ask=None):
+def scan(pairs, gate, client=None, balance=None, now_ms=None, frames_of=None, ask=None, price_of=None):
     """
-    Раз в закрытый час: новые сигналы → решение модели → кандидаты брокеру.
+    Каждый цикл: готовые ответы модели -> кандидаты брокеру (_collect).
+    Раз в закрытый час: новые сигналы -> вопрос модели в поток тетради (_new_hour);
+    ответ заберёт ближайший цикл — этот или следующий.
 
     frames_of(pair) -> часовая таблица (в бою flow_data.frame); ask(question) ->
-    ответ модели (в бою ask_model). Тесты подменяют оба.
+    ответ модели (в бою ask_model); price_of(pair) -> цена сейчас (в бою
+    _price_now, биржа бота). Тесты подменяют все три.
     """
     import flow_data
     now_ms = int(time.time() * 1000) if now_ms is None else int(now_ms)
     hour_ms = flow_data.last_closed_hour(now_ms)
-    state = _load_state()
-    if state.get('hour') == hour_ms:
-        return []
-    frames_of = frames_of or (lambda p: flow_data.frame(p, now_ms))
-    ask = ask or ask_model
+    if _load_state().get('hour') != hour_ms:
+        _new_hour(hour_ms, gate, now_ms, frames_of or (lambda p: flow_data.frame(p, now_ms)), ask or ask_model)
+    return _collect(gate, now_ms, price_of or (lambda p: _price_now(p, client)))
+
+
+def _new_hour(hour_ms, gate, now_ms, frames_of, ask):
+    """Сигналы закрытого часа; есть сигналы и места — вопрос модели уходит в поток тетради."""
     # Данные — по всей вселенной тетради (30 пар; широта разгрузки — по базовым 20).
     # Четыре потока: первое чтение после перезапуска — 1000 часов по каждой паре.
     from concurrent.futures import ThreadPoolExecutor
@@ -409,58 +481,102 @@ def scan(pairs, gate, client=None, balance=None, now_ms=None, frames_of=None, as
         frames = dict(zip(UNIVERSE, pool.map(frames_of, UNIVERSE)))
     if frames.get('BTCUSDT') is None:
         log(f'   {NAME}: нет часовых данных BTC — пропуск часа')
-        return []
+        return
     data = market(frames)
     t = pd.Timestamp(hour_ms, unit='ms', tz='UTC')
-    _maybe_review(data, t, gate)
-    try:
-        import news_feed                               # объявления биржи: пока только запись
-        news_feed.poll()
-    except Exception as exc:                          # noqa: BLE001
-        log(f'   {NAME}: новости не записаны ({exc})')
     # Торгует своя вселенная тетради (UNIVERSE), а не общий список ликвидных пар бота:
     # это настройка стратегии ИИ, на другие стратегии она не влияет.
     items = [(p, k) for p, k in alerts_at(data, t) if p in UNIVERSE and not gate.has_position_or_order(p)]
     state = {'hour': hour_ms, 'alerts': [f'{k} {p}' for p, k in items]}
     held = list(gate.held()) if hasattr(gate, 'held') else []
     free = SLOTS - len(held)
-    if not items:
-        _save_state(state)
-        return []
-    record = {'hour': t.isoformat(), 'held': held, 'free': free,
-              'alerts': [{'pair': p, 'pattern': k, 'price': float(data[p][0].loc[t, 'c']),
-                          'atr_d': float(data[p][1].at[t, 'atr_d'])} for p, k in items],
-              # Что взяла бы механика (сигналы по порядку тетради): против неё меряется выбор модели.
-              'mechanical': [p for p, _ in items][:max(0, free)]}
-    if free <= 0:
-        log(f"   {NAME}: сигналы {', '.join(state['alerts'])}, но мест нет ({len(held)}/{SLOTS})")
-        _save_state(state)
-        _log_decision(dict(record, picks=[], reason='мест нет'))
-        return []
-    question = brief(data, t, items, held, free)
+    if items:
+        record = {'hour': t.isoformat(), 'held': held, 'free': free,
+                  'alerts': [{'pair': p, 'pattern': k, 'price': float(data[p][0].loc[t, 'c']),
+                              'atr_d': float(data[p][1].at[t, 'atr_d'])} for p, k in items],
+                  # Что взяла бы механика (сигналы по порядку тетради): против неё меряется выбор модели.
+                  'mechanical': [p for p, _ in items][:max(0, free)]}
+        if free <= 0:
+            log(f"   {NAME}: сигналы {', '.join(state['alerts'])}, но мест нет ({len(held)}/{SLOTS})")
+            _log_decision(dict(record, picks=[], reason='мест нет'))
+        else:
+            question = brief(data, t, items, held, free)
+            _asked.append({'hour_ms': hour_ms, 'items': items, 'record': record,
+                           'feats': {p: data[p][1].loc[t] for p, _ in items},
+                           'future': _submit(_decide_job, ask, question, items)})
+            state['asked'] = True
+            log(f"   {NAME}: сигналы {', '.join(state['alerts'])} — вопрос модели ушёл, "
+                f"ответ заберёт ближайший цикл")
+    _save_state(state)
+    # Обзор — после вопроса о сделке: в очереди к модели сделка первая.
+    _maybe_review(data, t, gate)
     try:
-        text = ask(question)
+        import news_feed                               # объявления биржи: пока только запись
+        news_feed.poll()
+    except Exception as exc:                          # noqa: BLE001
+        log(f'   {NAME}: новости не записаны ({exc})')
+
+
+def _note_state(hour_ms, **fields):
+    """Ответ — в состояние своего часа; час уже сменился — не трогать."""
+    state = _load_state()
+    if state.get('hour') == hour_ms:
+        state.update(fields)
+        _save_state(state)
+
+
+def _collect(gate, now_ms, price_of):
+    """Готовые ответы модели -> кандидаты брокеру; ответ ещё в пути — его заберёт следующий цикл."""
+    out = []
+    for job in [j for j in _asked if j['future'].done()]:
+        _asked.remove(job)
+        out += _enter(job, gate, now_ms, price_of)
+    return out
+
+
+def _enter(job, gate, now_ms, price_of):
+    """
+    Ответ модели -> сигналы брокеру. Места и занятые пары — на момент входа, а
+    не вопроса; цена — биржи сейчас, а не закрытия часа: брокер исполняет
+    заявку за рынком по цене сигнала (strategy_profile.fills_through_market), и
+    закрытие часа, которому 5–15 минут, дало бы вход, какого на бирже не было.
+    """
+    items = job['items']
+    delay = round((now_ms - job['hour_ms'] - HOUR_MS) / 60000, 1)        # минут от закрытия часа
+    record = dict(job['record'], delay_min=delay)
+    try:
+        text = job['future'].result()
     except Exception as exc:                          # noqa: BLE001
         log(f'   {NAME}: модель не ответила ({getattr(exc, "llm_gate", "")} {exc}) — сигналы часа пропущены')
-        state['error'] = str(exc)
-        _save_state(state)
+        _note_state(job['hour_ms'], error=str(exc))
         _log_decision(dict(record, picks=None, error=str(exc)))
         return []
     picks, reason = picks_from(text, items)
-    state.update({'answer': text[:500], 'picks': picks})
-    _save_state(state)
-    _log_decision(dict(record, picks=picks, reason=reason, answer=text[:500]))
+    _note_state(job['hour_ms'], answer=text[:500], picks=picks)
+    record.update(picks=picks, reason=reason, answer=text[:500])
     if picks is None:
         log(f'   {NAME}: ответ модели без JSON — сигналы часа пропущены: {text[:200]}')
+        _log_decision(record)
         return []
-    log(f"   {NAME}: сигналы {', '.join(state['alerts'])}; модель берёт "
-        f"{', '.join(picks) or 'ничего'} — {reason}")
-    _notify_decision(items, picks[:free], reason)
+    alerts = ', '.join(f'{k} {p}' for p, k in items)
+    if delay > ANSWER_MAX_MIN:
+        log(f'   {NAME}: сигналы {alerts}; ответ модели через {delay:.0f} мин после закрытия часа '
+            f'(предел {ANSWER_MAX_MIN}) — вход пропущен')
+        _log_decision(dict(record, late=True))
+        return []
+    held = list(gate.held()) if hasattr(gate, 'held') else []
+    take = [p for p in picks if not gate.has_position_or_order(p)][:max(0, SLOTS - len(held))]
     keys = dict(items)
-    out = []
-    for p in picks[:free]:
-        f = data[p][1].loc[t]
-        price = float(data[p][0].loc[t, 'c'])
-        signal = to_signal(p, keys[p], f, price, reason)
+    out, entries = [], {}
+    for p in take:
+        price = price_of(p)
+        if not price:
+            log(f'   {NAME} {p}: нет цены биржи — вход пропущен')
+            continue
+        entries[p] = float(price)
+        signal = to_signal(p, keys[p], job['feats'][p], float(price), reason)
         out.append({'pair': p, 'signal': signal, 'score': 1.0, 'rr': None, 'df_1h': None})
+    _log_decision(dict(record, entries=entries))
+    log(f"   {NAME}: сигналы {alerts}; модель берёт {', '.join(picks) or 'ничего'} — {reason}")
+    _notify_decision(items, list(entries), reason)
     return out

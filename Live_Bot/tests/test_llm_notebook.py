@@ -10,6 +10,8 @@
 import json
 import os
 import sys
+import threading
+from concurrent.futures import Future
 
 import numpy as np
 import pandas as pd
@@ -25,6 +27,9 @@ import llm_notebook  # noqa: E402
 
 H = 3_600_000
 T0 = pd.Timestamp('2026-06-01', tz='UTC')
+MIN = 60_000
+REAL_SUBMIT = llm_notebook._submit
+REAL_MAYBE_REVIEW = llm_notebook._maybe_review
 
 
 def raw_frame(n=500, seed=0, drop_at=None, drop=0.0):
@@ -71,6 +76,16 @@ class Gate:
         return list(self._held)
 
 
+def run_now(fn, *args):
+    """Поток тетради без потока: ответ готов сразу, и его забирает тот же цикл."""
+    future = Future()
+    try:
+        future.set_result(fn(*args))
+    except Exception as exc:                          # noqa: BLE001
+        future.set_exception(exc)
+    return future
+
+
 @pytest.fixture
 def notebook_mode(monkeypatch, tmp_path):
     monkeypatch.setattr(config, 'LLM_MODE', 'notebook', raising=False)
@@ -80,6 +95,10 @@ def notebook_mode(monkeypatch, tmp_path):
     # Обзор рынка (поток к модели) и Telegram в тестах решений не нужны.
     monkeypatch.setattr(llm_notebook, '_maybe_review', lambda *a, **k: False)
     monkeypatch.setattr(llm_notebook, '_notify_decision', lambda *a, **k: None)
+    monkeypatch.setattr(llm_notebook, '_submit', run_now)
+    monkeypatch.setattr(llm_notebook, '_asked', [])
+    # Биржи в тестах нет: цена сейчас — 100, если тест не назвал свою.
+    monkeypatch.setattr(llm_notebook, '_price_now', lambda pair, client=None: 100.0)
 
 
 def hour_ms(idx):
@@ -136,14 +155,16 @@ class TestScan:
             asked.append(question)
             return '{"buy": ["AVAX", "ADA"], "reason": "broad cascade, high volume"}'
 
+        close = frames['AVAXUSDT'].loc[T0 + pd.Timedelta(hours=450), 'c']
+        now = {'AVAXUSDT': close * 1.012, 'ADAUSDT': 0.5}              # за минуты после закрытия цена ушла
         out = llm_notebook.scan(list(llm_notebook.POOL), Gate(held=['BTCUSDT']), now_ms=hour_ms(451) + 60_000,
-                                frames_of=lambda p: frames[p], ask=ask)
+                                frames_of=lambda p: frames[p], ask=ask, price_of=now.get)
         assert len(asked) == 1 and f'Free position slots: {llm_notebook.SLOTS - 1}' in asked[0] and 'Already holding: BTC' in asked[0]
         assert [c['pair'] for c in out] == ['AVAXUSDT', 'ADAUSDT']
         sig = out[0]['signal']
         p = sig['params']
         f = llm_notebook.market(frames)['AVAXUSDT'][1].loc[T0 + pd.Timedelta(hours=450)]
-        price = frames['AVAXUSDT'].loc[T0 + pd.Timedelta(hours=450), 'c']
+        price = now['AVAXUSDT']                        # вход — по цене биржи сейчас, не по закрытию часа
         assert sig['market_price'] == pytest.approx(price)
         assert p['entry'] > price                                   # лимит за рынком — вход сразу
         assert p['stop_loss'] == pytest.approx(price * (1 - 1.0 * f['atr_d'] / 100))
@@ -207,6 +228,103 @@ class TestScan:
         data = llm_notebook.market(frames)
         got = {p for p, k in llm_notebook.alerts_at(data, T0 + pd.Timedelta(hours=450)) if k == 'X'}
         assert got == {'AVAXUSDT', 'ADAUSDT'}
+
+
+class Later:
+    """Поток тетради под рукой теста: вопрос ждёт, пока тест не «ответит» за модель."""
+
+    def __init__(self):
+        self.jobs = []
+
+    def __call__(self, fn, *args):
+        future = Future()
+        self.jobs.append((future, fn, args))
+        return future
+
+    def run(self):
+        for future, fn, args in self.jobs:
+            try:
+                future.set_result(fn(*args))
+            except Exception as exc:                  # noqa: BLE001
+                future.set_exception(exc)
+        self.jobs.clear()
+
+
+def log_rows():
+    path = os.path.join(config.DATA_DIR, 'llm_notebook_log.jsonl')
+    return [json.loads(x) for x in open(path, encoding='utf-8')] if os.path.exists(path) else []
+
+
+class TestModelBesideTheCycle:
+    """Цикл бота общий для всех стратегий: модель спрашивается в своём потоке, ответ забирает цикл."""
+
+    def _scan(self, frames, minutes, gate=None, answer='{"buy": ["AVAX"], "reason": "x"}', calls=None,
+              price_of=lambda p: 100.0):
+        ask = (lambda q: calls.append(q) or answer) if calls is not None else (lambda q: answer)
+        return llm_notebook.scan(list(llm_notebook.POOL), gate or Gate(), now_ms=hour_ms(451) + minutes * MIN,
+                                 frames_of=lambda p: frames[p], ask=ask, price_of=price_of)
+
+    def test_cycle_does_not_wait_for_the_model(self, notebook_mode, monkeypatch):
+        frames, later, calls = market_with_cascade(), Later(), []
+        monkeypatch.setattr(llm_notebook, '_submit', later)
+        assert self._scan(frames, 4, calls=calls) == []                  # вопрос в очереди, цикл пошёл дальше
+        assert len(later.jobs) == 1 and not calls and not log_rows()
+        later.run()                                                       # модель ответила между циклами
+        out = self._scan(frames, 9, calls=calls)
+        assert [c['pair'] for c in out] == ['AVAXUSDT'] and len(calls) == 1
+        row = log_rows()[0]
+        assert row['delay_min'] == 9.0 and row['entries'] == {'AVAXUSDT': 100.0} and row['picks'] == ['AVAXUSDT']
+        assert self._scan(frames, 14, calls=calls) == [] and len(calls) == 1     # час решён один раз
+
+    def test_late_answer_is_not_traded(self, notebook_mode, monkeypatch):
+        frames, later = market_with_cascade(), Later()
+        monkeypatch.setattr(llm_notebook, '_submit', later)
+        self._scan(frames, 4)
+        later.run()
+        assert self._scan(frames, 45) == []
+        row = log_rows()[0]
+        assert row['late'] is True and row['picks'] == ['AVAXUSDT'] and row['delay_min'] == 45.0
+
+    def test_slots_and_pairs_are_rechecked_at_entry(self, notebook_mode, monkeypatch):
+        frames, later = market_with_cascade(), Later()
+        monkeypatch.setattr(llm_notebook, '_submit', later)
+        self._scan(frames, 4, answer='{"buy": ["AVAX", "ADA", "DOT"], "reason": "x"}')
+        later.run()
+        # Пока модель думала, AVAX уже в позиции, а свободное место осталось одно.
+        held = ['AVAXUSDT'] + ['BTCUSDT', 'ETHUSDT', 'XRPUSDT', 'BNBUSDT', 'LTCUSDT', 'LINKUSDT'][:llm_notebook.SLOTS - 2]
+        out = self._scan(frames, 9, gate=Gate(held=held), answer='{"buy": ["AVAX", "ADA", "DOT"], "reason": "x"}')
+        assert [c['pair'] for c in out] == ['ADAUSDT']
+
+    def test_no_exchange_price_no_entry(self, notebook_mode):
+        frames = market_with_cascade()
+        out = self._scan(frames, 4, answer='{"buy": ["AVAX", "ADA"], "reason": "x"}',
+                         price_of={'ADAUSDT': 0.5}.get)
+        assert [c['pair'] for c in out] == ['ADAUSDT'] and log_rows()[0]['entries'] == {'ADAUSDT': 0.5}
+
+    def test_trade_question_goes_before_the_review(self, notebook_mode, monkeypatch):
+        frames = market_with_cascade(t_idx=451)            # сигналы часа, что закрылся в 20:00, — час обзора
+        order = []
+        monkeypatch.setattr(llm_notebook, '_submit', lambda fn, *a: order.append(fn.__name__) or Future())
+        monkeypatch.setattr(llm_notebook, '_maybe_review', REAL_MAYBE_REVIEW)
+        monkeypatch.setattr(llm_notebook, '_review', {'slot': None, 'busy': False})
+        llm_notebook.scan(list(llm_notebook.POOL), Gate(), now_ms=hour_ms(452) + 4 * MIN,
+                          frames_of=lambda p: frames[p], ask=lambda q: '{"buy": [], "reason": "x"}',
+                          price_of=lambda p: 100.0)
+        assert order == ['_decide_job', '_run_review']
+
+    def test_real_thread_is_a_daemon_and_does_not_block(self, monkeypatch):
+        import queue
+        monkeypatch.setattr(llm_notebook, '_queue', queue.Queue())
+        monkeypatch.setattr(llm_notebook, '_worker', {'thread': None})
+        release = threading.Event()
+        future = REAL_SUBMIT(lambda: release.wait(5) and 'ответ')
+        assert not future.done()                           # цикл не ждёт модель
+        release.set()
+        assert future.result(timeout=5) == 'ответ'
+        assert llm_notebook._worker['thread'].daemon       # остановка бота не ждёт модель
+        failed = REAL_SUBMIT(lambda: 1 / 0)
+        with pytest.raises(ZeroDivisionError):             # ошибка модели — тому, кто забирает ответ
+            failed.result(timeout=5)
 
 
 class TestExecutionProfile:
