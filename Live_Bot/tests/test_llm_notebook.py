@@ -414,6 +414,91 @@ class TestPositionHold:
         assert b.positions('FIBO') and not pb.read_journal()
 
 
+class TestNotebookSignalThroughTheBroker:
+    """
+    Путь до конца: сигнал тетради -> bot._build_signal -> бумажный брокер.
+    Вход сразу по цене биржи из сигнала (тейкер, проскальзывание против нас),
+    стоп — тот, что посчитала тетрадь, без безубытка; выход по сроку закономерности.
+    """
+
+    @pytest.fixture()
+    def broker(self, tmp_path, monkeypatch):
+        monkeypatch.setenv('BOT_DATA_DIR', str(tmp_path))
+        monkeypatch.setenv('TRADING_MODE', 'PAPER')
+        monkeypatch.setenv('PAPER_FUNDING', 'false')
+        monkeypatch.setattr(llm_notebook.config, 'LLM_MODE', 'notebook', raising=False)
+        for module in ('config', 'paper_broker', 'dashboard', 'shadow', 'setup_journal'):
+            sys.modules.pop(module, None)
+        import config as cfg
+        import paper_broker
+        for name, value in (('PAPER_FEE_MAKER', 0.0), ('PAPER_FEE_TAKER', 0.0), ('PAPER_SLIPPAGE_PCT', 0.0003),
+                            ('MAX_POSITION_HOLD_HOURS', 0.0)):
+            monkeypatch.setattr(cfg, name, value)
+        import settings_store
+        import telegram_notify
+        monkeypatch.setattr(settings_store, 'load', lambda: {})           # стороны — обе, риск — общий
+        monkeypatch.setattr(telegram_notify, '_send', lambda *a, **k: True)
+        monkeypatch.setattr(telegram_notify, '_send_photo', lambda *a, **k: True)
+
+        class Client:
+            candles = {}
+
+            def fetch_ohlcv(self, symbol, timeframe, since=None, limit=None):
+                rows = [c for c in self.candles.get(symbol, []) if since is None or c[0] >= since]
+                return rows[:limit] if limit else rows
+
+            def fetch_funding_rate(self, symbol):
+                raise RuntimeError('нет')
+
+        client = Client()
+        yield paper_broker.PaperBroker(client, strategies=('LLM',)), client, paper_broker
+        for module in ('config', 'paper_broker'):
+            sys.modules.pop(module, None)
+
+    @staticmethod
+    def _signal(key, price):
+        f = pd.Series({'atr_d': 5.0, 'ret_4h': -5.0, 'ret_24h': -6.0, 'ret_7d': -9.0, 'rel_24h': -2.0,
+                       'oi_chg_4h': -6.0, 'oi_chg_24h': 5.0, 'vol_z': 2.0, 'taker_24h': 0.47, 'funding_bp': 0.5,
+                       'buy_ratio_pct_30d': 0.6})
+        import bot
+        candidate = {'pair': 'AVAXUSDT', 'signal': llm_notebook.to_signal('AVAXUSDT', key, f, price, 'x'),
+                     'score': 1.0, 'rr': None, 'df_1h': None}
+        signal, _ = bot._build_signal(candidate, 'LLM', 10_000)
+        assert signal is not None and signal['strategy'] == 'LLM'
+        return signal
+
+    START, BAR = 1_700_000_000_000, 5 * 60 * 1000
+
+    def test_long_enters_at_market_and_stops_at_notebook_stop(self, broker):
+        b, client, pb = broker
+        pb._now_ms = lambda: self.START
+        assert b.open('LLM', self._signal('P1', 20.0))
+        pos = b.positions('LLM')['AVAXUSDT']
+        assert pos['entry_price'] == pytest.approx(20.0 * 1.0003)          # по рынку, не по лимиту 20.02
+        assert pos['stop_loss'] == pytest.approx(19.0) and pos['max_hold_hours'] == 24
+        assert pos['breakeven_after_tp'] is False and not pos['be_level']
+        client.candles['AVAXUSDT'] = [[self.START + self.BAR, 20.0, 20.1, 18.9, 19.0, 0]]
+        pb._now_ms = lambda: self.START + 3 * self.BAR
+        b.update()
+        rows = pb.read_journal()
+        assert rows and rows[0]['exit_reason'] == 'SL'
+
+    def test_short_leaves_by_the_pattern_clock(self, broker):
+        b, client, pb = broker
+        pb._now_ms = lambda: self.START
+        assert b.open('LLM', self._signal('B3', 20.0))
+        pos = b.positions('LLM')['AVAXUSDT']
+        assert pos['direction'] == 'SHORT' and pos['entry_price'] == pytest.approx(20.0 * (1 - 0.0003))
+        assert pos['stop_loss'] == pytest.approx(21.3) and pos['max_hold_hours'] == 48
+        later = self.START + 49 * H
+        client.candles['AVAXUSDT'] = [[self.START + self.BAR, 20.0, 20.2, 19.8, 19.9, 0],
+                                      [later, 19.5, 19.6, 19.4, 19.5, 0]]
+        pb._now_ms = lambda: later + 2 * self.BAR
+        b.update()
+        rows = pb.read_journal()
+        assert rows and rows[0]['exit_reason'] == 'TIME'
+
+
 class TestDecisionLogAndReview:
     def test_decision_is_logged_with_mechanical_choice(self, notebook_mode):
         frames = market_with_cascade()
