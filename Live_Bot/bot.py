@@ -65,6 +65,23 @@ def _send_daily_summary_if_needed():
     tg.daily_by_strategy(rows, yesterday.strftime('%d.%m.%Y'))
 
 
+def _recorded_pairs(base):
+    """
+    Пары для записи сырых данных (стакан, лента, ликвидации, ОИ): список бота
+    и своя вселенная стратегии, если она шире — у ИИ по тетради 30 пар против
+    ~20 ликвидных. Стакан и ленту задним числом не скачать: что не записано
+    сегодня, потеряно. Только добавление: по парам бота пишется всё как было.
+    """
+    extra = []
+    try:
+        import llm_notebook
+        if llm_notebook.enabled():
+            extra = list(llm_notebook.UNIVERSE)
+    except Exception:                                  # noqa: BLE001
+        pass
+    return list(dict.fromkeys(list(base or []) + extra))
+
+
 def _build_signal(candidate, strategy, balance):
     """
     Достраивает из кандидата сканера готовый сигнал.
@@ -153,8 +170,12 @@ def _build_signal(candidate, strategy, balance):
             'poi_type': 'LLM',
         }
         df_for_chart = candidate.get('df_1h')
-        log(f"\n[LLM] {pair}: {signal['setup'].get('type')}, "
-            f"вероятность {llm.get('p')}, конфлюенс {llm.get('votes')}/5")
+        if llm.get('mode') == 'notebook':
+            # У тетради нет вероятности и конфлюенса — её «почему» и есть суть сделки.
+            log(f"\n[LLM] {pair}: {signal['setup'].get('type')} · {str(llm.get('why') or '')[:160]}")
+        else:
+            log(f"\n[LLM] {pair}: {signal['setup'].get('type')}, "
+                f"вероятность {llm.get('p')}, конфлюенс {llm.get('votes')}/5")
     elif strategy == 'FIBO':
         signal = analyze_market(candidate['df_1h'], None, pair, balance)
         if not signal:
@@ -293,7 +314,7 @@ def _paper_cycle():
         log("⏸ Бот на паузе — новые фантомные входы пропускаем")
         # Сбор позиционирования идёт и на паузе: пауза останавливает
         # сделки, а не наблюдение за рынком.
-        positioning.collect_if_due(broker.client)
+        positioning.collect_if_due(broker.client, pairs=_recorded_pairs(config.TRADING_PAIRS_POOL))
         market_cap.collect_if_due(broker.client)
         return
 
@@ -310,15 +331,16 @@ def _paper_cycle():
     # Ликвидации приходят потоком, а не по запросу: поток поднимается один
     # раз и дальше только пополняет список пар. Падение потока бот не
     # трогает — без него всё торгует как вчера.
+    recorded = _recorded_pairs(liquid_pairs)
     try:
         import liquidations
-        liquidations.ensure_running(liquid_pairs, client)
+        liquidations.ensure_running(recorded, client)
     except Exception as exc:                           # noqa: BLE001
         log(f'   ликвидации: сборщик не запущен — {exc}')
     # Лента сделок — тоже потоком: опрос покрывал у BTC 28% минут.
     try:
         import trades_ws
-        trades_ws.ensure_running(liquid_pairs, client)
+        trades_ws.ensure_running(recorded, client)
     except Exception as exc:                           # noqa: BLE001
         log(f'   лента сделок: сборщик не запущен — {exc}')
     _watch_streams()
@@ -427,7 +449,7 @@ def _paper_cycle():
     # В КОНЦЕ ЦИКЛА, А НЕ В НАЧАЛЕ. Сбор — это 84 запроса к бирже разом, и
     # в цикле, что приходится на начало часа, он шёл прямо перед сканерами
     # — те упирались в предел запросов, и пары выпадали из просмотра.
-    positioning.collect_if_due(broker.client)
+    positioning.collect_if_due(broker.client, pairs=_recorded_pairs(config.TRADING_PAIRS_POOL))
     # Рынок в целом (USDT.D, BTC.D, TOTAL2): один запрос тикеров спота.
     market_cap.collect_if_due(broker.client)
 

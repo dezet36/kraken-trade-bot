@@ -585,6 +585,22 @@ class TestDecisionLogAndReview:
         assert len(ran) == 1
 
 
+class TestRawDataForTheNotebookUniverse:
+    """Стакан, лента, ликвидации пишутся и по парам тетради сверх пула бота — задним числом их не скачать."""
+
+    def test_recorded_pairs_add_the_notebook_universe(self, monkeypatch):
+        import bot
+        monkeypatch.setattr(llm_notebook, 'enabled', lambda: True)
+        got = bot._recorded_pairs(['BTCUSDT', 'BICOUSDT'])
+        assert got[:2] == ['BTCUSDT', 'BICOUSDT']                   # пары бота — как были и первыми
+        assert set(llm_notebook.UNIVERSE) <= set(got) and len(got) == len(set(got))
+
+    def test_without_the_notebook_only_the_bot_pairs(self, monkeypatch):
+        import bot
+        monkeypatch.setattr(llm_notebook, 'enabled', lambda: False)
+        assert bot._recorded_pairs(['BTCUSDT', 'ETHUSDT']) == ['BTCUSDT', 'ETHUSDT']
+
+
 class TestHumanNames:
     """Человеку — имена закономерностей, не коды (28.09.2026: «что за P1?»)."""
 
