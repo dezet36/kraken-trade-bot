@@ -77,6 +77,9 @@ def notebook_mode(monkeypatch, tmp_path):
     monkeypatch.setattr(config, 'DATA_DIR', str(tmp_path))
     import settings_store
     monkeypatch.setattr(settings_store, 'risk_pct', lambda name: 0.5)
+    # Обзор рынка (поток к модели) и Telegram в тестах решений не нужны.
+    monkeypatch.setattr(llm_notebook, '_maybe_review', lambda *a, **k: False)
+    monkeypatch.setattr(llm_notebook, '_notify_decision', lambda *a, **k: None)
 
 
 def hour_ms(idx):
@@ -134,7 +137,7 @@ class TestScan:
 
         out = llm_notebook.scan(list(llm_notebook.POOL), Gate(held=['BTCUSDT']), now_ms=hour_ms(451) + 60_000,
                                 frames_of=lambda p: frames[p], ask=ask)
-        assert len(asked) == 1 and 'Free position slots: 3' in asked[0] and 'Already holding: BTC' in asked[0]
+        assert len(asked) == 1 and f'Free position slots: {llm_notebook.SLOTS - 1}' in asked[0] and 'Already holding: BTC' in asked[0]
         assert [c['pair'] for c in out] == ['AVAXUSDT', 'ADAUSDT']
         sig = out[0]['signal']
         p = sig['params']
@@ -158,7 +161,7 @@ class TestScan:
 
     def test_no_free_slots_no_question(self, notebook_mode):
         frames = market_with_cascade()
-        held = ['BTCUSDT', 'ETHUSDT', 'XRPUSDT', 'BNBUSDT']
+        held = ['BTCUSDT', 'ETHUSDT', 'XRPUSDT', 'BNBUSDT', 'LTCUSDT', 'LINKUSDT'][:llm_notebook.SLOTS]
         out = llm_notebook.scan(list(llm_notebook.POOL), Gate(held=held), now_ms=hour_ms(451) + 60_000,
                                 frames_of=lambda p: frames[p],
                                 ask=lambda q: (_ for _ in ()).throw(AssertionError('мест нет — модель не спрашиваем')))
@@ -268,3 +271,53 @@ class TestPositionHold:
         assert b.open('FIBO', self._signal())
         self._run(b, client, pb)
         assert b.positions('FIBO') and not pb.read_journal()
+
+
+class TestDecisionLogAndReview:
+    def test_decision_is_logged_with_mechanical_choice(self, notebook_mode):
+        frames = market_with_cascade()
+        llm_notebook.scan(list(llm_notebook.POOL), Gate(held=['BTCUSDT', 'ETHUSDT']), now_ms=hour_ms(451) + 60_000,
+                          frames_of=lambda p: frames[p], ask=lambda q: '{"buy": ["DOT"], "reason": "x"}')
+        rows = [json.loads(x) for x in open(os.path.join(config.DATA_DIR, 'llm_notebook_log.jsonl'), encoding='utf-8')]
+        assert len(rows) == 1
+        r = rows[0]
+        assert r['free'] == llm_notebook.SLOTS - 2 and r['picks'] == ['DOTUSDT']
+        assert len(r['mechanical']) == min(5, llm_notebook.SLOTS - 2)
+        assert {a['pattern'] for a in r['alerts']} == {'P1'} and all(a['atr_d'] > 0 for a in r['alerts'])
+
+    def test_review_question_and_parse(self, notebook_mode):
+        data = llm_notebook.market(market_with_cascade())
+        t = T0 + pd.Timedelta(hours=450)
+        q = llm_notebook.review_question(data, t)
+        assert 'AVAX' in q and 'IN RUSSIAN' in q and '"regime"' in q
+        text = 'Рынок падает, толпа в лонгах.\nРиск — продолжение разгрузки.\n' \
+               '{"regime": "falling", "btc_24h": "down", "watch": [{"coin": "SOL", "side": "long", "why": "x"}]}'
+        body, view = llm_notebook.parse_review(text)
+        assert body.startswith('Рынок падает') and view['regime'] == 'falling' and view['watch'][0]['coin'] == 'SOL'
+        assert llm_notebook.parse_review('без json')[1] is None
+
+    def test_review_runs_every_four_hours_once(self, monkeypatch):
+        data = llm_notebook.market(market_with_cascade())
+        monkeypatch.setattr(llm_notebook, '_review', {'slot': None, 'busy': False})
+        ran = []
+        run = lambda q, slot, held: ran.append(slot) or llm_notebook._review.update(busy=False)   # noqa: E731
+        t = T0 + pd.Timedelta(hours=451)          # закрытие в 20:00 UTC
+        assert llm_notebook._maybe_review(data, t, Gate(), run=run)
+        assert not llm_notebook._maybe_review(data, t, Gate(), run=run)          # тот же час — один раз
+        assert not llm_notebook._maybe_review(data, t + pd.Timedelta(hours=1), Gate(), run=run)   # 21:00 — не час обзора
+        assert len(ran) == 1
+
+
+class TestShortPattern:
+    def test_short_signal_is_mirrored(self, notebook_mode, monkeypatch):
+        patterns = dict(llm_notebook.PATTERNS)
+        patterns['S1'] = {'label': 'TEST SHORT', 'side': 'short', 'hold': 48, 'stop': 1.3, 'rank': ('rel_24h', 1),
+                          'conditions': [['ret_4h', '<', 1e9]]}
+        monkeypatch.setattr(llm_notebook, 'PATTERNS', patterns)
+        f = pd.Series({'atr_d': 5.0, 'ret_4h': 0, 'ret_24h': 0, 'ret_7d': 0, 'rel_24h': 0, 'oi_chg_4h': 0,
+                       'oi_chg_24h': 0, 'vol_z': 1, 'taker_24h': 0.5, 'funding_bp': 1, 'buy_ratio_pct_30d': 0.5})
+        sig = llm_notebook.to_signal('SOLUSDT', 'S1', f, 100.0, 'x')
+        p = sig['params']
+        assert sig['setup']['type'] == 'SHORT' and sig['htf_trend'] == 'BEARISH'
+        assert p['entry'] < 100.0 and p['stop_loss'] == pytest.approx(106.5) and p['tp_targets'][0] < 100.0
+        assert p['max_hold_hours'] == 48 and p['sl_distance'] > 0

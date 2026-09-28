@@ -37,6 +37,7 @@ REMOTE = '/opt/kraken/llm_exp/patterns'
 DESCR_EN = {
     'ret_1h': 'price change over the last 1h, %', 'ret_4h': 'price change over 4h, %',
     'ret_24h': 'price change over 24h, %', 'ret_72h': 'price change over 72h, %', 'ret_7d': 'price change over 7 days, %',
+    'ret_30d': 'price change over 30 days, % (the coin\'s regime)',
     'range_pos_7d': 'position of price in its 7-day high-low range: 0 = at the low, 1 = at the high',
     'atr_d': 'average daily high-low range over 14 days, % of price',
     'vol_z': 'quote volume of the last 24h divided by the 30-day median daily volume (1 = normal)',
@@ -52,6 +53,7 @@ DESCR_EN = {
     'funding_bp': 'last funding rate, basis points per 8h (positive = longs pay shorts)',
     'funding_pct_30d': 'percentile of funding within the last 30 days, 0..1',
     'btc_ret_4h': 'BTC change over 4h, %', 'btc_ret_24h': 'BTC change over 24h, %', 'btc_ret_7d': 'BTC change over 7 days, %',
+    'btc_ret_30d': 'BTC change over 30 days, % (market regime: negative = falling market)',
     'rel_24h': 'this coin 24h change minus BTC 24h change, %',
     'hour_utc': 'UTC hour of the decision (0..23)', 'weekday': 'weekday of the decision (0 = Monday)',
 }
@@ -76,8 +78,23 @@ RULE FORMAT (JSON only)
     "why": "one sentence: the market mechanism you exploit"}}
 ]}}
 Use only the feature names above. 2-4 conditions per rule. Think about WHO is forced to trade and WHY price should move: crowd positioning, liquidations, aggressive flow, funding costs, reversal vs continuation.
-{history}
+{history}{focus}
 Propose {n} rules. Answer with the JSON object only."""
+
+# Задача круга сверх общей (с 4-го круга, 28.09.2026): у тетради уже есть два лонга
+# (отскок после широкой разгрузки и накопление при расхождении с BTC); на падающем
+# рынке они в нуле, а владельцу нужно 6–8 сделок в неделю.
+FOCUS = {
+    4: """
+FOCUS OF THIS ROUND. Your notebook already has two LONG patterns (buying coins after a market-wide liquidation
+cascade; buying coins that are strong while BTC is weak). They make money in rising and sideways markets but
+nothing in FALLING markets, and together they trade only ~2-5 times per week. Find rules that make money in
+falling markets and add trades: SHORT rules are welcome and needed. Use the regime features (btc_ret_30d,
+ret_30d, btc_ret_7d) to switch a rule on only in the regime where its mechanism works - a rule may trade only
+when BTC fell over 30 days. Note that 2022 was a falling market and 2023-2024 a rising one; a short rule that
+loses overall may still work when gated on the falling regime. Target for all rules together: 6-8 trades per week.
+""",
+}
 
 
 def distribution_text():
@@ -122,7 +139,7 @@ def history_text(upto_round):
             + '\nKeep what works, fix what almost works, drop what loses, and try new mechanisms.\n')
 
 
-DIAG_FEATURES = ('ret_24h', 'ret_7d', 'btc_ret_24h', 'btc_ret_7d', 'buy_ratio_pct_30d', 'funding_bp',
+DIAG_FEATURES = ('ret_24h', 'ret_7d', 'btc_ret_24h', 'btc_ret_7d', 'btc_ret_30d', 'buy_ratio_pct_30d', 'funding_bp',
                  'taker_24h', 'vol_z', 'size_z', 'oi_chg_24h', 'range_pos_7d')
 
 
@@ -275,10 +292,11 @@ def main():
     os.makedirs(OUT, exist_ok=True)
     if cmd == 'round':
         k = int(sys.argv[2]) if len(sys.argv) > 2 else 1
-        prompt = TASK.format(features=distribution_text(), history=history_text(k), n=10)
+        prompt = TASK.format(features=distribution_text(), history=history_text(k), n=10,
+                             focus=FOCUS.get(k, ''))
         open(os.path.join(OUT, f'round{k}_prompt.txt'), 'w', encoding='utf-8').write(prompt)
         # Контекст сервера 12288 токенов: вопрос (~3.2 знака на токен) + мысль и ответ.
-        budget = int(min(9000, 11800 - len(prompt) / 3.2))
+        budget = int(min(9000, 11800 - len(prompt) / 2.6))
         text = ask(prompt, f'round{k}', max_tokens=max(3000, budget))
         if '{' not in text.split('</think>')[-1]:
             text = finish(f'round{k}')

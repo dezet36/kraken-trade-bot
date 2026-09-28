@@ -43,6 +43,7 @@ FEATURES = {
     'ret_24h': 'изменение цены за 24 часа, %',
     'ret_72h': 'изменение цены за 72 часа, %',
     'ret_7d': 'изменение цены за 7 дней, %',
+    'ret_30d': 'изменение цены за 30 дней, % (режим монеты)',
     'range_pos_7d': 'положение цены в диапазоне 7 дней: 0 — у минимума, 1 — у максимума',
     'atr_d': 'средний суточный размах за 14 дней, % цены',
     'vol_z': 'оборот за 24 ч к медиане суточного оборота за 30 дней (1 = обычно)',
@@ -62,6 +63,7 @@ FEATURES = {
     'btc_ret_4h': 'BTC за 4 часа, %',
     'btc_ret_24h': 'BTC за 24 часа, %',
     'btc_ret_7d': 'BTC за 7 дней, %',
+    'btc_ret_30d': 'BTC за 30 дней, % (режим рынка)',
     'rel_24h': 'ход пары за 24 ч минус ход BTC, %',
     'hour_utc': 'час UTC закрытой свечи (0..23)',
     'weekday': 'день недели (0 — понедельник)',
@@ -71,7 +73,8 @@ FEATURES = {
 def features(df, btc=None):
     c = df['c']
     out = pd.DataFrame(index=df.index)
-    for h, name in ((1, 'ret_1h'), (4, 'ret_4h'), (24, 'ret_24h'), (72, 'ret_72h'), (168, 'ret_7d')):
+    for h, name in ((1, 'ret_1h'), (4, 'ret_4h'), (24, 'ret_24h'), (72, 'ret_72h'), (168, 'ret_7d'),
+                    (720, 'ret_30d')):
         out[name] = (c / c.shift(h) - 1) * 100
     hi7, lo7 = df['h'].rolling(168).max(), df['l'].rolling(168).min()
     out['range_pos_7d'] = (c - lo7) / (hi7 - lo7)
@@ -97,7 +100,7 @@ def features(df, btc=None):
     out['funding_pct_30d'] = fr.rolling(24 * 30, min_periods=24 * 20).rank(pct=True)
     if btc is not None:
         bc = btc['c'].reindex(df.index)
-        for h, name in ((4, 'btc_ret_4h'), (24, 'btc_ret_24h'), (168, 'btc_ret_7d')):
+        for h, name in ((4, 'btc_ret_4h'), (24, 'btc_ret_24h'), (168, 'btc_ret_7d'), (720, 'btc_ret_30d')):
             out[name] = (bc / bc.shift(h) - 1) * 100
         out['rel_24h'] = out['ret_24h'] - out['btc_ret_24h']
     # Метка часа — открытие свечи; решение — на её закрытии.

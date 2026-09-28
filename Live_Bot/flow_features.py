@@ -20,7 +20,8 @@ import pandas as pd
 def features(df, btc=None):
     c = df['c']
     out = pd.DataFrame(index=df.index)
-    for h, name in ((1, 'ret_1h'), (4, 'ret_4h'), (24, 'ret_24h'), (72, 'ret_72h'), (168, 'ret_7d')):
+    for h, name in ((1, 'ret_1h'), (4, 'ret_4h'), (24, 'ret_24h'), (72, 'ret_72h'), (168, 'ret_7d'),
+                    (720, 'ret_30d')):
         out[name] = (c / c.shift(h) - 1) * 100
     hi7, lo7 = df['h'].rolling(168).max(), df['l'].rolling(168).min()
     out['range_pos_7d'] = (c - lo7) / (hi7 - lo7)
@@ -46,7 +47,7 @@ def features(df, btc=None):
     out['funding_pct_30d'] = fr.rolling(24 * 30, min_periods=24 * 20).rank(pct=True)
     if btc is not None:
         bc = btc['c'].reindex(df.index)
-        for h, name in ((4, 'btc_ret_4h'), (24, 'btc_ret_24h'), (168, 'btc_ret_7d')):
+        for h, name in ((4, 'btc_ret_4h'), (24, 'btc_ret_24h'), (168, 'btc_ret_7d'), (720, 'btc_ret_30d')):
             out[name] = (bc / bc.shift(h) - 1) * 100
         out['rel_24h'] = out['ret_24h'] - out['btc_ret_24h']
     close_time = df.index + pd.Timedelta(hours=1)

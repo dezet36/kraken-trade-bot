@@ -629,6 +629,30 @@ def llm_setups_text(setups: dict) -> str:
     return chr(10).join(out).rstrip()
 
 
+def llm_notebook_decision(alerts, picks, reason: str = ''):
+    """
+    ИИ-трейдер по тетради (llm_notebook) решил по сигналам часа: что было, что
+    взял, почему. Тот же тумблер, что у планов ИИ (llm_setup).
+    """
+    import tg_format as fmt
+    if not _allowed('llm_setup'):
+        return False
+    return _send(
+        f"🤖 <b>ИИ по тетради</b> · сигналы: {fmt.esc(', '.join(alerts))}\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"Берёт: <b>{fmt.esc(', '.join(picks) or 'ничего')}</b>"
+        + (f"\n{fmt.esc(str(reason)[:400])}" if reason else '')
+    )
+
+
+def llm_market_review(text: str):
+    """Обзор рынка от ИИ (раз в 4 ч, llm_notebook) — тот же тумблер, что у планов ИИ."""
+    import tg_format as fmt
+    if not _allowed('llm_setup') or not text:
+        return False
+    return _send(f"🧭 <b>ИИ: обзор рынка</b> · {_now()}\n━━━━━━━━━━━━━━━━━━━━\n{fmt.esc(text[:1500])}")
+
+
 def llm_setup_rejected(pair: str, side: str, entry: float, gate: str, detail: str = ''):
     """
     Модель предложила сетап, но его отклонил код или критик — коротко, без

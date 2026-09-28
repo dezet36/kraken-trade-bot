@@ -37,17 +37,20 @@ import ai_pattern_lab as L                            # noqa: E402
 import ai_model_research as R                         # noqa: E402
 
 OUT = os.path.join(HERE, 'results', 'model_trader')
-SLOTS = 4
+SLOTS = 6
 
 PATTERNS = {
-    'P1': {'label': 'CASCADE BOUNCE', 'hold': 24, 'stop': 1.0,
+    'P1': {'label': 'CASCADE BOUNCE', 'side': 'long', 'hold': 24, 'stop': 1.0, 'rank': ('ret_4h', 1),
            'conditions': [['ret_4h', '<', -4.2604], ['oi_chg_4h', '<', -4.7381], ['cascade_count_3h', '>=', 4]]},
-    'P2': {'label': 'BTC DIVERGENCE ACCUMULATION', 'hold': 48, 'stop': 1.3,
+    'P2': {'label': 'BTC DIVERGENCE ACCUMULATION', 'side': 'long', 'hold': 48, 'stop': 1.3, 'rank': ('rel_24h', -1),
            'conditions': [['rel_24h', '>=', 2.5], ['btc_ret_24h', '<=', -1.0], ['oi_chg_24h', '>=', 4.0],
                           ['vol_z', '>=', 1.5]]},
+    'B3': {'label': 'DISTRIBUTION ON MARKET BOUNCE', 'side': 'short', 'hold': 48, 'stop': 1.3, 'rank': ('rel_24h', 1),
+           'conditions': [['btc_ret_30d', '<', 0.0], ['rel_24h', '<=', -2.5], ['btc_ret_24h', '>=', 1.0],
+                          ['oi_chg_24h', '>=', 4.0], ['vol_z', '>=', 1.5]]},
 }
 
-NOTEBOOK = """YOU ARE THE TRADER of a crypto futures bot (20 liquid USDT perpetuals, long only for now).
+NOTEBOOK = """YOU ARE THE TRADER of a crypto futures bot (20 liquid USDT perpetuals, long and short).
 Below is YOUR NOTEBOOK: patterns you found and verified on 2022-01..2024-06 hourly data, results after costs.
 R = profit in units of the risk taken (stop distance). You decide which alerts to trade.
 
@@ -68,7 +71,16 @@ P2. BTC DIVERGENCE ACCUMULATION (long, hold 48h, stop = 1.3 x the coin's average
            coin up more than 16% over 7 days (+0.21R); 24h volume above 2.8x normal (+0.22R).
    Worse:  BTC down over 7 days (~0R) - in a falling market the strength usually fades.
 
-RISK: at most 4 open positions. Positions opened together in one market move are one bet - prefer the
+B3. DISTRIBUTION ON MARKET BOUNCE (short, hold 48h, stop = 1.3 x the coin's average daily range)
+   Trigger: BTC is down over 30 days (falling market), BTC bounced 1%+ in 24h, but the coin is 2.5%+ weaker
+   than BTC, while its open interest grew 4%+ and 24h volume is above 1.5x normal - someone is selling the coin
+   into the market bounce. Sell it.
+   Result: +0.255R per trade over 62 trades, 61% winners; positive in 6 of 7 half-years.
+   Better: retail long share high (+0.35R, the crowd is buying the bounce); funding not positive (+0.38R);
+           BTC 30d decline mild, above -9% (+0.38R).
+   Worse:  BTC 30d decline deeper than -9% (+0.13R); very high volume above 2.1x normal (+0.12R).
+
+RISK: at most 6 open positions. Positions opened together in one market move are one bet - prefer the
 strongest alerts, and skip when your notebook says the conditions are the weak ones.
 """
 
@@ -127,9 +139,8 @@ def alerts(data, split):
                     by_hour.setdefault(t, []).append((p, key))
     out = []
     for t in sorted(by_hour):
-        f = {p: data[p][1] for p, _ in by_hour[t]}
-        items = sorted(by_hour[t], key=lambda x: (x[1], f[x[0]].at[t, 'ret_4h'] if x[1] == 'P1'
-                                                   else -f[x[0]].at[t, 'rel_24h']))
+        items = sorted(by_hour[t], key=lambda x: (list(PATTERNS).index(x[1]),
+                                                   PATTERNS[x[1]]['rank'][1] * data[x[0]][1].at[t, PATTERNS[x[1]]['rank'][0]]))
         seen, uniq = set(), []
         for p, key in items:
             if p not in seen:
@@ -148,7 +159,7 @@ def outcomes(data, evs):
             mask = np.zeros(len(f), bool)
             mask[i] = True
             pat = PATTERNS[key]
-            tr = L.simulate(df, mask, 'long', pat['hold'], pat['stop'], f['atr_d'].to_numpy(float))
+            tr = L.simulate(df, mask, pat['side'], pat['hold'], pat['stop'], f['atr_d'].to_numpy(float))
             if tr:
                 res[(t, p)] = (tr[0][2], t + pd.Timedelta(hours=tr[0][3] + 1), key)
     return res
