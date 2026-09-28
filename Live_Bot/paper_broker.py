@@ -1930,7 +1930,7 @@ class PaperBroker:
         span = abs(final - pos['stop_loss'])
         progress = (abs(price - pos['stop_loss']) / span) if span else 0.0
 
-        return {
+        view = {
             'strategy': strategy,
             'pair': pair,
             'direction': pos['direction'],
@@ -1969,6 +1969,17 @@ class PaperBroker:
             'missing': (pos.get('context') or {}).get('missing', []),
             'geometry': (pos.get('context') or {}).get('geometry') or {},
         }
+        hold = pos.get('max_hold_hours')
+        if hold:
+            # Своя позиция со сроком (ИИ по тетради): выход — по времени, а цель в ней —
+            # заглушка брокеру. 28.09.2026 владелец прочёл «цель +20R» как «позиция на месяцы».
+            opened_ms = int(pos['opened_ts'])
+            exit_ms = opened_ms + int(float(hold) * 3_600_000)
+            now = _now_ms()
+            view.update(time_exit=True, hold_hours=float(hold), exit_by=_iso(exit_ms),
+                        time_left_h=round(max(0.0, (exit_ms - now) / 3_600_000), 1),
+                        progress_time=round(min(max((now - opened_ms) / (exit_ms - opened_ms), 0.0), 1.0), 4))
+        return view
 
     def _pending_view(self, strategy, pair, order):
         """

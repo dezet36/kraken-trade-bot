@@ -2082,6 +2082,9 @@ function posCards(rows) {
     const good = (r.unrealised || 0) >= 0;
     const mark = good ? 'var(--good)' : 'var(--bad)';
     const at = Math.round((r.progress || 0) * 100);
+    // Позиция со сроком (ИИ по тетради): выход по времени, цель в ней — заглушка брокеру.
+    // 28.09.2026 владелец прочёл «цель +20R» как «позиция на месяцы» — показываем срок.
+    const timed = !!(r.time_exit && r.exit_by);
 
     // Отметки целей на шкале «стоп -> последняя цель»
     const targets = r.targets && r.targets.length ? r.targets : [r.tp1];
@@ -2122,7 +2125,16 @@ function posCards(rows) {
         r.realized ? `зафиксировано ${money(r.realized)} · ` : ''}в рынке ${
         money(r.floating || 0)}${r.costs ? ` · издержки $${r.costs.toFixed(2)}` : ''}</div>
 
-      <div class="track">
+      ${timed ? `<div class="track">
+        <div class="track-bar">
+          <span class="now" style="left:${Math.round((r.progress_time || 0) * 100)}%; background:${mark}"></span>
+        </div>
+        <div class="track-ends">
+          <span>открыта ${when(r.opened)}</span>
+          <span>осталось ${dur((r.time_left_h || 0) * 60)}</span>
+          <span>выход ${when(r.exit_by)}</span>
+        </div>
+      </div>` : `<div class="track">
         <div class="track-bar">
           <span class="entry" style="left:${entryAt}%"></span>
           ${marks}
@@ -2133,16 +2145,17 @@ function posCards(rows) {
           <span>сейчас ${price(r.price)}</span>
           <span>цель ${price(targets[targets.length - 1])}</span>
         </div>
-      </div>
+      </div>`}
 
       <div class="pos-grid">
         ${cell('Вход', price(r.entry))}
         ${cell('Стоп-лосс', price(r.stop) + dist(r.stop, r.price), 'neg')}
-        ${cell('Тейк-профит', price(targets[0]) + dist(targets[0], r.price), 'pos')}
+        ${timed ? cell('Выход по сроку', `${when(r.exit_by)} · через ${r.hold_hours} ч после входа`)
+                : cell('Тейк-профит', price(targets[0]) + dist(targets[0], r.price), 'pos')}
         ${cell('Риск', riskNow(r), r.breakeven ? 'pos' : '')}
-        ${cell('RR план', r.rr ? r.rr.toFixed(2) : '—')}
+        ${cell('RR план', !timed && r.rr ? r.rr.toFixed(2) : '—')}
         ${cell('Макс. ход', (r.mfe_r != null ? r.mfe_r.toFixed(2) : '—') + ' R')}
-        ${targets.length > 1
+        ${!timed && targets.length > 1
           ? cell('Дальние цели', targets.slice(1).map(price).join(' · '), 'pos') : ''}
       </div>
       ${flags.length ? `<div class="flags" style="margin-top:10px">${flags.join('')}</div>` : ''}
@@ -3334,7 +3347,8 @@ function posChartHtml(pos, data) {
   // линия «выход», которой не существует.
   // Все цели плана, а не две первые: у SMC их три, и третьей на графике не было.
   // live — позиция открыта: на графике текущая цена «сейчас».
-  const targets = pos.targets && pos.targets.length ? pos.targets : [pos.tp1];
+  // Позиция со сроком (ИИ по тетради): цель — заглушка брокеру, на графике её нет.
+  const targets = pos.time_exit ? [] : (pos.targets && pos.targets.length ? pos.targets : [pos.tp1]);
   return tradeChart({
     entry: pos.entry, stop: pos.stop, targets: targets,
     exit: 0, direction: pos.direction, live: true, now: pos.price,

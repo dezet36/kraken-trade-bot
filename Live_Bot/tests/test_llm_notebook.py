@@ -459,6 +459,7 @@ class TestPositionHold:
         assert b.open('FIBO', self._signal())
         self._run(b, client, pb)
         assert b.positions('FIBO') and not pb.read_journal()
+        assert 'time_exit' not in b.snapshot()['open'][0]            # у обычной позиции карточка прежняя
 
 
 class TestNotebookSignalThroughTheBroker:
@@ -524,6 +525,12 @@ class TestNotebookSignalThroughTheBroker:
         assert pos['entry_price'] == pytest.approx(20.0 * 1.0003)          # по рынку, не по лимиту 20.02
         assert pos['stop_loss'] == pytest.approx(19.0) and pos['max_hold_hours'] == 24
         assert pos['breakeven_after_tp'] is False and not pos['be_level']
+        # Панели — срок выхода, а не заглушка-цель: «цель +20R» читали как «позиция на месяцы».
+        pb._now_ms = lambda: self.START + 6 * H
+        view = b.snapshot()['open'][0]
+        assert view['time_exit'] is True and view['hold_hours'] == 24 and view['time_left_h'] == 18.0
+        assert view['progress_time'] == 0.25 and view['exit_by'] == pb._iso(self.START + 24 * H)
+        pb._now_ms = lambda: self.START
         client.candles['AVAXUSDT'] = [[self.START + self.BAR, 20.0, 20.1, 18.9, 19.0, 0]]
         pb._now_ms = lambda: self.START + 3 * self.BAR
         b.update()
