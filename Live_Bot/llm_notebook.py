@@ -226,6 +226,25 @@ def ask_model(question, timeout=600):
     return out.get('content') or ''
 
 
+EXPORT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'docs', 'Промт_ИИ_тетрадь.txt')
+
+
+def export_text():
+    """Промт тетради целиком — для docs/Промт_ИИ_тетрадь.txt (правило: промт меняется только с экспортом)."""
+    return (
+        'Промт ИИ в режиме тетради (LLM_MODE=notebook) — экспорт из Live_Bot/llm_notebook.py.\n'
+        'Промт меняется только вместе с этим файлом: совпадение держит tests/test_llm_notebook.py.\n'
+        'Пересобрать: python Live_Bot/llm_notebook.py export\n\n'
+        'Модель без мысли (<think></think> в подсказке). Решение о сделках: n_predict 160,\n'
+        'temperature 0.2; обзор рынка: n_predict 600, temperature 0.3.\n\n'
+        '=== СИСТЕМА: ТЕТРАДЬ (NOTEBOOK) ===\n'
+        f'{NOTEBOOK}\n'
+        '=== ВОПРОС О СДЕЛКАХ (QUESTION): раз в час, если есть новые сигналы и места ===\n'
+        f'{QUESTION}\n\n'
+        '=== ОБЗОР РЫНКА (REVIEW): раз в 4 часа ===\n'
+        f'{REVIEW}\n')
+
+
 def _decide_job(ask, question, items):
     """
     В потоке тетради: вопрос модели -> её ответ, как есть.
@@ -594,3 +613,11 @@ def _enter(job, gate, now_ms, price_of):
     log(f"   {NAME}: сигналы {alerts}; модель берёт {', '.join(picks) or 'ничего'} — {reason}")
     _notify_decision(items, list(entries), reason)
     return out
+
+
+if __name__ == '__main__':
+    import sys
+    if sys.argv[1:] == ['export']:
+        with open(EXPORT, 'w', encoding='utf-8', newline='\n') as fh:
+            fh.write(export_text())
+        print(EXPORT)

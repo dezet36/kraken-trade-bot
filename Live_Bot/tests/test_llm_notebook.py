@@ -534,6 +534,15 @@ class TestDecisionLogAndReview:
         assert len(ran) == 1
 
 
+class TestPromptExport:
+    def test_docs_export_matches_the_prompt(self):
+        """Правило проекта: промт меняется только с экспортом (docs/Промт_ИИ_тетрадь.txt)."""
+        if not os.path.exists(llm_notebook.EXPORT):
+            pytest.skip('нет docs/')
+        assert open(llm_notebook.EXPORT, encoding='utf-8').read() == llm_notebook.export_text(), \
+            'промт тетради изменён без экспорта: python Live_Bot/llm_notebook.py export'
+
+
 class TestAnswerParsing:
     ITEMS = [('AVAXUSDT', 'P1'), ('ADAUSDT', 'P1'), ('ZECUSDT', 'B3')]
 
