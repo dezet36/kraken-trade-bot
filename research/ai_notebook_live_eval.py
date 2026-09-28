@@ -10,7 +10,10 @@
      следующего часа, стоп — доля суточного размаха, выход по сроку) — и сумму
      R: модель, механика, все сигналы подряд;
   2. обзоры: верно ли модель назвала ход BTC на сутки, и чем кончились
-     монеты из её «списка наблюдения» за сутки в названную сторону.
+     монеты из её «списка наблюдения» за сутки в названную сторону;
+  3. исполнение (п. 73): задержка входа от закрытия часа, опоздавшие ответы,
+     ошибки модели; закрытые сделки тетради из paper_trades.jsonl — их R
+     против R того же сигнала по правилам стенда (разница — цена живого входа).
 Судить после ≥ 50 решений (п. 69).
 """
 import json
@@ -28,6 +31,7 @@ import ai_model_trader_bt as B                        # noqa: E402
 H = 3_600_000
 FEE, SLIP = 0.00055, 0.0003
 BINANCE = {'SHIB1000USDT': '1000SHIBUSDT'}
+NOTEBOOK_START = pd.Timestamp('2026-09-28 09:43', tz='UTC')     # LLM_MODE=notebook на сервере
 
 
 def klines(pair, start_ms, end_ms):
@@ -128,8 +132,54 @@ def reviews(folder):
               f'(в плюс {np.mean(w > 0) * 100:.0f}%)')
 
 
+def _utc(value):
+    ts = pd.Timestamp(value)
+    return ts.tz_localize('UTC') if ts.tzinfo is None else ts.tz_convert('UTC')
+
+
+def execution(folder):
+    """Исполнение (п. 73): задержка, опоздания, ошибки; живые сделки против правил стенда."""
+    rows = [json.loads(x) for x in open(os.path.join(folder, 'llm_notebook_log.jsonl'), encoding='utf-8')
+            if x.strip()]
+    delays = np.array([r['delay_min'] for r in rows if r.get('delay_min') is not None], float)
+    late = sum(1 for r in rows if r.get('late'))
+    errors = sum(1 for r in rows if r.get('error'))
+    print(f'исполнение: решений {len(rows)}; задержка входа от закрытия часа — '
+          + (f'медиана {np.median(delays):.1f} мин, макс {delays.max():.1f}' if len(delays) else 'нет данных')
+          + f'; ответ опоздал {late}, модель не ответила {errors}')
+    path = os.path.join(folder, 'paper_trades.jsonl')
+    if not os.path.exists(path):
+        return
+    trades = [json.loads(x) for x in open(path, encoding='utf-8') if x.strip()]
+    trades = [t for t in trades if t.get('strategy') == 'LLM' and _utc(t['open_time']) >= NOTEBOOK_START]
+    live, rule = [], []
+    for t in trades:
+        opened = _utc(t['open_time'])
+        # Сигнал сделки — та же пара в решении часа, закрывшегося за 0–90 минут до входа.
+        for r in rows:
+            close = _utc(r['hour']) + pd.Timedelta(hours=1)
+            alert = next((a for a in r['alerts'] if a['pair'] == t['pair']), None)
+            if alert is None or not close <= opened <= close + pd.Timedelta(minutes=90):
+                continue
+            try:
+                bt = outcome(alert, r['hour'])
+            except Exception:                         # noqa: BLE001
+                bt = None
+            if bt is not None and t.get('pnl_r') is not None:
+                live.append(float(t['pnl_r']))
+                rule.append(bt)
+            break
+    if live:
+        live, rule = np.array(live), np.array(rule)
+        print(f'  закрытых сделок тетради {len(live)}: живой R {live.mean():+.3f}, те же сигналы по правилам стенда '
+              f'{rule.mean():+.3f}, разница {live.mean() - rule.mean():+.3f} (цена живого входа и исполнения)')
+    else:
+        print(f'  закрытых сделок тетради {len(trades)}, сопоставимых с сигналами — нет')
+
+
 if __name__ == '__main__':
     sys.stdout.reconfigure(encoding='utf-8')
     folder = sys.argv[1] if len(sys.argv) > 1 else '.'
     decisions(folder)
+    execution(folder)
     reviews(folder)
