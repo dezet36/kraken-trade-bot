@@ -25,7 +25,9 @@ import pandas as pd
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 OUT = os.path.join(HERE, os.getenv('FLOW_CACHE', 'flow_cache'))
-START = int(pd.Timestamp('2022-01-01', tz='UTC').timestamp() * 1000)
+# Период — 2022-01-01 … сейчас; FLOW_START/FLOW_END — другой (п. 75: 2021 год, в свою папку FLOW_CACHE).
+START = int(pd.Timestamp(os.getenv('FLOW_START', '2022-01-01'), tz='UTC').timestamp() * 1000)
+END = os.getenv('FLOW_END')
 H = 3_600_000
 
 PAIRS = ('AAVEUSDT', 'ADAUSDT', 'ARBUSDT', 'AVAXUSDT', 'BNBUSDT', 'BTCUSDT', 'COTIUSDT',
@@ -53,7 +55,7 @@ def binance_klines(pair, now):
         batch = get(f'https://fapi.binance.com/fapi/v1/klines?symbol={sym}&interval=1h&startTime={start}&limit=1500')
         if not batch:
             break
-        rows += batch
+        rows += [b for b in batch if b[0] <= now]
         start = batch[-1][0] + H
         time.sleep(0.15)
     df = pd.DataFrame(rows, columns=['ts', 'o', 'h', 'l', 'c', 'v', 'close_ts', 'qv', 'trades', 'tb', 'tbq', 'ignore'])
@@ -101,7 +103,8 @@ def fetch(pair):
     path = os.path.join(OUT, f'{pair}.pkl')
     if os.path.exists(path) and len(sys.argv) < 2:
         return pair, 'есть'
-    now = int(time.time() * 1000) // H * H
+    now = (int(pd.Timestamp(END, tz='UTC').timestamp() * 1000) if END
+           else int(time.time() * 1000) // H * H)
     k = binance_klines(pair, now)
     ratio = bybit_ratio(pair, now)
     oi = bybit_backwards(lambda end: f'https://api.bybit.com/v5/market/open-interest?category=linear&symbol={pair}'
