@@ -1,0 +1,472 @@
+[
+ {
+  "rule": {
+   "name": "bear_momentum_stall_short",
+   "side": "short",
+   "conditions": [
+    [
+     "btc_ret_30d",
+     "<=",
+     -5.0
+    ],
+    [
+     "range_pos_7d",
+     ">=",
+     0.75
+    ],
+    [
+     "ret_24h",
+     ">=",
+     1.5
+    ],
+    [
+     "taker_24h_dev",
+     "<=",
+     0.005
+    ]
+   ],
+   "hold_hours": 24,
+   "stop_atr": 1.2,
+   "why": "In a bear market, rallies at upper range levels without aggressive taker buying (stall) indicate distribution and likely rejection."
+  },
+  "train": {
+   "n": 377,
+   "per_week": 2.893640350877193,
+   "pct": 0.050223781063342944,
+   "r": 0.016687063757426856,
+   "t": 0.7079668053675013,
+   "win": 0.53315649867374
+  },
+  "valid": {
+   "n": 248,
+   "per_week": 5.7105263157894735,
+   "pct": -0.6803574430376765,
+   "r": -0.09106666143209216,
+   "t": -2.587481263523487,
+   "win": 0.4637096774193548
+  }
+ },
+ {
+  "rule": {
+   "name": "oi_distribution_trap_short",
+   "side": "short",
+   "conditions": [
+    [
+     "btc_ret_30d",
+     "<=",
+     -8.0
+    ],
+    [
+     "oi_chg_24h",
+     ">=",
+     4.0
+    ],
+    [
+     "buy_ratio_pct_30d",
+     ">=",
+     0.85
+    ],
+    [
+     "ret_24h",
+     "<=",
+     0.5
+    ]
+   ],
+   "hold_hours": 36,
+   "stop_atr": 1.5,
+   "why": "Rising open interest with high retail positioning and weak price action signals trapped longs; institutional supply absorption leads to breakdown."
+  },
+  "train": {
+   "n": 333,
+   "per_week": 2.555921052631579,
+   "pct": -0.2163050475348582,
+   "r": -0.02512124581499998,
+   "t": -0.9709278216124119,
+   "win": 0.43243243243243246
+  },
+  "valid": {
+   "n": 64,
+   "per_week": 1.4736842105263157,
+   "pct": 0.22960255423010018,
+   "r": 0.014544847391202702,
+   "t": 0.19853913446367447,
+   "win": 0.53125
+  }
+ },
+ {
+  "rule": {
+   "name": "rel_strength_exhaustion_short",
+   "side": "short",
+   "conditions": [
+    [
+     "btc_ret_7d",
+     "<=",
+     -5.0
+    ],
+    [
+     "rel_24h",
+     ">=",
+     2.0
+    ],
+    [
+     "ret_7d",
+     "<=",
+     -5.0
+    ],
+    [
+     "funding_bp",
+     ">=",
+     1.0
+    ]
+   ],
+   "hold_hours": 24,
+   "stop_atr": 1.3,
+   "why": "Coin outperforms BTC on a weak weekly trend with positive funding; this relative strength is unsustainable and reverts to the mean."
+  },
+  "train": {
+   "n": 589,
+   "per_week": 4.520833333333334,
+   "pct": 0.3753917896073702,
+   "r": 0.04265651860711285,
+   "t": 1.9951523472872963,
+   "win": 0.5093378607809848
+  },
+  "valid": {
+   "n": 194,
+   "per_week": 4.467105263157895,
+   "pct": -1.540350440034708,
+   "r": -0.1279001208859267,
+   "t": -3.6802556855313076,
+   "win": 0.3711340206185567
+  }
+ },
+ {
+  "rule": {
+   "name": "weekend_void_breakdown_short",
+   "side": "short",
+   "conditions": [
+    [
+     "weekday",
+     ">=",
+     5
+    ],
+    [
+     "vol_z",
+     "<=",
+     0.8
+    ],
+    [
+     "ret_1h",
+     "<=",
+     -1.0
+    ],
+    [
+     "taker_1h",
+     "<=",
+     0.46
+    ]
+   ],
+   "hold_hours": 48,
+   "stop_atr": 1.4,
+   "why": "Weekend low volume allows bears to push price down easily; lack of taker support confirms no institutional buying interest."
+  },
+  "train": {
+   "n": 755,
+   "per_week": 5.794956140350878,
+   "pct": -0.12941936073335863,
+   "r": -0.004998768888730727,
+   "t": -0.22908294420255076,
+   "win": 0.49801324503311256
+  },
+  "valid": {
+   "n": 385,
+   "per_week": 8.865131578947368,
+   "pct": 1.252997049514181,
+   "r": 0.09703912752258112,
+   "t": 2.851326412033211,
+   "win": 0.548051948051948
+  }
+ },
+ {
+  "rule": {
+   "name": "funding_exhaustion_grind_short",
+   "side": "short",
+   "conditions": [
+    [
+     "btc_ret_30d",
+     "<=",
+     -6.0
+    ],
+    [
+     "funding_pct_30d",
+     ">=",
+     0.8
+    ],
+    [
+     "ret_4h",
+     "<=",
+     0.3
+    ],
+    [
+     "vol_z",
+     "<=",
+     0.7
+    ]
+   ],
+   "hold_hours": 48,
+   "stop_atr": 1.6,
+   "why": "High funding percentile in a bear market with low volatility and volume indicates exhaustion of long leverage; slow grind lower follows."
+  },
+  "train": {
+   "n": 195,
+   "per_week": 1.4967105263157896,
+   "pct": 0.19739446318068252,
+   "r": 0.010907131944551831,
+   "t": 0.3101963307547908,
+   "win": 0.558974358974359
+  },
+  "valid": {
+   "n": 114,
+   "per_week": 2.625,
+   "pct": 0.7039177383846182,
+   "r": 0.07503971510735359,
+   "t": 1.1974250226707357,
+   "win": 0.5175438596491229
+  }
+ },
+ {
+  "rule": {
+   "name": "taker_divergence_dist_short",
+   "side": "short",
+   "conditions": [
+    [
+     "range_pos_7d",
+     ">=",
+     0.85
+    ],
+    [
+     "taker_1h",
+     "<=",
+     0.44
+    ],
+    [
+     "oi_chg_4h",
+     ">=",
+     2.0
+    ],
+    [
+     "ret_1h",
+     ">=",
+     0.2
+    ]
+   ],
+   "hold_hours": 24,
+   "stop_atr": 1.2,
+   "why": "Price at range highs with weak taker flow but rising OI suggests new shorts are entering to cap the rally; distribution phase."
+  },
+  "train": {
+   "n": 56,
+   "per_week": 0.4298245614035088,
+   "pct": 0.5188791478417353,
+   "r": 0.06872778963313664,
+   "t": 1.0474766471805632,
+   "win": 0.5535714285714286
+  },
+  "valid": {
+   "n": 27,
+   "per_week": 0.6217105263157895,
+   "pct": -0.5031889755569158,
+   "r": -0.0752711095051384,
+   "t": -0.7241592053086136,
+   "win": 0.4444444444444444
+  }
+ },
+ {
+  "rule": {
+   "name": "bear_fomo_bounce_fail_short",
+   "side": "short",
+   "conditions": [
+    [
+     "btc_ret_30d",
+     "<=",
+     -10.0
+    ],
+    [
+     "ret_24h",
+     ">=",
+     2.5
+    ],
+    [
+     "size_z",
+     "<=",
+     0.9
+    ],
+    [
+     "buy_ratio_pct_30d",
+     ">=",
+     0.7
+    ]
+   ],
+   "hold_hours": 24,
+   "stop_atr": 1.5,
+   "why": "Strong bounce in a deep bear market without large trade size and with crowded longs indicates retail FOMO; trend resumes downward."
+  },
+  "train": {
+   "n": 128,
+   "per_week": 0.9824561403508772,
+   "pct": 0.5730265632628453,
+   "r": 0.02897893852769067,
+   "t": 0.9828691232750413,
+   "win": 0.5078125
+  },
+  "valid": {
+   "n": 26,
+   "per_week": 0.5986842105263157,
+   "pct": 0.25916691327392505,
+   "r": 0.02486514271751707,
+   "t": 0.4100351454835922,
+   "win": 0.5384615384615384
+  }
+ },
+ {
+  "rule": {
+   "name": "funding_flip_no_follow_short",
+   "side": "short",
+   "conditions": [
+    [
+     "btc_ret_30d",
+     "<=",
+     -5.0
+    ],
+    [
+     "funding_bp",
+     ">=",
+     1.5
+    ],
+    [
+     "taker_24h_dev",
+     "<=",
+     0.01
+    ],
+    [
+     "ret_24h",
+     "<=",
+     0.5
+    ]
+   ],
+   "hold_hours": 36,
+   "stop_atr": 1.4,
+   "why": "Positive funding without taker buying pressure or price momentum signals weak long interest; bears regain control."
+  },
+  "train": {
+   "n": 51,
+   "per_week": 0.39144736842105265,
+   "pct": 1.4162247305089644,
+   "r": 0.1505491218033929,
+   "t": 1.4429964403180717,
+   "win": 0.5294117647058824
+  },
+  "valid": {
+   "n": 9,
+   "per_week": 0.20723684210526314,
+   "pct": 0.9766014406911386,
+   "r": 0.054446650487696785,
+   "t": 0.42955909183636426,
+   "win": 0.6666666666666666
+  }
+ },
+ {
+  "rule": {
+   "name": "trend_breakdown_accel_short",
+   "side": "short",
+   "conditions": [
+    [
+     "btc_ret_30d",
+     "<=",
+     -8.0
+    ],
+    [
+     "range_pos_7d",
+     "<=",
+     0.2
+    ],
+    [
+     "oi_chg_24h",
+     ">=",
+     3.0
+    ],
+    [
+     "ret_24h",
+     "<=",
+     -1.5
+    ]
+   ],
+   "hold_hours": 48,
+   "stop_atr": 1.5,
+   "why": "Breakdown from lower range with expanding OI and negative returns confirms bearish acceleration; trend continuation likely."
+  },
+  "train": {
+   "n": 582,
+   "per_week": 4.467105263157895,
+   "pct": -0.5540249149228751,
+   "r": -0.0347605141484191,
+   "t": -1.333181935969788,
+   "win": 0.4329896907216495
+  },
+  "valid": {
+   "n": 147,
+   "per_week": 3.3848684210526314,
+   "pct": -0.9717275418971125,
+   "r": -0.032864575980968584,
+   "t": -0.5414285784681188,
+   "win": 0.41496598639455784
+  }
+ },
+ {
+  "rule": {
+   "name": "bear_momentum_stall_short_v2",
+   "side": "short",
+   "conditions": [
+    [
+     "btc_ret_30d",
+     "<=",
+     -3.0
+    ],
+    [
+     "funding_bp",
+     ">=",
+     2.0
+    ],
+    [
+     "vol_z",
+     "<=",
+     0.8
+    ],
+    [
+     "range_pos_7d",
+     ">=",
+     0.8
+    ]
+   ],
+   "hold_hours": 24,
+   "stop_atr": 1.3,
+   "why": "High funding without volume support at range highs indicates weak retail-led rallies; lack of institutional volume confirms distribution phase."
+  },
+  "train": {
+   "n": 6,
+   "per_week": 0.04605263157894737,
+   "pct": -1.0915873304119854,
+   "r": -0.10758129182598937,
+   "t": -0.5421512109133848,
+   "win": 0.6666666666666666
+  },
+  "valid": {
+   "n": 2,
+   "per_week": 0.046052631578947366,
+   "pct": -0.4534152825721682,
+   "r": -0.04872790889164306,
+   "t": -0.39678806233549035,
+   "win": 0.5
+  }
+ }
+]
