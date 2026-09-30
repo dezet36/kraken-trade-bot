@@ -1,0 +1,237 @@
+[
+ {
+  "rule": {
+   "name": "bear_bounce_rejection_short",
+   "side": "short",
+   "conditions": [
+    [
+     "btc_ret_30d",
+     "<=",
+     -0.5
+    ],
+    [
+     "ret_24h",
+     ">=",
+     0.3
+    ],
+    [
+     "range_pos_7d",
+     "<=",
+     0.5
+    ],
+    [
+     "vol_z",
+     "<=",
+     0.95
+    ]
+   ],
+   "hold_hours": 24,
+   "stop_atr": 0.7,
+   "why": "Bounce exhaustion in confirmed downtrend; low-volume rallies trap late longs before continuation drops price."
+  },
+  "train": {
+   "n": 2408,
+   "per_week": 18.482456140350877,
+   "pct": 0.010127508427383951,
+   "r": -3.201846176009807e-05,
+   "t": -0.0020070578301914755,
+   "win": 0.4838039867109635
+  },
+  "valid": {
+   "n": 712,
+   "per_week": 16.394736842105264,
+   "pct": -0.34585320624329186,
+   "r": -0.03215865274931593,
+   "t": -1.1906203678167233,
+   "win": 0.4648876404494382
+  }
+ },
+ {
+  "rule": {
+   "name": "crowded_long_funding_short",
+   "side": "short",
+   "conditions": [
+    [
+     "btc_ret_30d",
+     "<=",
+     -0.5
+    ],
+    [
+     "funding_bp",
+     ">=",
+     1.0
+    ],
+    [
+     "buy_ratio_pct_30d",
+     ">=",
+     0.7
+    ],
+    [
+     "oi_chg_24h",
+     ">=",
+     -0.2
+    ]
+   ],
+   "hold_hours": 18,
+   "stop_atr": 0.6,
+   "why": "Overcrowded long positioning with positive funding in a bearish macro regime; forced liquidations as weak hands capitulate."
+  },
+  "train": {
+   "n": 2146,
+   "per_week": 16.471491228070178,
+   "pct": 0.12680234541429078,
+   "r": 0.039203129478888786,
+   "t": 1.9539029466563709,
+   "win": 0.4706430568499534
+  },
+  "valid": {
+   "n": 356,
+   "per_week": 8.197368421052632,
+   "pct": 0.41066154765293655,
+   "r": 0.12707623595946843,
+   "t": 2.2597461218118107,
+   "win": 0.46348314606741575
+  }
+ },
+ {
+  "rule": {
+   "name": "volume_accumulation_long",
+   "side": "long",
+   "conditions": [
+    [
+     "ret_7d",
+     "<=",
+     -2.0
+    ],
+    [
+     "range_pos_7d",
+     "<=",
+     0.35
+    ],
+    [
+     "taker_24h_dev",
+     ">=",
+     0.003
+    ],
+    [
+     "size_z",
+     ">=",
+     1.1
+    ]
+   ],
+   "hold_hours": 24,
+   "stop_atr": 0.9,
+   "why": "Selling exhaustion after multi-day drawdown; large trade size and rising taker buy ratio signal smart money accumulation."
+  },
+  "train": {
+   "n": 445,
+   "per_week": 3.4155701754385968,
+   "pct": 0.0389686439136627,
+   "r": -0.02800019010393828,
+   "t": -0.8746432092979718,
+   "win": 0.5168539325842697
+  },
+  "valid": {
+   "n": 152,
+   "per_week": 3.5,
+   "pct": 0.3996445108130619,
+   "r": 0.02782240864344357,
+   "t": 0.4011465912482479,
+   "win": 0.5131578947368421
+  }
+ },
+ {
+  "rule": {
+   "name": "relative_weakness_distribution_short",
+   "side": "short",
+   "conditions": [
+    [
+     "btc_ret_30d",
+     "<=",
+     0
+    ],
+    [
+     "rel_24h",
+     "<=",
+     -0.8
+    ],
+    [
+     "oi_chg_24h",
+     ">=",
+     0.1
+    ],
+    [
+     "vol_z",
+     ">=",
+     1.05
+    ]
+   ],
+   "hold_hours": 20,
+   "stop_atr": 0.7,
+   "why": "Relative breakdown with rising OI and volume indicates distribution phase where late longs are trapped as price grinds lower."
+  },
+  "train": {
+   "n": 1331,
+   "per_week": 10.216008771929825,
+   "pct": 0.0047109268455651394,
+   "r": 0.023972216280126978,
+   "t": 0.8597476614672455,
+   "win": 0.45379413974455296
+  },
+  "valid": {
+   "n": 597,
+   "per_week": 13.74671052631579,
+   "pct": -0.1919871942371772,
+   "r": -0.009300222648614838,
+   "t": -0.24143981334404202,
+   "win": 0.45896147403685095
+  }
+ },
+ {
+  "rule": {
+   "name": "short_squeeze_funding_flip_long",
+   "side": "long",
+   "conditions": [
+    [
+     "funding_bp",
+     "<=",
+     -0.2
+    ],
+    [
+     "range_pos_7d",
+     "<=",
+     0.3
+    ],
+    [
+     "ret_1h",
+     ">=",
+     0.1
+    ],
+    [
+     "buy_ratio_pct_30d",
+     "<=",
+     0.35
+    ]
+   ],
+   "hold_hours": 12,
+   "stop_atr": 0.6,
+   "why": "Crowded short positioning with negative funding near support; forced short covering on early momentum reversal."
+  },
+  "train": {
+   "n": 1024,
+   "per_week": 7.859649122807018,
+   "pct": 0.09795662441534178,
+   "r": -0.015552119797684043,
+   "t": -0.5679735321208248,
+   "win": 0.4755859375
+  },
+  "valid": {
+   "n": 264,
+   "per_week": 6.078947368421052,
+   "pct": 0.9510821904957454,
+   "r": 0.1903563589538422,
+   "t": 3.0120233594313564,
+   "win": 0.5643939393939394
+  }
+ }
+]
