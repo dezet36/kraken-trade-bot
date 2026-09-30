@@ -66,7 +66,8 @@ interest change over 24h; "buy share" = aggressive (taker) buying as a share of 
 
 Write a short market review for the owner IN RUSSIAN (at most 900 characters): 1) the market regime and what
 drives it now; 2) where the crowd and the aggressive flow are; 3) which coins are close to the patterns of your
-notebook (P1, P2, B3) and what you will do if they trigger; 4) the main risk for the next 24 hours. Plain text,
+notebook you trade (P1 and B3; P2 is switched off by the owner - do not suggest P2 trades) and what you will do
+if they trigger; 4) the main risk for the next 24 hours. Plain text,
 no tables. The owner does not know the codes: do not write P1, P2, B3 - call the patterns only by their Russian
 names: «Отскок после ликвидаций» (P1), «Накопление при слабом BTC» (P2), «Продажа на отскоке» (B3). No English
 labels from the table either - say «доля розничных лонгов», «доля агрессивных покупок», «открытый интерес».

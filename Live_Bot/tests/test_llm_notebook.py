@@ -267,6 +267,18 @@ class TestScan:
         assert data['BTCUSDT'][1].at[t, 'cascade_count_3h'] == 3        # новые пары широту не добавляют
         assert not [p for p, k in llm_notebook.alerts_at(data, t) if k == 'P1']
 
+    def test_switched_off_pattern_gives_no_alerts(self, monkeypatch):
+        """P2 выключена владельцем 30.09 (п. 75): модель её сигналов не получает, текст тетради тот же."""
+        assert llm_notebook.OFF == ('P2',)
+        patterns = dict(llm_notebook.PATTERNS)
+        patterns['P2'] = dict(patterns['P2'], conditions=[['ret_4h', '<', -4.2604], ['oi_chg_4h', '<', -4.7381]])
+        monkeypatch.setattr(llm_notebook, 'PATTERNS', patterns)
+        data = llm_notebook.market(market_with_cascade(dumped=('AVAXUSDT', 'ADAUSDT')))
+        t = T0 + pd.Timedelta(hours=450)
+        assert not [p for p, k in llm_notebook.alerts_at(data, t) if k == 'P2']
+        monkeypatch.setattr(llm_notebook, 'OFF', ())
+        assert {p for p, k in llm_notebook.alerts_at(data, t) if k == 'P2'} == {'AVAXUSDT', 'ADAUSDT'}
+
     def test_core_only_pattern_skips_extra_pairs(self, monkeypatch):
         patterns = {'X': {'label': 'ANY DUMP', 'side': 'long', 'hold': 24, 'stop': 1.0, 'rank': ('ret_4h', 1),
                           'universe': 'core', 'conditions': [['ret_4h', '<', -4.2604], ['oi_chg_4h', '<', -4.7381]]}}
@@ -572,7 +584,7 @@ class TestDecisionLogAndReview:
         data = llm_notebook.market(market_with_cascade())
         t = T0 + pd.Timedelta(hours=450)
         q = llm_notebook.review_question(data, t)
-        assert 'AVAX' in q and 'IN RUSSIAN' in q and '"regime"' in q and '(P1, P2, B3)' in q
+        assert 'AVAX' in q and 'IN RUSSIAN' in q and '"regime"' in q and 'P2 is switched off' in q
         assert 'Your open positions now: none' in q
         assert 'Your open positions now: LINK, XLM' in llm_notebook.review_question(data, t, ['LINKUSDT', 'XLMUSDT'])
         # У каждого числа подпись: голые столбцы модель путала (фандинг за долю покупок).

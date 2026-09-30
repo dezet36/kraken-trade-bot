@@ -73,6 +73,11 @@ EXTRA = ('BCHUSDT', 'ETCUSDT', 'ATOMUSDT', 'FILUSDT', 'TRXUSDT', 'OPUSDT', 'APTU
          '1000PEPEUSDT', 'SEIUSDT')
 UNIVERSE = POOL + EXTRA
 
+# Выключено владельцем 30.09.2026 (docs п. 75): P2 вне выборки ≈ 0 (2021 −0.05R, test ≈ +0.05…0.09R)
+# при половине всех сделок. Сигналов P2 модель больше не получает; проверенный текст тетради
+# (v3.3) не меняется — иначе его пришлось бы проверять заново.
+OFF = ('P2',)
+
 PATTERNS = {
     'P1': {'label': 'CASCADE BOUNCE', 'side': 'long', 'hold': 24, 'stop': 1.0, 'rank': ('ret_4h', 1),
            'conditions': [['ret_4h', '<', -4.2604], ['oi_chg_4h', '<', -4.7381], ['cascade_count_3h', '>=', 4]]},
@@ -251,6 +256,8 @@ def alerts_at(data, t):
     """Новые сигналы в час t (первый час серии), в порядке _order (он же — выбор механики)."""
     items = []
     for key, pat in PATTERNS.items():
+        if key in OFF:
+            continue
         for p, (df, f) in data.items():
             if t not in f.index or (pat.get('universe') == 'core' and p not in POOL):
                 continue
@@ -521,7 +528,8 @@ interest change over 24h; "buy share" = aggressive (taker) buying as a share of 
 
 Write a short market review for the owner IN RUSSIAN (at most 900 characters): 1) the market regime and what
 drives it now; 2) where the crowd and the aggressive flow are; 3) which coins are close to the patterns of your
-notebook (P1, P2, B3) and what you will do if they trigger; 4) the main risk for the next 24 hours. Plain text,
+notebook you trade (P1 and B3; P2 is switched off by the owner - do not suggest P2 trades) and what you will do
+if they trigger; 4) the main risk for the next 24 hours. Plain text,
 no tables. The owner does not know the codes: do not write P1, P2, B3 - call the patterns only by their Russian
 names: «Отскок после ликвидаций» (P1), «Накопление при слабом BTC» (P2), «Продажа на отскоке» (B3). No English
 labels from the table either - say «доля розничных лонгов», «доля агрессивных покупок», «открытый интерес».
