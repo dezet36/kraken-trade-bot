@@ -120,6 +120,8 @@ def fetch(pair):
     tmp = path + '.tmp'
     df.to_pickle(tmp)
     os.replace(tmp, path)
+    if df.empty:                                       # пары в этом периоде ещё не было
+        return pair, '0 ч — пары в периоде нет'
     return pair, f'{len(df)} ч, {df.index.min():%Y-%m-%d}…{df.index.max():%Y-%m-%d}, ratio {df.buy_ratio.notna().mean():.0%}, oi {df.oi.notna().mean():.0%}'
 
 
