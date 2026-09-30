@@ -314,6 +314,17 @@ def _stale(pair, now=None):
     return at is None or (now - at) >= llm_urgency.STALE_HOURS * 3600
 
 
+def _alive(plan, now):
+    """
+    План ещё может сбыться: моложе срока LLM_TRIGGER_TTL_H.
+
+    Снимает просроченное _check_armed — но только в режиме планов. В режимах
+    «правила» и «тетрадь» он не зовётся, и план LINK от 27.09 висел в панели и
+    в Telegram «Сетапы ИИ» как живой ещё 30.09 — показ должен сам не брать его.
+    """
+    return now - plan['armed_at'] < int(config.__dict__.get('LLM_TRIGGER_TTL_H', 0) or 12) * 3600
+
+
 def armed():
     """Взведённые условия — для панели: пара, условие, уровень, возраст."""
     now = time.time()
@@ -321,7 +332,7 @@ def armed():
              'level': p['verdict'].get('trigger_level'),
              'side': p['verdict'].get('side'),
              'minutes': int((now - p['armed_at']) / 60)}
-            for pair, p in _armed.items()]
+            for pair, p in _armed.items() if _alive(p, now)]
 
 
 def current_setups(broker=None, now=None):
@@ -337,6 +348,8 @@ def current_setups(broker=None, now=None):
     ttl_min = int(config.__dict__.get('LLM_TRIGGER_TTL_H', 0) or 12) * 60
     out = {'armed': [], 'pending': [], 'open': []}
     for pair, plan in sorted(_armed.items()):
+        if not _alive(plan, now):
+            continue
         v = plan['verdict']
         minutes = int((now - plan['armed_at']) / 60)
         out['armed'].append({

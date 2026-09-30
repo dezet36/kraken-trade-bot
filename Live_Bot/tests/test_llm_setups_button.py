@@ -65,6 +65,16 @@ class TestLiveSetupsAreCollected:
         got = strategy_llm.current_setups(None)
         assert len(got['armed']) == 1 and got['pending'] == [] and got['open'] == []
 
+    def test_an_expired_plan_is_not_shown_as_alive(self):
+        # 30.09.2026: план LINK от 27.09 (режим «планы») висел в «Сетапах ИИ» при режиме «тетрадь» —
+        # снимает его только _check_armed, а в других режимах он не зовётся.
+        strategy_llm._arm('LINKUSDT', approving_verdict(trigger_when='retest', trigger_level=14.2, trigger_id='L3'))
+        strategy_llm._arm('SOLUSDT', approving_verdict(trigger_when='retest', trigger_level=100.0, trigger_id='L3'))
+        strategy_llm._armed['LINKUSDT']['armed_at'] -= 3 * 24 * 3600
+        got = strategy_llm.current_setups(None)
+        assert [a['pair'] for a in got['armed']] == ['SOLUSDT']
+        assert [a['pair'] for a in strategy_llm.armed()] == ['SOLUSDT']
+
     def test_a_broken_broker_does_not_hide_the_plans(self):
         class Broken:
             def snapshot(self):
