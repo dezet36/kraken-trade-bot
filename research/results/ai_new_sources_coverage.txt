@@ -1,0 +1,46 @@
+Покрытие новых источников (доля часов периода): спот / Coinbase; DVOL — общий
+  AAVEUSDT       спот 100% 100% 100% | Coinbase 100% 100% 100%
+  ADAUSDT        спот 100% 100% 100% | Coinbase  79% 100% 100%
+  ARBUSDT        спот   0%  51% 100% | Coinbase   0%  51% 100%
+  AVAXUSDT       спот 100% 100% 100% | Coinbase  25% 100% 100%
+  BNBUSDT        спот 100% 100% 100% | Coinbase   0%   0%   0%
+  BTCUSDT        спот 100% 100% 100% | Coinbase 100% 100% 100%
+  COTIUSDT       спот 100% 100% 100% | Coinbase  35% 100% 100%
+  DOGEUSDT       спот 100% 100% 100% | Coinbase  58% 100% 100%
+  DOTUSDT        спот 100% 100% 100% | Coinbase  54% 100% 100%
+  ETHUSDT        спот 100% 100% 100% | Coinbase 100% 100% 100%
+  LINKUSDT       спот 100% 100% 100% | Coinbase 100% 100% 100%
+  LTCUSDT        спот 100% 100% 100% | Coinbase 100% 100% 100%
+  NEARUSDT       спот 100% 100% 100% | Coinbase   0%  73% 100%
+  SHIB1000USDT   спот  64% 100% 100% | Coinbase  31% 100% 100%
+  SOLUSDT        спот 100% 100% 100% | Coinbase  54% 100% 100%
+  SUIUSDT        спот   0%  47% 100% | Coinbase   0%  45% 100%
+  UNIUSDT        спот 100% 100% 100% | Coinbase 100% 100% 100%
+  XLMUSDT        спот 100% 100% 100% | Coinbase 100% 100% 100%
+  XRPUSDT        спот 100% 100% 100% | Coinbase   5%  39% 100%
+  ZECUSDT        спот 100% 100% 100% | Coinbase 100% 100% 100%
+  BCHUSDT        спот 100% 100% 100% | Coinbase 100% 100% 100%
+  ETCUSDT        спот 100% 100% 100% | Coinbase 100% 100% 100%
+  ATOMUSDT       спот 100% 100% 100% | Coinbase 100% 100% 100%
+  FILUSDT        спот 100% 100% 100% | Coinbase 100% 100% 100%
+  TRXUSDT        спот 100% 100% 100% | Coinbase   0%   0%   0%
+  OPUSDT         спот   0%  83% 100% | Coinbase   0%  83% 100%
+  APTUSDT        спот   0%  68% 100% | Coinbase   0%  68% 100%
+  INJUSDT        спот 100% 100% 100% | Coinbase   0%  71% 100%
+  1000PEPEUSDT   спот   0%  46% 100% | Coinbase   0%   0%  55%
+  SEIUSDT        спот   0%  35% 100% | Coinbase   0%  35% 100%
+  XMRUSDT        спот 100%  86%   0% | Coinbase   0%   0%   0%
+  DASHUSDT       спот 100% 100% 100% | Coinbase 100% 100% 100%
+  HBARUSDT       спот 100% 100% 100% | Coinbase   0%  69% 100%
+  CRVUSDT        спот 100% 100% 100% | Coinbase  77% 100% 100%
+  ICPUSDT        спот  64% 100% 100% | Coinbase  64% 100% 100%
+  LDOUSDT        спот   0%  86% 100% | Coinbase   0%  65% 100%
+  ALGOUSDT       спот 100% 100% 100% | Coinbase 100% 100% 100%
+  STXUSDT        спот 100% 100% 100% | Coinbase   0%  98% 100%
+  GALAUSDT       спот  30% 100% 100% | Coinbase  12%  54%   0%
+  ZENUSDT        спот 100% 100% 100% | Coinbase  29%  99% 100%
+  EGLDUSDT       спот 100% 100% 100% | Coinbase   0%  63% 100%
+  SANDUSDT       спот 100% 100% 100% | Coinbase   0%  84% 100%
+  DVOL y2021: 78%
+  DVOL train: 100%
+  DVOL valid: 100%
