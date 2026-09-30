@@ -663,7 +663,9 @@ def _status_items(data, t):
                 f = data[p][1].loc[t]
                 unmet = [(n, op, v, f.get(n)) for n, op, v in own if not _holds(f.get(n), op, v)]
                 coins.append((len(unmet), sum(_gap(n, v, x) for n, _, v, x in unmet), p, unmet))
-            coins.sort(key=lambda x: (x[0], x[1]))
+            # Ближе всех — по суммарному недобору до порогов, а не по числу невыполненных условий: 30.09 «ближе всех
+            # COTI» стояла с одним условием, но рангом доли лонгов 0.95 при нужных 0.03 — дальше NEAR с двумя.
+            coins.sort(key=lambda x: (x[1], x[0]))
             item['ready'] = [p.replace('USDT', '') for n, _, p, _ in coins if n == 0]
             item['near'] = [(p.replace('USDT', ''), unmet) for _, _, p, unmet in coins[:2]]
         items.append(item)

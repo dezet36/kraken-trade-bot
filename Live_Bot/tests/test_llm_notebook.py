@@ -709,6 +709,13 @@ class TestPatternStatus:
             'SOL: funding -0.9bp (needs <= -2.0bp), retail rank 0.14 (needs <= 0.03); '
             'SEI: funding +0.6bp (needs <= -2.0bp), retail rank 0.10 (needs <= 0.03).')
 
+    def test_closest_is_by_distance_to_thresholds_not_by_count(self):
+        # 30.09: COTI с одним невыполненным условием (ранг доли лонгов 0.95 при нужных 0.03) стояла «ближе всех»
+        # впереди NEAR, которой не хватало немного по двум условиям.
+        data, t = status_data({'COTIUSDT': {'funding_bp': -3.0, 'buy_ratio_pct_30d': 0.95},
+                               'NEARUSDT': {'funding_bp': 1.0, 'buy_ratio_pct_30d': 0.09}})
+        assert 'Closest - NEAR:' in status_line(data, t, 'P4')
+
     def test_coins_meeting_all_conditions_are_named(self):
         dump = {'ret_4h': -5.0, 'oi_chg_4h': -6.0}
         squeeze = {'funding_bp': -2.5, 'buy_ratio_pct_30d': 0.02}
