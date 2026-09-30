@@ -572,9 +572,16 @@ def llm_setups_text(setups: dict) -> str:
     одной строкой. Пусто — так и сказано.
     """
     armed, pending, open_ = setups.get('armed') or [], setups.get('pending') or [], setups.get('open') or []
+    # Режим тетради (ИИ торгует свои закономерности): что с каждой сейчас — почему ИИ молчит, кто ближе к сигналу.
+    notebook = setups.get('notebook') or {}
+    status = []
+    if notebook.get('lines'):
+        at = str(notebook.get('at') or '')[11:16]
+        status = ['', f"📓 <b>Тетрадь сейчас</b>" + (f" · час до {at} UTC" if at else '')]
+        status += [f"• {_esc(line)}" for line in notebook['lines']]
     if not (armed or pending or open_):
         return ("🤖 <b>Живых сетапов ИИ нет</b>" + chr(10)
-                + "Ни планов, ждущих условия, ни заявок, ни позиций.")
+                + "Ни планов, ждущих условия, ни заявок, ни позиций." + chr(10).join([''] + status))
 
     def hours(minutes):
         minutes = int(minutes or 0)
@@ -621,12 +628,14 @@ def llm_setups_text(setups: dict) -> str:
             r = o.get('unrealised_r')
             out.append(f"{icon} <b>{o['pair']} {o.get('direction', '')}</b>"
                        + (f" · сейчас <b>{float(r):+.2f} R</b>" if r is not None else ''))
-            out.append(f"   вход {_fmt_p(entry)} · стоп {_fmt_p(float(o.get('stop') or 0))}"
-                       + (f" · цель {_fmt_p(float(o['tp1']))}" if o.get('tp1') else '')
+            # Позиция тетради выходит по сроку: её «цель» — заглушка брокеру (20 стопов), не показывать.
+            goal = (f" · выход по сроку через {float(o.get('time_left_h') or 0):.0f} ч" if o.get('time_exit')
+                    else (f" · цель {_fmt_p(float(o['tp1']))}" if o.get('tp1') else ''))
+            out.append(f"   вход {_fmt_p(entry)} · стоп {_fmt_p(float(o.get('stop') or 0))}" + goal
                        + (f" · цена {_fmt_p(float(o['price']))}" if o.get('price') else ''))
             if o.get('why'):
                 out.append(f"   <i>{_esc(str(o['why'])[:160])}</i>")
-    return chr(10).join(out).rstrip()
+    return chr(10).join(out + status).rstrip()
 
 
 def llm_notebook_decision(alerts, picks, reason: str = ''):

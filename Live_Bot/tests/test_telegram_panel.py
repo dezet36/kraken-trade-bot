@@ -120,6 +120,17 @@ class TestWhatWasBroken:
         for piece in ('DOGEUSDT · LONG', 'Вход', 'Стоп', 'Цель 1', 'риск'):
             assert piece in card, piece
 
+    def test_a_notebook_position_card_shows_its_time_exit_not_the_placeholder_target(self, env):
+        """ИИ-тетрадь: цель — заглушка брокеру (20 стопов); 28.09 владелец прочёл её как «позиция на месяцы»."""
+        env.pb._now_ms = lambda: T0
+        sig = signal(tp1=300.0)
+        sig['params']['max_hold_hours'] = 24
+        assert env.broker.open('LLM', sig)
+        feed(env, 'DOGEUSDT', [(101, 99.5, 100)])
+        _t, card, _kb = env.ctl._render('p:LLM:DOGEUSDT')
+        assert '⏱ Выход по сроку' in card and 'осталось 24 ч' in card and 'цели нет' in card
+        assert 'Цель 1' not in card and 'Целей взято' not in card
+
     def test_a_button_edits_the_message_it_was_pressed_on(self, env):
         env.ctl._handle_callback('pl:0', '42', 777, 'cb')
         assert env.edited and env.edited[0][0] == 777 and not env.sent

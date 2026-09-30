@@ -684,6 +684,24 @@ class TestPatternStatus:
         assert status_line(data, t, 'P1').endswith('all conditions hold now on ADA, AVAX, XMR.')
         assert status_line(data, t, 'P4').endswith('all conditions hold now on XRP.')          # HBAR: P4 там не торгуется
 
+    def test_the_same_status_in_russian_for_the_owner(self):
+        data, t = status_data({'SOLUSDT': {'funding_bp': -0.9, 'buy_ratio_pct_30d': 0.14}})
+        lines = llm_notebook.status_ru(data, t)
+        assert lines[0] == ('«Отскок после ликвидаций» (лонг) — сейчас сработать не может: '
+                            'монет в каскаде за 3 ч 0 (нужно не ниже 4)')
+        assert lines[1].startswith('«Продажа на отскоке» (шорт) — сейчас сработать не может: '
+                                   'BTC за 30 дней +6.5% (нужно ниже 0%); BTC за сутки +0.3% (нужно не ниже +1.0%)')
+        assert lines[2].startswith('«Сжатие шортистов» (лонг) — ни у одной монеты; ближе всех SOL — фандинг −0.9 bp '
+                                   '(нужно не выше −2.0 bp), доля розничных лонгов, ранг месяца 0.14 (нужно не выше 0.03)')
+
+    def test_hour_state_keeps_the_status_for_the_owner(self, notebook_mode):
+        frames = market_with_cascade()
+        llm_notebook.scan(list(llm_notebook.POOL), Gate(), now_ms=hour_ms(451) + MIN, frames_of=lambda p: frames[p],
+                          ask=lambda q: '{"trade": [], "reason": "x"}')
+        now = llm_notebook.status_now()
+        assert now['at'] == (T0 + pd.Timedelta(hours=451)).isoformat() and len(now['lines']) == 3
+        assert now['lines'][0].startswith('«Отскок после ликвидаций» (лонг) — условия выполнены: ADA, AVAX')
+
     def test_core_only_pattern_ignores_extra_coins_and_off_pattern_is_absent(self):
         data, t = status_data({'SEIUSDT': {'rel_24h': -5.0, 'oi_chg_24h': 6.0, 'vol_z': 2.0},
                                'LTCUSDT': {'rel_24h': -3.0, 'oi_chg_24h': 5.0, 'vol_z': 1.2}},

@@ -585,6 +585,7 @@ def _holds(x, op, value):
 
 
 def _condition_text(name, op, value, x):
+    """«funding -0.9bp (needs <= -2.0bp)» — модели."""
     label, fmt, unit = _LABEL.get(name, (name, '+.2f', ''))
     need = '0' if float(value) == 0 else format(float(value), fmt)
     return f'{label} {_v(x, fmt)}{unit if pd.notna(x) else ""} (needs {op} {need}{unit})'
@@ -597,37 +598,82 @@ def _gap(name, value, x):
     return abs(float(x) - float(value)) / (0.25 if name in _RANKS else max(abs(float(value)), 1.0))
 
 
-def pattern_status(data, t):
-    """Строка на каждую торгуемую закономерность: может ли сработать в этот час, на ком, кто ближе всех."""
+def _status_items(data, t):
+    """
+    Что с каждой торгуемой закономерностью в час t — одно из трёх:
+    blocked — не выполнено рыночное условие [(признак, оп, порог, значение)]; ready — монеты, у которых
+    выполнено всё; near — две ближайшие монеты и чего им не хватает [(монета, [(признак, оп, порог, значение)])].
+    """
     market = data['BTCUSDT'][1].loc[t]
-    lines = []
+    items = []
     for key, pat in PATTERNS.items():
         if key in OFF:
             continue
-        head = f"- {key} «{TITLES.get(key, key)}» ({pat['side']}):"
-        blocked = [c for c in pat['conditions'] if c[0] in _MARKET_WIDE and not _holds(market.get(c[0]), c[1], c[2])]
-        if blocked:
-            why = '; '.join(_condition_text(n, op, v, market.get(n)) for n, op, v in blocked)
+        blocked = [(n, op, v, market.get(n)) for n, op, v in pat['conditions']
+                   if n in _MARKET_WIDE and not _holds(market.get(n), op, v)]
+        item = {'key': key, 'side': pat['side'], 'blocked': blocked, 'ready': [], 'near': []}
+        if not blocked:
+            own = [c for c in pat['conditions'] if c[0] not in _MARKET_WIDE]
+            coins = []
+            for p in pairs_of(key):
+                if p not in data or t not in data[p][1].index:
+                    continue
+                f = data[p][1].loc[t]
+                unmet = [(n, op, v, f.get(n)) for n, op, v in own if not _holds(f.get(n), op, v)]
+                coins.append((len(unmet), sum(_gap(n, v, x) for n, _, v, x in unmet), p, unmet))
+            coins.sort(key=lambda x: (x[0], x[1]))
+            item['ready'] = [p.replace('USDT', '') for n, _, p, _ in coins if n == 0]
+            item['near'] = [(p.replace('USDT', ''), unmet) for _, _, p, unmet in coins[:2]]
+        items.append(item)
+    return items
+
+
+def pattern_status(data, t):
+    """Строка на каждую торгуемую закономерность — модели в обзор: может ли сработать, на ком, кто ближе всех."""
+    lines = []
+    for it in _status_items(data, t):
+        head = f"- {it['key']} «{TITLES.get(it['key'], it['key'])}» ({it['side']}):"
+        if it['blocked']:
+            why = '; '.join(_condition_text(*c) for c in it['blocked'])
             lines.append(f'{head} CANNOT trigger this hour - {why}.')
-            continue
-        own = [c for c in pat['conditions'] if c[0] not in _MARKET_WIDE]
-        coins = []
-        for p in pairs_of(key):
-            if p not in data or t not in data[p][1].index:
-                continue
-            f = data[p][1].loc[t]
-            unmet = [c for c in own if not _holds(f.get(c[0]), c[1], c[2])]
-            coins.append((len(unmet), sum(_gap(n, v, f.get(n)) for n, _, v in unmet), p, f, unmet))
-        coins.sort(key=lambda x: (x[0], x[1]))
-        ready = [p.replace('USDT', '') for n, _, p, _, _ in coins if n == 0]
-        if ready:
-            lines.append(f"{head} all conditions hold now on {', '.join(ready)}.")
-            continue
-        near = '; '.join(f"{p.replace('USDT', '')}: " + ', '.join(_condition_text(n, op, v, f.get(n))
-                                                                  for n, op, v in unmet)
-                         for _, _, p, f, unmet in coins[:2])
-        lines.append(f'{head} no coin meets it now. Closest - {near}.')
+        elif it['ready']:
+            lines.append(f"{head} all conditions hold now on {', '.join(it['ready'])}.")
+        else:
+            near = '; '.join(f'{coin}: ' + ', '.join(_condition_text(*c) for c in unmet) for coin, unmet in it['near'])
+            lines.append(f'{head} no coin meets it now. Closest - {near}.')
     return '\n'.join(lines)
+
+
+# Тот же статус человеку — по-русски (Telegram «Сетапы ИИ»): почему тетрадь молчит и кто ближе к сигналу.
+_LABEL_RU = {'ret_4h': ('изменение за 4 ч', '+.1f', '%'), 'oi_chg_4h': ('ОИ за 4 ч', '+.1f', '%'),
+             'rel_24h': ('сила против BTC за сутки', '+.1f', '%'), 'oi_chg_24h': ('ОИ за сутки', '+.1f', '%'),
+             'vol_z': ('объём к обычному', '.1f', '×'), 'funding_bp': ('фандинг', '+.1f', ' bp'),
+             'buy_ratio_pct_30d': ('доля розничных лонгов, ранг месяца', '.2f', ''),
+             'btc_ret_24h': ('BTC за сутки', '+.1f', '%'), 'btc_ret_30d': ('BTC за 30 дней', '+.1f', '%'),
+             'cascade_count_3h': ('монет в каскаде за 3 ч', '.0f', '')}
+_OP_RU = {'<': 'ниже', '<=': 'не выше', '>': 'выше', '>=': 'не ниже'}
+
+
+def _condition_ru(name, op, value, x):
+    label, fmt, unit = _LABEL_RU.get(name, (name, '+.2f', ''))
+    need = '0' if float(value) == 0 else format(float(value), fmt)
+    return (f"{label} {_v(x, fmt)}{unit if pd.notna(x) else ''} "
+            f"(нужно {_OP_RU[op]} {need}{unit})").replace('-', '−')
+
+
+def status_ru(data, t):
+    """[строка на закономерность] — для человека."""
+    lines = []
+    for it in _status_items(data, t):
+        head = f"«{TITLES.get(it['key'], it['key'])}» ({'лонг' if it['side'] == 'long' else 'шорт'})"
+        if it['blocked']:
+            lines.append(f"{head} — сейчас сработать не может: {'; '.join(_condition_ru(*c) for c in it['blocked'])}")
+        elif it['ready']:
+            lines.append(f"{head} — условия выполнены: {', '.join(it['ready'])}")
+        else:
+            near = '; '.join(f'{coin} — ' + ', '.join(_condition_ru(*c) for c in unmet) for coin, unmet in it['near'])
+            lines.append(f'{head} — ни у одной монеты; ближе всех {near}')
+    return lines
 
 
 def review_question(data, t, held=()):
@@ -771,6 +817,10 @@ def _new_hour(hour_ms, gate, now_ms, frames_of, ask):
             state['asked'] = True
             log(f"   {NAME}: сигналы {', '.join(state['alerts'])} — вопрос модели ушёл, "
                 f"ответ заберёт ближайший цикл")
+    try:                                              # человеку в Telegram «Сетапы ИИ»: почему тетрадь молчит
+        state.update(status=status_ru(data, t), status_at=(t + pd.Timedelta(hours=1)).isoformat())
+    except Exception as exc:                          # noqa: BLE001
+        log(f'   {NAME}: статус закономерностей не посчитан ({exc})')
     _save_state(state)
     # Обзор — после вопроса о сделке: в очереди к модели сделка первая.
     _maybe_review(data, t, gate)
@@ -779,6 +829,12 @@ def _new_hour(hour_ms, gate, now_ms, frames_of, ask):
         news_feed.poll()
     except Exception as exc:                          # noqa: BLE001
         log(f'   {NAME}: новости не записаны ({exc})')
+
+
+def status_now():
+    """Статус закономерностей последнего разобранного часа — {'lines': [...], 'at': ISO закрытия} или {}."""
+    state = _load_state()
+    return {'lines': state['status'], 'at': state.get('status_at', '')} if state.get('status') else {}
 
 
 def _note_state(hour_ms, **fields):

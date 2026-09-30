@@ -103,6 +103,35 @@ class TestTheListReadsLikeAPlan:
         assert 'Живых сетапов ИИ нет' in text
 
 
+class TestNotebookMode:
+    """ИИ по тетради (LLM_MODE=notebook): планов нет, а «почему ИИ молчит» — статус закономерностей часа."""
+
+    STATUS = {'lines': ['«Продажа на отскоке» (шорт) — сейчас сработать не может: BTC за 30 дней +6.6% (нужно ниже 0%)',
+                        '«Сжатие шортистов» (лонг) — ни у одной монеты; ближе всех SOL — фандинг −0.9 bp'],
+              'at': '2026-09-30T14:00:00+00:00'}
+
+    def test_the_status_explains_the_silence(self):
+        text = tg.llm_setups_text({'armed': [], 'pending': [], 'open': [], 'notebook': self.STATUS})
+        assert 'Живых сетапов ИИ нет' in text and '📓 <b>Тетрадь сейчас</b> · час до 14:00 UTC' in text
+        assert '• «Продажа на отскоке» (шорт) — сейчас сработать не может' in text and 'ближе всех SOL' in text
+
+    def test_a_notebook_position_shows_its_time_exit_not_the_placeholder_target(self):
+        # Цель позиции тетради — заглушка брокеру (20 стопов); 28.09 владелец прочёл её как «позиция на месяцы».
+        pos = {'strategy': 'LLM', 'pair': 'LINKUSDT', 'direction': 'LONG', 'entry': 14.63, 'stop': 13.36,
+               'tp1': 39.81, 'price': 14.5, 'unrealised_r': -0.1, 'time_exit': True, 'time_left_h': 5.4}
+        text = tg.llm_setups_text({'armed': [], 'pending': [], 'open': [pos], 'notebook': self.STATUS})
+        assert 'выход по сроку через 5 ч' in text and 'цель' not in text and '39.81' not in text
+        assert text.index('В позиции') < text.index('Тетрадь сейчас')
+
+    def test_current_setups_carry_the_status_in_notebook_mode(self, monkeypatch):
+        import llm_notebook
+        monkeypatch.setattr(llm_notebook, 'enabled', lambda: True)
+        monkeypatch.setattr(llm_notebook, 'status_now', lambda: self.STATUS)
+        assert strategy_llm.current_setups(None)['notebook'] == self.STATUS
+        monkeypatch.setattr(llm_notebook, 'enabled', lambda: False)
+        assert 'notebook' not in strategy_llm.current_setups(None)
+
+
 class TestTheButtonAndCommandSendTheList:
     def test_the_command_sends_the_list_and_the_menu_has_the_button(self, monkeypatch):
         import telegram_bot

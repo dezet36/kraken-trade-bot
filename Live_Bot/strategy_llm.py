@@ -368,6 +368,13 @@ def current_setups(broker=None, now=None):
             log(f'   {NAME}: состояние брокера для списка сетапов не прочитано — {exc}')
     out['pending'] = [o for o in snap.get('pending') or [] if o.get('strategy') == NAME]
     out['open'] = [o for o in snap.get('open') or [] if o.get('strategy') == NAME]
+    # Режим тетради: сетапов-планов в нём нет, а «почему ИИ молчит» — это статус закономерностей часа.
+    try:
+        import llm_notebook
+        if llm_notebook.enabled():
+            out['notebook'] = llm_notebook.status_now()
+    except Exception as exc:                       # noqa: BLE001
+        log(f'   {NAME}: статус тетради для списка сетапов не прочитан — {exc}')
     return out
 
 

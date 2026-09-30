@@ -288,13 +288,19 @@ def position_view(d, strategy, pair):
         + (f" · до стопа {abs(price - stop) / price * 100:.2f}%" if price else ''),
     ]
     taken = int(p.get('tp_hit') or 0)
-    for k, t in enumerate(targets):
-        mark = '✅' if k < taken else '🎯'
-        share = f" · {fmt.num(fractions[k]) * 100:.0f}%" if k < len(fractions) else ''
-        lines.append(f"{mark} Цель {k + 1} {fmt.price(t)}{share} · "
-                     f"{fmt.r(sign * (fmt.num(t) - entry) / risk_dist)}")
-    lines.append(f"Целей взято {taken}/{len(targets)} · безубыток {'да' if p.get('breakeven') else 'нет'}"
-                 + (f" · осталось {fmt.num(p.get('size_left_pct')):.0f}%" if taken else ''))
+    if p.get('time_exit'):
+        # Позиция ИИ-тетради выходит по сроку; её «цель» — заглушка брокеру (20 стопов). 28.09.2026
+        # владелец прочёл такую цель как «позиция на месяцы» — показывается срок, а не цель.
+        lines.append(f"⏱ Выход по сроку {fmt.clock(p.get('exit_by'))} · осталось "
+                     f"{fmt.num(p.get('time_left_h')):.0f} ч · цели нет, стоп — страховка")
+    else:
+        for k, t in enumerate(targets):
+            mark = '✅' if k < taken else '🎯'
+            share = f" · {fmt.num(fractions[k]) * 100:.0f}%" if k < len(fractions) else ''
+            lines.append(f"{mark} Цель {k + 1} {fmt.price(t)}{share} · "
+                         f"{fmt.r(sign * (fmt.num(t) - entry) / risk_dist)}")
+        lines.append(f"Целей взято {taken}/{len(targets)} · безубыток {'да' if p.get('breakeven') else 'нет'}"
+                     + (f" · осталось {fmt.num(p.get('size_left_pct')):.0f}%" if taken else ''))
     lines.append(f"Лучший ход {fmt.r(p.get('mfe_r'))} · зафиксировано {fmt.money(p.get('realized'))}")
     lines.append(f"Позиция {fmt.money(fmt.num(p.get('size')) * price, signed=False)} · "
                  f"риск {fmt.money(p.get('risk'), signed=False)} · издержки {fmt.money(p.get('costs'), signed=False)}")
