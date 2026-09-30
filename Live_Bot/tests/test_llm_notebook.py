@@ -648,6 +648,19 @@ class TestDecisionLogAndReview:
         assert got['reviews'][0]['text'] == '«Сжатие шортистов» не активен, ОИ растёт'
         assert 'Накопление при слабом BTC (лонг, 48 ч)' not in got['patterns']          # выключена
 
+    def test_review_carries_the_market_mood(self, notebook_mode, monkeypatch):
+        """Фон обзора из market_mood: страх по опционам, спрос США, доля спота; нет свежей строки — так и сказано."""
+        data = llm_notebook.market(market_with_cascade())
+        t = T0 + pd.Timedelta(hours=450)
+        assert 'MARKET MOOD: not available this hour.' in llm_notebook.review_question(data, t)
+        import market_mood
+        monkeypatch.setattr(market_mood, 'facts', lambda: {'dvol': 35.29, 'dvol_chg_24h': 0.68, 'dvol_pct_30d': 0.19,
+                                                           'btc_cb_prem_bp': -5.29, 'btc_spot_share_24h': 0.0927})
+        q = llm_notebook.review_question(data, t)
+        assert ('MARKET MOOD: BTC implied volatility from options (DVOL) 35.3 (+0.7% in 24h; rank 0.19 within 30 days, '
+                '1 = most fear of the month); US buyers on Coinbase pay -5.3 bp over Binance for BTC (negative = US '
+                'selling); spot share of BTC turnover 9%.') in q
+
     def test_review_runs_every_four_hours_once(self, monkeypatch):
         data = llm_notebook.market(market_with_cascade())
         monkeypatch.setattr(llm_notebook, '_review', {'slot': None, 'busy': False})

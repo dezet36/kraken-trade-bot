@@ -55,6 +55,7 @@ Which alerts do you trade now (at most {free})? Answer with JSON only, the reaso
 === ОБЗОР РЫНКА (REVIEW): раз в 4 часа ===
 It is {time} UTC. MARKET DASHBOARD of your coins (hourly data, closed hour).
 BTC: {btc24}% in 24h, {btc7}% in 7d, {btc30}% in 30d. Coins in a liquidation cascade in the last 3h: {breadth}.
+{mood}
 Your open positions now: {held} (they close by your notebook rules - stop or time).
 How to read a row: price change over 24h, 7d, 30d; "vs BTC" = the coin's 24h change minus BTC's; "OI" = open
 interest change over 24h; "buy share" = aggressive (taker) buying as a share of 24h volume, 0.50 = balance;
@@ -66,7 +67,8 @@ PATTERN STATUS NOW (computed by code from this data - trust it, do not re-derive
 {status}
 
 Write a short market review for the owner IN RUSSIAN (at most 900 characters): 1) the market regime and what
-drives it now; 2) where the crowd and the aggressive flow are; 3) which patterns of your notebook can trigger soon
+drives it now, with MARKET MOOD (fear in options, US demand, spot vs futures); 2) where the crowd and the aggressive
+flow are; 3) which patterns of your notebook can trigger soon
 and on which coins - ONLY from PATTERN STATUS: if a pattern cannot trigger now, say so plainly and do not promise
 trades by it (trades open only on pattern alerts, never from this review); 4) the main risk for the next 24 hours.
 Plain text, no tables. The owner does not know the codes: do not write P1, B3, P4 - call the patterns only by

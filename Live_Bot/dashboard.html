@@ -5045,7 +5045,7 @@ function renderLlmState(d) {
     + streamLine('лента сделок', streams.trades) + streamLine('ликвидации', streams.liquidations)
     + '</div>'
     + (armed ? '<div class="ai-state" style="margin-top:6px"><span>взведённые планы:</span>' + armed + '</div>' : '')
-    + macroLine(d.macro);
+    + macroLine(d.macro) + moodLine(d.mood);
   const criticBtn = document.getElementById('ai-critic');
   if (criticBtn) criticBtn.onclick = () => toggleCritic(criticBtn);
 }
@@ -5072,6 +5072,20 @@ function macroLine(m) {
     parts.push(`ширина <b>${m.up_24h} из ${m.counted_24h}</b> в плюсе за 24ч (${share >= 70 ? 'широкий рост' : share <= 30 ? 'широкое падение' : 'смешанно'})`);
   }
   return '<div class="ai-state" style="margin-top:6px"><span>рынок в целом:</span>'
+    + parts.map(x => `<span>${x}</span>`).join('') + '</div>';
+}
+
+/* Настроение рынка (market_mood, раз в закрытый час): страх по опционам BTC (DVOL и его ранг за месяц),
+   премия Coinbase у BTC (спрос США) и доля спота в обороте BTC. Фон обзоров ИИ-тетради. */
+function moodLine(m) {
+  if (!m || m.dvol === undefined) return '';
+  const n = (v, d, s) => (v === null || v === undefined) ? '—' : `${s && +v >= 0 ? '+' : ''}${(+v).toFixed(d)}`;
+  const rank = m.dvol_pct_30d;
+  const fear = rank === null || rank === undefined ? '' : (rank >= 0.8 ? ' — страх выше обычного' : rank <= 0.2 ? ' — спокойно' : '');
+  const parts = [`страх по опционам BTC (DVOL) <b>${n(m.dvol, 1)}</b> (24ч ${n(m.dvol_chg_24h, 1, true)}%, ранг месяца ${n(rank, 2)}${fear})`,
+                 `премия Coinbase у BTC <b>${n(m.btc_cb_prem_bp, 1, true)} б.п.</b> (${+m.btc_cb_prem_bp < 0 ? 'США продают' : 'США покупают'})`,
+                 `доля спота в обороте BTC <b>${m.btc_spot_share_24h === null || m.btc_spot_share_24h === undefined ? '—' : Math.round(m.btc_spot_share_24h * 100) + '%'}</b>`];
+  return '<div class="ai-state" style="margin-top:6px"><span>настроение:</span>'
     + parts.map(x => `<span>${x}</span>`).join('') + '</div>';
 }
 

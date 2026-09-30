@@ -160,7 +160,8 @@ _TERMS = [(re.compile(r'retail long share', re.I), 'доля розничных 
           (re.compile(r'(?<!\w)OI(?!\w)'), 'ОИ'),
           (re.compile(r'(?<!\w)open interest(?!\w)', re.I), 'открытый интерес'),
           (re.compile(r'(?<!\w)interest(?!\w)', re.I), 'интерес'),
-          (re.compile(r'(?<!\w)funding(?!\w)', re.I), 'фандинг')]
+          (re.compile(r'(?<!\w)funding(?!\w)', re.I), 'фандинг'),
+          (re.compile(r'implied volatility', re.I), 'ожидаемая волатильность')]
 
 
 def title(key):
@@ -578,6 +579,7 @@ REVIEW_EVERY_H = 4
 
 REVIEW = """It is {time} UTC. MARKET DASHBOARD of your coins (hourly data, closed hour).
 BTC: {btc24}% in 24h, {btc7}% in 7d, {btc30}% in 30d. Coins in a liquidation cascade in the last 3h: {breadth}.
+{mood}
 Your open positions now: {held} (they close by your notebook rules - stop or time).
 How to read a row: price change over 24h, 7d, 30d; "vs BTC" = the coin's 24h change minus BTC's; "OI" = open
 interest change over 24h; "buy share" = aggressive (taker) buying as a share of 24h volume, 0.50 = balance;
@@ -589,7 +591,8 @@ PATTERN STATUS NOW (computed by code from this data - trust it, do not re-derive
 {status}
 
 Write a short market review for the owner IN RUSSIAN (at most 900 characters): 1) the market regime and what
-drives it now; 2) where the crowd and the aggressive flow are; 3) which patterns of your notebook can trigger soon
+drives it now, with MARKET MOOD (fear in options, US demand, spot vs futures); 2) where the crowd and the aggressive
+flow are; 3) which patterns of your notebook can trigger soon
 and on which coins - ONLY from PATTERN STATUS: if a pattern cannot trigger now, say so plainly and do not promise
 trades by it (trades open only on pattern alerts, never from this review); 4) the main risk for the next 24 hours.
 Plain text, no tables. The owner does not know the codes: do not write P1, B3, P4 - call the patterns only by
@@ -715,6 +718,26 @@ def status_ru(data, t):
     return lines
 
 
+def mood_line():
+    """
+    Фон обзора из общего слоя market_mood (30.09.2026): страх по опционам, спрос США, доля спота. Торговых
+    правил на этих данных нет (п. 82) — это контекст анализа. Нет свежей строки — так и сказано.
+    """
+    try:
+        import market_mood
+        m = market_mood.facts()
+    except Exception:                                  # noqa: BLE001
+        m = {}
+    if not m:
+        return 'MARKET MOOD: not available this hour.'
+    share = m.get('btc_spot_share_24h')
+    return (f"MARKET MOOD: BTC implied volatility from options (DVOL) {_v(m.get('dvol'), '.1f')} "
+            f"({_v(m.get('dvol_chg_24h'), '+.1f')}% in 24h; rank {_v(m.get('dvol_pct_30d'), '.2f')} within 30 days, "
+            f"1 = most fear of the month); US buyers on Coinbase pay {_v(m.get('btc_cb_prem_bp'), '+.1f')} bp over "
+            f"Binance for BTC (negative = US selling); spot share of BTC turnover "
+            f"{'—' if share is None else f'{share * 100:.0f}%'}.")
+
+
 def review_question(data, t, held=()):
     btc = data['BTCUSDT'][1].loc[t]
     rows = []
@@ -734,7 +757,7 @@ def review_question(data, t, held=()):
                          btc24=_v(btc['btc_ret_24h'], '+.1f'), btc7=_v(btc['btc_ret_7d'], '+.1f'),
                          btc30=_v(btc['btc_ret_30d'], '+.1f'), breadth=int(btc['cascade_count_3h']),
                          held=', '.join(p.replace('USDT', '') for p in held) or 'none',
-                         table='\n'.join(rows), status=pattern_status(data, t))
+                         table='\n'.join(rows), status=pattern_status(data, t), mood=mood_line())
 
 
 def parse_review(text):

@@ -12,6 +12,7 @@ import dashboard
 import error_log
 import positioning
 import market_cap
+import market_mood
 import strategy_levels
 import strategy_llm
 import strategy_rsibb
@@ -316,6 +317,7 @@ def _paper_cycle():
         # сделки, а не наблюдение за рынком.
         positioning.collect_if_due(broker.client, pairs=_recorded_pairs(config.TRADING_PAIRS_POOL))
         market_cap.collect_if_due(broker.client)
+        market_mood.collect_if_due()
         return
 
     client = broker.client
@@ -452,6 +454,8 @@ def _paper_cycle():
     positioning.collect_if_due(broker.client, pairs=_recorded_pairs(config.TRADING_PAIRS_POOL))
     # Рынок в целом (USDT.D, BTC.D, TOTAL2): один запрос тикеров спота.
     market_cap.collect_if_due(broker.client)
+    # Настроение рынка (DVOL, премия Coinbase у BTC, доля спота): четыре запроса раз в закрытый час.
+    market_mood.collect_if_due()
 
 
 _CYCLE_STAMP = os.path.join(config.DATA_DIR, 'last_cycle.json')

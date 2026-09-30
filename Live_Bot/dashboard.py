@@ -1355,6 +1355,14 @@ def llm_payload(limit=40):
     except Exception:                                  # noqa: BLE001
         pass
 
+    # Настроение рынка (DVOL, премия Coinbase у BTC, доля спота) — фон обзоров тетради, общий слой market_mood.
+    mood = {}
+    try:
+        import market_mood
+        mood = market_mood.facts()
+    except Exception:                                  # noqa: BLE001
+        pass
+
     outcomes = _llm_outcomes_summary()
 
     critic = True
@@ -1406,6 +1414,7 @@ def llm_payload(limit=40):
         'setups': setups,
         'notebook': notebook,
         'macro': macro,
+        'mood': mood,
         'outcomes': outcomes,
         'calls': rows,
     }
