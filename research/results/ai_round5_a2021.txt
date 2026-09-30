@@ -1,0 +1,8 @@
+Круг 5, ступень А: правила кругов 1–4 на 2021 годе (15 пар), проход — R > 0 и ≥ 20 сделок
+  да  whale_trend_accel          long   118 сд (2.26/нед) R +0.025 t +0.3 плюс 51%
+  да  neg_funding_short_squeeze  long    53 сд (1.02/нед) R +0.202 t +2.1 плюс 62%
+  да  intraday_surge_cont        long   155 сд (2.97/нед) R +0.011 t +0.3 плюс 50%
+  НЕТ funding_exhaustion_grind   short    7 сд (0.13/нед) R +0.079 t +0.2 плюс 43%
+  да  bear_fomo_bounce_fail      short   22 сд (0.42/нед) R +0.229 t +2.7 плюс 64%
+
+Прошли ступень А: whale_trend_accel, neg_funding_short_squeeze, intraday_surge_cont, bear_fomo_bounce_fail

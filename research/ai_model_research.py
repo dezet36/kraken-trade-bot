@@ -33,6 +33,7 @@ SSH = ['ssh', '-i', 'C:/Users/Лаки/.ssh/kraken', '-o', 'UserKnownHostsFile=C
 SCP = ['scp', '-i', 'C:/Users/Лаки/.ssh/kraken', '-o', 'UserKnownHostsFile=C:/Users/Лаки/.ssh/known_hosts',
        '-o', 'IdentitiesOnly=yes', '-P', '53547']
 REMOTE = '/opt/kraken/llm_exp/patterns'
+SSH_N = SSH[:1] + ['-n'] + SSH[1:]      # удалённый nohup … & — только с -n, иначе ssh висит до конца запроса
 
 DESCR_EN = {
     'ret_1h': 'price change over the last 1h, %', 'ret_4h': 'price change over 4h, %',
@@ -93,6 +94,20 @@ falling markets and add trades: SHORT rules are welcome and needed. Use the regi
 ret_30d, btc_ret_7d) to switch a rule on only in the regime where its mechanism works - a rule may trade only
 when BTC fell over 30 days. Note that 2022 was a falling market and 2023-2024 a rising one; a short rule that
 loses overall may still work when gated on the falling regime. Target for all rules together: 6-8 trades per week.
+""",
+    # Круг 5 (30.09.2026, docs п. 76): сводка тетради после проверок вне выборки — без цифр ступени А на 2021
+    # (иначе 2021 перестал бы быть нетронутым для новых правил).
+    5: """
+FOCUS OF THIS ROUND. Your notebook after checks on data you have never seen (2024-07..2025-04 and the year 2021):
+- the liquidation-cascade bounce (long) holds on unseen data, except in the falling market of 2025-26;
+- the distribution-on-bounce short (BTC fell over 30 days and bounced 1%+ in 24h, the coin is 2.5%+ weaker than
+  BTC with rising open interest and volume) holds but is rare, about 0.5 trades per week;
+- 'coin strong while BTC is weak' (long) did NOT hold on unseen data and is switched off.
+The notebook now trades only 2-3 times per week. Propose NEW mechanisms - not variations of these three and not
+repeats of your earlier rules above. Most wanted: SHORT rules that make money when BTC fell over 30 days
+(btc_ret_30d < 0); also LONG rules that are not liquidation cascades. Prefer 2-3 simple conditions with a clear
+mechanism of who is forced to trade; each rule must trade at least 0.5 times per week across the 20 coins on
+2022-01..2024-06.
 """,
 }
 
@@ -188,7 +203,7 @@ def ask(prompt, tag, max_tokens=6000):
     json.dump(payload, open(local, 'w', encoding='utf-8'), ensure_ascii=False)
     subprocess.run(SSH + [f'mkdir -p {REMOTE}'], check=True)
     subprocess.run(SCP + [local, f'root@195.133.35.5:{REMOTE}/{tag}_request.json'], check=True)
-    subprocess.run(SSH + [f'cd {REMOTE} && rm -f {tag}_answer.json && nohup curl -s -m 7200 '
+    subprocess.run(SSH_N + [f'cd {REMOTE} && rm -f {tag}_answer.json && nohup curl -s -m 7200 '
                           f'-H "Content-Type: application/json" -d @{tag}_request.json '
                           f'http://127.0.0.1:8788/v1/chat/completions > {tag}_answer.json.part 2>&1 && '
                           f'mv {tag}_answer.json.part {tag}_answer.json &'], check=True)
@@ -230,7 +245,7 @@ def finish(tag, n_predict=2500):
     local = os.path.join(OUT, f'{tag}_finish_request.json')
     json.dump(payload, open(local, 'w', encoding='utf-8'), ensure_ascii=False)
     subprocess.run(SCP + [local, f'root@195.133.35.5:{REMOTE}/{tag}_finish_request.json'], check=True)
-    subprocess.run(SSH + [f'cd {REMOTE} && rm -f {tag}_finish.json && nohup curl -s -m 7200 '
+    subprocess.run(SSH_N + [f'cd {REMOTE} && rm -f {tag}_finish.json && nohup curl -s -m 7200 '
                           f'-H "Content-Type: application/json" -d @{tag}_finish_request.json '
                           f'http://127.0.0.1:8788/completion > {tag}_finish.json.part 2>&1 && '
                           f'mv {tag}_finish.json.part {tag}_finish.json &'], check=True)
@@ -276,8 +291,10 @@ def parse_rules(text):
 
 def score(rules, tag):
     out = []
+    # test (2025-05…2026-09) смотрели дважды — с круга 5 он не считается (п. 76); вместо него — 2021 годом.
+    splits = ('train', 'valid') if int(''.join(ch for ch in tag if ch.isdigit()) or 0) >= 5 else ('train', 'valid', 'test')
     for r in rules:
-        summary, _ = L.evaluate(r, splits=('train', 'valid', 'test'))
+        summary, _ = L.evaluate(r, splits=splits)
         clean = {s: {k: (None if (isinstance(v, float) and np.isnan(v)) else v) for k, v in summary[s].items()}
                  for s in summary}
         out.append({'rule': r, **clean})
