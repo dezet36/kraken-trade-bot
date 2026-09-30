@@ -368,3 +368,14 @@ class TestPaperDashboard:
 
         assert payload['closed_total'] == 1
         assert payload['strategies']['FIBO']['start_balance'] == 10_000.0
+
+
+def test_ai_page_carries_the_notebook_in_notebook_mode(dash, monkeypatch):
+    """«Разбор ИИ»: в режиме тетради — её обзоры и решения; разборы прежнего режима «планы» — ниже."""
+    import llm_notebook
+    monkeypatch.setattr(llm_notebook, 'enabled', lambda: True)
+    monkeypatch.setattr(llm_notebook, 'page_payload',
+                        lambda: {'status': {}, 'decisions': [], 'reviews': [], 'patterns': ['Сжатие шортистов (лонг, 48 ч)']})
+    assert dash.llm_payload()['notebook']['patterns'] == ['Сжатие шортистов (лонг, 48 ч)']
+    monkeypatch.setattr(llm_notebook, 'enabled', lambda: False)
+    assert dash.llm_payload()['notebook'] is None

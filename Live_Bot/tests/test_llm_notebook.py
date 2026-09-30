@@ -628,6 +628,26 @@ class TestDecisionLogAndReview:
         assert body.startswith('Рынок падает') and view['regime'] == 'falling' and view['watch'][0]['coin'] == 'SOL'
         assert llm_notebook.parse_review('без json')[1] is None
 
+    def test_page_payload_for_the_dashboard(self, notebook_mode):
+        """Панель «Разбор ИИ»: свежие сверху, имена закономерностей, «почему» без кодов, монеты без USDT."""
+        path = os.path.join(config.DATA_DIR, 'llm_notebook_log.jsonl')
+        with open(path, 'w', encoding='utf-8') as fh:
+            for hour, reason in (('2026-09-28T13:00:00+00:00', 'P2 fits'), ('2026-09-30T08:00:00+00:00', 'P1 cascade')):
+                fh.write(json.dumps({'hour': hour, 'alerts': [{'pair': 'LINKUSDT', 'pattern': 'P1'}],
+                                     'picks': ['LINKUSDT'], 'mechanical': ['LINKUSDT'], 'reason': reason,
+                                     'delay_min': 7.3, 'entries': {'LINKUSDT': 14.62}}) + '\n')
+            fh.write('битая строка\n')
+        with open(os.path.join(config.DATA_DIR, 'llm_notebook_reviews.jsonl'), 'w', encoding='utf-8') as fh:
+            fh.write(json.dumps({'hour': '2026-09-30T12:00:00+00:00', 'text': 'P4 не активен, OI растёт',
+                                 'view': {'regime': 'sideways'}}, ensure_ascii=False) + '\n')
+        got = llm_notebook.page_payload()
+        assert [d['hour'] for d in got['decisions']] == ['2026-09-30T08:00:00+00:00', '2026-09-28T13:00:00+00:00']
+        first = got['decisions'][0]
+        assert first['alerts'] == [{'pair': 'LINK', 'title': 'Отскок после ликвидаций (лонг, 24 ч)'}]
+        assert first['picks'] == ['LINK'] and first['reason'] == '«Отскок после ликвидаций» cascade'
+        assert got['reviews'][0]['text'] == '«Сжатие шортистов» не активен, ОИ растёт'
+        assert 'Накопление при слабом BTC (лонг, 48 ч)' not in got['patterns']          # выключена
+
     def test_review_runs_every_four_hours_once(self, monkeypatch):
         data = llm_notebook.market(market_with_cascade())
         monkeypatch.setattr(llm_notebook, '_review', {'slot': None, 'busy': False})

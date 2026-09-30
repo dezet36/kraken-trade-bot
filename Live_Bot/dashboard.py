@@ -1337,6 +1337,16 @@ def llm_payload(limit=40):
     except Exception:                                  # noqa: BLE001
         pass
 
+    # ИИ по тетради (LLM_MODE=notebook): обзоры рынка и решения по сигналам — то, что модель делает
+    # сейчас. Разборы (calls) и исходы планов на странице — прежнего режима «планы».
+    notebook = None
+    try:
+        import llm_notebook
+        if llm_notebook.enabled():
+            notebook = llm_notebook.page_payload()
+    except Exception:                                  # noqa: BLE001
+        pass
+
     # Рынок в целом — то, что модель видит в разметке; человеку тоже нужно.
     macro = None
     try:
@@ -1394,6 +1404,7 @@ def llm_payload(limit=40):
         # они подсвечиваются отдельно, чтобы видеть, кто останавливает планы.
         'code_gates': list(llm_decide.CODE_GATES),
         'setups': setups,
+        'notebook': notebook,
         'macro': macro,
         'outcomes': outcomes,
         'calls': rows,

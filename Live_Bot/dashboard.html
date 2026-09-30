@@ -1080,6 +1080,12 @@
         <div class="panel-head bare" style="margin-top:22px">
           <h2>Живые сетапы</h2><span class="hint">ждут условия · ждут цену · в позиции — то же, что кнопка «Сетапы ИИ» в Telegram</span></div>
         <div class="panel card-pad"><div id="ai-setups" class="ai-setups"></div></div>
+        <div id="ai-notebook-wrap" hidden>
+          <div class="panel-head bare" style="margin-top:22px">
+            <h2>Тетрадь: обзор рынка и решения</h2><span class="hint" id="ai-notebook-hint"></span></div>
+          <div class="panel card-pad"><div id="ai-notebook" class="ai-setups"></div></div>
+          <div class="hint" style="margin-top:14px">Ниже — исходы и разборы прежнего режима «планы» (до 27.09): сейчас ИИ торгует по тетради.</div>
+        </div>
         <div class="panel-head bare" style="margin-top:22px">
           <h2>Исходы планов</h2><span class="hint" id="ai-outcomes-hint"></span></div>
         <div class="panel card-pad"><div id="ai-outcomes" class="ai-outcomes"></div></div>
@@ -4903,6 +4909,43 @@ function renderAiSetups(setups) {
   box.innerHTML = out.join('') + nbCard;
 }
 
+/* ИИ по тетради (LLM_MODE=notebook): последний обзор рынка и решения по сигналам — то, что модель
+   делает сейчас. Исходы и разборы ниже — прежнего режима «планы»; над ними это и сказано. */
+function renderAiNotebook(nb) {
+  const wrap = el('ai-notebook-wrap'), box = el('ai-notebook');
+  if (!wrap || !box) return;
+  wrap.hidden = !nb;
+  if (!nb) return;
+  setText('ai-notebook-hint', (nb.patterns || []).length ? `торгует: ${nb.patterns.join(' · ')}` : '');
+  const REGIME = { rising: 'рост', falling: 'падение', sideways: 'боковик' };
+  const BTC = { up: 'вверх', down: 'вниз', flat: 'на месте' };
+  const out = [];
+  const rv = (nb.reviews || [])[0];
+  if (rv) {
+    const v = rv.view || {};
+    const expect = [
+      v.regime ? `режим: <b>${esc(REGIME[v.regime] || v.regime)}</b>` : '',
+      v.btc_24h ? `BTC на сутки: <b>${esc(BTC[v.btc_24h] || v.btc_24h)}</b>` : '',
+      (v.watch || []).length ? 'наблюдает: ' + v.watch.map(w => esc(`${w.coin} ${w.side === 'short' ? 'шорт' : 'лонг'}`)).join(', ') : '',
+    ].filter(Boolean).join(' · ');
+    const paras = String(rv.text || '').split('\n').filter(s => s.trim()).map(p => `<div class="row">${esc(p)}</div>`);
+    out.push(`<div class="ai-setup"><div><span class="nm">🧭 Обзор рынка</span><br><small style="color:var(--ink-3)">${fmtWhen(rv.hour)}</small></div>
+      <div>${paras.join('')}${expect ? `<div class="row" style="color:var(--ink-3)">ожидания модели — ${expect}</div>` : ''}</div></div>`);
+  }
+  const ds = nb.decisions || [];
+  if (!ds.length) out.push('<div class="empty">Решений по сигналам ещё не было.</div>');
+  ds.forEach(r => {
+    const closed = r.hour ? new Date(Date.parse(r.hour) + 3600e3).toISOString() : '';
+    const alerts = (r.alerts || []).map(a => `${esc(a.pair)} — ${esc(a.title)}`).join('<br>');
+    const took = (r.picks || []).length ? `взяла: <b>${esc(r.picks.join(', '))}</b>` : 'не взяла ничего';
+    const delay = (r.delay_min !== null && r.delay_min !== undefined) ? ` · вход через ${esc(r.delay_min)} мин после закрытия часа` : '';
+    out.push(`<div class="ai-setup"><div><span class="nm">⚡ Сигналы часа</span><br><small style="color:var(--ink-3)">${fmtWhen(closed)}</small></div>
+      <div><div class="row">${alerts}</div><div class="row">${took}${delay}</div></div>
+      ${r.reason ? `<div class="why">${esc(String(r.reason).slice(0, 300))}</div>` : ''}</div>`);
+  });
+  box.innerHTML = out.join('');
+}
+
 /* Исходы планов за неделю: сколько принято, вошло, снято до входа, и что
    цена сделала за 48 ч — цель или стоп первыми. Это та сводка, которую
    иначе пришлось бы считать руками по трём файлам. */
@@ -5089,6 +5132,7 @@ function renderLlm() {
       .join('');
   }
   renderAiSetups(d && d.setups);
+  renderAiNotebook(d && d.notebook);
   renderAiOutcomes(d && d.outcomes);
   setText('ai-count', calls.length
     ? `последние ${calls.length} · свежие сверху`

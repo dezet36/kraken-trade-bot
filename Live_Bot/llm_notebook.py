@@ -440,6 +440,45 @@ def _log_decision(record):
     _append_jsonl('llm_notebook_log.jsonl', record)
 
 
+def _tail_jsonl(name, n):
+    """Последние n записей журнала (битая строка пропускается)."""
+    path = os.path.join(config.DATA_DIR, name)
+    if not os.path.exists(path):
+        return []
+    with open(path, encoding='utf-8') as fh:
+        lines = fh.readlines()[-n:]
+    out = []
+    for line in lines:
+        try:
+            out.append(json.loads(line))
+        except ValueError:
+            continue
+    return out
+
+
+def page_payload(decisions=10, reviews=3):
+    """
+    Для страницы «Разбор ИИ» панели: что тетрадь делает сейчас — статус закономерностей, последние
+    обзоры рынка и решения по сигналам (свежие сверху), по-русски и с именами, а не кодами.
+    """
+    def pair(p):
+        return str(p).replace('USDT', '')
+    rows = []
+    for r in reversed(_tail_jsonl('llm_notebook_log.jsonl', decisions)):
+        alerts = r.get('alerts') or []
+        rows.append({'hour': r.get('hour'),
+                     'alerts': [{'pair': pair(a.get('pair')), 'title': title(a['pattern']) if a.get('pattern') in PATTERNS
+                                 else a.get('pattern')} for a in alerts],
+                     'picks': [pair(p) for p in r.get('picks') or []],
+                     'mechanical': [pair(p) for p in r.get('mechanical') or []],
+                     'reason': humanize(r.get('reason') or ''), 'delay_min': r.get('delay_min'),
+                     'entries': {pair(k): v for k, v in (r.get('entries') or {}).items()}})
+    views = [{'hour': r.get('hour'), 'text': humanize(r.get('text') or ''), 'view': r.get('view') or {}}
+             for r in reversed(_tail_jsonl('llm_notebook_reviews.jsonl', reviews))]
+    return {'status': status_now(), 'decisions': rows, 'reviews': views,
+            'patterns': [title(k) for k in PATTERNS if k not in OFF]}
+
+
 def _notify_decision(items, picks, reason):
     """Сигналы — строкой на закономерность, по имени: «Отскок после ликвидаций (лонг, 24 ч): AVAX, ADA»."""
     try:
