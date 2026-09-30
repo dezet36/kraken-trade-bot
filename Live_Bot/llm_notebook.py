@@ -691,6 +691,8 @@ def _maybe_review(data, t, gate, run=None):
     except Exception as exc:                          # noqa: BLE001
         _review['busy'] = False
         log(f'   {NAME}: обзор рынка не собран ({exc})')
+        # Несобранный вопрос — тот же «обзор не получен»: без этого обзоры молча прекратились бы.
+        _health_event('review', False, f'вопрос не собран: {str(exc)[:100]}', key=close.isoformat())
         return False
     if run is not None:                                # тесты: без потока
         run(question, close.isoformat(), held)

@@ -687,6 +687,18 @@ class TestHealth:
         monkeypatch.setattr(telegram_notify, 'llm_notebook_health', lambda text: box.append(text) or True)
         return box
 
+    def test_review_that_cannot_be_built_counts_as_a_failure(self, sent, monkeypatch):
+        # Вопрос обзора не собрался (нет BTC в данных) — раньше только строка в журнале бота.
+        monkeypatch.setattr(llm_notebook, '_review', {'slot': None, 'busy': False})
+        data = llm_notebook.market(market_with_cascade())
+        data.pop('BTCUSDT')
+        run = lambda *a: pytest.fail('обзор без вопроса не запускается')             # noqa: E731
+        t = T0 + pd.Timedelta(hours=451)                                             # закрытие в 20:00 UTC
+        assert not REAL_MAYBE_REVIEW(data, t, Gate(), run=run)
+        assert not sent                                                               # один сбой — ещё не повод
+        assert not REAL_MAYBE_REVIEW(data, t + pd.Timedelta(hours=4), Gate(), run=run)
+        assert len(sent) == 1 and 'вопрос не собран' in sent[0]
+
     def test_two_model_failures_in_a_row_tell_the_owner_once(self, sent):
         frames = market_with_cascade()
         broken = dict(frames_of=lambda p: frames[p], price_of=lambda p: 100.0,
