@@ -20,6 +20,8 @@ smc_lab_eval, как и для обычного стенда). Индексы з
 Запуск:
     python research/smc_lab_live.py gen             # 10 пар пула × 5 периодов, 4 процесса
     python research/smc_lab_live.py gen fresh       # выбранные периоды
+    python research/smc_lab_live.py gen20           # + остальные пары списка бота → раскладка 'live20'
+    python research/smc_lab_live.py gen12x          # 23 пары кэша 12m вне списка бота → 'live12x'
 Строки: research/results/smc_lab_rows_<период>_live.pkl (в .gitignore);
 читаются как раскладка 'live' (smc_lab_eval.rows(period, 'live')).
 """
@@ -135,8 +137,70 @@ def generate(periods):
         print(f'live {period}: {len(frame)} срабатываний → {path}', flush=True)
 
 
+# ВСЕ ПАРЫ СПИСКА БОТА (30.09.2026, владелец: «используй все пары, а не только
+# 10»). Пары пула уже посчитаны (раскладка 'live') — досчитываются остальные из
+# research/ai_doctrine.PAIRS, какие есть в кэше периода, и всё вместе пишется
+# раскладкой 'live20'. Свежий период — из backtest_cache_fresh20
+# (research/fetch_fresh20.py): в общем backtest_cache_fresh только 10 пар.
+CACHES20 = {'fresh': 'backtest_cache_fresh20'}
+
+
+def rows_path20(period):
+    return os.path.join(OUT, f'smc_lab_rows_{period}_live20.pkl')
+
+
+def generate20(periods):
+    import ai_doctrine as D
+    jobs, done = [], {}
+    for p in periods:
+        cache = CACHES20.get(p, D.PERIODS[p])
+        done[p] = pd.read_pickle(rows_path(p))
+        have = set(done[p]['pair'])
+        for pair in D.PAIRS:
+            if pair not in have and os.path.exists(os.path.join(HERE, cache, f'{pair}_5m.pkl')):
+                jobs.append((p, cache, pair))
+    by_period = {p: [] for p in periods}
+    with Pool(4) as pool:
+        for period, pair, rows, sec in pool.imap_unordered(_job, jobs):
+            by_period[period] += rows
+            print(f'  live20 {period:6s} {pair:13s} срабатываний {len(rows):6d}  {sec:7.1f} с', flush=True)
+    for period, rows in by_period.items():
+        frame = pd.concat([done[period], pd.DataFrame(rows)], ignore_index=True)
+        path = rows_path20(period)
+        frame.to_pickle(path + '.tmp')
+        os.replace(path + '.tmp', path)
+        print(f'live20 {period}: {len(frame)} срабатываний, пар {frame["pair"].nunique()} → {path}', flush=True)
+
+
+def generate12x():
+    """
+    Независимая выборка для проверки улучшений (30.09.2026): пары кэша 12m вне
+    списка бота (research/ai_doctrine.PAIRS) — в отборе правил они не
+    участвуют. Раскладка 'live12x'.
+    """
+    import ai_doctrine as D
+    cache = D.PERIODS['12m']
+    pairs = sorted({f.rsplit('_', 1)[0] for f in os.listdir(os.path.join(HERE, cache)) if f.endswith('_5m.pkl')}
+                   - set(D.PAIRS))
+    rows = []
+    with Pool(4) as pool:
+        for period, pair, got, sec in pool.imap_unordered(_job, [('12m', cache, p) for p in pairs]):
+            rows += got
+            print(f'  live12x {pair:15s} срабатываний {len(got):6d}  {sec:7.1f} с', flush=True)
+    frame = pd.DataFrame(rows)
+    path = os.path.join(OUT, 'smc_lab_rows_12m_live12x.pkl')
+    frame.to_pickle(path + '.tmp')
+    os.replace(path + '.tmp', path)
+    print(f'live12x: {len(frame)} срабатываний, пар {frame["pair"].nunique()} → {path}', flush=True)
+
+
 if __name__ == '__main__':
     sys.stdout.reconfigure(encoding='utf-8')
-    if sys.argv[1:2] == ['gen']:
+    if sys.argv[1:2] == ['gen12x']:
+        generate12x()
+    elif sys.argv[1:2] == ['gen']:
         import ai_doctrine as D
         generate(sys.argv[2:] or list(D.PERIODS))
+    elif sys.argv[1:2] == ['gen20']:
+        import ai_doctrine as D
+        generate20(sys.argv[2:] or list(D.PERIODS))
