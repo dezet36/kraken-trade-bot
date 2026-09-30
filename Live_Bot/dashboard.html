@@ -4861,16 +4861,20 @@ function renderAiSetups(setups) {
   if (!box) return;
   const st = setups || {};
   const armed = st.armed || [], pending = st.pending || [], open = st.open || [];
-  if (!armed.length && !pending.length && !open.length) {
-    box.innerHTML = '<div class="empty">Живых сетапов нет: ни планов, ждущих условия, ни заявок, ни позиций.</div>';
-    return;
-  }
   const pct = (a, b) => b ? `${(Math.abs(a - b) / b * 100).toFixed(2)}%` : '—';
   const P = v => (v === null || v === undefined || v === '') ? '—' : (+(+v).toPrecision(6));
   const card = (kind, pair, side, rows, why) => `<div class="ai-setup">
     <div><span class="nm">${esc(pair)} ${esc(side || '')}</span><br><small style="color:var(--ink-3)">${kind}</small></div>
     <div>${rows.map(r => `<div class="row">${r}</div>`).join('')}</div>
     ${why ? `<div class="why">${esc(String(why).slice(0, 220))}</div>` : ''}</div>`;
+  // ИИ по тетради: планов в нём нет, а почему ИИ молчит — статус закономерностей последнего часа (как в Telegram).
+  const nb = (st.notebook && (st.notebook.lines || []).length) ? st.notebook : null;
+  const nbCard = nb ? card(nb.at ? `час до ${esc(String(nb.at).slice(11, 16))} UTC` : 'последний час',
+                           '📓 Тетрадь сейчас', '', nb.lines.map(l => '• ' + esc(l)), '') : '';
+  if (!armed.length && !pending.length && !open.length) {
+    box.innerHTML = '<div class="empty">Живых сетапов нет: ни планов, ждущих условия, ни заявок, ни позиций.</div>' + nbCard;
+    return;
+  }
   const out = [];
   armed.forEach(a => {
     const tp = (a.targets || [])[0];
@@ -4888,12 +4892,15 @@ function renderAiSetups(setups) {
   });
   open.forEach(o => {
     const r = o.unrealised_r;
+    // Позиция тетради выходит по сроку; её «цель» — заглушка брокеру (20 стопов), не показывать.
+    const goal = o.time_exit ? ` · выход по сроку через ${Math.round(+o.time_left_h || 0)} ч`
+                             : (o.tp1 ? ` · цель ${P(o.tp1)}` : '');
     out.push(card('📈 в позиции', o.pair, o.direction, [
-      `вход <b>${P(o.entry)}</b> · стоп ${P(o.stop)}${o.tp1 ? ` · цель ${P(o.tp1)}` : ''}${o.price ? ` · цена ${P(o.price)}` : ''}`,
+      `вход <b>${P(o.entry)}</b> · стоп ${P(o.stop)}${goal}${o.price ? ` · цена ${P(o.price)}` : ''}`,
       r !== null && r !== undefined ? `сейчас <b style="color:${+r >= 0 ? 'var(--good)' : 'var(--bad)'}">${+r >= 0 ? '+' : ''}${(+r).toFixed(2)} R</b>` : '',
     ].filter(Boolean), o.why));
   });
-  box.innerHTML = out.join('');
+  box.innerHTML = out.join('') + nbCard;
 }
 
 /* Исходы планов за неделю: сколько принято, вошло, снято до входа, и что
