@@ -125,20 +125,22 @@ class TestParityWithResearch:
             pytest.skip('нет research/')
         sys.path.insert(0, RESEARCH)
         import ai_model_trader_bt as bt
+        import ai_question_v34 as v34
         assert llm_notebook.NOTEBOOK == bt.NOTEBOOK
         assert llm_notebook.QUESTION == bt.QUESTION
-        assert llm_notebook.PATTERNS == bt.PATTERNS
+        assert {k: v for k, v in llm_notebook.PATTERNS.items() if k != 'P4'} == bt.PATTERNS
+        assert llm_notebook.PATTERNS['P4'] == v34.P4
         assert llm_notebook.SLOTS == bt.SLOTS
         assert llm_notebook.EXTRA == bt.EXTRA
 
-    def test_live_question_is_the_validated_v33(self):
-        """Вживую — ровно тот вопрос и та тетрадь, что прошли проверку п. 72 (research/ai_question_v33.py)."""
-        if not os.path.exists(os.path.join(RESEARCH, 'ai_question_v33.py')):
+    def test_live_question_is_the_validated_v34(self):
+        """Вживую — ровно тот вопрос и та тетрадь, что прошли проверку п. 77 (research/ai_question_v34.py)."""
+        if not os.path.exists(os.path.join(RESEARCH, 'ai_question_v34.py')):
             pytest.skip('нет research/')
         sys.path.insert(0, RESEARCH)
-        import ai_question_v33 as v33
-        assert llm_notebook.QUESTION == v33.QUESTION_V33
-        assert llm_notebook.NOTEBOOK == v33.NOTEBOOK_V33
+        import ai_question_v34 as v34
+        assert llm_notebook.QUESTION == v34.QUESTION_V34
+        assert llm_notebook.NOTEBOOK == v34.NOTEBOOK_V34
 
     def test_question_shows_side_and_btc_30d(self):
         data = llm_notebook.market(market_with_cascade(n=900, t_idx=850))
@@ -266,6 +268,18 @@ class TestScan:
         t = T0 + pd.Timedelta(hours=450)
         assert data['BTCUSDT'][1].at[t, 'cascade_count_3h'] == 3        # новые пары широту не добавляют
         assert not [p for p, k in llm_notebook.alerts_at(data, t) if k == 'P1']
+
+    def test_short_squeeze_p4_alert(self):
+        """P4 (п. 77): фандинг ≤ −2 bp и доля розничных лонгов в нижних 3% месяца — сигнал на первом часе серии."""
+        frames = market_with_cascade(n=900, t_idx=850, dumped=())
+        df = frames['FILUSDT']
+        df.iloc[848:, df.columns.get_loc('funding')] = -0.0003          # −3 bp: шорты платят лонгам
+        df.iloc[848:, df.columns.get_loc('buy_ratio')] = 0.30           # толпа ушла в шорты — минимум месяца
+        data = llm_notebook.market(frames)
+        t = T0 + pd.Timedelta(hours=848)
+        assert ('FILUSDT', 'P4') in llm_notebook.alerts_at(data, t)
+        assert ('FILUSDT', 'P4') not in llm_notebook.alerts_at(data, t + pd.Timedelta(hours=1))   # серия идёт
+        assert llm_notebook.title('P4') == 'Сжатие шортистов (лонг, 48 ч)'
 
     def test_switched_off_pattern_gives_no_alerts(self, monkeypatch):
         """P2 выключена владельцем 30.09 (п. 75): модель её сигналов не получает, текст тетради тот же."""
@@ -584,7 +598,7 @@ class TestDecisionLogAndReview:
         data = llm_notebook.market(market_with_cascade())
         t = T0 + pd.Timedelta(hours=450)
         q = llm_notebook.review_question(data, t)
-        assert 'AVAX' in q and 'IN RUSSIAN' in q and '"regime"' in q and 'P2 is switched off' in q
+        assert 'AVAX' in q and 'IN RUSSIAN' in q and '"regime"' in q and '(P1, B3 and P4)' in q
         assert 'Your open positions now: none' in q
         assert 'Your open positions now: LINK, XLM' in llm_notebook.review_question(data, t, ['LINKUSDT', 'XLMUSDT'])
         # У каждого числа подпись: голые столбцы модель путала (фандинг за долю покупок).

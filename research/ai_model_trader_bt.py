@@ -38,7 +38,9 @@ import ai_model_research as R                         # noqa: E402
 
 OUT = os.path.join(HERE, 'results', 'model_trader')
 SLOTS = 6
-VERSION = 'v3.3'        # тетрадь и вопрос: имена файлов ответов не пересекаются с прошлой версией
+VERSION = 'v3.4'        # тетрадь и вопрос: имена файлов ответов не пересекаются с прошлой версией
+# v3.4 (30.09.2026, docs п. 77): в тетради нет P2 (выключена), есть P4 «сжатие шортистов» — её запись
+# в research/ai_question_v34.P4; PATTERNS стенда остаются P1, P2, B3 ради воспроизводимости прежних проверок.
 # v3.3 (28.09.2026, docs п. 72): RISK — «бери все подходящие сигналы каскада», причина — по-русски.
 # v3.2 (28.09.2026, docs п. 70): в вопросе — сторона сигнала, BTC за 30 дней, «каждый сигнал уже выполнил
 # условие», ключ ответа "trade", причина ≤ 25 слов, шкала ранга доли розницы; в тетради — порог «high» у B3.
@@ -74,14 +76,6 @@ P1. CASCADE BOUNCE (long, hold 24h, stop = 1.0 x the coin's average daily range)
    Worse:  a single coin dumping alone (-0.11R, usually its own bad news); BTC almost flat while coins dump
            (-0.12R); normal volume (~0R); the 2022 bear market after FTX (~0R, cascades kept going).
 
-P2. BTC DIVERGENCE ACCUMULATION (long, hold 48h, stop = 1.3 x the coin's average daily range)
-   Trigger: the coin is 2.5%+ stronger than BTC over 24h while BTC fell 1%+, open interest grew 4%+ in 24h
-   and 24h volume is above 1.5x normal - someone accumulates the coin while the market is weak.
-   Result: +0.111R per trade over 770 trades, 47% winners (winners are bigger than losers).
-   Better: BTC up more than 3.4% over 7 days (+0.25R); BTC down more than 2.1% today (+0.19R);
-           coin up more than 16% over 7 days (+0.21R); 24h volume above 2.8x normal (+0.22R).
-   Worse:  BTC down over 7 days (~0R) - in a falling market the strength usually fades.
-
 B3. DISTRIBUTION ON MARKET BOUNCE (short, hold 48h, stop = 1.3 x the coin's average daily range)
    Trigger: BTC is down over 30 days (falling market), BTC bounced 1%+ in 24h, but the coin is 2.5%+ weaker
    than BTC, while its open interest grew 4%+ and 24h volume is above 1.5x normal - someone is selling the coin
@@ -90,6 +84,12 @@ B3. DISTRIBUTION ON MARKET BOUNCE (short, hold 48h, stop = 1.3 x the coin's aver
    Better: retail long share high (30-day rank above 0.5: +0.35R, the crowd is buying the bounce); funding not positive (+0.38R);
            BTC 30d decline mild, above -9% (+0.38R).
    Worse:  BTC 30d decline deeper than -9% (+0.13R); very high volume above 2.1x normal (+0.12R).
+
+P4. SHORT SQUEEZE (long, hold 48h, stop = 1.5 x the coin's average daily range)
+   Trigger: funding is deeply negative (-2 bp per 8h or lower: shorts pay longs every 8 hours) and the share of retail
+   accounts in longs is at the lowest 3% of its last 30 days - the crowd is maximally short and pays to stay short.
+   Buy the coin: the shorts give up or get squeezed.
+   Result: +0.113R per trade over 386 trades, 50% winners (winners are bigger than losers).
 
 RISK: at most 6 open positions. Take every alert that fits your notebook - a liquidation cascade usually gives
 several good trades at once, and on history taking them all earned more than picking one or two. Skip an

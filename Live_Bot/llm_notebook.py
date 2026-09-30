@@ -74,8 +74,8 @@ EXTRA = ('BCHUSDT', 'ETCUSDT', 'ATOMUSDT', 'FILUSDT', 'TRXUSDT', 'OPUSDT', 'APTU
 UNIVERSE = POOL + EXTRA
 
 # Выключено владельцем 30.09.2026 (docs п. 75): P2 вне выборки ≈ 0 (2021 −0.05R, test ≈ +0.05…0.09R)
-# при половине всех сделок. Сигналов P2 модель больше не получает; проверенный текст тетради
-# (v3.3) не меняется — иначе его пришлось бы проверять заново.
+# при половине всех сделок. С тетради v3.4 (п. 77) её нет и в тексте; запись в PATTERNS оставлена ради
+# стенда и прежних проверок (research/ai_model_trader_bt.PATTERNS).
 OFF = ('P2',)
 
 PATTERNS = {
@@ -88,6 +88,9 @@ PATTERNS = {
            'universe': 'core',
            'conditions': [['btc_ret_30d', '<', 0.0], ['rel_24h', '<=', -2.5], ['btc_ret_24h', '>=', 1.0],
                           ['oi_chg_24h', '>=', 4.0], ['vol_z', '>=', 1.5]]},
+    # Тетрадь v3.4 (30.09.2026, п. 76–77): правило круга 1 модели, прошло train, valid и 2021; все 30 пар.
+    'P4': {'label': 'SHORT SQUEEZE', 'side': 'long', 'hold': 48, 'stop': 1.5, 'rank': ('funding_bp', 1),
+           'conditions': [['funding_bp', '<=', -2.0], ['buy_ratio_pct_30d', '<=', 0.03]]},
 }
 
 NOTEBOOK = """YOU ARE THE TRADER of a crypto futures bot (30 liquid USDT perpetuals, long and short).
@@ -103,14 +106,6 @@ P1. CASCADE BOUNCE (long, hold 24h, stop = 1.0 x the coin's average daily range)
    Worse:  a single coin dumping alone (-0.11R, usually its own bad news); BTC almost flat while coins dump
            (-0.12R); normal volume (~0R); the 2022 bear market after FTX (~0R, cascades kept going).
 
-P2. BTC DIVERGENCE ACCUMULATION (long, hold 48h, stop = 1.3 x the coin's average daily range)
-   Trigger: the coin is 2.5%+ stronger than BTC over 24h while BTC fell 1%+, open interest grew 4%+ in 24h
-   and 24h volume is above 1.5x normal - someone accumulates the coin while the market is weak.
-   Result: +0.111R per trade over 770 trades, 47% winners (winners are bigger than losers).
-   Better: BTC up more than 3.4% over 7 days (+0.25R); BTC down more than 2.1% today (+0.19R);
-           coin up more than 16% over 7 days (+0.21R); 24h volume above 2.8x normal (+0.22R).
-   Worse:  BTC down over 7 days (~0R) - in a falling market the strength usually fades.
-
 B3. DISTRIBUTION ON MARKET BOUNCE (short, hold 48h, stop = 1.3 x the coin's average daily range)
    Trigger: BTC is down over 30 days (falling market), BTC bounced 1%+ in 24h, but the coin is 2.5%+ weaker
    than BTC, while its open interest grew 4%+ and 24h volume is above 1.5x normal - someone is selling the coin
@@ -119,6 +114,12 @@ B3. DISTRIBUTION ON MARKET BOUNCE (short, hold 48h, stop = 1.3 x the coin's aver
    Better: retail long share high (30-day rank above 0.5: +0.35R, the crowd is buying the bounce); funding not positive (+0.38R);
            BTC 30d decline mild, above -9% (+0.38R).
    Worse:  BTC 30d decline deeper than -9% (+0.13R); very high volume above 2.1x normal (+0.12R).
+
+P4. SHORT SQUEEZE (long, hold 48h, stop = 1.5 x the coin's average daily range)
+   Trigger: funding is deeply negative (-2 bp per 8h or lower: shorts pay longs every 8 hours) and the share of retail
+   accounts in longs is at the lowest 3% of its last 30 days - the crowd is maximally short and pays to stay short.
+   Buy the coin: the shorts give up or get squeezed.
+   Result: +0.113R per trade over 386 trades, 50% winners (winners are bigger than losers).
 
 RISK: at most 6 open positions. Take every alert that fits your notebook - a liquidation cascade usually gives
 several good trades at once, and on history taking them all earned more than picking one or two. Skip an
@@ -142,8 +143,9 @@ OPS = {'<': np.less, '<=': np.less_equal, '>': np.greater, '>=': np.greater_equa
 
 # Имена закономерностей для человека: в Telegram, в «почему» сделки и в обзоре — они, а не коды
 # (28.09.2026 владелец: «читаю сообщение от ИИ и не понимаю, что за P»). Коды остаются в журналах.
-TITLES = {'P1': 'Отскок после ликвидаций', 'P2': 'Накопление при слабом BTC', 'B3': 'Продажа на отскоке'}
-_CODES = re.compile(r'(?<!\w)([PРBВ])([123])(?!\w)')     # латиница и кириллица: модель пишет и «Р1»
+TITLES = {'P1': 'Отскок после ликвидаций', 'P2': 'Накопление при слабом BTC', 'B3': 'Продажа на отскоке',
+          'P4': 'Сжатие шортистов'}
+_CODES = re.compile(r'(?<!\w)([PРBВ])([1234])(?!\w)')     # латиница и кириллица: модель пишет и «Р1»
 # Ярлыки таблицы обзора, которые модель переносит в русский текст (обзор 20:00 28.09: «OI», «buy share»).
 _TERMS = [(re.compile(r'retail long share', re.I), 'доля розничных лонгов'),
           (re.compile(r'retail rank', re.I), 'ранг розничных лонгов'),
@@ -528,10 +530,9 @@ interest change over 24h; "buy share" = aggressive (taker) buying as a share of 
 
 Write a short market review for the owner IN RUSSIAN (at most 900 characters): 1) the market regime and what
 drives it now; 2) where the crowd and the aggressive flow are; 3) which coins are close to the patterns of your
-notebook you trade (P1 and B3; P2 is switched off by the owner - do not suggest P2 trades) and what you will do
-if they trigger; 4) the main risk for the next 24 hours. Plain text,
-no tables. The owner does not know the codes: do not write P1, P2, B3 - call the patterns only by their Russian
-names: «Отскок после ликвидаций» (P1), «Накопление при слабом BTC» (P2), «Продажа на отскоке» (B3). No English
+notebook you trade (P1, B3 and P4) and what you will do if they trigger; 4) the main risk for the next 24 hours.
+Plain text, no tables. The owner does not know the codes: do not write P1, B3, P4 - call the patterns only by
+their Russian names: «Отскок после ликвидаций» (P1), «Продажа на отскоке» (B3), «Сжатие шортистов» (P4). No English
 labels from the table either - say «доля розничных лонгов», «доля агрессивных покупок», «открытый интерес».
 Then on the LAST line write JSON only:
 {{"regime": "rising|falling|sideways", "btc_24h": "up|down|flat", "watch": [{{"coin": "XXX", "side": "long|short", "why": "few words"}}]}}"""
