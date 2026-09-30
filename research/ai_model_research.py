@@ -96,7 +96,7 @@ when BTC fell over 30 days. Note that 2022 was a falling market and 2023-2024 a 
 loses overall may still work when gated on the falling regime. Target for all rules together: 6-8 trades per week.
 """,
     # Круг 5 (30.09.2026, docs п. 76): сводка тетради после проверок вне выборки — без цифр ступени А на 2021
-    # (иначе 2021 перестал бы быть нетронутым для новых правил).
+    # (иначе 2021 перестал бы быть нетронутым для новых правил). Круг 6 — повтор круга 5 с коротким вопросом.
     5: """
 FOCUS OF THIS ROUND. Your notebook after checks on data you have never seen (2024-07..2025-04 and the year 2021):
 - the liquidation-cascade bounce (long) holds on unseen data, except in the falling market of 2025-26;
@@ -110,6 +110,9 @@ mechanism of who is forced to trade; each rule must trade at least 0.5 times per
 2022-01..2024-06.
 """,
 }
+
+
+FOCUS[6] = FOCUS[5]
 
 
 def distribution_text():
@@ -127,6 +130,46 @@ def distribution_text():
         lines.append(f'- {name}: {descr}. Typical values (5/25/50/75/95%): '
                      + ' / '.join(f'{v:.3g}' for v in q))
     return '\n'.join(lines)
+
+
+def distribution_short():
+    """Признаки с тремя квантилями train (10/50/90%) — короче: с круга 6 вопрос обязан влезть в контекст (п. 76)."""
+    data = L.load_all()
+    a, b = (np.datetime64(x) for x in L.SPLITS['train'])
+    import pandas as pd
+    allf = pd.concat([feat[(feat.index.tz_convert(None).to_numpy() >= a) & (feat.index.tz_convert(None).to_numpy() < b)]
+                      for _pair, (_df, feat) in data.items()])
+    lines = []
+    for name, descr in DESCR_EN.items():
+        q = allf[name].quantile([0.10, 0.5, 0.90]).to_numpy()
+        lines.append(f'- {name}: {descr} (10/50/90%: ' + ' / '.join(f'{v:.3g}' for v in q) + ')')
+    return '\n'.join(lines)
+
+
+def history_compact(upto_round):
+    """
+    Прежние правила одной строкой: сторона, признаки, итог train; без порогов и разборов.
+    Круг 5 переполнил контекст (вопрос 9446 токенов при 12288) и модель переписала правила из истории.
+    """
+    seen, rows = set(), []
+    for k in range(1, upto_round):
+        path = os.path.join(OUT, f'round{k}_scored.json')
+        if not os.path.exists(path):
+            continue
+        for item in json.load(open(path, encoding='utf-8')):
+            rule, tr = item['rule'], item['train']
+            key = (rule['side'], json.dumps(rule['conditions']))
+            if key in seen:
+                continue
+            seen.add(key)
+            feats = ', '.join(c[0] for c in rule['conditions'])
+            res = ('too rare' if not tr['n'] or tr['r'] is None or tr['t'] is None
+                   else f"{tr['r']:+.3f}R t={tr['t']:+.1f} {tr['per_week']:.1f}/wk")
+            rows.append(f"- {rule['name']} ({rule['side']}; {feats}): {res}")
+    if not rows:
+        return ''
+    return ('\nYOUR EARLIER RULES ON 2022-01..2024-06 (side; features used; result after costs). Most lost or were '
+            'too weak - do not repeat these mechanisms:\n' + '\n'.join(rows) + '\n')
 
 
 def history_text(upto_round):
@@ -309,11 +352,17 @@ def main():
     os.makedirs(OUT, exist_ok=True)
     if cmd == 'round':
         k = int(sys.argv[2]) if len(sys.argv) > 2 else 1
-        prompt = TASK.format(features=distribution_text(), history=history_text(k), n=10,
-                             focus=FOCUS.get(k, ''))
+        if k >= 6:
+            # Короткий вопрос (п. 76): круг 5 переполнил контекст. Сжатая история, 3 квантиля, 5 правил.
+            prompt = TASK.format(features=distribution_short(), history=history_compact(k), n=5,
+                                 focus=FOCUS.get(k, ''))
+        else:
+            prompt = TASK.format(features=distribution_text(), history=history_text(k), n=10,
+                                 focus=FOCUS.get(k, ''))
         open(os.path.join(OUT, f'round{k}_prompt.txt'), 'w', encoding='utf-8').write(prompt)
-        # Контекст сервера 12288 токенов: вопрос (~3.2 знака на токен) + мысль и ответ.
-        budget = int(min(9000, 11800 - len(prompt) / 2.6))
+        # Контекст сервера 12288 токенов: вопрос + мысль и ответ. Цифры токенизируются плотно — ~2 знака
+        # на токен (круг 5: 19102 знака = 9446 токенов), а не 3.2, как считалось раньше.
+        budget = int(min(9000, 11800 - len(prompt) / (2.0 if k >= 6 else 2.6)))
         text = ask(prompt, f'round{k}', max_tokens=max(3000, budget))
         if '{' not in text.split('</think>')[-1]:
             text = finish(f'round{k}')
