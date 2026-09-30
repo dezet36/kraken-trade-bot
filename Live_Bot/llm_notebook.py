@@ -71,7 +71,13 @@ POOL = ('AAVEUSDT', 'ADAUSDT', 'ARBUSDT', 'AVAXUSDT', 'BNBUSDT', 'BTCUSDT', 'COT
 # B3 на новых парах не подтвердилась — торгуется только на базовых.
 EXTRA = ('BCHUSDT', 'ETCUSDT', 'ATOMUSDT', 'FILUSDT', 'TRXUSDT', 'OPUSDT', 'APTUSDT', 'INJUSDT',
          '1000PEPEUSDT', 'SEIUSDT')
-UNIVERSE = POOL + EXTRA
+# 30.09.2026 (docs п. 80, research/ai_universe_extend.py): ещё 12 монет, выбраны по бирже (листинг до
+# 30.06.2023, медиана оборота Bybit ≥ $3 млн). На них перенеслась только P1: train +0.184R, valid +0.451R,
+# 2021 +0.601R; P4 — нет (train −0.02R), B3 — только основные. Широта каскада — по-прежнему по основным 20.
+WIDE = ('XMRUSDT', 'DASHUSDT', 'HBARUSDT', 'CRVUSDT', 'ICPUSDT', 'LDOUSDT', 'ALGOUSDT', 'STXUSDT', 'GALAUSDT',
+        'ZENUSDT', 'EGLDUSDT', 'SANDUSDT')
+ON_WIDE = ('P1',)
+UNIVERSE = POOL + EXTRA + WIDE
 
 # Выключено владельцем 30.09.2026 (docs п. 75): P2 вне выборки ≈ 0 (2021 −0.05R, test ≈ +0.05…0.09R)
 # при половине всех сделок. С тетради v3.4 (п. 77) её нет и в тексте; запись в PATTERNS оставлена ради
@@ -251,6 +257,13 @@ def market(frames):
     return data
 
 
+def pairs_of(key):
+    """Монеты, на которых торгуется закономерность: B3 — основные 20, P1 — все 42, остальные — 30."""
+    if PATTERNS[key].get('universe') == 'core':
+        return POOL
+    return UNIVERSE if key in ON_WIDE else POOL + EXTRA
+
+
 def _order(data, t, item):
     """Порядок сигналов: по закономерностям в порядке тетради, внутри — по её признаку силы."""
     pair, key = item
@@ -264,8 +277,9 @@ def alerts_at(data, t):
     for key, pat in PATTERNS.items():
         if key in OFF:
             continue
+        allowed = pairs_of(key)
         for p, (df, f) in data.items():
-            if t not in f.index or (pat.get('universe') == 'core' and p not in POOL):
+            if t not in f.index or p not in allowed:
                 continue
             i = f.index.get_loc(t)
             m = _mask(f.iloc[max(0, i - 1):i + 1], pat['conditions'])
@@ -598,8 +612,8 @@ def pattern_status(data, t):
             continue
         own = [c for c in pat['conditions'] if c[0] not in _MARKET_WIDE]
         coins = []
-        for p in UNIVERSE:
-            if p not in data or t not in data[p][1].index or (pat.get('universe') == 'core' and p not in POOL):
+        for p in pairs_of(key):
+            if p not in data or t not in data[p][1].index:
                 continue
             f = data[p][1].loc[t]
             unmet = [c for c in own if not _holds(f.get(c[0]), c[1], c[2])]
@@ -721,7 +735,7 @@ def scan(pairs, gate, client=None, balance=None, now_ms=None, frames_of=None, as
 
 def _new_hour(hour_ms, gate, now_ms, frames_of, ask):
     """Сигналы закрытого часа; есть сигналы и места — вопрос модели уходит в поток тетради."""
-    # Данные — по всей вселенной тетради (30 пар; широта разгрузки — по базовым 20).
+    # Данные — по всей вселенной тетради (42 пары; широта разгрузки — по базовым 20).
     # Четыре потока: первое чтение после перезапуска — 1000 часов по каждой паре.
     from concurrent.futures import ThreadPoolExecutor
     with ThreadPoolExecutor(max_workers=4) as pool:

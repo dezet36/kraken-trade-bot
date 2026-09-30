@@ -305,6 +305,22 @@ class TestScan:
         got = {p for p, k in llm_notebook.alerts_at(data, T0 + pd.Timedelta(hours=450)) if k == 'X'}
         assert got == {'AVAXUSDT', 'ADAUSDT'}
 
+    def test_wide_coins_trade_only_the_cascade_bounce(self):
+        """П. 80: на 12 новых монетах перенеслась только P1; P4 там не торгуется, B3 — только основные."""
+        assert len(llm_notebook.UNIVERSE) == 42 and llm_notebook.pairs_of('P1') == llm_notebook.UNIVERSE
+        assert llm_notebook.pairs_of('P4') == llm_notebook.POOL + llm_notebook.EXTRA
+        assert llm_notebook.pairs_of('B3') == llm_notebook.POOL
+        frames = market_with_cascade(n=900, t_idx=850)                          # каскад на основных пяти
+        frames['XMRUSDT'] = raw_frame(900, seed=300, drop_at=850, drop=0.07)    # новая монета — в каскаде
+        for p in ('HBARUSDT', 'FILUSDT'):                                       # толпа в шортах: условие P4
+            df = frames[p]
+            df.iloc[848:, df.columns.get_loc('funding')] = -0.0003
+            df.iloc[848:, df.columns.get_loc('buy_ratio')] = 0.30
+        data = llm_notebook.market(frames)
+        assert ('XMRUSDT', 'P1') in llm_notebook.alerts_at(data, T0 + pd.Timedelta(hours=850))
+        before = llm_notebook.alerts_at(data, T0 + pd.Timedelta(hours=848))
+        assert ('FILUSDT', 'P4') in before and not [x for x in before if x[0] == 'HBARUSDT']
+
 
 class Later:
     """Поток тетради под рукой теста: вопрос ждёт, пока тест не «ответит» за модель."""
@@ -662,10 +678,11 @@ class TestPatternStatus:
 
     def test_coins_meeting_all_conditions_are_named(self):
         dump = {'ret_4h': -5.0, 'oi_chg_4h': -6.0}
-        data, t = status_data({'AVAXUSDT': dump, 'ADAUSDT': dump, 'XRPUSDT': {'funding_bp': -2.5, 'buy_ratio_pct_30d': 0.02}},
-                              market={'cascade_count_3h': 5})
-        assert status_line(data, t, 'P1').endswith('all conditions hold now on ADA, AVAX.')
-        assert status_line(data, t, 'P4').endswith('all conditions hold now on XRP.')
+        squeeze = {'funding_bp': -2.5, 'buy_ratio_pct_30d': 0.02}
+        data, t = status_data({'AVAXUSDT': dump, 'ADAUSDT': dump, 'XMRUSDT': dump, 'XRPUSDT': squeeze,
+                               'HBARUSDT': squeeze}, market={'cascade_count_3h': 5})
+        assert status_line(data, t, 'P1').endswith('all conditions hold now on ADA, AVAX, XMR.')
+        assert status_line(data, t, 'P4').endswith('all conditions hold now on XRP.')          # HBAR: P4 там не торгуется
 
     def test_core_only_pattern_ignores_extra_coins_and_off_pattern_is_absent(self):
         data, t = status_data({'SEIUSDT': {'rel_24h': -5.0, 'oi_chg_24h': 6.0, 'vol_z': 2.0},
