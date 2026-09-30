@@ -648,6 +648,18 @@ def llm_notebook_decision(alerts, picks, reason: str = ''):
     )
 
 
+def llm_notebook_health(text: str):
+    """
+    ИИ по тетради подряд не может получить данные или решение модели — владельцу.
+    Тумблер сообщений ИИ (llm_setup), а не ошибок: ошибки владелец выключил,
+    а неработающая стратегия выглядела бы как «сигналов нет».
+    """
+    import tg_format as fmt
+    if not _allowed('llm_setup'):
+        return False
+    return _send(f"⚠️ <b>ИИ по тетради не работает</b> · {_now()}\n━━━━━━━━━━━━━━━━━━━━\n{fmt.esc(text[:600])}")
+
+
 def llm_market_review(text: str):
     """Обзор рынка от ИИ (раз в 4 ч, llm_notebook) — тот же тумблер, что у планов ИИ."""
     import tg_format as fmt

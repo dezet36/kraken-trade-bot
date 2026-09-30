@@ -57,6 +57,7 @@ Which alerts do you trade now (at most {free})? Answer with JSON only, the reaso
 === ОБЗОР РЫНКА (REVIEW): раз в 4 часа ===
 It is {time} UTC. MARKET DASHBOARD of your coins (hourly data, closed hour).
 BTC: {btc24}% in 24h, {btc7}% in 7d, {btc30}% in 30d. Coins in a liquidation cascade in the last 3h: {breadth}.
+Your open positions now: {held} (they close by your notebook rules - stop or time).
 How to read a row: price change over 24h, 7d, 30d; "vs BTC" = the coin's 24h change minus BTC's; "OI" = open
 interest change over 24h; "buy share" = aggressive (taker) buying as a share of 24h volume, 0.50 = balance;
 "funding" in bp per 8h, +1.0 = the normal rate; "retail rank" = share of retail accounts in longs vs its own last

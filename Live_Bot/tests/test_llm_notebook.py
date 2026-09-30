@@ -97,6 +97,9 @@ def notebook_mode(monkeypatch, tmp_path):
     monkeypatch.setattr(llm_notebook, '_notify_decision', lambda *a, **k: None)
     monkeypatch.setattr(llm_notebook, '_submit', run_now)
     monkeypatch.setattr(llm_notebook, '_asked', [])
+    monkeypatch.setattr(llm_notebook, '_health', {'fails': {}, 'last': {}, 'alerted': 0.0})
+    import telegram_notify
+    monkeypatch.setattr(telegram_notify, 'llm_notebook_health', lambda text: True)
     # Биржи в тестах нет: цена сейчас — 100, если тест не назвал свою.
     monkeypatch.setattr(llm_notebook, '_price_now', lambda pair, client=None: 100.0)
 
@@ -570,6 +573,8 @@ class TestDecisionLogAndReview:
         t = T0 + pd.Timedelta(hours=450)
         q = llm_notebook.review_question(data, t)
         assert 'AVAX' in q and 'IN RUSSIAN' in q and '"regime"' in q and '(P1, P2, B3)' in q
+        assert 'Your open positions now: none' in q
+        assert 'Your open positions now: LINK, XLM' in llm_notebook.review_question(data, t, ['LINKUSDT', 'XLMUSDT'])
         # У каждого числа подпись: голые столбцы модель путала (фандинг за долю покупок).
         row = next(x for x in q.splitlines() if x.startswith('AVAX:'))
         assert 'buy share 0.' in row and 'funding +' in row and 'retail rank ' in row and row.endswith('x')
@@ -590,6 +595,53 @@ class TestDecisionLogAndReview:
         assert not llm_notebook._maybe_review(data, t, Gate(), run=run)          # тот же час — один раз
         assert not llm_notebook._maybe_review(data, t + pd.Timedelta(hours=1), Gate(), run=run)   # 21:00 — не час обзора
         assert len(ran) == 1
+
+
+class TestHealth:
+    """Неработающая стратегия выглядела бы как «сигналов нет»: два сбоя подряд — владельцу сообщение."""
+
+    @pytest.fixture()
+    def sent(self, notebook_mode, monkeypatch):
+        import telegram_notify
+        box = []
+        monkeypatch.setattr(telegram_notify, 'llm_notebook_health', lambda text: box.append(text) or True)
+        return box
+
+    def test_two_model_failures_in_a_row_tell_the_owner_once(self, sent):
+        frames = market_with_cascade()
+        broken = dict(frames_of=lambda p: frames[p], price_of=lambda p: 100.0,
+                      ask=lambda q: (_ for _ in ()).throw(RuntimeError('llama-server не отвечает')))
+        llm_notebook.scan(list(llm_notebook.POOL), Gate(), now_ms=hour_ms(451) + MIN, **broken)
+        assert not sent                                                   # один сбой — ещё не повод
+        frames2 = market_with_cascade(t_idx=452)
+        broken['frames_of'] = lambda p: frames2[p]
+        llm_notebook.scan(list(llm_notebook.POOL), Gate(), now_ms=hour_ms(453) + MIN, **broken)
+        assert len(sent) == 1 and 'модель не дала решения' in sent[0] and 'llama-server' in sent[0]
+        frames3 = market_with_cascade(t_idx=453)
+        broken['frames_of'] = lambda p: frames3[p]
+        llm_notebook.scan(list(llm_notebook.POOL), Gate(), now_ms=hour_ms(454) + MIN, **broken)
+        assert len(sent) == 1                                             # не чаще раза в 6 ч
+
+    def test_success_resets_the_count(self, sent):
+        assert not llm_notebook._health_event('decision', False, 'x')
+        assert not llm_notebook._health_event('decision', True)
+        assert not llm_notebook._health_event('decision', False, 'y')     # снова первый — молчим
+        assert not sent
+
+    def test_the_same_hour_retried_by_the_next_cycle_counts_once(self, sent):
+        frames = {p: None for p in llm_notebook.UNIVERSE}                 # биржи молчат
+        for minutes in (1, 6, 11):                                        # три цикла одного часа
+            llm_notebook.scan(list(llm_notebook.POOL), Gate(), now_ms=hour_ms(451) + minutes * MIN,
+                              frames_of=frames.get, ask=lambda q: '', price_of=lambda p: 100.0)
+        assert not sent
+        llm_notebook.scan(list(llm_notebook.POOL), Gate(), now_ms=hour_ms(452) + MIN,
+                          frames_of=frames.get, ask=lambda q: '', price_of=lambda p: 100.0)
+        assert len(sent) == 1 and 'нет часовых данных' in sent[0]
+
+    def test_review_failures(self, sent):
+        llm_notebook._health_event('review', False, 'timeout')
+        llm_notebook._health_event('review', False, 'timeout')
+        assert len(sent) == 1 and 'обзор рынка не получен' in sent[0]
 
 
 class TestRawDataForTheNotebookUniverse:
@@ -617,6 +669,13 @@ class TestHumanNames:
         assert '«Отскок после ликвидаций»' in out and '«Накопление при слабом BTC»' in out
         assert out.count('«Отскок после ликвидаций»') == 2 and '«Продажа на отскоке»' in out
         assert 'P3' in out and 'B1' in out and 'SEI' in out
+
+    def test_table_labels_in_russian_text_become_russian(self):
+        # Обзор 20:00 28.09: «Агрессивные покупатели (buy share ~0.47)», «рост OI».
+        out = llm_notebook.humanize('Агрессивные покупатели (buy share ~0.47), рост OI, высокий retail rank у ZEC; '
+                                    'OIL и COIN не трогаем.')
+        assert out == ('Агрессивные покупатели (доля агрессивных покупок ~0.47), рост ОИ, высокий ранг розничных '
+                       'лонгов у ZEC; OIL и COIN не трогаем.')
 
     def test_code_before_the_name_is_dropped_not_doubled(self):
         # Обзор 16:00 28.09: модель пишет и код, и имя — имя не должно идти дважды.

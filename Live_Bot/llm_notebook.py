@@ -139,6 +139,11 @@ OPS = {'<': np.less, '<=': np.less_equal, '>': np.greater, '>=': np.greater_equa
 # (28.09.2026 владелец: «читаю сообщение от ИИ и не понимаю, что за P»). Коды остаются в журналах.
 TITLES = {'P1': 'Отскок после ликвидаций', 'P2': 'Накопление при слабом BTC', 'B3': 'Продажа на отскоке'}
 _CODES = re.compile(r'(?<!\w)([PРBВ])([123])(?!\w)')     # латиница и кириллица: модель пишет и «Р1»
+# Ярлыки таблицы обзора, которые модель переносит в русский текст (обзор 20:00 28.09: «OI», «buy share»).
+_TERMS = [(re.compile(r'retail long share', re.I), 'доля розничных лонгов'),
+          (re.compile(r'retail rank', re.I), 'ранг розничных лонгов'),
+          (re.compile(r'buy share', re.I), 'доля агрессивных покупок'),
+          (re.compile(r'(?<!\w)OI(?!\w)'), 'ОИ')]
 
 
 def title(key):
@@ -162,7 +167,10 @@ def humanize(text):
     def name(m):
         key = {'P': 'P', 'Р': 'P', 'B': 'B', 'В': 'B'}[m.group(1)] + m.group(2)
         return f'«{TITLES[key]}»' if key in TITLES else m.group(0)
-    return _CODES.sub(name, text)
+    text = _CODES.sub(name, text)
+    for pattern, ru in _TERMS:
+        text = pattern.sub(ru, text)
+    return text
 
 # «Лучше/хуже» тетради флагами — как в research/ai_notebook_flags.py (docs п. 71, совпадение держит тест).
 # Только в журнал решений: модели счёт не показывается. Вживую проверяется, держатся ли флаги P1
@@ -430,6 +438,48 @@ def _notify_decision(items, picks, reason):
 # обзора. Поток — daemon: остановка бота не ждёт модель (пул потоков ждал бы
 # её при выходе до конца вопроса, до 15 минут).
 ANSWER_MAX_MIN = 30       # ответ позже — вход уже не тот, что мерили (вход на открытии часа)
+
+# ── Здоровье: неработающая стратегия выглядела бы как «сигналов нет» ─────────
+HEALTH_FAILS = 2                   # подряд — и владельцу сообщение
+HEALTH_QUIET_S = 6 * 3600          # не чаще раза в 6 ч
+HEALTH_WHAT = {'data': 'нет часовых данных бирж — часы без проверки сигналов',
+               'decision': 'модель не дала решения по сигналам — сделки пропущены',
+               'review': 'обзор рынка не получен — модель, вероятно, недоступна'}
+_health = {'fails': {}, 'last': {}, 'alerted': 0.0}
+_health_lock = threading.Lock()
+
+
+def _health_event(kind, ok, detail='', key=None):
+    """
+    Сбой или успех: часовые данные (data), решение модели (decision), обзор (review).
+    HEALTH_FAILS сбоев одного вида подряд — сообщение владельцу, не чаще HEALTH_QUIET_S.
+    key — чтобы один и тот же час, повторённый следующим циклом, не считался дважды.
+    -> True, если сообщение ушло.
+    """
+    with _health_lock:
+        fails = _health['fails']
+        if ok:
+            fails.pop(kind, None)
+            _health['last'].pop(kind, None)
+            return False
+        if key is not None and _health['last'].get(kind) == key:
+            return False
+        _health['last'][kind] = key
+        fails[kind] = fails.get(kind, 0) + 1
+        if fails[kind] < HEALTH_FAILS or time.time() - _health['alerted'] < HEALTH_QUIET_S:
+            return False
+        _health['alerted'] = time.time()
+        count = fails[kind]
+    text = f"{HEALTH_WHAT[kind]}: {count} раза подряд" + (f" ({detail})" if detail else '')
+    log(f'⚠️ {NAME}: {text}')
+    try:
+        import telegram_notify
+        telegram_notify.llm_notebook_health(text)
+    except Exception as exc:                          # noqa: BLE001
+        log(f'   {NAME}: сообщение о сбое не отправлено ({exc})')
+    return True
+
+
 _queue = queue.Queue()
 _worker = {'thread': None}
 _asked = []               # вопросы в пути и готовые ответы, которые ждут цикла
@@ -462,6 +512,7 @@ REVIEW_EVERY_H = 4
 
 REVIEW = """It is {time} UTC. MARKET DASHBOARD of your coins (hourly data, closed hour).
 BTC: {btc24}% in 24h, {btc7}% in 7d, {btc30}% in 30d. Coins in a liquidation cascade in the last 3h: {breadth}.
+Your open positions now: {held} (they close by your notebook rules - stop or time).
 How to read a row: price change over 24h, 7d, 30d; "vs BTC" = the coin's 24h change minus BTC's; "OI" = open
 interest change over 24h; "buy share" = aggressive (taker) buying as a share of 24h volume, 0.50 = balance;
 "funding" in bp per 8h, +1.0 = the normal rate; "retail rank" = share of retail accounts in longs vs its own last
@@ -485,7 +536,7 @@ def _v(x, fmt):
     return '—' if x is None or pd.isna(x) else format(float(x), fmt)
 
 
-def review_question(data, t):
+def review_question(data, t, held=()):
     btc = data['BTCUSDT'][1].loc[t]
     rows = []
     for p in UNIVERSE:
@@ -499,9 +550,11 @@ def review_question(data, t):
                     f"OI {_v(f['oi_chg_24h'], '+.1f')}% | buy share {_v(f['taker_24h'], '.2f')} | "
                     f"funding {_v(f['funding_bp'], '+.1f')}bp | retail rank {_v(f['buy_ratio_pct_30d'], '.2f')} | "
                     f"volume {_v(f['vol_z'], '.1f')}x")
+    # Открытые позиции — в вопрос: без них обзор 20:00 28.09 написал «открытых позиций нет» при LINK и XLM.
     return REVIEW.format(time=(t + pd.Timedelta(hours=1)).strftime('%Y-%m-%d %H:%M'),
                          btc24=_v(btc['btc_ret_24h'], '+.1f'), btc7=_v(btc['btc_ret_7d'], '+.1f'),
                          btc30=_v(btc['btc_ret_30d'], '+.1f'), breadth=int(btc['cascade_count_3h']),
+                         held=', '.join(p.replace('USDT', '') for p in held) or 'none',
                          table='\n'.join(rows))
 
 
@@ -530,6 +583,7 @@ def _run_review(question, slot, held):
                                       'top_p': 0.9, 'stop': ['<|im_end|>'], 'cache_prompt': True}, 900)
         body, parsed = parse_review((out.get('content') or '').strip())
         _append_jsonl('llm_notebook_reviews.jsonl', {'hour': slot, 'held': held, 'text': body, 'view': parsed})
+        _health_event('review', bool(body))
         body = humanize(body)                          # человеку — имена закономерностей, не коды
         log(f'   {NAME}: обзор рынка — {body[:160]}')
         try:
@@ -539,6 +593,7 @@ def _run_review(question, slot, held):
             log(f'   {NAME}: обзор не отправлен в Telegram ({exc})')
     except Exception as exc:                          # noqa: BLE001
         log(f'   {NAME}: обзор рынка не получен ({exc})')
+        _health_event('review', False, str(exc)[:120])
     finally:
         _review['busy'] = False
 
@@ -552,7 +607,7 @@ def _maybe_review(data, t, gate, run=None):
     _review['busy'] = True
     held = list(gate.held()) if hasattr(gate, 'held') else []
     try:
-        question = review_question(data, t)
+        question = review_question(data, t, held)
     except Exception as exc:                          # noqa: BLE001
         _review['busy'] = False
         log(f'   {NAME}: обзор рынка не собран ({exc})')
@@ -591,7 +646,9 @@ def _new_hour(hour_ms, gate, now_ms, frames_of, ask):
         frames = dict(zip(UNIVERSE, pool.map(frames_of, UNIVERSE)))
     if frames.get('BTCUSDT') is None:
         log(f'   {NAME}: нет часовых данных BTC — пропуск часа')
+        _health_event('data', False, 'BTC', key=hour_ms)
         return
+    _health_event('data', True)
     data = market(frames)
     t = pd.Timestamp(hour_ms, unit='ms', tz='UTC')
     # Торгует своя вселенная тетради (UNIVERSE), а не общий список ликвидных пар бота:
@@ -661,6 +718,7 @@ def _enter(job, gate, now_ms, price_of):
         log(f'   {NAME}: модель не ответила ({getattr(exc, "llm_gate", "")} {exc}) — сигналы часа пропущены')
         _note_state(job['hour_ms'], error=str(exc))
         _log_decision(dict(record, picks=None, error=str(exc)))
+        _health_event('decision', False, str(exc)[:120])
         return []
     picks, reason = picks_from(text, items)
     _note_state(job['hour_ms'], answer=text[:500], picks=picks)
@@ -668,13 +726,16 @@ def _enter(job, gate, now_ms, price_of):
     if picks is None:
         log(f'   {NAME}: ответ модели без JSON — сигналы часа пропущены: {text[:200]}')
         _log_decision(record)
+        _health_event('decision', False, 'в ответе нет списка сделок')
         return []
     alerts = ', '.join(f'{k} {p}' for p, k in items)
     if delay > ANSWER_MAX_MIN:
         log(f'   {NAME}: сигналы {alerts}; ответ модели через {delay:.0f} мин после закрытия часа '
             f'(предел {ANSWER_MAX_MIN}) — вход пропущен')
         _log_decision(dict(record, late=True))
+        _health_event('decision', False, f'ответ через {delay:.0f} мин после закрытия часа')
         return []
+    _health_event('decision', True)
     held = list(gate.held()) if hasattr(gate, 'held') else []
     take = [p for p in picks if not gate.has_position_or_order(p)][:max(0, SLOTS - len(held))]
     keys = dict(items)
