@@ -1,0 +1,222 @@
+[
+ {
+  "rule": {
+   "name": "us_premium_evaporation_short",
+   "side": "short",
+   "conditions": [
+    [
+     "btc_ret_30d",
+     "<",
+     -4.0
+    ],
+    [
+     "cb_prem_chg_24h",
+     "<",
+     -1.5
+    ],
+    [
+     "taker_gap_24h",
+     "<",
+     -0.003
+    ]
+   ],
+   "hold_hours": 24,
+   "stop_atr": 1.2,
+   "why": "US dollar demand evaporating while spot sellers dump into futures leaves no bid support; price grinds lower as hedgers unwind and leverage unwinds."
+  },
+  "train": {
+   "n": 2535,
+   "per_week": 19.457236842105264,
+   "pct": -0.07025078628861373,
+   "r": 0.013921315089161255,
+   "t": 1.2374564077481176,
+   "win": 0.47731755424063116
+  },
+  "valid": {
+   "n": 895,
+   "per_week": 20.608552631578945,
+   "pct": -0.5768278897218874,
+   "r": -0.04847490475405688,
+   "t": -2.503353147724994,
+   "win": 0.42569832402234636
+  }
+ },
+ {
+  "rule": {
+   "name": "spot_divergence_accum_long",
+   "side": "long",
+   "conditions": [
+    [
+     "taker_gap_24h",
+     ">",
+     0.01
+    ],
+    [
+     "range_pos_7d",
+     "<",
+     0.4
+    ],
+    [
+     "buy_ratio_pct_30d",
+     "<",
+     0.7
+    ]
+   ],
+   "hold_hours": 48,
+   "stop_atr": 0.9,
+   "why": "Spot-driven accumulation diverges from futures selling, signaling non-leverage absorption that typically precedes a mean-reversion bounce."
+  },
+  "train": {
+   "n": 2206,
+   "per_week": 16.93201754385965,
+   "pct": -0.3756471473931028,
+   "r": -0.06560533987166627,
+   "t": -3.1438259298987266,
+   "win": 0.4465095194922937
+  },
+  "valid": {
+   "n": 820,
+   "per_week": 18.88157894736842,
+   "pct": -0.09784131645860966,
+   "r": -0.03804995605891257,
+   "t": -1.0177769116328048,
+   "win": 0.45
+  }
+ },
+ {
+  "rule": {
+   "name": "gamma_hedging_amplification_short",
+   "side": "short",
+   "conditions": [
+    [
+     "btc_ret_30d",
+     "<",
+     -2.0
+    ],
+    [
+     "dvol_pct_30d",
+     ">",
+     0.75
+    ],
+    [
+     "funding_bp",
+     ">",
+     0.8
+    ]
+   ],
+   "hold_hours": 12,
+   "stop_atr": 0.8,
+   "why": "Short gamma hedging by options dealers forces futures selling on dips while crowded retail longs provide liquidity for shorts to accumulate."
+  },
+  "train": {
+   "n": 1599,
+   "per_week": 12.273026315789474,
+   "pct": -0.17111226520350953,
+   "r": -0.030903141525488204,
+   "t": -1.8853386152282867,
+   "win": 0.44652908067542213
+  },
+  "valid": {
+   "n": 860,
+   "per_week": 19.802631578947366,
+   "pct": -0.8202582900244159,
+   "r": -0.13596417141100986,
+   "t": -6.796193985316246,
+   "win": 0.3930232558139535
+  }
+ },
+ {
+  "rule": {
+   "name": "us_institutional_flip_long",
+   "side": "long",
+   "conditions": [
+    [
+     "btc_ret_30d",
+     "<",
+     -1.0
+    ],
+    [
+     "cb_prem_chg_24h",
+     ">",
+     0.8
+    ],
+    [
+     "dvol_pct_30d",
+     "<",
+     0.35
+    ],
+    [
+     "ret_1h",
+     ">",
+     0.1
+    ]
+   ],
+   "hold_hours": 24,
+   "stop_atr": 1.1,
+   "why": "Rising US premium amid compressed volatility signals institutional USD accumulation ahead of a volatility expansion rally."
+  },
+  "train": {
+   "n": 2783,
+   "per_week": 21.36074561403509,
+   "pct": -0.3109720825648059,
+   "r": -0.05283506309898667,
+   "t": -5.166611845678118,
+   "win": 0.4523895077254761
+  },
+  "valid": {
+   "n": 822,
+   "per_week": 18.927631578947366,
+   "pct": -0.6065872892270038,
+   "r": -0.1009558189491131,
+   "t": -5.516249268124392,
+   "win": 0.44525547445255476
+  }
+ },
+ {
+  "rule": {
+   "name": "spot_capitulation_breakdown_short",
+   "side": "short",
+   "conditions": [
+    [
+     "spot_share_rel",
+     ">",
+     1.05
+    ],
+    [
+     "ret_24h",
+     "<",
+     -1.0
+    ],
+    [
+     "taker_gap_24h",
+     "<",
+     -0.004
+    ],
+    [
+     "btc_ret_30d",
+     "<",
+     0
+    ]
+   ],
+   "hold_hours": 36,
+   "stop_atr": 1.0,
+   "why": "High spot share during declines indicates long-term holder distribution; once spot liquidity dries up, futures longs lack support and price breaks down."
+  },
+  "train": {
+   "n": 922,
+   "per_week": 7.076754385964913,
+   "pct": 0.012586655700266774,
+   "r": 0.04366260764407462,
+   "t": 1.3833713500686382,
+   "win": 0.46203904555314534
+  },
+  "valid": {
+   "n": 364,
+   "per_week": 8.381578947368421,
+   "pct": -1.4845670548570906,
+   "r": -0.17572280895341,
+   "t": -4.293803848409001,
+   "win": 0.37637362637362637
+  }
+ }
+]

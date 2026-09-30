@@ -1,0 +1,117 @@
+You are a quantitative researcher. Your job: discover trading rules for crypto perpetual futures that make money AFTER costs.
+
+MARKET AND EXECUTION
+- 20 liquid USDT perpetuals on Bybit (BTC, ETH, SOL, XRP, BNB, DOGE, ADA, AVAX, LINK, LTC, AAVE, ARB, COTI, DOT, NEAR, SHIB, SUI, UNI, XLM, ZEC).
+- A rule is checked at the close of every hour on every coin. When all its conditions are true, the bot enters at the next hour's open with a market order.
+- Exit: stop-loss at stop_atr x atr_d from entry, otherwise at the close after hold_hours. One open position per rule per coin.
+- Round-trip cost is about 0.17% of price (fees + slippage). A trade with a 5% stop pays ~0.03R in costs.
+- Target frequency: all your rules together should trade about 2-5 times per week across the 20 coins, i.e. each rule roughly 0.02-0.3 signals per coin per week. Very rare rules are useless; very frequent rules drown in costs.
+
+DATA (hourly, 2022-01..2024-06 shown to you; later years are held out to test you)
+- ret_1h: price change over the last 1h, % (10/50/90%: -0.903 / 0 / 0.899)
+- ret_4h: price change over 4h, % (10/50/90%: -1.85 / 0 / 1.83)
+- ret_24h: price change over 24h, % (10/50/90%: -4.84 / -0.066 / 4.86)
+- ret_72h: price change over 72h, % (10/50/90%: -8.38 / -0.231 / 8.61)
+- ret_7d: price change over 7 days, % (10/50/90%: -13.1 / -0.543 / 13.7)
+- ret_30d: price change over 30 days, % (the coin's regime) (10/50/90%: -26.4 / -2.89 / 32.6)
+- range_pos_7d: position of price in its 7-day high-low range: 0 = at the low, 1 = at the high (10/50/90%: 0.141 / 0.476 / 0.863)
+- atr_d: average daily high-low range over 14 days, % of price (10/50/90%: 3.66 / 6.3 / 10.8)
+- vol_z: quote volume of the last 24h divided by the 30-day median daily volume (1 = normal) (10/50/90%: 0.524 / 0.945 / 2.06)
+- taker_1h: share of volume bought aggressively (market buys) in the last hour; 0.5 = balanced (10/50/90%: 0.438 / 0.492 / 0.543)
+- taker_4h: aggressive-buy share over 4h (10/50/90%: 0.461 / 0.491 / 0.52)
+- taker_24h: aggressive-buy share over 24h (10/50/90%: 0.474 / 0.491 / 0.506)
+- taker_24h_dev: taker_24h minus its own 30-day average (positive = unusual buying pressure) (10/50/90%: -0.0149 / 0.000228 / 0.0145)
+- size_z: average trade size over 24h divided by its 30-day median (>1 = bigger players active) (10/50/90%: 0.831 / 0.992 / 1.19)
+- buy_ratio: share of Bybit accounts that are long (retail crowd positioning), 0..1 (10/50/90%: 0.532 / 0.689 / 0.808)
+- buy_ratio_chg_24h: change of buy_ratio over 24h, percentage points (10/50/90%: -4.16 / 0.08 / 4.15)
+- buy_ratio_pct_30d: percentile of buy_ratio within the last 30 days, 0..1 (10/50/90%: 0.0708 / 0.528 / 0.951)
+- oi_chg_4h: open interest change over 4h, % (10/50/90%: -3.03 / 0.0293 / 3.09)
+- oi_chg_24h: open interest change over 24h, % (10/50/90%: -7.23 / 0.0975 / 7.9)
+- oi_chg_72h: open interest change over 72h, % (10/50/90%: -11.4 / 0.456 / 14.1)
+- funding_bp: last funding rate, basis points per 8h (positive = longs pay shorts) (10/50/90%: -0.765 / 1 / 1.2)
+- funding_pct_30d: percentile of funding within the last 30 days, 0..1 (10/50/90%: 0.105 / 0.523 / 0.84)
+- btc_ret_4h: BTC change over 4h, % (10/50/90%: -1.04 / 0.00716 / 1.08)
+- btc_ret_24h: BTC change over 24h, % (10/50/90%: -2.95 / 0.0205 / 3.15)
+- btc_ret_7d: BTC change over 7 days, % (10/50/90%: -7.7 / 0.167 / 10.1)
+- btc_ret_30d: BTC change over 30 days, % (market regime: negative = falling market) (10/50/90%: -16.3 / 1.33 / 25.8)
+- rel_24h: this coin 24h change minus BTC 24h change, % (10/50/90%: -3.35 / -0.143 / 3.2)
+- hour_utc: UTC hour of the decision (0..23) (10/50/90%: 2 / 12 / 21)
+- weekday: weekday of the decision (0 = Monday) (10/50/90%: 0 / 3 / 6)
+- spot_share_24h: share of spot in 24h turnover: spot / (spot + perpetual); higher = spot-driven market (10/50/90%: 0.101 / 0.163 / 0.257)
+- spot_share_rel: spot_share_24h divided by its 30-day median (>1 = spot unusually active, <1 = futures-driven) (10/50/90%: 0.805 / 0.998 / 1.23)
+- spot_taker_24h: aggressive-buy share on the SPOT market over 24h; 0.5 = balanced (10/50/90%: 0.462 / 0.494 / 0.52)
+- taker_gap_24h: spot_taker_24h minus futures taker_24h (positive = spot buyers more aggressive than futures) (10/50/90%: -0.0259 / 0.00217 / 0.0287)
+- cb_prem_bp: Coinbase (US) price premium over Binance spot, basis points, 4h average (positive = US buyers pay up) (10/50/90%: -9.24 / 0.764 / 8.25)
+- cb_prem_chg_24h: change of cb_prem_bp over 24h, basis points (10/50/90%: -7.09 / -0.0204 / 7.17)
+- btc_cb_prem_bp: Coinbase premium of BTC, basis points (US demand for the whole market) (10/50/90%: -8.15 / 0.998 / 6.29)
+- dvol: DVOL: BTC implied volatility from Deribit options, % annualized (fear gauge) (10/50/90%: 41.6 / 58.5 / 78.8)
+- dvol_chg_24h: DVOL change over 24h, % (10/50/90%: -5.52 / -0.209 / 5.49)
+- dvol_pct_30d: percentile of DVOL within the last 30 days, 0..1 (10/50/90%: 0.0243 / 0.354 / 0.943)
+
+RULE FORMAT (JSON only)
+{"rules": [
+  {"name": "short snake_case name", "side": "long" or "short",
+    "conditions": [["feature", "<" | "<=" | ">" | ">=", number], ...],
+    "hold_hours": integer 6..96, "stop_atr": number 0.3..2.0,
+    "why": "one sentence: the market mechanism you exploit"}
+]}
+Use only the feature names above. 2-4 conditions per rule. Think about WHO is forced to trade and WHY price should move: crowd positioning, liquidations, aggressive flow, funding costs, reversal vs continuation.
+
+YOUR EARLIER RULES ON 2022-01..2024-06 (side; features used; result after costs). Most lost or were too weak - do not repeat these mechanisms:
+- funding_crowd_squeeze (short; funding_bp, buy_ratio_pct_30d): -0.003R t=-0.1 3.8/wk
+- whale_trend_follow (long; ret_24h, size_z, oi_chg_24h): +0.087R t=+1.4 3.1/wk
+- capitulation_reversal (long; range_pos_7d, oi_chg_24h, ret_24h): -0.087R t=-4.2 7.4/wk
+- absorption_long (long; taker_24h_dev, ret_24h, vol_z): +0.032R t=+0.3 0.5/wk
+- alpha_weakness_short (short; btc_ret_24h, rel_24h, oi_chg_24h): -0.005R t=-0.4 7.8/wk
+- neg_funding_short_squeeze (long; funding_bp, buy_ratio_pct_30d): +0.044R t=+0.9 2.0/wk
+- intraday_surge_cont (long; ret_1h, taker_1h, vol_z): +0.045R t=+1.8 4.5/wk
+- retail_panic_reversal (long; buy_ratio_chg_24h, range_pos_7d, oi_chg_4h): +0.042R t=+0.8 1.5/wk
+- weekly_crap_shakeout (long; ret_7d, range_pos_7d, oi_chg_72h): -0.078R t=-2.7 3.9/wk
+- flow_range_divergence_short (short; taker_24h_dev, range_pos_7d, buy_ratio_pct_30d): -0.002R t=-0.0 0.3/wk
+- trend_oi_accel_long (long; ret_4h, oi_chg_24h, size_z): +0.100R t=+1.8 3.0/wk
+- liq_cascade_bounce_long (long; ret_1h, oi_chg_4h, range_pos_7d): -0.025R t=-0.8 3.3/wk
+- funding_decay_reversal_short (short; range_pos_7d, funding_pct_30d, taker_1h): -0.043R t=-1.0 1.2/wk
+- btc_divergence_accum_long (long; rel_24h, btc_ret_24h, oi_chg_24h): +0.042R t=+1.4 7.8/wk
+- retail_flush_momentum_short (short; buy_ratio_chg_24h, vol_z, ret_24h): -0.139R t=-3.0 1.9/wk
+- extreme_funding_stall_short (short; funding_bp, ret_1h, taker_1h): -0.041R t=-3.7 14.3/wk
+- weekly_deep_drawdown_long (long; ret_7d, range_pos_7d, oi_chg_72h): -0.076R t=-1.9 2.7/wk
+- taker_absorption_swing_long (long; ret_24h, taker_24h, buy_ratio_pct_30d): too rare
+- oi_expansion_exhaustion_short (short; range_pos_7d, oi_chg_72h, funding_bp): -0.037R t=-0.9 1.9/wk
+- intraday_momentum_btc_fail_short (short; ret_1h, taker_1h, btc_ret_4h): -0.055R t=-0.8 0.5/wk
+- whale_trend_accel (long; ret_4h, oi_chg_24h, size_z): +0.093R t=+1.2 1.7/wk
+- absorption_capitulation (long; buy_ratio_pct_30d, range_pos_7d, taker_24h_dev): +0.212R t=+1.0 0.1/wk
+- funding_oi_squeeze (long; funding_bp, buy_ratio_pct_30d, oi_chg_4h): +0.003R t=+0.1 2.2/wk
+- btc_divergence_accum (long; rel_24h, btc_ret_24h, oi_chg_24h, vol_z): +0.102R t=+2.1 3.7/wk
+- intraday_liq_grab (long; ret_1h, range_pos_7d, taker_1h): too rare
+- alpha_weakness_breakdown (short; btc_ret_24h, rel_24h, oi_chg_24h): -0.011R t=-0.5 5.0/wk
+- weekend_low_vol_reversal (long; weekday, ret_24h, vol_z): -0.068R t=-2.1 1.6/wk
+- extreme_funding_stall_short (short; funding_bp, buy_ratio_pct_30d, ret_4h): -0.021R t=-0.8 2.2/wk
+- trend_mid_filter_long (long; ret_4h, oi_chg_24h, size_z, range_pos_7d): -0.013R t=-0.1 0.2/wk
+- neg_funding_rel_squeeze (long; funding_bp, buy_ratio_pct_30d, rel_24h): +0.142R t=+1.8 0.8/wk
+- bear_momentum_stall (short; btc_ret_30d, range_pos_7d, ret_24h, taker_24h_dev): +0.017R t=+0.7 2.9/wk
+- oi_distribution_trap (short; btc_ret_30d, oi_chg_24h, buy_ratio_pct_30d, ret_24h): -0.025R t=-1.0 2.6/wk
+- rel_strength_exhaustion (short; btc_ret_7d, rel_24h, ret_7d, funding_bp): +0.043R t=+2.0 4.5/wk
+- weekend_void_breakdown (short; weekday, vol_z, ret_1h, taker_1h): -0.005R t=-0.2 5.8/wk
+- funding_exhaustion_grind (short; btc_ret_30d, funding_pct_30d, ret_4h, vol_z): +0.011R t=+0.3 1.5/wk
+- taker_divergence_dist (short; range_pos_7d, taker_1h, oi_chg_4h, ret_1h): +0.069R t=+1.0 0.4/wk
+- bear_fomo_bounce_fail (short; btc_ret_30d, ret_24h, size_z, buy_ratio_pct_30d): +0.029R t=+1.0 1.0/wk
+- liq_cascade_continuation (short; btc_ret_30d, ret_1h, oi_chg_4h, range_pos_7d): -0.143R t=-3.5 2.2/wk
+- funding_flip_no_follow (short; btc_ret_30d, funding_bp, taker_24h_dev, ret_24h): +0.151R t=+1.4 0.4/wk
+- trend_breakdown_accel (short; btc_ret_30d, range_pos_7d, oi_chg_24h, ret_24h): -0.035R t=-1.3 4.5/wk
+- bear_momentum_stall_short_v2 (short; btc_ret_30d, funding_bp, vol_z, range_pos_7d): -0.108R t=-0.5 0.0/wk
+- bear_bounce_rejection_short (short; btc_ret_30d, ret_24h, range_pos_7d, vol_z): -0.000R t=-0.0 18.5/wk
+- crowded_long_funding_short (short; btc_ret_30d, funding_bp, buy_ratio_pct_30d, oi_chg_24h): +0.039R t=+2.0 16.5/wk
+- volume_accumulation_long (long; ret_7d, range_pos_7d, taker_24h_dev, size_z): -0.028R t=-0.9 3.4/wk
+- relative_weakness_distribution_short (short; btc_ret_30d, rel_24h, oi_chg_24h, vol_z): +0.024R t=+0.9 10.2/wk
+- short_squeeze_funding_flip_long (long; funding_bp, range_pos_7d, ret_1h, buy_ratio_pct_30d): -0.016R t=-0.6 7.9/wk
+
+FOCUS OF THIS ROUND - NEW DATA. You now also see data you never had: the SPOT market next to the futures market
+(spot_share_24h, spot_share_rel, spot_taker_24h, taker_gap_24h), the US price premium on Coinbase (cb_prem_bp,
+cb_prem_chg_24h, btc_cb_prem_bp) and BTC implied volatility from options (dvol, dvol_chg_24h, dvol_pct_30d).
+With futures-only features your 45 earlier rules found one lasting pattern. Every rule of this round must use at
+least one of the NEW features and name the mechanism: who is buying or selling (spot holders, leveraged futures
+traders, US buyers, option hedgers) and why price should follow. Most wanted: SHORT rules that make money when
+BTC fell over 30 days (btc_ret_30d < 0), and LONG rules that are not liquidation cascades. Each rule must trade at
+least 0.5 times per week across the 20 coins on 2022-01..2024-06.
+
+Propose 5 rules. Answer with the JSON object only.
