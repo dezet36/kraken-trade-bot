@@ -146,11 +146,15 @@ OPS = {'<': np.less, '<=': np.less_equal, '>': np.greater, '>=': np.greater_equa
 TITLES = {'P1': 'Отскок после ликвидаций', 'P2': 'Накопление при слабом BTC', 'B3': 'Продажа на отскоке',
           'P4': 'Сжатие шортистов'}
 _CODES = re.compile(r'(?<!\w)([PРBВ])([1234])(?!\w)')     # латиница и кириллица: модель пишет и «Р1»
-# Ярлыки таблицы обзора, которые модель переносит в русский текст (обзор 20:00 28.09: «OI», «buy share»).
+# Ярлыки таблицы обзора, которые модель переносит в русский текст (обзор 20:00 28.09: «OI», «buy share»;
+# пробный обзор 30.09 со статусом закономерностей: «Открытый interest», «funding не глубоко отрицательный»).
 _TERMS = [(re.compile(r'retail long share', re.I), 'доля розничных лонгов'),
           (re.compile(r'retail rank', re.I), 'ранг розничных лонгов'),
           (re.compile(r'buy share', re.I), 'доля агрессивных покупок'),
-          (re.compile(r'(?<!\w)OI(?!\w)'), 'ОИ')]
+          (re.compile(r'(?<!\w)OI(?!\w)'), 'ОИ'),
+          (re.compile(r'(?<!\w)open interest(?!\w)', re.I), 'открытый интерес'),
+          (re.compile(r'(?<!\w)interest(?!\w)', re.I), 'интерес'),
+          (re.compile(r'(?<!\w)funding(?!\w)', re.I), 'фандинг')]
 
 
 def title(key):
@@ -528,9 +532,13 @@ interest change over 24h; "buy share" = aggressive (taker) buying as a share of 
 30 days (0 = lowest, 1 = highest); "volume" = 24h volume vs normal.
 {table}
 
+PATTERN STATUS NOW (computed by code from this data - trust it, do not re-derive the conditions yourself):
+{status}
+
 Write a short market review for the owner IN RUSSIAN (at most 900 characters): 1) the market regime and what
-drives it now; 2) where the crowd and the aggressive flow are; 3) which coins are close to the patterns of your
-notebook you trade (P1, B3 and P4) and what you will do if they trigger; 4) the main risk for the next 24 hours.
+drives it now; 2) where the crowd and the aggressive flow are; 3) which patterns of your notebook can trigger soon
+and on which coins - ONLY from PATTERN STATUS: if a pattern cannot trigger now, say so plainly and do not promise
+trades by it (trades open only on pattern alerts, never from this review); 4) the main risk for the next 24 hours.
 Plain text, no tables. The owner does not know the codes: do not write P1, B3, P4 - call the patterns only by
 their Russian names: «Отскок после ликвидаций» (P1), «Продажа на отскоке» (B3), «Сжатие шортистов» (P4). No English
 labels from the table either - say «доля розничных лонгов», «доля агрессивных покупок», «открытый интерес».
@@ -543,6 +551,69 @@ _review = {'slot': None, 'busy': False}
 def _v(x, fmt):
     """Число для обзора; нет значения — прочерк, а не «nan»."""
     return '—' if x is None or pd.isna(x) else format(float(x), fmt)
+
+
+# Статус закономерностей для обзора (30.09.2026). Обзоры 29–30.09 обещали шорты «Продажи на отскоке»
+# при BTC за 30 дней в плюсе (её условие — минус) и «Накопление при слабом BTC» при растущем BTC:
+# условия модель выводила из таблицы сама и ошибалась. Теперь их считает код — модель пересказывает.
+_MARKET_WIDE = ('cascade_count_3h', 'btc_ret_4h', 'btc_ret_24h', 'btc_ret_7d', 'btc_ret_30d')
+_LABEL = {'ret_4h': ('4h change', '+.1f', '%'), 'oi_chg_4h': ('OI 4h', '+.1f', '%'),
+          'rel_24h': ('vs BTC', '+.1f', '%'), 'oi_chg_24h': ('OI 24h', '+.1f', '%'),
+          'vol_z': ('volume', '.1f', 'x'), 'funding_bp': ('funding', '+.1f', 'bp'),
+          'buy_ratio_pct_30d': ('retail rank', '.2f', ''), 'btc_ret_24h': ('BTC 24h', '+.1f', '%'),
+          'btc_ret_30d': ('BTC 30d', '+.1f', '%'),
+          'cascade_count_3h': ('coins in a liquidation cascade in the last 3h', '.0f', '')}
+_RANKS = ('buy_ratio_pct_30d',)                         # 0..1: «близость» к порогу меряется в четвертях
+
+
+def _holds(x, op, value):
+    return x is not None and pd.notna(x) and bool(OPS[op](float(x), float(value)))
+
+
+def _condition_text(name, op, value, x):
+    label, fmt, unit = _LABEL.get(name, (name, '+.2f', ''))
+    need = '0' if float(value) == 0 else format(float(value), fmt)
+    return f'{label} {_v(x, fmt)}{unit if pd.notna(x) else ""} (needs {op} {need}{unit})'
+
+
+def _gap(name, value, x):
+    """Насколько признак не дотянул до порога — чтобы назвать монеты, ближайшие к закономерности."""
+    if x is None or pd.isna(x):
+        return 99.0
+    return abs(float(x) - float(value)) / (0.25 if name in _RANKS else max(abs(float(value)), 1.0))
+
+
+def pattern_status(data, t):
+    """Строка на каждую торгуемую закономерность: может ли сработать в этот час, на ком, кто ближе всех."""
+    market = data['BTCUSDT'][1].loc[t]
+    lines = []
+    for key, pat in PATTERNS.items():
+        if key in OFF:
+            continue
+        head = f"- {key} «{TITLES.get(key, key)}» ({pat['side']}):"
+        blocked = [c for c in pat['conditions'] if c[0] in _MARKET_WIDE and not _holds(market.get(c[0]), c[1], c[2])]
+        if blocked:
+            why = '; '.join(_condition_text(n, op, v, market.get(n)) for n, op, v in blocked)
+            lines.append(f'{head} CANNOT trigger this hour - {why}.')
+            continue
+        own = [c for c in pat['conditions'] if c[0] not in _MARKET_WIDE]
+        coins = []
+        for p in UNIVERSE:
+            if p not in data or t not in data[p][1].index or (pat.get('universe') == 'core' and p not in POOL):
+                continue
+            f = data[p][1].loc[t]
+            unmet = [c for c in own if not _holds(f.get(c[0]), c[1], c[2])]
+            coins.append((len(unmet), sum(_gap(n, v, f.get(n)) for n, _, v in unmet), p, f, unmet))
+        coins.sort(key=lambda x: (x[0], x[1]))
+        ready = [p.replace('USDT', '') for n, _, p, _, _ in coins if n == 0]
+        if ready:
+            lines.append(f"{head} all conditions hold now on {', '.join(ready)}.")
+            continue
+        near = '; '.join(f"{p.replace('USDT', '')}: " + ', '.join(_condition_text(n, op, v, f.get(n))
+                                                                  for n, op, v in unmet)
+                         for _, _, p, f, unmet in coins[:2])
+        lines.append(f'{head} no coin meets it now. Closest - {near}.')
+    return '\n'.join(lines)
 
 
 def review_question(data, t, held=()):
@@ -564,7 +635,7 @@ def review_question(data, t, held=()):
                          btc24=_v(btc['btc_ret_24h'], '+.1f'), btc7=_v(btc['btc_ret_7d'], '+.1f'),
                          btc30=_v(btc['btc_ret_30d'], '+.1f'), breadth=int(btc['cascade_count_3h']),
                          held=', '.join(p.replace('USDT', '') for p in held) or 'none',
-                         table='\n'.join(rows))
+                         table='\n'.join(rows), status=pattern_status(data, t))
 
 
 def parse_review(text):

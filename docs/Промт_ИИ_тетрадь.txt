@@ -62,9 +62,13 @@ interest change over 24h; "buy share" = aggressive (taker) buying as a share of 
 30 days (0 = lowest, 1 = highest); "volume" = 24h volume vs normal.
 {table}
 
+PATTERN STATUS NOW (computed by code from this data - trust it, do not re-derive the conditions yourself):
+{status}
+
 Write a short market review for the owner IN RUSSIAN (at most 900 characters): 1) the market regime and what
-drives it now; 2) where the crowd and the aggressive flow are; 3) which coins are close to the patterns of your
-notebook you trade (P1, B3 and P4) and what you will do if they trigger; 4) the main risk for the next 24 hours.
+drives it now; 2) where the crowd and the aggressive flow are; 3) which patterns of your notebook can trigger soon
+and on which coins - ONLY from PATTERN STATUS: if a pattern cannot trigger now, say so plainly and do not promise
+trades by it (trades open only on pattern alerts, never from this review); 4) the main risk for the next 24 hours.
 Plain text, no tables. The owner does not know the codes: do not write P1, B3, P4 - call the patterns only by
 their Russian names: «Отскок после ликвидаций» (P1), «Продажа на отскоке» (B3), «Сжатие шортистов» (P4). No English
 labels from the table either - say «доля розничных лонгов», «доля агрессивных покупок», «открытый интерес».

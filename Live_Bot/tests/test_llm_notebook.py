@@ -598,7 +598,8 @@ class TestDecisionLogAndReview:
         data = llm_notebook.market(market_with_cascade())
         t = T0 + pd.Timedelta(hours=450)
         q = llm_notebook.review_question(data, t)
-        assert 'AVAX' in q and 'IN RUSSIAN' in q and '"regime"' in q and '(P1, B3 and P4)' in q
+        assert 'AVAX' in q and 'IN RUSSIAN' in q and '"regime"' in q
+        assert 'PATTERN STATUS NOW' in q and '- P4 «Сжатие шортистов» (long):' in q
         assert 'Your open positions now: none' in q
         assert 'Your open positions now: LINK, XLM' in llm_notebook.review_question(data, t, ['LINKUSDT', 'XLMUSDT'])
         # У каждого числа подпись: голые столбцы модель путала (фандинг за долю покупок).
@@ -621,6 +622,59 @@ class TestDecisionLogAndReview:
         assert not llm_notebook._maybe_review(data, t, Gate(), run=run)          # тот же час — один раз
         assert not llm_notebook._maybe_review(data, t + pd.Timedelta(hours=1), Gate(), run=run)   # 21:00 — не час обзора
         assert len(ran) == 1
+
+
+def status_data(coins=None, market=None):
+    """Один час признаков по всем парам: спокойный рынок, BTC за 30 дней +6.5%; coins — {пара: {признак: число}}."""
+    base = {'ret_4h': 0.1, 'oi_chg_4h': 0.2, 'rel_24h': 0.0, 'oi_chg_24h': 0.5, 'vol_z': 1.0, 'funding_bp': 1.0,
+            'buy_ratio_pct_30d': 0.5, 'btc_ret_4h': 0.1, 'btc_ret_24h': 0.3, 'btc_ret_7d': -2.0, 'btc_ret_30d': 6.5,
+            'cascade_count_3h': 0.0}
+    data = {p: (None, pd.DataFrame([{**base, **(market or {}), **(coins or {}).get(p, {})}], index=[T0]))
+            for p in llm_notebook.UNIVERSE}
+    return data, T0
+
+
+def status_line(data, t, key):
+    return next(x for x in llm_notebook.pattern_status(data, t).splitlines() if x.startswith(f'- {key} '))
+
+
+class TestPatternStatus:
+    """
+    Обзор: что с закономерностями сейчас — считает код. Обзоры 29–30.09 обещали шорты «Продажи на
+    отскоке» при BTC за 30 дней в плюсе: условия модель выводила из таблицы сама.
+    """
+
+    def test_market_wide_condition_blocks_the_pattern(self):
+        data, t = status_data()
+        b3 = status_line(data, t, 'B3')
+        assert b3.startswith('- B3 «Продажа на отскоке» (short): CANNOT trigger this hour')
+        assert 'BTC 30d +6.5% (needs < 0%)' in b3 and 'BTC 24h +0.3% (needs >= +1.0%)' in b3
+        p1 = status_line(data, t, 'P1')
+        assert 'CANNOT trigger this hour - coins in a liquidation cascade in the last 3h 0 (needs >= 4)' in p1
+
+    def test_closest_coins_with_what_they_lack(self):
+        data, t = status_data({'SOLUSDT': {'funding_bp': -0.9, 'buy_ratio_pct_30d': 0.14},
+                               'SEIUSDT': {'funding_bp': 0.6, 'buy_ratio_pct_30d': 0.10}})
+        assert status_line(data, t, 'P4') == (
+            '- P4 «Сжатие шортистов» (long): no coin meets it now. Closest - '
+            'SOL: funding -0.9bp (needs <= -2.0bp), retail rank 0.14 (needs <= 0.03); '
+            'SEI: funding +0.6bp (needs <= -2.0bp), retail rank 0.10 (needs <= 0.03).')
+
+    def test_coins_meeting_all_conditions_are_named(self):
+        dump = {'ret_4h': -5.0, 'oi_chg_4h': -6.0}
+        data, t = status_data({'AVAXUSDT': dump, 'ADAUSDT': dump, 'XRPUSDT': {'funding_bp': -2.5, 'buy_ratio_pct_30d': 0.02}},
+                              market={'cascade_count_3h': 5})
+        assert status_line(data, t, 'P1').endswith('all conditions hold now on ADA, AVAX.')
+        assert status_line(data, t, 'P4').endswith('all conditions hold now on XRP.')
+
+    def test_core_only_pattern_ignores_extra_coins_and_off_pattern_is_absent(self):
+        data, t = status_data({'SEIUSDT': {'rel_24h': -5.0, 'oi_chg_24h': 6.0, 'vol_z': 2.0},
+                               'LTCUSDT': {'rel_24h': -3.0, 'oi_chg_24h': 5.0, 'vol_z': 1.2}},
+                              market={'btc_ret_30d': -3.0, 'btc_ret_24h': 1.5})
+        b3 = status_line(data, t, 'B3')
+        assert 'SEI' not in b3 and 'no coin meets it now. Closest - LTC: volume 1.2x (needs >= 1.5x)' in b3
+        s = llm_notebook.pattern_status(data, t)
+        assert 'P2' not in s and 'Накопление' not in s                    # выключена владельцем
 
 
 class TestHealth:
@@ -702,6 +756,10 @@ class TestHumanNames:
                                     'OIL и COIN не трогаем.')
         assert out == ('Агрессивные покупатели (доля агрессивных покупок ~0.47), рост ОИ, высокий ранг розничных '
                        'лонгов у ZEC; OIL и COIN не трогаем.')
+        # Пробный обзор 30.09: «Открытый interest растёт», «funding не глубоко отрицательный».
+        out = llm_notebook.humanize('Открытый interest растет; funding не глубоко отрицательный; Open Interest и '
+                                    'FundingRate.')
+        assert out == 'Открытый интерес растет; фандинг не глубоко отрицательный; открытый интерес и FundingRate.'
 
     def test_code_before_the_name_is_dropped_not_doubled(self):
         # Обзор 16:00 28.09: модель пишет и код, и имя — имя не должно идти дважды.
