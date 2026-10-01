@@ -454,6 +454,15 @@ class MarketContext:
             entry = entry + shift if direction == BULLISH else entry - shift
 
         far_edge = candidate['invalidation']
+        # СТОП ЗА СНЯТИЕМ — ЗАОДНО И ОТБОР СЕТАПОВ (разбор 01.10.2026,
+        # docs/SMC_разбор_аналитика_2026-10-01.md, К2 и S2). `swept` — любое
+        # снятие в сторону сделки за SWEEP_FRESH_BARS свечей, не обязательно у
+        # этой зоны: у трети зон стоп ставится по снятию, и в половине таких
+        # случаев оно было ДО начала ноги. Стоп уезжает за чужой экстремум
+        # (медиана 1.8% против 0.9% за краем блока), взвешенный R:R падает ниже
+        # MIN_RR, и сетап отсеивается. Привязать снятие к ноге — пропустить эти
+        # сетапы, а они проигрывают: −44R на отборе 2022–24, −51R на приёмке
+        # 2024–26. Менять место стопа здесь — только вместе с заменой отбора.
         if d.SL_MODE == 'conservative' and swept is not None:
             extreme = swept['extreme']
             far_edge = min(far_edge, extreme) if direction == BULLISH else max(far_edge, extreme)
