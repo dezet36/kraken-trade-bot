@@ -108,6 +108,11 @@ def apply_patch(variant):
                                **poi._zone_geometry(direction, top, bottom)})
             return blocks
         poi.find_order_blocks = find_order_blocks_origin
+    if variant in ('B_htf', 'B_any'):
+        # R6 (второй круг): направление старшего ТФ — только 4 ч или «любой ТФ,
+        # при споре — день» вместо обязательного согласия дня и 4 ч.
+        from smc import params as P
+        P.BIAS_MODE = 'htf_only' if variant == 'B_htf' else 'any'
     if variant in ('S4', 'ALL'):
         def untapped_pools_strict(pools, sweeps, index, side=None):
             high, low = _arrays['high'], _arrays['low']

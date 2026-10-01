@@ -234,13 +234,13 @@ def struct_rows(variant, period):
     return f
 
 
-def struct_build():
+def struct_build(variants=VARIANTS, out_name='struct_orders.pkl'):
     import smcr_live as L
     E = L.E
     other = tuple(p for p in L.D.PAIRS if p not in L.POOL10)
     recs = []
     for period in PERIODS5:
-        for v in VARIANTS:
+        for v in variants:
             lay = f'st_{v}'
             E.BAR_H[lay] = 1.0
             E._rows[(period, lay)] = struct_rows(v, period)
@@ -262,7 +262,7 @@ def struct_build():
         L.simulate.cache.pop(period, None)
         E._exec.pop(period, None)
     frame = pd.DataFrame(recs)
-    frame.to_pickle(os.path.join(OUT, 'struct_orders.pkl'))
+    frame.to_pickle(os.path.join(OUT, out_name))
     return frame
 
 
@@ -271,14 +271,14 @@ def _tot(f, col='r'):
     return len(r), (r.mean() if len(r) else np.nan), r.sum()
 
 
-def struct_eval(frame=None):
+def struct_eval(frame=None, variants=VARIANTS, out_name='struct_orders.pkl'):
     if frame is None:
-        frame = pd.read_pickle(os.path.join(OUT, 'struct_orders.pkl'))
+        frame = pd.read_pickle(os.path.join(OUT, out_name))
     for base_label, sel in (('ядро без фильтра толпы', lambda d: d),
                             ('живая SMC с фильтром толпы', lambda d: d[d['crowd'] & d['fund_bp'].notna()])):
         print(f'\nСТРУКТУРА — {base_label}: сделок / R на сделку / итог R (каждая заявка отдельно)')
         f = sel(frame)
-        for v in VARIANTS:
+        for v in variants:
             pool = f[(f['variant'] == v) & (f['sample'] == 'pool')]
             oth = f[(f['variant'] == v) & (f['sample'] == 'other')]
             cells = []
@@ -291,7 +291,7 @@ def struct_eval(frame=None):
             print(f'  {v:4s} | ' + ' | '.join(cells) + f' || приёмка {n_l} {m_l:+.3f} {s_l:+.1f} (насквозь {s_lf:+.1f})'
                   f' || вне пула {n_o} {m_o:+.3f} {s_o:+.1f}')
         base = f[f['variant'] == 'base']
-        for v in VARIANTS[1:]:
+        for v in variants[1:]:
             var = f[f['variant'] == v]
             bp, vp = base[base['sample'] == 'pool'], var[var['sample'] == 'pool']
             early_ok = all(_tot(vp[vp['period'] == p])[2] > _tot(bp[bp['period'] == p])[2] for p in EARLY)
@@ -312,6 +312,11 @@ if __name__ == '__main__':
     sys.stdout.reconfigure(encoding='utf-8')
     if sys.argv[1:2] == ['live']:
         main_live()
+    elif sys.argv[1:2] == ['struct'] and len(sys.argv) > 2:
+        # второй круг: python smcr_eval.py struct base B_htf B_any
+        vs = tuple(sys.argv[2:])
+        name = 'struct_orders_' + '_'.join(vs[1:]) + '.pkl'
+        struct_eval(struct_build(vs, name), vs, name)
     elif sys.argv[1:2] == ['struct']:
         struct_eval(struct_build())
     elif sys.argv[1:2] == ['struct_eval']:
