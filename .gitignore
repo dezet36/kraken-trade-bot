@@ -91,6 +91,10 @@ research/flow_cache*/
 research/binance_metrics_cache/
 # Стакан Binance, выжимка 5 мин (research/fetch_binance_bookdepth.py) — восстановимо.
 research/binance_bookdepth_cache/
+# Минутные свечи Binance с потоком тейкеров (research/fetch_binance_klines_1m.py) — ~2 ГБ,
+# восстановимо; промежуточные признаки стенда микроструктуры.
+research/binance_klines_1m_cache/
+research/results/micro/*.pkl
 # Промежуточные строки стендов разбора SMC (research/smcr_*.py) — пересоздаются
 # прогоном; текстовые итоги рядом в git.
 research/results/smcr/*.pkl
