@@ -326,6 +326,63 @@ class TestLiquidity:
         # Первый день прошлого не имеет
         assert pd.isna(levels['pdh'].iloc[0])
 
+    @staticmethod
+    def _hours(start, days, high_of_day):
+        """Часовые свечи: у каждого дня свой максимум, минимум на 10 ниже."""
+        rows = []
+        for d in range(days):
+            hi = high_of_day(d)
+            for h in range(24):
+                rows.append({'timestamp': start + pd.Timedelta(days=d, hours=h), 'open': hi - 5,
+                             'high': hi, 'low': hi - 10, 'close': hi - 5, 'volume': 1.0})
+        return pd.DataFrame(rows)
+
+    def test_previous_week_is_last_monday_to_sunday(self):
+        """
+        Регрессия (аудит 01.10.2026): resample('W') у pandas — неделя по
+        воскресенье с меткой СПРАВА, и с понедельника по субботу свечи получали
+        максимум ПОЗАПРОШЛОЙ недели. Неделя — с понедельника по воскресенье.
+        """
+        monday = pd.Timestamp('2024-01-01', tz='UTC')            # понедельник
+        df = self._hours(monday, 21, lambda d: 100 + d)           # максимум растёт день ото дня
+        levels = liquidity.build_reference_levels(df)
+        wednesday_week3 = 14 * 24 + 2 * 24 + 12                     # среда третьей недели, 12:00
+        # прошлая неделя — дни 7…13, её максимум — день 13 (113), а не неделя 1 (106)
+        assert levels['pwh'].iloc[wednesday_week3] == pytest.approx(113)
+        assert levels['pwl'].iloc[wednesday_week3] == pytest.approx(97)   # 107 − 10
+        # во второй неделе прошлая — первая (дни 0…6)
+        assert levels['pwh'].iloc[7 * 24 + 5] == pytest.approx(106)
+        # в первой неделе прошлой недели в данных нет — прочерк, а не обрывок
+        assert pd.isna(levels['pwh'].iloc[3 * 24])
+
+    def test_short_window_takes_levels_from_daily_candles(self):
+        """
+        Регрессия (аудит 01.10.2026): живой бот строит структуру по окну 304
+        часовых свечи — прошлый месяц в него не помещается, и по окну PMH был
+        верен в 5–10% случаев. С дневными свечами уровни те же, что по всей
+        истории; без них — прочерк, а не число по обрывку периода.
+        """
+        start = pd.Timestamp('2024-01-01', tz='UTC')
+        df = self._hours(start, 75, lambda d: 100 + (d % 40))        # 75 дней: январь, февраль, март
+        full = liquidity.build_reference_levels(df)
+        window = df.iloc[-304:].reset_index(drop=True)
+        daily = (df.set_index('timestamp').resample('1D').agg({'high': 'max', 'low': 'min'})
+                 .reset_index().iloc[:-1])                           # только закрытые дни
+        with_daily = liquidity.build_reference_levels(window, daily=daily)
+        without = liquidity.build_reference_levels(window)
+        last = len(df) - 1
+        for col in ('pdh', 'pdl', 'pwh', 'pwl', 'pmh', 'pml'):
+            assert with_daily[col].iloc[-1] == pytest.approx(full[col].iloc[last]), col
+        assert full['pmh'].iloc[last] == pytest.approx(139)          # февраль: максимум дня 39 → 139
+        assert pd.isna(without['pmh'].iloc[-1])                      # в 12.7 суток февраль не помещается
+
+    def test_context_feeds_daily_candles_to_liquidity(self):
+        """MarketContext отдаёт пулам дневные свечи окна направления (bias = 1д)."""
+        import inspect
+        from smc import signal
+        src = inspect.getsource(signal.MarketContext.__init__)
+        assert "find_liquidity_pools(df_poi, self.structure, daily=daily)" in src
+
 
 # ── Связь таймфреймов (регрессия на реальный баг) ─────────────────────────────
 class TestTimeframeAlignment:

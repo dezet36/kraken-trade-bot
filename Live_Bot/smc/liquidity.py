@@ -30,7 +30,7 @@ BSL = 'BSL'
 SSL = 'SSL'
 
 
-def build_reference_levels(df, day_open_hour=None):
+def build_reference_levels(df, day_open_hour=None, daily=None):
     """
     Уровни предыдущих периодов (§3.3) для каждой свечи.
 
@@ -41,6 +41,21 @@ def build_reference_levels(df, day_open_hour=None):
 
     day_open_hour — час UTC, с которого начинается торговый день. Методичка
     §11.1: открытие дня в 02:00 UTC+2, то есть 00:00 UTC.
+
+    daily — ЗАКРЫТЫЕ дневные свечи (timestamp, high, low). Если даны, уровни
+    считаются по ним. Живой бот строит структуру по окну 304 часовых свечи
+    (12.7 суток): прошлая неделя в него помещается не всегда, прошлый месяц —
+    никогда, и по одному часовому окну хай/лоу прошлой недели был верен в
+    33–37% случаев, прошлого месяца — в 5–10% (аудит 01.10.2026,
+    docs/Аудит_данных_и_разметки_2026-10-01.md, раздел 3.1).
+
+    Каждой свече берётся период, ПРЕДШЕСТВУЮЩИЙ её собственному: день —
+    вчера, неделя — с понедельника по воскресенье прошлой недели, месяц —
+    прошлый календарный. Значение только по ПОЛНОМУ периоду; если во фрейме
+    его нет целиком — прочерк (NaN), а не число по обрывку. До 01.10.2026
+    неделя бралась через resample('W') — у pandas это неделя по воскресенье с
+    меткой СПРАВА, и с понедельника по субботу свечи получали хай/лоу
+    ПОЗАПРОШЛОЙ недели.
     """
     day_open_hour = params.DAY_OPEN_HOUR_UTC if day_open_hour is None else day_open_hour
 
@@ -48,21 +63,51 @@ def build_reference_levels(df, day_open_hour=None):
         raise ValueError('build_reference_levels требует колонку timestamp')
 
     ts = pd.to_datetime(df['timestamp'], utc=True)
-    shifted = ts - pd.Timedelta(hours=day_open_hour)
+    # Единица хранения — явно наносекунды (pandas 3 хранит в той, в которой
+    # создан столбец; см. smc/signal.to_ns): иначе периоды не совпадут при reindex.
+    shifted = pd.DatetimeIndex(ts - pd.Timedelta(hours=day_open_hour)).as_unit('ns')
 
-    frame = pd.DataFrame({
-        'high': df['high'].to_numpy(dtype=float),
-        'low': df['low'].to_numpy(dtype=float),
-    }, index=shifted)
+    if daily is not None and len(daily) and 'timestamp' in daily.columns:
+        src_index = pd.DatetimeIndex(pd.to_datetime(daily['timestamp'], utc=True)
+                                     - pd.Timedelta(hours=day_open_hour)).as_unit('ns')
+        source = pd.DataFrame({'high': daily['high'].to_numpy(dtype=float),
+                               'low': daily['low'].to_numpy(dtype=float)}, index=src_index)
+        per_day = 1
+    else:
+        source = pd.DataFrame({'high': df['high'].to_numpy(dtype=float),
+                               'low': df['low'].to_numpy(dtype=float)}, index=shifted)
+        step = pd.Series(shifted).diff().median() if len(shifted) > 1 else pd.Timedelta(hours=1)
+        per_day = max(1, int(round(pd.Timedelta(days=1) / step)))
+
+    day_start = shifted.normalize()
+    week_start = (shifted - pd.to_timedelta(shifted.weekday, unit='D')).normalize()
+    month_start = (shifted - pd.to_timedelta(shifted.day - 1, unit='D')).normalize()
+    prev_month_end = month_start - pd.Timedelta(days=1)
+    previous = {
+        'd': (day_start - pd.Timedelta(days=1), 'D', {}),
+        'w': (week_start - pd.Timedelta(days=7), 'W-MON', {'label': 'left', 'closed': 'left'}),
+        'm': ((prev_month_end - pd.to_timedelta(prev_month_end.day - 1, unit='D')).normalize(), 'MS', {}),
+    }
 
     out = pd.DataFrame(index=df.index)
-    for label, rule in (('d', 'D'), ('w', 'W'), ('m', 'MS')):
-        grouped = frame.resample(rule)
-        period_high = grouped['high'].max().shift(1)
-        period_low = grouped['low'].min().shift(1)
-        # reindex по каждой свече: значение прошлого завершённого периода
-        out[f'p{label}h'] = period_high.reindex(shifted, method='ffill').to_numpy()
-        out[f'p{label}l'] = period_low.reindex(shifted, method='ffill').to_numpy()
+    for label, (prev_start, rule, kw) in previous.items():
+        grouped = source.resample(rule, **kw)
+        agg = pd.DataFrame({'high': grouped['high'].max(), 'low': grouped['low'].min(),
+                            'bars': grouped['high'].count()})
+        agg.index = pd.DatetimeIndex(agg.index).as_unit('ns')
+        prev_start = pd.DatetimeIndex(prev_start).as_unit('ns')
+        # полный период: дней в нём × свечей в сутки
+        starts = agg.index
+        if label == 'd':
+            days = pd.Series(1, index=starts)
+        elif label == 'w':
+            days = pd.Series(7, index=starts)
+        else:
+            days = pd.Series(starts.days_in_month, index=starts)
+        full = agg['bars'] >= days * per_day
+        agg.loc[~full, ['high', 'low']] = np.nan
+        out[f'p{label}h'] = agg['high'].reindex(prev_start).to_numpy()
+        out[f'p{label}l'] = agg['low'].reindex(prev_start).to_numpy()
 
     return out
 
@@ -121,7 +166,7 @@ def find_equal_levels(points, kind, tolerance_pct=None,
     return sorted(unique, key=lambda c: c['index'])
 
 
-def find_liquidity_pools(df, structure_obj, include_reference=True):
+def find_liquidity_pools(df, structure_obj, include_reference=True, daily=None):
     """
     Собирает все пулы ликвидности: свинговые уровни, EQH/EQL и уровни
     предыдущих периодов.
@@ -130,6 +175,8 @@ def find_liquidity_pools(df, structure_obj, include_reference=True):
         {'side': 'BSL'|'SSL', 'price', 'index', 'confirmed_at', 'source', 'weight'}
 
     weight отражает значимость уровня по §3.3 (месяц > неделя > день > свинг).
+    daily — закрытые дневные свечи для уровней прошлого дня/недели/месяца
+    (см. build_reference_levels); None — по самим свечам df.
     """
     pools = []
     points = structure_obj['points']
@@ -156,7 +203,7 @@ def find_liquidity_pools(df, structure_obj, include_reference=True):
         })
 
     if include_reference and 'timestamp' in df.columns:
-        levels = build_reference_levels(df)
+        levels = build_reference_levels(df, daily=daily)
         # Уровень периода актуален с той свечи, где он впервые известен;
         # берём точки смены значения, чтобы не плодить дубликаты на каждой свече.
         for col, side, source, weight in (

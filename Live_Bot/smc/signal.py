@@ -118,7 +118,13 @@ class MarketContext:
         # ── Тяжёлый предрасчёт, один раз на пару ─────────────────────────
         self.structure = structure_mod.build_structure(df_poi, tier='swing')
         self.minor_structure = structure_mod.build_structure(df_poi, tier='minor')
-        self.pools = liquidity.find_liquidity_pools(df_poi, self.structure)
+        # Уровни прошлого дня/недели/месяца — по ДНЕВНЫМ свечам окна направления:
+        # часовое окно живого бота (12.7 суток) прошлую неделю вмещает не всегда,
+        # прошлый месяц — никогда (аудит 01.10.2026, liquidity.build_reference_levels).
+        daily = self.frames.get('bias')
+        if daily is None or self._durations.get('bias') != 86_400 * 10 ** 9:
+            daily = None
+        self.pools = liquidity.find_liquidity_pools(df_poi, self.structure, daily=daily)
         self.sweeps = liquidity.find_sweeps(df_poi, self.pools)
         self.pois = poi_mod.collect_pois(df_poi, self.structure, self.sweeps)
         # Индекс по времени подтверждения: на каждой свече релевантны только
