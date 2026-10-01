@@ -95,6 +95,8 @@ research/binance_bookdepth_cache/
 # восстановимо; промежуточные признаки стенда микроструктуры.
 research/binance_klines_1m_cache/
 research/results/micro/*.pkl
+# Заявки ФИБО на 10 новых парах (research/fibo_other_pairs.py gen) — пересоздаются.
+research/results/fibo_other/
 # Промежуточные строки стендов разбора SMC (research/smcr_*.py) — пересоздаются
 # прогоном; текстовые итоги рядом в git.
 research/results/smcr/*.pkl
