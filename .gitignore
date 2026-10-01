@@ -89,6 +89,8 @@ research/flow_cache*/
 # Позиционирование Binance, 5 мин (research/fetch_binance_metrics.py) — сотни МБ,
 # восстановимо тем же загрузчиком.
 research/binance_metrics_cache/
+# Стакан Binance, выжимка 5 мин (research/fetch_binance_bookdepth.py) — восстановимо.
+research/binance_bookdepth_cache/
 # Промежуточные строки стендов разбора SMC (research/smcr_*.py) — пересоздаются
 # прогоном; текстовые итоги рядом в git.
 research/results/smcr/*.pkl
