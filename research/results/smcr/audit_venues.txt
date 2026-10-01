@@ -1,0 +1,22 @@
+B. Часовые свечи Binance (flow_cache) против Bybit (кэши периодов), 10 пар пула; расхождение, б.п.
+         hours  close_med_bp  close_p99_bp  high_med_bp  high_p99_bp  low_med_bp  low_p99_bp  wick_gt10bp_pct  newhigh_disagree_pct  newlow_disagree_pct  vol_ratio_bn_by
+period                                                                                                                                                                   
+12m      96002          1.81          6.07         1.96         8.69        2.01       11.26             5.90                  4.53                 4.84             3.20
+bear    131040          2.52         12.74         2.60        17.84        2.93       21.08            10.07                  7.36                 7.07             7.50
+fresh    78930          2.10          6.03         2.18         9.29        2.17       11.65             7.90                  4.97                 5.45             3.52
+mid1     87840          1.92          8.64         2.03        12.96        2.16       21.56             6.36                  6.47                 8.11             4.20
+mid2     72960          1.63          7.66         1.84        12.30        1.91       15.73             4.46                  5.06                 4.17             2.92
+
+по парам (все периоды):
+          close_med_bp  high_p99_bp  wick_gt10bp_pct  newhigh_disagree_pct  newlow_disagree_pct
+pair                                                                                           
+ADAUSDT           2.26        10.52             4.24                  4.30                 5.87
+AVAXUSDT          1.85        12.46             4.73                  5.35                 5.45
+BNBUSDT           5.60        15.44            28.41                  7.44                 6.99
+BTCUSDT           1.00         9.93             2.47                  6.04                 5.30
+DOGEUSDT          1.67        14.39             7.52                  5.91                 6.55
+ETHUSDT           1.00        10.91             3.11                  5.18                 4.77
+LINKUSDT          1.75        11.41             4.80                  5.35                 6.66
+LTCUSDT           1.71        10.59             3.78                  6.90                 6.53
+SOLUSDT           1.57        16.00             5.89                  4.56                 5.76
+XRPUSDT           1.56        10.49             4.44                  5.75                 5.39
