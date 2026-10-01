@@ -16,6 +16,16 @@
     cap, cooldown, occupy, cool_from_place, max_positions   правила портфеля
     pairs                     набор пар
     filt                      функция (строка срабатывания, признаки) → bool, или None
+    funding                   'real' — фандинг по фактическим выплатам из кэша периода
+                              (с 01.10.2026 по умолчанию), 'flat' — прежний плоский
+                              расход 0.03%/сут (для повтора замеров до 01.10.2026)
+
+ИТОГИ БЕЗ ДВОЙНОГО СЧЁТА (01.10.2026). Периоды 12m (2025-05…2026-07) и fresh
+(2025-11…2026-09) пересекаются на 8 месяцев: 259 из 345 заявок fresh лежат
+внутри 12m. run() по-прежнему печатает каждый период целиком, но СУММУ, среднее
+и интервал считает без повтора — сделки fresh, заявка которых раньше конца 12m,
+в итог не входят (dedup_fresh). Прежние итоги «по пяти периодам» завышали
+выборку (docs/SMC_разбор_аналитика_2026-10-01.md, А1).
 
 Признаки рынка на момент заявки — research/ai_setups.features (ход цены,
 ATR, дневной размах, ОИ, фандинг, BTC), плюс часы до решения ФРС.
@@ -57,7 +67,10 @@ H = 3_600_000
 LIVE = dict(min_conf=4.5, long_premium=0.0, min_rr=4.0, max_rr=0.0, min_stop=0.8, cost_limit=10.0,
             offset=0.001, depth=0.0, fill_through=0.0, fractions=None, breakeven=False, max_hold=336.0,
             expiry=48.0, cancel_at_target=False, cap=3, cooldown=12.0, occupy=True, cool_from_place=True,
-            max_positions=5, pairs=POOL10, filt=None, tiebreak='live', fixed_r=None)
+            max_positions=5, pairs=POOL10, filt=None, tiebreak='live', fixed_r=None,
+            funding='real')
+# Конец 12m: сделки fresh с заявкой до этого момента уже посчитаны в 12m.
+END_12M_MS = int(pd.Timestamp('2026-07-04 23:00', tz='UTC').value // 10 ** 6)
 # ПОРЯДОК ОДНОВРЕМЕННЫХ ЗАЯВОК. Сигналы нескольких пар в один час портфель
 # разбирает по очереди, а мест (кэп 3 в сторону, 5 позиций) мало. Живой бот
 # сортирует кандидатов цикла по конфлюенсу, затем по R:R
@@ -100,6 +113,24 @@ def exec_data(period, pairs):
             df = bt.load_cached(p, '5m')
             have[p] = df
     return {p: have[p] for p in pairs if have.get(p) is not None}
+
+
+_funding = {}
+
+
+def funding_data(period, pairs):
+    """Фактические выплаты фандинга пар периода для smc_engine.FUNDING_REAL."""
+    have = _funding.setdefault(period, {})
+    for p in pairs:
+        if p not in have:
+            got = S.load_series(D.PERIODS[period], 'funding', p, 'funding_rate')
+            have[p] = None if got is None else smc_engine.funding_series(*got)
+    return {p: have[p] for p in pairs if have.get(p) is not None}
+
+
+def _funding_on(period, spec):
+    smc_engine.FUNDING_REAL = (funding_data(period, spec['pairs'])
+                               if spec.get('funding', 'flat') == 'real' else None)
 
 
 _ctx = {}
@@ -210,6 +241,7 @@ def portfolio(period, spec, orders=None):
     orders = orders_for(period, spec) if orders is None else orders
     data = exec_data(period, spec['pairs'])
     smc_engine.FILL_THROUGH_PCT = spec['fill_through']
+    _funding_on(period, spec)
     try:
         res = run_portfolio(orders, data, risk_pct=1.0, max_positions=spec['max_positions'],
                             cooldown_hours=spec['cooldown'], breakeven_after_tp1=spec['breakeven'],
@@ -218,7 +250,20 @@ def portfolio(period, spec, orders=None):
                             cancel_at_target=spec['cancel_at_target'])
     finally:
         smc_engine.FILL_THROUGH_PCT = 0.0
+        smc_engine.FUNDING_REAL = None
     return res, orders
+
+
+def overlaps_12m(trade_or_order):
+    """Заявка fresh, уже посчитанная в 12m (создана до конца 12m)."""
+    meta = getattr(trade_or_order, 'meta', None)
+    if meta is None and isinstance(trade_or_order, dict):
+        meta = trade_or_order.get('meta')
+    row = (meta or {}).get('row')
+    if row is not None:
+        return int(row.t) <= END_12M_MS
+    created = getattr(trade_or_order, 'created', None)
+    return created is not None and created <= np.datetime64(END_12M_MS, 'ms')
 
 
 def per_setup(period, spec, orders=None):
@@ -227,6 +272,7 @@ def per_setup(period, spec, orders=None):
     data = exec_data(period, spec['pairs'])
     prepared = {p: _prepare(df) for p, df in data.items()}
     smc_engine.FILL_THROUGH_PCT = spec['fill_through']
+    _funding_on(period, spec)
     out = []
     try:
         for o in orders:
@@ -239,16 +285,21 @@ def per_setup(period, spec, orders=None):
             out.append((o, None if res is None else res['pnl'] / res['risk']))
     finally:
         smc_engine.FILL_THROUGH_PCT = 0.0
+        smc_engine.FUNDING_REAL = None
     return out
 
 
-def run(spec_changes=None, label='', periods=PERIODS, quiet=False):
+def run(spec_changes=None, label='', periods=PERIODS, quiet=False, dedup=True):
+    """Портфель по периодам. Каждый период печатается целиком; итог (сумма,
+    среднее, интервал) при dedup=True — без сделок fresh, уже посчитанных в 12m."""
     spec = dict(LIVE, **(spec_changes or {}))
     per, allr = {}, []
     for period in periods:
         res, orders = portfolio(period, spec)
         rs = [t['pnl'] / t['risk'] for t in res['trades']]
         per[period] = (len(rs), float(np.sum(rs)) if rs else 0.0)
+        if dedup and period == 'fresh' and '12m' in periods:
+            rs = [t['pnl'] / t['risk'] for t in res['trades'] if not overlaps_12m(t)]
         allr += rs
     r = np.array(allr)
     lo, hi = ci(r) if len(r) > 10 else (np.nan, np.nan)
@@ -262,10 +313,17 @@ def run(spec_changes=None, label='', periods=PERIODS, quiet=False):
 if __name__ == '__main__':
     sys.stdout.reconfigure(encoding='utf-8')
     print('проверка стенда: итог по пяти периодам, R портфеля с живыми правилами')
+    # Сверки со старыми числами — как считали до 01.10.2026: плоский фандинг и
+    # сумма пяти периодов с повтором 12m/fresh.
+    old = {'funding': 'flat'}
     pool_order = {'tiebreak': 'pool', 'pairs': tuple(__import__('llm_rules').POOL)}
-    run(dict(pool_order, min_stop=0.5, cost_limit=0.0, offset=0.0), 'как старый бэктест (сверка: +141.2R, 824 сд)')
-    run(dict(pool_order, min_stop=0.5, offset=0.0), 'стоп от 0.5%, предел 10% (сверка: −0.2R, 716 сд)')
+    run(dict(old, **pool_order, min_stop=0.5, cost_limit=0.0, offset=0.0),
+        'как старый бэктест (сверка: +141.2R, 824 сд)', dedup=False)
+    run(dict(old, **pool_order, min_stop=0.5, offset=0.0), 'стоп от 0.5%, предел 10% (сверка: −0.2R, 716 сд)',
+        dedup=False)
     print('живой порядок одновременных заявок (конфлюенс, затем R:R):')
-    run({'min_stop': 0.5, 'cost_limit': 0.0, 'offset': 0.0}, 'как старый бэктест')
-    run({}, 'ЖИВАЯ SMC: стоп от 0.8%, предел 10%, смещение 0.1%')
-    run({'fill_through': 0.0005}, 'живая, налив насквозь 0.05%')
+    run(dict(old, min_stop=0.5, cost_limit=0.0, offset=0.0), 'как старый бэктест', dedup=False)
+    run(old, 'ЖИВАЯ SMC без фильтра толпы (по-старому)', dedup=False)
+    print('с 01.10.2026: фандинг по факту, итог без двойного счёта 12m/fresh:')
+    run({}, 'ЖИВАЯ SMC без фильтра толпы: стоп от 0.8%, предел 10%')
+    run({'fill_through': 0.0005}, 'то же, налив насквозь 0.05%')

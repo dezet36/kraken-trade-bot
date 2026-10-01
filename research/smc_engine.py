@@ -50,6 +50,23 @@ SLIPPAGE_PCT = 0.0005   # 0.05%
 # берём среднюю величину как расход для обеих сторон — консервативно.
 FUNDING_PCT_PER_DAY = 0.0003
 
+# ФАНДИНГ ПО ФАКТУ (01.10.2026, docs/SMC_разбор_аналитика_2026-10-01.md, F4).
+# Плоский расход выше — допущение «в среднем платим». У стратегии, которая
+# фильтрует сделки по ставке (SMC и ФИБО «против толпы»), оно систематически
+# неверно: сделка по построению стоит с той стороны, которой ПЛАТЯТ, и стенд
+# занижал живую SMC на +0.036R на сделку. Здесь — ряды фактических выплат:
+# {пара: (метки выплат datetime64[ns] UTC, ставки)}; лонг платит ставку с
+# номинала, шорт получает. Пары нет в словаре — прежний плоский расход.
+# По умолчанию выключено (None): прежние замеры всех стратегий не меняются;
+# включает стенд, которому это нужно (research/smc_lab_eval, spec['funding']).
+FUNDING_REAL = None
+
+
+def funding_series(ts_ms, rates):
+    """Ряд выплат для FUNDING_REAL: метки в миллисекундах → datetime64[ns]."""
+    ts = np.asarray(ts_ms, dtype='int64').astype('datetime64[ms]').astype('datetime64[ns]')
+    return ts, np.asarray(rates, dtype=float)
+
 # Лимит наливается, только если цена прошла его НАСКВОЗЬ на эту долю. 0 —
 # налив при касании (как бумажный брокер). На бирже заявка у уровня стоит в
 # очереди, и касание с разворотом её часто не исполняет — а это ровно лучшие
@@ -216,6 +233,13 @@ def simulate_order(order, exec_arrays, start_pos, risk_amount,
     if size > 1:
         bar_ns = float(ts[1] - ts[0])
         bar_days = bar_ns / (24 * 3600 * 1e9)
+    # Фактические выплаты (FUNDING_REAL): платится каждая выплата ПОСЛЕ входа,
+    # до которой позиция дожила, с остатка номинала на её момент.
+    real = (FUNDING_REAL or {}).get(order.pair)
+    if real is not None:
+        f_ts, f_rate = real
+        f_k = int(np.searchsorted(f_ts, entry_time, side='right'))
+        f_sign = 1.0 if is_long else -1.0
 
     # ── Фаза 2: ведение позиции ──────────────────────────────────────────
     be_armed = False
@@ -246,7 +270,14 @@ def simulate_order(order, exec_arrays, start_pos, risk_amount,
             best_price = min(best_price, lo)
             worst_price = max(worst_price, hi)
 
-        funding += remaining * close[i] * FUNDING_PCT_PER_DAY * bar_days
+        if real is None:
+            funding += remaining * close[i] * FUNDING_PCT_PER_DAY * bar_days
+        else:
+            # Выплата в момент T, а свеча i открылась не раньше T: позиция
+            # была открыта в момент выплаты (иначе до свечи i мы бы не дошли).
+            while f_k < len(f_ts) and f_ts[f_k] <= ts[i]:
+                funding += f_sign * f_rate[f_k] * remaining * opens[i]
+                f_k += 1
 
         # Безубыток по триггерной цене (уровень B у фибо-стратегии)
         if order.be_trigger is not None and not be_armed:
