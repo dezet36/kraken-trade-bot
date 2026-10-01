@@ -86,6 +86,14 @@ research/universe_cache/
 # Часовой набор для закономерностей ИИ (research/ai_flow_fetch.py) — ~80 МБ,
 # восстановим тем же загрузчиком.
 research/flow_cache*/
+# Позиционирование Binance, 5 мин (research/fetch_binance_metrics.py) — сотни МБ,
+# восстановимо тем же загрузчиком.
+research/binance_metrics_cache/
+# Промежуточные строки стендов разбора SMC (research/smcr_*.py) — пересоздаются
+# прогоном; текстовые итоги рядом в git.
+research/results/smcr/*.pkl
+research/results/smc0/*.pkl
+research/results/smc1/*.pkl
 # Заявки точной симуляции (research/fibo_live_sim.py) — пересоздаются прогоном,
 # по 3–5 МБ на период; текстовые итоги рядом с ними в git.
 research/results/*.pkl

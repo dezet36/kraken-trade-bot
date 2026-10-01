@@ -108,6 +108,8 @@ def apply_patch(variant):
                                **poi._zone_geometry(direction, top, bottom)})
             return blocks
         poi.find_order_blocks = find_order_blocks_origin
+    # LVL — ядро как есть ПОСЛЕ исправления уровней прошлой недели/месяца (01.10.2026):
+    # подмены нет, вариант отдельный, чтобы не затереть строки base.
     if variant in ('B_htf', 'B_any'):
         # R6 (второй круг): направление старшего ТФ — только 4 ч или «любой ТФ,
         # при споре — день» вместо обязательного согласия дня и 4 ч.
