@@ -97,6 +97,9 @@ COLUMNS = [
     'llm_p',
     'llm_votes',        # сколько факторов из пяти она отметила
     'llm_model',        # какой моделью получен ответ: сравнивать надо равное
+    # Ставка фандинга в момент решения, б.п. за одну выплату (SMC и ФИБО с
+    # фильтром «против толпы»), с 01.10.2026. Имя — как в бумажном журнале.
+    'funding_bp',
 ]
 
 
@@ -137,6 +140,15 @@ def _next_trade_id() -> int:
         return max(int(r.get('trade_id', 0)) for r in rows) + 1
     except Exception:
         return len(rows) + 1
+
+
+def _funding_bp(signal: dict):
+    """Ставка фандинга в момент решения (б.п.) или '' — то же правило, что у
+    бумажного брокера (PaperBroker._context)."""
+    value = (signal.get('smc') or {}).get('funding_bp')
+    if value is None:
+        value = (signal.get('scan') or {}).get('funding_bp')
+    return '' if value is None else value
 
 
 def open_trade(position: dict, signal: dict, balance_before: float) -> int:
@@ -196,6 +208,9 @@ def open_trade(position: dict, signal: dict, balance_before: float) -> int:
         # Размах свечей в процентах цены на момент решения. None, если свечей
         # не хватило — пустая клетка честнее выдуманного числа.
         'atr_pct':          signal.get('atr_pct'),
+        # Ставка фандинга в момент решения: SMC кладёт её в signal['smc'],
+        # ФИБО — в контекст скана. Пусто, если стратегия её не знает.
+        'funding_bp':       _funding_bp(signal),
         # контекст скана: score и компоненты (bot.py кладёт в signal)
         **{f'scan_{k}': v for k, v in (signal.get('scan') or {}).items()},
     }

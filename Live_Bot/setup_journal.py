@@ -58,7 +58,7 @@ LLM_LIFECYCLE = ('условие не наступило', 'цель дости�
 CONTEXT_KEYS = [
     'why', 'confirmed', 'missing', 'factors', 'confluence', 'zone', 'poi_type',
     'sweep', 'impulse_pct', 'score', 'htf_trend', 'htf_strength',
-    'regime', 'regime_er',
+    'regime', 'regime_er', 'funding_bp',
     'llm_analysis', 'llm_trigger', 'llm_stop_why', 'llm_tp_why', 'llm_p',
     'llm_votes', 'llm_critic',
 ]
@@ -95,6 +95,7 @@ COLUMNS = [
     ('htf_trend', 'тренд 4ч'), ('htf_strength', 'сила тренда 4ч'),
 
     ('regime', 'режим рынка (BTC, 1д)'), ('regime_er', 'направленность BTC (ER)'),
+    ('funding_bp', 'фандинг при решении, б.п.'),
     ('atr_pct', 'ATR, % цены'),
 
     ('llm_analysis', 'ИИ: разбор'), ('llm_trigger', 'ИИ: условие входа'),
@@ -227,6 +228,7 @@ def _context_columns(ctx):
         'htf_strength': ctx.get('htf_strength', ''),
         'regime': ctx.get('regime', ''),
         'regime_er': ctx.get('regime_er', ''),
+        'funding_bp': '' if ctx.get('funding_bp') is None else ctx.get('funding_bp'),
         'llm_analysis': llm.get('analysis', ''),
         'llm_trigger': llm.get('trigger', ''),
         'llm_stop_why': llm.get('stop_why', ''),
@@ -313,6 +315,7 @@ def _trades(strategy):
             'impulse_pct': t.get('impulse_pct'), 'score': t.get('score'),
             'htf_trend': t.get('htf_trend'), 'htf_strength': t.get('htf_strength'),
             'regime': t.get('regime'), 'regime_er': t.get('regime_er'),
+            'funding_bp': t.get('funding_bp'),
             'atr_pct': t.get('atr_pct'),
             'llm_analysis': t.get('llm_analysis'), 'llm_trigger': t.get('llm_trigger'),
             'llm_stop_why': t.get('llm_stop_why'), 'llm_tp_why': t.get('llm_tp_why'),

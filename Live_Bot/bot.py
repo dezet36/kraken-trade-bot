@@ -182,9 +182,12 @@ def _build_signal(candidate, strategy, balance):
         if not signal:
             return None, None
         signal['htf_trend'] = candidate.get('htf_trend', 'NEUTRAL')
+        # funding_bp — ставка в момент решения: сканер кладёт её в кандидата,
+        # чтобы фильтр толпы проверялся вживую, а до 01.10.2026 она здесь
+        # отбрасывалась и до журнала не доходила.
         signal['scan'] = {k: candidate.get(k) for k in
                           ('score', 'score_legacy', 'rr_est', 'htf_strength',
-                           'proximity', 'size_pct')}
+                           'proximity', 'size_pct', 'funding_bp')}
         df_for_chart = candidate['df_1h']
         log(f"\n[FIBO] {pair}: зона {candidate.get('zone')}, "
             f"HTF {signal['htf_trend']}")
@@ -691,7 +694,7 @@ def trading_cycle():
                     # Контекст скана — в журнал сделки («почему открылась»)
                     signal['scan'] = {k: candidate.get(k) for k in
                                       ('score', 'score_legacy', 'rr_est', 'htf_strength',
-                                       'proximity', 'size_pct')}
+                                       'proximity', 'size_pct', 'funding_bp')}
                     df_for_chart = candidate['df_1h']
 
                 # Та же проверка сторон, что и в фантомном пути. Живой путь

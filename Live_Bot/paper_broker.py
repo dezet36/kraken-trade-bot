@@ -126,6 +126,11 @@ COLUMNS = [
     # падение, боковик — и его коэффициент эффективности. С 25.09.2026; до
     # того разбор по режиму делался задним числом по дневным свечам.
     'regime', 'regime_er',
+    # Ставка фандинга в момент решения, б.п. за одну выплату (SMC и ФИБО с
+    # фильтром «против толпы»; у остальных пусто). С 01.10.2026: до того
+    # ставка шла в сигнал, а брокер её терял, и фильтр толпы нечем было
+    # проверить по своим же сделкам (docs/SMC_аудит_2026-09-30.md, раздел 5).
+    'funding_bp',
     'breakeven_set',
     'why', 'confluence', 'poi_type', 'factors', 'sweep',
     'impulse_pct', 'score', 'proximity', 'htf_strength',
@@ -1055,6 +1060,10 @@ class PaperBroker:
             ctx['regime'], ctx['regime_er'] = market_regime.last_btc_regime()
         except Exception:                              # noqa: BLE001
             ctx['regime'], ctx['regime_er'] = '', None
+        # Ставка фандинга в момент решения — по ней фильтр толпы проверяется
+        # вживую. SMC кладёт её в signal['smc'], ФИБО — в контекст скана.
+        funding_bp = smc.get('funding_bp')
+        ctx['funding_bp'] = funding_bp if funding_bp is not None else scan.get('funding_bp')
 
         # Разбор модели, если сделку открыла пятая стратегия. Своё «почему»
         # она пишет сама и человеческим языком — оно заменяет собранное выше
@@ -1769,6 +1778,7 @@ class PaperBroker:
             'hour_utc': pos.get('hour_utc', ''),
             'regime': ctx.get('regime', ''),
             'regime_er': ctx.get('regime_er') if ctx.get('regime_er') is not None else '',
+            'funding_bp': ctx.get('funding_bp') if ctx.get('funding_bp') is not None else '',
             'breakeven_set': pos['breakeven_set'],
             'why': ctx.get('why', ''),
             'geometry': json.dumps(ctx.get('geometry') or {}, ensure_ascii=False),

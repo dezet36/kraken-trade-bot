@@ -1242,3 +1242,89 @@ class TestTargetsAreTakenNearToFar:
         broker._save_state()
         again = pb.PaperBroker(client, strategies=('FIBO', 'SMC'))
         assert again.positions('SMC')['BTCUSDT']['targets'] == [120.0, 110.0], 'прожитый порядок не трогаем'
+
+
+class TestFundingAtDecisionReachesTheJournal:
+    """
+    Ставка фандинга в момент решения доходит до заявки, сделки и журналов.
+
+    ЗАЧЕМ. SMC и ФИБО берут сделку только «против толпы» по фандингу. Ставку
+    они клали в сигнал (SMC — signal['smc']['funding_bp'], ФИБО — кандидат
+    сканера), а брокер и сборка сигнала её теряли: фильтр толпы нечем было
+    проверить по собственным сделкам (docs/SMC_аудит_2026-09-30.md, раздел 5).
+    С 01.10.2026 — колонка funding_bp в бумажном, боевом и сетапном журналах.
+    """
+
+    @staticmethod
+    def _smc_signal(rate_bp):
+        s = signal(strategy='SMC', entry=100.0, stop=90.0, tp1=130.0)
+        s['smc'] = {'funding_bp': rate_bp, 'confluence': 5.0, 'poi_type': 'ORDER_BLOCK',
+                    'factors': {'ote_zone': True, 'fvg_present': True}}
+        return s
+
+    def test_smc_rate_is_in_the_order_context(self, broker_env):
+        broker, _client, pb, _cfg = broker_env
+        pb._now_ms = lambda: 1_700_000_000_000
+        broker.open('SMC', self._smc_signal(1.0))
+        assert broker.pending('SMC')['BTCUSDT']['context']['funding_bp'] == 1.0
+
+    def test_smc_rate_reaches_the_closed_trade(self, broker_env):
+        broker, client, pb, _cfg = broker_env
+        pb._now_ms = lambda: 1_700_000_000_000
+        broker.open('SMC', self._smc_signal(-1.25))
+        feed(broker, client, 'BTCUSDT', [(100, 100, 100), (101, 85, 88)],
+             now=1_700_000_000_000 + 5 * BAR_MS)
+        row = pb.read_journal()[0]
+        assert float(row['funding_bp']) == -1.25
+
+    def test_fibo_rate_comes_from_the_scan(self, broker_env):
+        broker, client, pb, _cfg = broker_env
+        pb._now_ms = lambda: 1_700_000_000_000
+        s = signal(entry=100.0, stop=90.0, tp1=130.0)
+        s['scan']['funding_bp'] = 2.5
+        broker.open('FIBO', s)
+        feed(broker, client, 'BTCUSDT', [(100, 100, 100), (101, 85, 88)],
+             now=1_700_000_000_000 + 5 * BAR_MS)
+        assert float(pb.read_journal()[0]['funding_bp']) == 2.5
+
+    def test_unknown_rate_is_an_empty_cell(self, broker_env):
+        """Нет ставки — пустая клетка, а не ноль: ноль — тоже ставка."""
+        broker, client, pb, _cfg = broker_env
+        pb._now_ms = lambda: 1_700_000_000_000
+        broker.open('FIBO', signal(entry=100.0, stop=90.0, tp1=130.0))
+        feed(broker, client, 'BTCUSDT', [(100, 100, 100), (101, 85, 88)],
+             now=1_700_000_000_000 + 5 * BAR_MS)
+        assert pb.read_journal()[0]['funding_bp'] == ''
+
+    def test_all_journals_name_it_the_same(self):
+        import paper_broker
+        import setup_journal
+        import trade_journal
+        assert 'funding_bp' in paper_broker.COLUMNS
+        assert 'funding_bp' in trade_journal.COLUMNS
+        assert 'funding_bp' in setup_journal.CONTEXT_KEYS
+        assert 'funding_bp' in dict(setup_journal.COLUMNS)
+        assert setup_journal._context_columns({'funding_bp': 1.0})['funding_bp'] == 1.0
+        assert setup_journal._context_columns({'funding_bp': None})['funding_bp'] == ''
+
+    def test_live_journal_takes_it_from_the_signal(self):
+        import trade_journal
+        assert trade_journal._funding_bp({'smc': {'funding_bp': 1.0}}) == 1.0
+        assert trade_journal._funding_bp({'scan': {'funding_bp': -2.0}}) == -2.0
+        assert trade_journal._funding_bp({'smc': {}, 'scan': {}}) == ''
+
+    def test_fibo_signal_keeps_the_rate_from_the_scanner(self, monkeypatch):
+        """Сборка сигнала ФИБО больше не отбрасывает ставку кандидата."""
+        import bot
+
+        def fake_analyze(df_1h, df_5m, pair, balance):
+            return {'trading_pair': pair,
+                    'setup': {'type': 'SHORT', 'start_price': 110.0, 'end_price': 100.0, 'size': 10.0},
+                    'trigger': {'zone': 'Zone_A'}, 'params': {'entry': 104.0, 'stop_loss': 108.0}}
+
+        monkeypatch.setattr(bot, 'analyze_market', fake_analyze)
+        monkeypatch.setattr(bot.settings, 'allows', lambda strategy, direction: True)
+        sig, _df = bot._build_signal({'pair': 'ETHUSDT', 'df_1h': object(), 'zone': 'Zone_A',
+                                      'funding_bp': 1.0}, 'FIBO', 10_000)
+        assert sig is not None
+        assert sig['scan']['funding_bp'] == 1.0
