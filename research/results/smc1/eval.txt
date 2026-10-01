@@ -1,0 +1,54 @@
+  pool AAVEUSDT: сетапов 414
+  pool ADAUSDT: сетапов 379
+  pool ARBUSDT: сетапов 193
+  pool AVAXUSDT: сетапов 381
+  pool BNBUSDT: сетапов 337
+  pool BTCUSDT: сетапов 346
+  pool COTIUSDT: сетапов 387
+  pool DOGEUSDT: сетапов 381
+  pool DOTUSDT: сетапов 388
+  pool ETHUSDT: сетапов 356
+  pool LINKUSDT: сетапов 384
+  pool LTCUSDT: сетапов 379
+  pool NEARUSDT: сетапов 375
+  pool SHIB1000USDT: сетапов 350
+  pool SOLUSDT: сетапов 383
+  pool SUIUSDT: сетапов 240
+  pool UNIUSDT: сетапов 390
+  pool XLMUSDT: сетапов 403
+  pool XRPUSDT: сетапов 377
+  pool ZECUSDT: сетапов 360
+  other ALGOUSDT: сетапов 302
+  other CRVUSDT: сетапов 302
+  other DASHUSDT: сетапов 289
+  other EGLDUSDT: сетапов 297
+  other GALAUSDT: сетапов 285
+  other HBARUSDT: сетапов 286
+  other ICPUSDT: сетапов 253
+  other LDOUSDT: сетапов 260
+  other SANDUSDT: сетапов 309
+  other STXUSDT: сетапов 230
+  other XMRUSDT: сетапов 310
+  other ZENUSDT: сетапов 296
+  other 1000PEPEUSDT: сетапов 245
+  other APTUSDT: сетапов 277
+  other ATOMUSDT: сетапов 282
+  other BCHUSDT: сетапов 310
+  other ETCUSDT: сетапов 309
+  other FILUSDT: сетапов 314
+  other INJUSDT: сетапов 236
+  other OPUSDT: сетапов 265
+  other SEIUSDT: сетапов 189
+  other TRXUSDT: сетапов 242
+
+портфель (6 позиций, одна на пару), исполнение на часовых свечах, фандинг по факту
+  по тренду | рынок | без толпы   3.4 сд/нед | dev 435 -0.092 | val 196 -0.026 | hold 217 -0.050 | val+hold [-0.226; +0.152] | y21 155 -0.261 | вне пула  860 -0.004 | итог пула y21 -40.5R dev -39.9R val -5.1R hold -11.0R
+  по тренду | рынок | толпа       1.3 сд/нед | dev 169 +0.057 | val  51 +0.025 | hold  67 +0.015 | val+hold [-0.315; +0.380] | y21 107 -0.243 | вне пула  380 +0.187 | итог пула y21 -25.9R dev +9.7R val +1.3R hold +1.0R
+  по тренду | слом 4ч | без толпы  0.8 сд/нед | dev  96 -0.267 | val  53 -0.308 | hold  54 -0.251 | val+hold [-0.530; -0.016] | y21  32 +0.052 | вне пула  201 +0.125 | итог пула y21 +1.7R dev -25.6R val -16.3R hold -13.6R
+  по тренду | слом 4ч | толпа     0.3 сд/нед | dev  34 -0.417 | val   8 +0.177 | hold  14 -0.085 | val+hold [-0.587; +0.674] | y21  19 +0.312 | вне пула   57 +0.153 | итог пула y21 +5.9R dev -14.2R val +1.4R hold -1.2R
+  любое | рынок | без толпы       6.3 сд/нед | dev 802 -0.171 | val 336 +0.211 | hold 416 +0.079 | val+hold [-0.014; +0.294] | y21 310 +0.122 | вне пула 1553 -0.115 | итог пула y21 +37.9R dev -136.9R val +70.8R hold +33.0R
+  любое | рынок | толпа           4.7 сд/нед | dev 616 -0.011 | val 221 +0.159 | hold 267 -0.107 | val+hold [-0.148; +0.181] | y21 274 +0.118 | вне пула 1160 +0.044 | итог пула y21 +32.3R dev -6.5R val +35.1R hold -28.5R
+  любое | слом 4ч | без толпы     2.5 сд/нед | dev 326 -0.110 | val 140 -0.019 | hold 170 +0.054 | val+hold [-0.164; +0.212] | y21 110 -0.029 | вне пула  610 +0.063 | итог пула y21 -3.2R dev -35.7R val -2.7R hold +9.3R
+  любое | слом 4ч | толпа         1.2 сд/нед | dev 169 -0.030 | val  57 -0.004 | hold  50 -0.129 | val+hold [-0.343; +0.235] | y21  84 +0.107 | вне пула  286 +0.208 | итог пула y21 +9.0R dev -5.1R val -0.2R hold -6.4R
+
+Лучший по dev: по тренду | рынок | толпа → НЕ проходит протокол
