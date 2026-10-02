@@ -40,6 +40,11 @@ def _smc():
     return params
 
 
+def _smcs():
+    from smcs import params
+    return params
+
+
 def _llm_rules():
     """Правила ИИ, если он в режиме «правила» (config.LLM_MODE=rules), иначе None."""
     import llm_rules
@@ -75,6 +80,8 @@ def expiry_hours(strategy):
             return _rsibb().EXPIRY_BARS * _bar_hours(_rsibb().TIMEFRAME)
         if name == 'SMC':
             return _smc().PENDING_ORDER_MAX_HOURS
+        if name == 'SMCS':
+            return _smcs().PENDING_ORDER_MAX_HOURS
         if name == 'LLM':
             if _llm_rules() is not None:
                 return _llm_rules().PENDING_ORDER_MAX_HOURS
@@ -93,6 +100,8 @@ def cooldown_hours(strategy):
             return _rsibb().COOLDOWN_HOURS
         if name == 'SMC':
             return _smc().COOLDOWN_HOURS
+        if name == 'SMCS':
+            return _smcs().COOLDOWN_HOURS
         if name == 'LLM':
             if _llm_rules() is not None:
                 return _llm_rules().COOLDOWN_HOURS
@@ -110,6 +119,8 @@ def cost_limit_pct(strategy):
             return _rsibb().MAX_ENTRY_COST_SHARE_PCT
         if name == 'SMC':
             return _smc().MAX_ENTRY_COST_SHARE_PCT
+        if name == 'SMCS':
+            return _smcs().MAX_ENTRY_COST_SHARE_PCT
         if name == 'LLM':
             if _llm_rules() is not None:
                 return _llm_rules().MAX_ENTRY_COST_SHARE_PCT
@@ -141,6 +152,8 @@ def max_hold_hours(strategy):
             return _rsibb().MAX_HOLD_BARS * _bar_hours(_rsibb().TIMEFRAME)
         if name == 'SMC':
             return _smc().MAX_POSITION_HOLD_HOURS
+        if name == 'SMCS':
+            return _smcs().MAX_POSITION_HOLD_HOURS
         if name == 'LLM':
             if _llm_rules() is not None:
                 return _llm_rules().MAX_POSITION_HOLD_HOURS
@@ -161,6 +174,8 @@ def drops_at_target(strategy):
     try:
         if strategy == 'SMC':
             return bool(_smc().CANCEL_PENDING_AT_TARGET)
+        if strategy == 'SMCS':
+            return bool(_smcs().CANCEL_PENDING_AT_TARGET)
         if strategy == 'LLM' and _llm_rules() is not None:
             return bool(_llm_rules().CANCEL_PENDING_AT_TARGET)
     except Exception:                              # noqa: BLE001
@@ -191,6 +206,10 @@ def fills_through_market(strategy):
             return bool(_rsibb().FILL_THROUGH_MARKET)
         if strategy == 'SMC':
             return bool(_smc().FILL_THROUGH_MARKET)
+        if strategy == 'SMCS':
+            # Вход SMCS — по рынку: лимит за рынком исполняется сразу, как
+            # замер (первая минута после закрытия бара слома, тейкер).
+            return bool(_smcs().FILL_THROUGH_MARKET)
         if strategy == 'LLM':
             if _llm_rules() is not None:
                 return bool(_llm_rules().FILL_THROUGH_MARKET)
@@ -221,6 +240,8 @@ def min_stop_pct(strategy):
             return float(_levels().MIN_STOP_PCT)
         if strategy == 'RSIBB':
             return float(_rsibb().MIN_STOP_PCT)
+        if strategy == 'SMCS':
+            return float(_smcs().MIN_STOP_PCT)
         if strategy == 'LLM':
             if _llm_rules() is not None:
                 return float(_llm_rules().MIN_SL_PCT) * 100

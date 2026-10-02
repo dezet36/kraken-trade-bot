@@ -153,9 +153,26 @@ def rsibb_decisions(df):
     return _fp(out)
 
 
+def smcs_decisions(df):
+    """SMC-структура 4ч: сетап на последнем баре, как его видит адаптер,
+    с числами из СВОЕГО params."""
+    from smcs import core, params
+    h4 = frames_of(df.copy())['htf']
+    o, h, l, c = (h4[col].astype(float).tolist() for col in ('open', 'high', 'low', 'close'))
+    out = []
+    for i in range(60, len(h4)):
+        setup, reason = core.evaluate(o[:i + 1], h[:i + 1], l[:i + 1], c[:i + 1],
+                                      k=params.SWING_K, atr_period=params.ATR_PERIOD,
+                                      stop_buffer_atr=params.STOP_BUFFER_ATR,
+                                      target_r=params.TARGET_R, bos_only=params.BOS_ONLY)
+        out.append(reason if setup is None else
+                   (setup['direction'], round(setup['stop'], 8), round(setup['target'], 8)))
+    return _fp(out)
+
+
 def profiles():
     import strategy_profile
-    return _fp({n: strategy_profile.describe(n) for n in ('SMC', 'LEVELS', 'RSIBB', 'LLM')})
+    return _fp({n: strategy_profile.describe(n) for n in ('SMC', 'LEVELS', 'RSIBB', 'LLM', 'SMCS')})
 
 
 READERS = {
@@ -165,6 +182,7 @@ READERS = {
     'LLM-уровни': llm_levels,
     'LEVELS': levels_decisions,
     'RSIBB': rsibb_decisions,
+    'SMCS': smcs_decisions,
 }
 
 
@@ -202,7 +220,7 @@ class TestDecisionParamsAreIsolated:
         import strategy_profile
         assert strategy_profile.cooldown_hours('SMC') == 99.0
         assert strategy_profile.fills_through_market('SMC') is True
-        for other in ('LEVELS', 'RSIBB', 'LLM'):
+        for other in ('LEVELS', 'RSIBB', 'LLM', 'SMCS'):
             assert _fp(strategy_profile.describe(other)) == _fp(json.loads(baseline['профили'])[other])
 
     def test_llm_rules_do_not_reach_anyone_else(self, df, baseline, monkeypatch):
@@ -249,6 +267,24 @@ class TestDecisionParamsAreIsolated:
             if name != 'RSIBB':
                 assert fn(df) == baseline[name], f'{name} изменился от правки решений Боллинджера'
 
+    def test_smcs_decisions_do_not_reach_anyone_else(self, df, baseline, monkeypatch):
+        from smcs import params
+        for name, value in {
+            'SWING_K': 2, 'STOP_BUFFER_ATR': 0.5, 'TARGET_R': 3.0, 'BOS_ONLY': False,
+            'MAX_POSITION_HOLD_HOURS': 1.0, 'PENDING_ORDER_MAX_HOURS': 9.0,
+            'COOLDOWN_HOURS': 99.0, 'MAX_ENTRY_COST_SHARE_PCT': 50.0, 'MIN_STOP_PCT': 3.0,
+        }.items():
+            monkeypatch.setattr(params, name, value)
+        assert smcs_decisions(df) != baseline['SMCS'], 'правка SMCS должна менять SMCS — иначе тест пуст'
+        for name, fn in READERS.items():
+            if name != 'SMCS':
+                assert fn(df) == baseline[name], f'{name} изменился от правки решений SMCS'
+        import strategy_profile
+        assert strategy_profile.cooldown_hours('SMCS') == 99.0
+        before = json.loads(baseline['профили'])
+        for other in ('SMC', 'LEVELS', 'RSIBB', 'LLM'):
+            assert _fp(strategy_profile.describe(other)) == _fp(before[other])
+
     def test_llm_settings_do_not_reach_anyone_else(self, df, baseline, monkeypatch):
         import strategy_profile
         cfg = strategy_profile._config()
@@ -261,7 +297,7 @@ class TestDecisionParamsAreIsolated:
         for name, fn in READERS.items():
             assert fn(df) == baseline[name], f'{name} изменился от настроек ИИ'
         before = json.loads(baseline['профили'])
-        for other in ('SMC', 'LEVELS', 'RSIBB'):
+        for other in ('SMC', 'LEVELS', 'RSIBB', 'SMCS'):
             assert _fp(strategy_profile.describe(other)) == _fp(before[other])
 
     def test_common_config_values_reach_only_fibo(self, df, baseline, monkeypatch):
@@ -330,14 +366,16 @@ STRATEGY_MODULES = {
     'SMC': ('strategy_smc.py',),
     'LEVELS': ('strategy_levels.py',),
     'RSIBB': ('strategy_rsibb.py',),
+    'SMCS': ('strategy_smcs.py',),
     'LLM': ('strategy_llm.py', 'llm_market.py', 'llm_context.py', 'llm_decide.py',
             'llm_record.py', 'llm_urgency.py', 'llm_prompt.py', 'llm_grammar.py', 'llm_rules.py'),
 }
 SHARED = ('market_structure.py', 'smc/signal.py', 'smc/structure.py', 'smc/swings.py',
           'smc/liquidity.py', 'smc/imbalance.py', 'smc/poi.py', 'smc/fib.py',
           'smc/sessions.py', 'levels/core.py', 'rsibb/core.py', 'liquidity/core.py',
+          'smcs/core.py',
           'exchange.py', 'market_regime.py', 'strategy_profile.py')
-ADAPTERS = re.compile(r'^\s*(import|from)\s+(strategy_smc|strategy_levels|strategy_rsibb|strategy_llm)\b', re.M)
+ADAPTERS = re.compile(r'^\s*(import|from)\s+(strategy_smcs|strategy_smc|strategy_levels|strategy_rsibb|strategy_llm)\b', re.M)
 
 
 def _src(path):
@@ -361,6 +399,6 @@ class TestNoStrategyImportsAnother:
         src = _src(path)
         hits = {m.group(2) for m in ADAPTERS.finditer(src)}
         assert not hits, f'общий слой {path} импортирует стратегию: {sorted(hits)}'
-        if path.startswith(('smc/', 'levels/', 'rsibb/', 'liquidity/')):
+        if path.startswith(('smc/', 'levels/', 'rsibb/', 'liquidity/', 'smcs/')):
             assert not re.search(r'^\s*(import|from)\s+(config|settings_store)\b', src, re.M), (
                 f'{path}: ядро читает config/настройки — оно должно считать по числам своего params')

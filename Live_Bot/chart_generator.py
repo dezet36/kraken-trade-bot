@@ -45,7 +45,7 @@ def _strategy_of(signal: dict) -> str:
     график останется прежним, но не сломается.
     """
     for section, name in (('llm', 'LLM'), ('smc', 'SMC'), ('levels', 'LEVELS'),
-                          ('rsibb', 'RSIBB')):
+                          ('rsibb', 'RSIBB'), ('smcs', 'SMCS')):
         if signal.get(section):
             return name
     if signal.get('zone_a') or signal.get('zone_b'):

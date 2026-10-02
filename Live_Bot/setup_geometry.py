@@ -159,6 +159,16 @@ def build(strategy, signal):
                 'label': (glossary.liquidity_side(smc.get('sweep_side'))
                           + ' · снята'),
             })
+    elif strategy == 'SMCS':
+        sm = signal.get('smcs') or {}
+        # Сетап SMCS — сам слом: свинг, за которым закрылась свеча 4ч, и
+        # нога, его сломавшая. Вход по рынку, поэтому главной зоны нет;
+        # ордер-блок ноги — граница, за которой стоит стоп.
+        leg('начало ноги — за ним стоп', 'экстремум ноги')
+        if sm.get('level'):
+            lines.append({'price': float(sm['level']),
+                          'label': 'сломанный свинг 4ч (BOS)', 'main': True})
+        band(sm.get('ob_lo'), sm.get('ob_hi'), 'ордер-блок ноги')
     elif strategy == 'LEVELS':
         lv = signal.get('levels') or {}
         if lv.get('level'):

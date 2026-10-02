@@ -49,7 +49,7 @@ import settings_store as settings
 import setup_geometry
 from logger import log
 
-STRATEGIES = ('FIBO', 'SMC', 'LEVELS', 'RSIBB', 'LLM')
+STRATEGIES = ('FIBO', 'SMC', 'LEVELS', 'RSIBB', 'LLM', 'SMCS')
 
 BAR_TF = '5m'
 BAR_MS = 5 * 60 * 1000
