@@ -102,6 +102,10 @@ research/results/fibo_other/
 research/results/smcr/*.pkl
 research/results/smc0/*.pkl
 research/results/smc1/*.pkl
+# SMC с нуля (research/smcz): итоги прогонов по парам — сотни МБ, пересоздаются
+# прогоном (smcz.run_events / run_model_c); текстовые итоги рядом в git.
+research/results/smcz/*/
+research/results/smcz/*.log
 # Заявки точной симуляции (research/fibo_live_sim.py) — пересоздаются прогоном,
 # по 3–5 МБ на период; текстовые итоги рядом с ними в git.
 research/results/*.pkl
