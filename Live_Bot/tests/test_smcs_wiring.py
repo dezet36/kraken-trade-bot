@@ -7,7 +7,7 @@
 - исполнение — то, что мерилось: вход ПО РЫНКУ сразу после закрытия бара
   слома (лимит за рынком, тейкер), стоп и цель — как в замере, срок 30 сут,
   без паузы после выхода, предел издержек 20% (в замере не отсёк бы ничего),
-  пять позиций в одну сторону;
+  восемь позиций в одну сторону (выбор владельца 02.10.2026);
 - устаревший слом (бот стоял) входом не становится.
 """
 
@@ -97,7 +97,7 @@ class TestAdapter:
         assert p['stop_loss'] == pytest.approx(ev['stop'])
         assert p['tp_targets'] == [pytest.approx(ev['target'])]
         assert p['max_hold_hours'] == 720
-        assert p['max_same_direction'] == 5
+        assert p['max_same_direction'] == 8
         assert p['be_level'] is None and p['breakeven_after_tp'] is False
         # лимит ЗА рынком: исполнится сразу, по рынку
         price = sig['market_price']
