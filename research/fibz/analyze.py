@@ -108,7 +108,7 @@ def cmd_map(runs, period='DEV'):
         fill = (df.status == sim.ST_FILLED).mean() if len(df) else np.nan
         side = {s: stats(df[df.dir == s], 'r_net')['mean'] for s in (1, -1)}
         f = df[df.status == sim.ST_FILLED]
-        rows.append(dict(tf=key[0], k=key[1], r=key[2], stop=key[3], target=str(key[4]),
+        rows.append(dict(tf=key[0], k=key[1], r=key[2], stop=key[3], target=str(key[4]), E=key[5], H=key[6],
                          n=n_['n'], fill=fill, gross=g['mean'], net=n_['mean'], t=n_['t'],
                          cost=g['mean'] - n_['mean'], long=side[1], short=side[-1],
                          rr=f.rr.median() if len(f) else np.nan,
@@ -117,8 +117,9 @@ def cmd_map(runs, period='DEV'):
     out = pd.DataFrame(rows)
     pd.set_option('display.width', 250)
     pd.set_option('display.max_rows', 500)
-    print(f'ЭТАП 1 — карта, {period}, Bybit, одна позиция на пару; R на сделку')
-    print(out.round(3).to_string(index=False))
+    if len(out) <= 300:
+        print(f'Карта, {period}, Bybit, одна позиция на пару; R на сделку')
+        print(out.round(3).to_string(index=False))
     return out
 
 

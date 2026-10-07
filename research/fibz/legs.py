@@ -135,7 +135,7 @@ def build(bars: dict, tf: str, k: int, expiry_bars: int) -> pd.DataFrame:
 def orders(df: pd.DataFrame, B: Bars, unit: int, r: float, stop: str, target, expiry_bars: int,
            hold_bars: int) -> dict:
     """Заявки на откат r. stop: 'A' — за началом ноги, '786' — за уровнем 0.786;
-    оба + 0.1·ATR. target: 'B', 'e1272', 'e1618' или кратное R."""
+    оба + 0.1·ATR. target: 'B', 'e1272', 'e1618', 'e2618' или кратное R."""
     d = df.dir.to_numpy()
     A, Bp, atr = df.A.to_numpy(), df.B.to_numpy(), df.atr.to_numpy()
     L = (Bp - A) * d
@@ -151,6 +151,8 @@ def orders(df: pd.DataFrame, B: Bars, unit: int, r: float, stop: str, target, ex
         tg = Bp + d * 0.272 * L
     elif target == 'e1618':
         tg = Bp + d * 0.618 * L
+    elif target == 'e2618':
+        tg = Bp + d * 1.618 * L
     else:
         tg = entry + d * float(target) * risk
     per = B.tf // unit

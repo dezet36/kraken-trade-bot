@@ -31,6 +31,10 @@ GRIDS = {
     's1': dict(struct=[(tf, k) for tf in ('15m', '1h', '4h', '12h', '1d') for k in (2, 3, 5)],
                r=[0.382, 0.5, 0.618, 0.786], stop=['A'], target=['B', 'e1618', 2.0],
                E=[12], H=[120]),
+    # этап 2 — поиск в области 6ч…1д (дополнение протокола 07.10)
+    's2': dict(struct=[(tf, k) for tf in ('6h', '8h', '12h', '1d') for k in (2, 3, 5)],
+               r=[0.236, 0.3, 0.382, 0.5], stop=['A', '786'],
+               target=['e1272', 'e1618', 'e2618', 2.0, 3.0], E=[6, 12], H=[60, 120]),
 }
 
 
@@ -40,7 +44,7 @@ def run_pair(args):
     if os.path.exists(out):
         return pair, 'уже есть'
     t0 = time.time()
-    bars = D.load(pair, tfs=('15m', '1h', '4h', '12h', '1d'), src=src)
+    bars = D.load(pair, tfs=('15m', '1h', '4h', '6h', '8h', '12h', '1d'), src=src)
     m1 = bars['base']
     cumf = D.funding_cum(pair, 'binance' if src == 'bv1h' else src, m1.t)
     legs, res = {}, {}
