@@ -129,6 +129,11 @@ def build(bars: dict, tf: str, k: int, expiry_bars: int) -> pd.DataFrame:
     else:
         df['taker_leg'] = np.nan
     df['hour'] = (B.tclose[c] % 1440) // 60
+    # ликвидность на дату события (широкая выборка): оборот прошлых 30 полных дней и возраст ряда
+    D1 = bars['1d']
+    adv = pd.Series(D1.qv, index=D1.t // 1440).rolling(30, min_periods=20).mean()
+    df['adv30'] = adv.reindex(B.tclose[c] // 1440 - 1).to_numpy()
+    df['age_d'] = (B.tclose[c] - m1.t[0]) / 1440.0
     return df[np.isfinite(df.atr) & (L > 0)].reset_index(drop=True)
 
 

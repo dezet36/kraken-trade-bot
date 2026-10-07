@@ -50,7 +50,7 @@ def frame(runs, key, pair_src='bybit'):
         lg = run['legs'][(tf, k, E)]
         x = res.join(lg.drop(columns=['i_place']), on='ev')
         x['pair'] = pair
-        x['minute'] = minute_t(pair, pair_src)[np.minimum(x.i_place.to_numpy(), len(minute_t(pair, pair_src)) - 1)]
+        x['minute'] = x['t']                       # минута события = минута постановки заявки
         parts.append(x)
     if not parts:
         return pd.DataFrame()
