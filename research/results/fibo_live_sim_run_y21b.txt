@@ -1,0 +1,16 @@
+копия find_local_extremes совпала с оригиналом на 3000 окнах
+   backtest_cache_y21b BTCUSDT: 1018 заявок
+   backtest_cache_y21b ETHUSDT: 1374 заявок
+   backtest_cache_y21b SOLUSDT: 1844 заявок
+   backtest_cache_y21b XRPUSDT: 1476 заявок
+   backtest_cache_y21b BNBUSDT: 1369 заявок
+   backtest_cache_y21b DOGEUSDT: 1413 заявок
+   backtest_cache_y21b AVAXUSDT: 1825 заявок
+   backtest_cache_y21b ADAUSDT: 1522 заявок
+   backtest_cache_y21b LINKUSDT: 1720 заявок
+   backtest_cache_y21b LTCUSDT: 1480 заявок
+
+== backtest_cache_y21b: заявок 15041, в пределе издержек 13274
+   ЖИВАЯ ФИБО: предел издержек 5%, снятие у цели     2440 сд     -20.8R  -0.009 R/сд  PF 0.980  просадка  61.8%
+   то же без снятия у цели                           2113 сд     +59.0R  +0.028 R/сд  PF 1.027  просадка  34.6%
+   без предела издержек, снятие у цели               2666 сд     +23.0R  +0.009 R/сд  PF 1.001  просадка  49.4%
