@@ -113,6 +113,21 @@ class TestAnalyzeMarket:
         assert signal is not None
         assert signal['smc']['funding_bp'] is None
 
+    def test_rate_is_asked_with_the_exchange_client(self, monkeypatch):
+        """
+        Ставка — на момент решения: клиент биржи доходит до общего слоя, чтобы
+        выплату, совпавшую с закрытием часа, не ждать от сборщика (01.10.2026).
+        """
+        self._patch(monkeypatch, make_setup('BEARISH', targets=(90.0, 85.0, 80.0)), None)
+        import positioning
+        seen = []
+        monkeypatch.setattr(positioning, 'settled_funding',
+                            lambda pair, client=None, **k: seen.append((pair, client)) or 0.0001)
+        client = object()
+        signal = strategy_smc.analyze_market('BTCUSDT', 10_000, client=client, risk_scale=1.0)
+        assert seen == [('BTCUSDT', client)]
+        assert signal['smc']['funding_bp'] == pytest.approx(1.0)
+
 
 class TestPool:
     def test_pairs_outside_the_pool_are_not_scanned(self, monkeypatch):

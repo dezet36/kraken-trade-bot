@@ -72,11 +72,16 @@ def _score(setup, rr, htf_strength, proximity):
             config.SCORE_WEIGHT_PROXIMITY * proximity_score)
 
 
-def _funding_rate(pair):
-    """Последняя выплаченная ставка фандинга (доля за 8 ч) из общего слоя или None."""
+def _funding_rate(pair, client=None):
+    """
+    Последняя выплаченная ставка фандинга (доля за 8 ч) из общего слоя или None.
+
+    Через positioning.settled_funding: сборщик подхватывает выплату с опозданием
+    до часа, а в момент решения нужна уже выплаченная (01.10.2026).
+    """
     try:
         import positioning
-        rate = positioning.latest('funding', pair)
+        rate = positioning.settled_funding(pair, client=client)
         return None if rate is None else float(rate)
     except Exception as exc:                                  # noqa: BLE001
         log(f"   {pair}: фандинг не прочитан ({exc})")
@@ -203,7 +208,7 @@ def scan_for_setups(liquid_pairs, trade_manager, client=None):
                 continue
 
             # Против толпы (config.FIBO_FUNDING_AGAINST_CROWD, research/fibo_crowd.py)
-            funding = _funding_rate(pair) if config.FIBO_FUNDING_AGAINST_CROWD else None
+            funding = _funding_rate(pair, client=client) if config.FIBO_FUNDING_AGAINST_CROWD else None
             blocked = crowd_reason(setup_dir, funding)
             if blocked:
                 log(f"   {pair}: {setup_dir} пропущен — {blocked}")

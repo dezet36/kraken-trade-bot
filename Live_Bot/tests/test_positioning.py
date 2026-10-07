@@ -299,3 +299,92 @@ class TestBookSnapshot:
     def test_empty_side_gives_nothing(self, store):
         assert store.book_snapshot({'bids': [], 'asks': [[1, 1]]}) is None
         assert store.book_snapshot(None) is None
+
+
+class TestSettledFunding:
+    """
+    Ставка на момент решения (с 01.10.2026): выплата совпадает с закрытием
+    часа, по которому решают SMC и ФИБО, а сборщик подхватывает её с
+    опозданием до часа. Фильтр толпы проверялся со ставкой, известной в момент
+    выплаты, — значит, прошедшую выплату надо дочитать, а не ждать сборщика.
+    """
+
+    T = 1_790_870_400_000                      # 2026-10-01 16:00 UTC — момент выплаты
+    H = 3_600_000
+
+    class Exchange:
+        id = 'fake'
+        markets = {'BTC/USDT:USDT': {'id': 'BTCUSDT', 'swap': True}}
+
+        def __init__(self, rows=(), fail=False):
+            self.rows, self.fail, self.calls = list(rows), fail, 0
+
+        def load_markets(self):
+            return self.markets
+
+        def fetch_funding_rate_history(self, pair, limit=None):
+            self.calls += 1
+            if self.fail:
+                raise RuntimeError('биржа молчит')
+            return [{'timestamp': ts, 'fundingRate': v} for ts, v in self.rows]
+
+    def _journal(self, store, rows):
+        store._append('funding', [{'pair': 'BTCUSDT', 'ts': ts, 'value': v} for ts, v in rows])
+
+    def test_without_client_reads_the_journal(self, store):
+        self._journal(store, [(self.T - 8 * self.H, 0.0001)])
+        assert store.settled_funding('BTCUSDT', now_ms=self.T + self.H) == pytest.approx(0.0001)
+
+    def test_passed_settlement_is_fetched_and_journaled(self, store):
+        """Выплата 16:00 прошла, в журнале только 08:00 — спросить биржу и записать."""
+        self._journal(store, [(self.T - 8 * self.H, 0.0001)])
+        ex = self.Exchange(rows=[(self.T - 8 * self.H, 0.0001), (self.T, -0.0002)])
+        rate = store.settled_funding('BTCUSDT', client=ex, now_ms=self.T + 60_000)
+        assert rate == pytest.approx(-0.0002)
+        assert ex.calls == 1
+        # Записано общим порядком и без повтора старой строки.
+        assert [r['ts'] for r in store.series('funding', 'BTCUSDT')] == [self.T - 8 * self.H, self.T]
+
+    def test_no_request_before_the_next_settlement(self, store):
+        self._journal(store, [(self.T - 8 * self.H, 0.0001)])
+        ex = self.Exchange(rows=[(self.T, -0.0002)])
+        rate = store.settled_funding('BTCUSDT', client=ex, now_ms=self.T - 60_000)
+        assert rate == pytest.approx(0.0001) and ex.calls == 0
+
+    def test_exchange_failure_falls_back_to_the_journal(self, store):
+        self._journal(store, [(self.T - 8 * self.H, 0.0001)])
+        ex = self.Exchange(fail=True)
+        assert store.settled_funding('BTCUSDT', client=ex, now_ms=self.T + 60_000) == pytest.approx(0.0001)
+
+    def test_four_hour_pair_uses_its_own_step(self, store):
+        """Bybit переводит монету на выплату раз в 4 ч — шаг берётся из журнала."""
+        self._journal(store, [(self.T - 8 * self.H, 0.0001), (self.T - 4 * self.H, 0.0001)])
+        assert store.funding_due('BTCUSDT', now_ms=self.T + 60_000)
+        assert not store.funding_due('BTCUSDT', now_ms=self.T - 60_000)
+
+    def test_one_question_a_minute_while_the_exchange_is_late(self, store):
+        self._journal(store, [(self.T - 8 * self.H, 0.0001)])
+        ex = self.Exchange(rows=[(self.T - 8 * self.H, 0.0001)])     # биржа ещё не опубликовала
+        store._funding_checked.clear()
+        store.settled_funding('BTCUSDT', client=ex, now_ms=self.T + 20_000)
+        store.settled_funding('BTCUSDT', client=ex, now_ms=self.T + 50_000)
+        assert ex.calls == 1
+        store.settled_funding('BTCUSDT', client=ex, now_ms=self.T + 90_000)
+        assert ex.calls == 2
+
+    def test_hour_start_throttle_is_retried_once(self, store, monkeypatch):
+        """Выплата — в начале часа, когда Bybit режет запросы (10006): один повтор."""
+        self._journal(store, [(self.T - 8 * self.H, 0.0001)])
+        monkeypatch.setattr(store.time, 'sleep', lambda s: None)
+        ex = self.Exchange(rows=[(self.T, -0.0002)])
+        real = ex.fetch_funding_rate_history
+
+        def flaky(pair, limit=None):
+            if ex.calls == 0:
+                ex.calls += 1
+                raise RuntimeError('bybit {"retCode":10006,"retMsg":"Too many visits!"}')
+            return real(pair, limit)
+        ex.fetch_funding_rate_history = flaky
+        store._funding_checked.clear()
+        assert store.settled_funding('BTCUSDT', client=ex, now_ms=self.T + 20_000) == pytest.approx(-0.0002)
+        assert ex.calls == 2

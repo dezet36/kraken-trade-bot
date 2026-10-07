@@ -508,3 +508,93 @@ def latest(source, pair, upto=None, max_age_hours=None):
         if now - rows[-1]['ts'] > limit * 3_600_000:
             return None
     return rows[-1].get('value')
+
+
+# ── Ставка на момент решения (с 01.10.2026) ──────────────────────────────────
+# Сборщик выше идёт раз в час и в КОНЦЕ цикла, поэтому новую выплату он
+# подхватывает через 2–48 минут после неё (журнал сервера 30.09–01.10: 00:02,
+# 08:32, 16:23, 00:48, 08:13, 16:06). Фильтр толпы SMC проверялся на стенде, где
+# ставка известна в сам момент выплаты, а выплата совпадает с закрытием часа —
+# с той самой свечой, по которой SMC решает. На 2022–2026 из-за этой задержки
+# бот выставил бы 32 заявки сверх 467 пропущенных фильтром стенда — из группы,
+# которую фильтр отсекает (docs/Независимый_разбор_2026-10-01.md).
+FUNDING_STEP_MS = 8 * 3_600_000      # шаг выплат по умолчанию; свой шаг пары — по двум последним записям
+FUNDING_GRACE_MS = 10_000            # биржа публикует выплату через секунды после её момента
+FUNDING_RECHECK_MS = 60_000          # не спрашивать одну пару чаще раза в минуту
+_funding_checked = {}                # пара -> когда спрашивали биржу
+
+
+def _remember(source, pair, rows):
+    """Дописывает строки источника с тем же отсевом повторов, что и сбор."""
+    global _seen
+    if _seen is None:
+        _seen = _load_seen()
+    fresh = []
+    for row in rows:
+        if row.get('value') is None or row.get('ts') is None:
+            continue
+        key = (pair, int(row['ts']))
+        if key in _seen[source]:
+            continue
+        _seen[source].add(key)
+        fresh.append({'pair': pair, 'ts': int(row['ts']),
+                      **{k: v for k, v in row.items() if k != 'ts'}})
+    return _append(source, fresh)
+
+
+def _funding_history(client, native, pause=2.0):
+    """
+    Три последние выплаты. Выплата приходится на начало часа, а там Bybit на
+    несколько секунд режет запросы (retCode 10006, exchange.RATE_LIMIT_RETRIES):
+    один повтор после паузы, дальше — ошибка наверх.
+    """
+    try:
+        return client.fetch_funding_rate_history(native, limit=3)
+    except Exception as exc:                               # noqa: BLE001
+        if 'RateLimit' not in type(exc).__name__ and '10006' not in str(exc):
+            raise
+        time.sleep(pause)
+        return client.fetch_funding_rate_history(native, limit=3)
+
+
+def funding_due(pair, now_ms=None):
+    """
+    Прошла ли по времени выплата, которой ещё нет в журнале.
+
+    Шаг выплат берётся из двух последних записей пары: Bybit переводит монету на
+    выплату раз в 4 или 1 час при крайнем фандинге, и жёсткие 8 часов тогда
+    проспали бы выплату. Нет записей — пора спросить.
+    """
+    rows = series('funding', pair, limit=2)
+    if not rows:
+        return True
+    now = int(now_ms if now_ms is not None else time.time() * 1000)
+    step = rows[-1]['ts'] - rows[-2]['ts'] if len(rows) == 2 else FUNDING_STEP_MS
+    if step <= 0 or step > FUNDING_STEP_MS:
+        step = FUNDING_STEP_MS
+    return now >= rows[-1]['ts'] + step + FUNDING_GRACE_MS
+
+
+def settled_funding(pair, client=None, now_ms=None):
+    """
+    Последняя выплаченная ставка фандинга (доля за выплату) — не старше
+    последней выплаты биржи — или None.
+
+    Читает журнал, как latest('funding'). Если по времени выплата уже прошла, а
+    сборщик её ещё не записал, — один запрос по этой паре, ответ дописывается в
+    журнал общим порядком. Зовут его стратегии в момент решения, то есть только
+    когда сетап уже найден: запросов единицы в сутки. Отказ биржи — прежнее
+    значение из журнала и строка в лог; торговля от источника не зависит.
+    """
+    now = int(now_ms if now_ms is not None else time.time() * 1000)
+    if client is not None and funding_due(pair, now_ms=now):
+        if now - _funding_checked.get(pair, 0) >= FUNDING_RECHECK_MS:
+            _funding_checked[pair] = now
+            try:
+                native = exchange.market_symbol(pair, client) or pair
+                raw = _funding_history(client, native)
+                _remember('funding', pair, [{'ts': r['timestamp'], 'value': r.get('fundingRate')}
+                                            for r in raw or [] if r.get('timestamp')])
+            except Exception as exc:                       # noqa: BLE001
+                log(f'   {pair}: свежая ставка фандинга не получена ({str(exc)[:60]}) — беру из журнала')
+    return latest('funding', pair, upto=now if now_ms is not None else None)

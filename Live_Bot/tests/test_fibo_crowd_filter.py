@@ -85,3 +85,15 @@ class TestScanner:
         self._patch(monkeypatch, 'LONG', None)
         out = pair_scanner.scan_for_setups(['BTCUSDT'], self.TM())
         assert len(out) == 1 and out[0]['funding_bp'] is None
+
+    def test_rate_is_asked_with_the_exchange_client(self, monkeypatch):
+        """Ставка на момент решения: клиент биржи доходит до общего слоя (01.10.2026)."""
+        self._patch(monkeypatch, 'SHORT', None)
+        import positioning
+        seen = []
+        monkeypatch.setattr(positioning, 'settled_funding',
+                            lambda pair, client=None, **k: seen.append((pair, client)) or 0.0001)
+        client = object()
+        out = pair_scanner.scan_for_setups(['BTCUSDT'], self.TM(), client=client)
+        assert seen == [('BTCUSDT', client)]
+        assert len(out) == 1 and out[0]['funding_bp'] == pytest.approx(1.0)

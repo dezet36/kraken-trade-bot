@@ -226,11 +226,17 @@ def _to_bot_signal(setup, pair, balance, risk_scale=1.0):
     }
 
 
-def _funding_rate(pair):
-    """Последняя выплаченная ставка фандинга пары (доля за 8 ч) или None."""
+def _funding_rate(pair, client=None):
+    """
+    Последняя выплаченная ставка фандинга пары (доля за 8 ч) или None.
+
+    Через positioning.settled_funding: выплата совпадает с закрытием часа, по
+    которому SMC решает, а сборщик подхватывает её с опозданием до часа — фильтр
+    же проверялся со ставкой, известной в момент выплаты (01.10.2026).
+    """
     try:
         import positioning
-        rate = positioning.latest('funding', pair)
+        rate = positioning.settled_funding(pair, client=client)
         return None if rate is None else float(rate)
     except Exception as exc:                                  # noqa: BLE001
         log(f"   {pair}: фандинг не прочитан ({exc})")
@@ -303,7 +309,7 @@ def analyze_market(pair, balance, client=None, risk_scale=None):
 
     # Против толпы — решение SMC, а не ядра: ядро не знает про биржу, а
     # фандинг лежит в общем слое (positioning).
-    rate = _funding_rate(pair) if smc_params.FUNDING_AGAINST_CROWD else None
+    rate = _funding_rate(pair, client=client) if smc_params.FUNDING_AGAINST_CROWD else None
     if smc_params.FUNDING_AGAINST_CROWD and rate is None:
         log(f"   {pair}: фандинг неизвестен — фильтр толпы пропущен")
     blocked = crowd_reason(setup['direction'], rate)
