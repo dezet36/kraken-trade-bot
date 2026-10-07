@@ -576,6 +576,11 @@ def _submit(fn, *args):
 
 # ── Обзор рынка: модель анализирует рынок для человека ──────────────────────
 REVIEW_EVERY_H = 4
+# Сколько ждать обзор (07.10.2026). Модель сервера читает его вопрос (~5000 токенов: 42 монеты, статус, настроение)
+# 7.5–8 мин и пишет ответ ещё 2–6 мин — 10–13 мин при прежнем пределе 15: под нагрузкой обзор терялся
+# (5 из 30 с 05.10) и владельцу дважды ушло ложное «модель, вероятно, недоступна». Обзор стартует в начале
+# часа, следующий вопрос о сделках — через час, так что 25 мин очередь не задерживают.
+REVIEW_TIMEOUT_S = 25 * 60
 
 REVIEW = """It is {time} UTC. MARKET DASHBOARD of your coins (hourly data, closed hour).
 BTC: {btc24}% in 24h, {btc7}% in 7d, {btc30}% in 30d. Coins in a liquidation cascade in the last 3h: {breadth}.
@@ -784,7 +789,7 @@ def _run_review(question, slot, held):
         raw = (f'<|im_start|>system\n{NOTEBOOK}<|im_end|>\n<|im_start|>user\n{question}<|im_end|>\n'
                f'<|im_start|>assistant\n<think>\n\n</think>\n\n')
         out = llm_server._completion({'prompt': raw, 'n_predict': 600, 'temperature': 0.3, 'top_k': 20,
-                                      'top_p': 0.9, 'stop': ['<|im_end|>'], 'cache_prompt': True}, 900)
+                                      'top_p': 0.9, 'stop': ['<|im_end|>'], 'cache_prompt': True}, REVIEW_TIMEOUT_S)
         body, parsed = parse_review((out.get('content') or '').strip())
         _append_jsonl('llm_notebook_reviews.jsonl', {'hour': slot, 'held': held, 'text': body, 'view': parsed})
         _health_event('review', bool(body))

@@ -128,7 +128,9 @@ def main(folder):
                     if not (np.isnan(a) and np.isnan(b)):
                         feat_err[k].append(abs(a - b) if not (np.isnan(a) or np.isnan(b)) else np.inf)
                 for key, pat in N.PATTERNS.items():
-                    if pat.get('universe') == 'core' and p not in N.POOL:
+                    # Где закономерность торгуется (B3 — основные, P4 — 30, P1 — 42): 07.10 условие P4 на SAND
+                    # (новая монета, P4 там не торгуется) считалось как «выполнено» без сигнала.
+                    if p not in N.pairs_of(key):
                         continue
                     a = bool(N._mask(fl.loc[[t]], pat['conditions'])[0])
                     b = bool(N._mask(fh.loc[[t]], pat['conditions'])[0])

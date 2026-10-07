@@ -661,6 +661,10 @@ class TestDecisionLogAndReview:
                 '1 = most fear of the month); US buyers on Coinbase pay -5.3 bp over Binance for BTC (negative = US '
                 'selling); spot share of BTC turnover 9%.') in q
 
+    def test_review_waits_long_enough_for_the_server_model(self):
+        """07.10: обзор идёт 10–13 мин (вопрос ~5000 токенов при ~8 мин чтения) — предел 15 мин его терял."""
+        assert 20 * 60 <= llm_notebook.REVIEW_TIMEOUT_S < 60 * 60
+
     def test_review_runs_every_four_hours_once(self, monkeypatch):
         data = llm_notebook.market(market_with_cascade())
         monkeypatch.setattr(llm_notebook, '_review', {'slot': None, 'busy': False})
