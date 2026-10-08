@@ -894,6 +894,30 @@
   .acc-strats label { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--ink); }
   #acc-form, #acc-list { display: flex; flex-direction: column; gap: 14px; }
   #acc-form:empty { display: none; }
+  /* Книга счёта по инструкциям (этап 7, шаг 2). */
+  .acc-book { margin-top: 14px; display: flex; flex-direction: column; gap: 10px; }
+  .acc-sub { font-size: 11.5px; font-weight: 600; color: var(--ink-3); text-transform: uppercase;
+             letter-spacing: .05em; margin-top: 6px; }
+  .acc-meters { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px 18px; }
+  .acc-meter-l { display: flex; justify-content: space-between; gap: 8px; font-size: 12.5px;
+                 color: var(--ink-2); margin-bottom: 4px; font-variant-numeric: tabular-nums; }
+  .acc-track { height: 6px; border-radius: 3px; background: var(--hairline-2); overflow: hidden; }
+  .acc-track i { display: block; height: 100%; border-radius: 3px; }
+  .acc-track i.good { background: var(--good); }
+  .acc-track i.bad { background: var(--bad); }
+  .acc-instr { border: 1px solid var(--hairline); border-radius: var(--r-sm); padding: 8px 10px; font-size: 13px; }
+  .acc-instr.todo { border-color: var(--accent); background: var(--accent-soft); }
+  .acc-instr-h { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .acc-instr-h .hint { margin-left: auto; }
+  .acc-instr-b { color: var(--ink-2); margin-top: 4px; line-height: 1.55; font-variant-numeric: tabular-nums;
+                 overflow-wrap: anywhere; }
+  .acc-done { color: var(--good); font-size: 12px; }
+  .acc-status { border-radius: var(--r-sm); padding: 8px 10px; font-size: 13px; display: flex;
+                gap: 8px; align-items: center; flex-wrap: wrap; }
+  .acc-status.pass { background: color-mix(in srgb, var(--good) 14%, transparent); }
+  .acc-status.fail { background: color-mix(in srgb, var(--bad) 14%, transparent); }
+  .acc-log summary { cursor: pointer; font-size: 12.5px; color: var(--ink-2); }
+  .acc-log .acc-instr { margin-top: 6px; }
   /* hidden слабее правила по классу (.keys-grid label — flex): см. .filters */
   .keys-grid label[hidden] { display: none; }
   /* Страница «Стратегии» (этап 6). */
@@ -2998,6 +3022,7 @@ const NOTIFY_EVENTS = [
   ['error', 'Ошибки бота'],
   ['daily', 'Дневная сводка'],
   ['service', 'Запуск бота'],
+  ['account_orders', 'Инструкции по счетам без API (проп)'],
 ];
 const NOTIFY_CHANNELS = [['telegram', 'Telegram']];
 
@@ -4489,9 +4514,102 @@ function accCard(a) {
     ${a.draft ? '<div class="acc-draft">Правила — черновик (типичные для пропа): проверьте и сохраните свои.</div>' : ''}
     <div class="acc-rules">${rules}</div>
     <div class="acc-chips">${chips}</div>
-    ${a.enabled && !ACC.engine ? '<div class="hint" style="margin-top:8px">Исполнение на торговых счетах подключается следующим шагом этапа 7 — пока счёт только заведён.</div>' : ''}
+    ${a.enabled && !(ACC.engine || {})[a.kind] ? '<div class="hint" style="margin-top:8px">Исполнение на биржевых счетах подключается следующим шагом этапа 7 — пока счёт только заведён.</div>' : ''}
     ${edit}${keysForm}
+    ${a.kind === 'manual' ? accBook(a) : ''}
   </div>`;
+}
+
+/* Книга счёта по инструкциям (accounts/manual.py): деньги этапа, правила
+   пропа, что ждёт исполнения, позиции и заявки, итоги. Книга — запись плана:
+   что было бы на счёте при исполненных вовремя инструкциях. */
+function accMeter(label, text, frac, tone) {
+  const w = Math.round(Math.min(Math.max(Number(frac) || 0, 0), 1) * 100);
+  return `<div class="acc-meter"><div class="acc-meter-l"><span>${label}</span><b>${text}</b></div>
+    <div class="acc-track"><i class="${tone}" style="width:${w}%"></i></div></div>`;
+}
+const accSide = d => `<span class="${d === 'LONG' ? 'pos' : 'neg'}">${d === 'LONG' ? 'лонг' : 'шорт'}</span>`;
+const accMoney = v => '$' + Number(v || 0).toLocaleString('ru', { maximumFractionDigits: 2 });
+function accQty(v) {
+  v = Number(v || 0);
+  return v >= 1000 ? v.toFixed(0) : v >= 10 ? v.toFixed(1) : v >= 1 ? v.toFixed(3) : String(Number(v.toPrecision(4)));
+}
+function accTargets(x) {
+  const t = x.targets || [], f = x.fractions || [];
+  return t.map((v, i) => price(v) + (t.length > 1 && f[i] != null ? ` (${Math.round(f[i] * 100)}%)` : '')).join(' · ');
+}
+
+function accInstr(a, it, buttons) {
+  const done = it.done ? `<span class="acc-done">✓ сделано ${when(it.done)}</span>` : '';
+  const btn = buttons && ACC.writable && it.action && !it.done
+    ? `<button type="button" class="btn sm" data-acc-act="ack" data-acc-id="${esc(a.id)}" data-acc-item="${it.id}">Готово</button>` : '';
+  return `<div class="acc-instr${it.action && !it.done ? ' todo' : ''}">
+    <div class="acc-instr-h"><span>${it.icon || '📋'} <b>${esc(it.title)}</b></span><span class="hint">${when(it.at)}</span>${done}${btn}</div>
+    <div class="acc-instr-b">${(it.lines || []).map(esc).join('<br>')}</div></div>`;
+}
+
+function accBook(a) {
+  const b = (ACC.books || {})[a.id];
+  if (!b) return '';
+  const id = esc(a.id), w = ACC.writable, q = b.quality || {};
+  const out = [];
+  if (b.status !== 'active') {
+    out.push(`<div class="acc-status ${b.status === 'target' ? 'pass' : 'fail'}">${b.status === 'target' ? '🏆' : '⛔'}
+      <b>${esc(b.status_text)}</b> — ${esc(b.status_why)}
+      ${w ? `<button type="button" class="btn sm" data-acc-act="new_phase" data-acc-id="${id}">Новый этап</button>` : ''}</div>`);
+  }
+  out.push(stKpis([
+    ['Капитал', accMoney(b.equity), `${b.return_pct >= 0 ? '+' : ''}${Number(b.return_pct || 0).toFixed(2)}% за этап ${b.phase}`, stCls(b.return_pct)],
+    ['Сегодня', stUsd(b.day_pnl), 'с полуночи UTC', stCls(b.day_pnl)],
+    ['Открытый риск', accMoney(b.open_risk), b.room ? `до правила пропа ${accMoney(Math.max(0, b.room.amount))}` : ''],
+    ['Сделок за этап', q.trades || 0, q.trades ? `в плюс ${stPct(q.win_rate)} · ${stR(q.total_r)}` : 'закрытых ещё нет'],
+  ]));
+  const meters = [];
+  if (b.target_pct) meters.push(accMeter(`Цель +${b.target_pct}% · ${accMoney(b.target_level)}`,
+    `${Math.round((b.target_progress || 0) * 100)}%`, b.target_progress, 'good'));
+  if (b.drawdown_limit_pct) meters.push(accMeter(`Просадка · предел ${b.drawdown_limit_pct}% (${accMoney(b.floor)})`,
+    `${Number(b.drawdown_pct).toFixed(2)}%`, b.drawdown_pct / b.drawdown_limit_pct, 'bad'));
+  if (b.daily_limit) meters.push(accMeter(`Убыток за сутки · предел ${accMoney(b.daily_limit)}`,
+    `${b.daily_used_pct || 0}%`, (b.daily_used_pct || 0) / 100, 'bad'));
+  if (meters.length) out.push(`<div class="acc-meters">${meters.join('')}</div>`);
+  if (Math.abs((b.deposit_rules || 0) - b.start) >= 0.01 && b.started) {
+    out.push(`<div class="hint">В правилах размер счёта ${accMoney(b.deposit_rules)} — применится с нового этапа
+      (этап ${b.phase} начат с ${accMoney(b.start)}).</div>`);
+  }
+  if (b.waiting.length) {
+    out.push(`<div class="acc-sub">Ждут исполнения · ${b.waiting.length}</div>` + b.waiting.map(it => accInstr(a, it, true)).join(''));
+  } else if (!b.started) {
+    out.push(`<div class="hint">Заявок ещё не было. Когда стратегии счёта найдут сетап, инструкция придёт в Telegram
+      и появится здесь: пара, сторона, вход, стоп, тейки, объём.</div>`);
+  }
+  if (b.positions.length) {
+    out.push(`<div class="acc-sub">Позиции · ${b.positions.length}</div>` + stTable(b.positions,
+      ['', 'стратегия', 'вход', 'стоп', 'тейки', 'объём', 'итог', ''], p => `<tr>
+      <th class="lbl">${esc(p.pair)} ${accSide(p.direction)}</th><td>${esc(accTitle(p.strategy))}</td>
+      <td>${price(p.entry)}</td><td>${price(p.stop)}${p.breakeven ? ' 🛡' : ''}</td><td>${accTargets(p)}</td>
+      <td>${accQty(p.size)}</td><td class="${stCls(p.result)}">${stUsd(p.result)} · ${stR(p.result_r)}</td>
+      <td>${w ? `<button type="button" class="btn sm ghost" data-acc-act="close" data-acc-id="${id}" data-acc-pair="${esc(p.pair)}">Закрыл сам</button>` : ''}</td></tr>`));
+  }
+  if (b.pending.length) {
+    out.push(`<div class="acc-sub">Заявки · ${b.pending.length}</div>` + stTable(b.pending,
+      ['', 'стратегия', 'вход', 'стоп', 'тейки', 'объём', 'до цены', 'снять до', ''], o => `<tr>
+      <th class="lbl">${esc(o.pair)} ${accSide(o.direction)}</th><td>${esc(accTitle(o.strategy))}</td>
+      <td>${price(o.entry)}${o.stop_entry ? ' (стоп-заявка)' : ''}</td><td>${price(o.stop)}</td><td>${accTargets(o)}</td>
+      <td>${accQty(o.size)}</td><td>${o.distance_pct == null ? '—' : o.distance_pct + '%'}</td><td>${when(o.expires)}</td>
+      <td>${w ? `<button type="button" class="btn sm ghost" data-acc-act="cancel" data-acc-id="${id}" data-acc-pair="${esc(o.pair)}">Снял сам</button>` : ''}</td></tr>`));
+  }
+  if (b.recent.length) {
+    out.push(`<div class="acc-sub">Последние сделки этапа</div>` + stTable(b.recent,
+      ['', 'стратегия', 'вход → выход', 'выход', 'итог', 'закрыта'], r => `<tr>
+      <th class="lbl">${esc(r.pair)} ${accSide(r.direction)}</th><td>${esc(accTitle(r.strategy))}</td>
+      <td>${price(r.entry_price)} → ${price(r.exit_price)}</td><td>${esc(r.exit_reason)}</td>
+      <td class="${stCls(r.pnl_usd)}">${stUsd(r.pnl_usd)} · ${stR(r.pnl_r)}</td><td>${when(r.closed_at)}</td></tr>`));
+  }
+  if (b.instructions.length) {
+    out.push(`<details class="acc-log"><summary>Все инструкции · последние ${b.instructions.length}</summary>
+      ${b.instructions.map(it => accInstr(a, it, false)).join('')}</details>`);
+  }
+  return `<div class="acc-book">${out.join('')}</div>`;
 }
 
 function accForm() {
@@ -4621,6 +4739,23 @@ function bindAccounts() {
         && !confirm('Включить торговлю реальными деньгами на этом счёте?')) return;
     try { await accPost('/api/accounts/save', { id, enabled: !a.enabled }); await loadAccounts(); }
     catch (e) { msg.style.color = 'var(--bad)'; msg.textContent = e.message; }
+  });
+  const ACT_ASK = {
+    close: p => `Позиция ${p} закрыта у вас на счёте? В записи она закроется по последней цене.`,
+    cancel: p => `Заявка ${p} снята у вас на счёте? Из записи она уберётся.`,
+    new_phase: () => 'Начать новый этап? Размер счёта — из правил, итоги прошлого этапа останутся в журнале.',
+  };
+  document.querySelectorAll('[data-acc-act]').forEach(b => b.onclick = async () => {
+    const d = b.dataset, msg = el('acc-msg-' + d.accId);
+    if (ACT_ASK[d.accAct] && !confirm(ACT_ASK[d.accAct](d.accPair || ''))) return;
+    try {
+      b.disabled = true;
+      await accPost('/api/accounts/act', { id: d.accId, action: d.accAct, item: d.accItem, pair: d.accPair });
+      await loadAccounts();
+    } catch (e) {
+      b.disabled = false;
+      if (msg) { msg.style.color = 'var(--bad)'; msg.textContent = e.message; } else alert(e.message);
+    }
   });
   document.querySelectorAll('[data-acc-del]').forEach(b => b.onclick = async () => {
     const id = b.dataset.accDel, msg = el('acc-msg-' + id);

@@ -993,6 +993,27 @@ def scan_result(liquid: int, candidates: int, active_positions: int):
     )
 
 
+def account_instruction(account, item):
+    """
+    Инструкция по торговому счёту без API (проп по инструкциям, accounts/manual.py):
+    что поставить, снять, перенести и закрыть руками. Приходит сразу, как бот
+    решил, — с ценами, которые вбиваются в терминал как есть.
+    """
+    import tg_format as fmt
+    if not _allowed('account_orders'):
+        return False
+    lines = [f"{item.get('icon') or '📋'} <b>{fmt.esc(item.get('title', ''))}</b> · {fmt.esc(account)}",
+             fmt.RULE]
+    lines += [fmt.esc(line) for line in item.get('lines') or []]
+    markup = None
+    if item.get('action'):
+        lines.append('<i>Сделали — нажмите «Готово» (или на панели, страница «Счета»).</i>')
+        if item.get('account') and item.get('id') is not None:
+            markup = {'inline_keyboard': [[{'text': '✅ Готово',
+                                            'callback_data': f"ad:{item['account']}:{item['id']}"[:64]}]]}
+    return _send('\n'.join(lines), reply_markup=markup)
+
+
 def error_alert(message: str):
     import tg_format as fmt
     if not _allowed('error'):

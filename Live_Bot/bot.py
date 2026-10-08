@@ -24,6 +24,7 @@ from pair_scanner import get_liquid_pairs, scan_for_setups
 from paper_broker import PaperBroker, STRATEGIES as PAPER_STRATEGIES
 # Деньги и допуск стратегий — у их тестовых счетов (реорганизация, этап 2).
 from accounts import paper as account
+from accounts import manual as manual_accounts
 from trade_manager import LiveTradeManager
 from logger import log
 
@@ -86,7 +87,7 @@ def _recorded_pairs(base):
     return list(dict.fromkeys(list(base or []) + extra))
 
 
-def _build_signal(candidate, strategy, balance):
+def _build_signal(candidate, strategy, balance, setups=None):
     """
     Достраивает из кандидата сканера готовый сигнал.
 
@@ -119,6 +120,15 @@ def _build_signal(candidate, strategy, balance):
     if not signal:
         return None, None
 
+    # Копия сетапа без денег — счетам по инструкциям (accounts/manual.py), до
+    # решения тестового счёта: у них свои стороны и свой риск. Её сбой сделку
+    # теста не трогает.
+    if setups is not None:
+        try:
+            setups.append(manual_accounts.setup_copy(signal))
+        except Exception as exc:                       # noqa: BLE001
+            log(f"   ⚠️ {strategy} {pair}: копия сетапа для счетов по инструкциям — {exc}")
+
     # Решение счёта стратегии (accounts/paper.py, с 08.10.2026): разрешена ли
     # сторона и на каких деньгах — риск, предел в одну сторону, размер.
     # Стратегия отдаёт сетап без денег. Проверка сторон стоит ЗДЕСЬ, после
@@ -133,6 +143,33 @@ def _build_signal(candidate, strategy, balance):
 
     signal['strategy'] = strategy
     return signal, df_for_chart
+
+
+def _trading_wants(strategy):
+    """Ждёт ли сетапы стратегии хоть один счёт по инструкциям. Сбой — нет."""
+    try:
+        return manual_accounts.wants(strategy)
+    except Exception as exc:                           # noqa: BLE001
+        log(f'⚠️ счета по инструкциям: {exc}')
+        return False
+
+
+def _offer_to_trading(strategy, setup=None, candidate=None):
+    """
+    Сетап — счетам по инструкциям (accounts/manual.py). Кандидат сверх предела
+    заявок теста достраивается здесь: адаптер строит сигнал из готового
+    кандидата, без сети. Отказ или сбой торговых счетов тест не трогает.
+    """
+    try:
+        if setup is None:
+            from strategies import registry
+            signal, _ = registry.adapter(strategy).build_signal(candidate)
+            if not signal:
+                return
+            setup = manual_accounts.setup_copy(signal)
+        manual_accounts.offer(strategy, setup)
+    except Exception as exc:                           # noqa: BLE001
+        log(f'⚠️ счета по инструкциям: {strategy} — {exc}')
 
 
 def _open_from_candidate(candidate, strategy, balance):
@@ -227,6 +264,12 @@ def _paper_cycle():
     # срабатывают. Делаем это ДО проверки паузы — пауза запрещает новые входы,
     # а не ведение позиций.
     broker.update()
+    # Счета по инструкциям (проп без API): свечи, события, правила пропа — до
+    # паузы, как и тест: пауза запрещает новые входы, а не ведение.
+    try:
+        manual_accounts.update(broker.client)
+    except Exception as exc:                           # noqa: BLE001
+        log(f'⚠️ счета по инструкциям: {exc}')
 
     if controller.is_paused():
         log("⏸ Бот на паузе — новые фантомные входы пропускаем")
@@ -323,12 +366,22 @@ def _paper_cycle():
 
         found[strategy] = candidates
         log(f"   {strategy}: сетапов найдено {len(candidates)}")
+        # Счета по инструкциям, выбравшие стратегию, получают сетапы ЭТОГО
+        # прохода — копией без денег, до решения тестового счёта. Тест не
+        # меняется: те же кандидаты в том же порядке и тот же предел заявок.
+        trading = _trading_wants(strategy)
         opened = 0
         for candidate in candidates:
             if free is not None and opened >= free:
-                break
+                if not trading:
+                    break
+                _offer_to_trading(strategy, candidate=candidate)
+                continue
             try:
-                signal, _ = _build_signal(candidate, strategy, balance)
+                setups = [] if trading else None
+                signal, _ = _build_signal(candidate, strategy, balance, setups=setups)
+                if setups:
+                    _offer_to_trading(strategy, setup=setups[0])
                 if signal and broker.open(strategy, signal):
                     opened += 1
                     total_opened += 1
@@ -689,6 +742,8 @@ def _start_paper():
 
     controller.trade_manager = broker
     controller.start()
+    # Инструкции счетов по инструкциям (проп без API) — в Telegram.
+    manual_accounts.notify_with(tg.account_instruction)
 
     log("\n👻 ФАНТОМНАЯ ТОРГОВЛЯ — ордера на биржу НЕ отправляются")
     for name in broker.strategies:
@@ -724,6 +779,12 @@ def _start_paper():
     if getattr(config, 'PORTFOLIO_DAILY_DD_PAUSE_PCT', 0):
         log(f"   Термостат: новые входы стоят при просадке портфеля за день "
             f"≥ {config.PORTFOLIO_DAILY_DD_PAUSE_PCT:.1f}%")
+    # Торговые счета по инструкциям (проп без API, accounts/manual.py).
+    try:
+        for line in manual_accounts.describe():
+            log(line)
+    except Exception as exc:                           # noqa: BLE001
+        log(f'⚠️ счета по инструкциям: {exc}')
 
     dashboard.start_dashboard(broker=broker)
     tg.bot_started(broker.get_real_balance(), broker=broker)

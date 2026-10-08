@@ -1727,17 +1727,19 @@ class _Handler(BaseHTTPRequestHandler):
             # Торговые счета (accounts/live.py): правила и признак ключей —
             # без самих ключей.
             try:
-                from accounts import live
+                from accounts import live, manual
                 from strategies import registry
+                books = {code: manual.report(code, rules)
+                         for code, rules in live.load().items() if rules['kind'] == 'manual'}
                 self._send_json({
-                    'accounts': live.listing(), 'kinds': live.KINDS,
+                    'accounts': live.listing(), 'books': books, 'kinds': live.KINDS,
                     'exchanges': list(live.EXCHANGES), 'modes': list(live.MODES),
                     'limits': live.LIMITS, 'defaults': live.kind_defaults(),
                     'strategies': [{'code': c, 'title': registry.get(c).title}
                                    for c in live.allowed_strategies()],
-                    # Исполнение на торговых счетах подключается следующими
-                    # шагами этапа 7: пока счета только заводятся.
-                    'engine': False,
+                    # Исполнение: проп по инструкциям ведётся (этап 7, шаг 2),
+                    # биржи — следующим шагом.
+                    'engine': {'manual': True, 'exchange': False},
                     'writable': _controls_allowed()})
             except Exception as exc:               # noqa: BLE001
                 self._fail(500, f'счета недоступны: {exc}')
@@ -1808,7 +1810,8 @@ class _Handler(BaseHTTPRequestHandler):
         if path not in ('/api/settings', '/api/deposit', '/api/action',
                         '/api/update', '/api/update/rollback',
                         '/api/errors/clear', '/api/accounts/save',
-                        '/api/accounts/delete', '/api/accounts/keys'):
+                        '/api/accounts/delete', '/api/accounts/keys',
+                        '/api/accounts/act'):
             self.send_error(404)
             return
         if not _controls_allowed():
@@ -1835,6 +1838,20 @@ class _Handler(BaseHTTPRequestHandler):
                 raise ValueError('ожидается объект')
         except Exception as exc:
             self._fail(400, f'Неверные данные: {exc}')
+            return
+
+        if path == '/api/accounts/act':
+            # Счёт по инструкциям (accounts/manual.py): «Готово» по инструкции,
+            # заявка снята или позиция закрыта владельцем, новый этап.
+            from accounts import manual
+            try:
+                text = manual.act(str(changes.get('id') or ''), str(changes.get('action') or ''),
+                                  item=changes.get('item'), pair=changes.get('pair'))
+                self._send_json({'ok': True, 'message': text})
+            except ValueError as exc:
+                self._fail(400, str(exc))
+            except Exception as exc:               # noqa: BLE001
+                self._fail(500, f'действие не выполнено: {exc}')
             return
 
         if path in ('/api/accounts/save', '/api/accounts/delete', '/api/accounts/keys'):

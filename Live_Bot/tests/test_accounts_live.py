@@ -252,7 +252,9 @@ class TestPanel:
         assert [a['id'] for a in data['accounts']] == ['hashhedge']
         assert data['exchanges'] == ['bybit', 'bingx'] and data['modes'] == ['demo', 'live']
         assert 'LLM' not in [s['code'] for s in data['strategies']]
-        assert data['engine'] is False
+        # проп по инструкциям ведётся (accounts/manual.py), биржи — следующим шагом
+        assert data['engine'] == {'manual': True, 'exchange': False}
+        assert list(data['books']) == ['hashhedge']
         assert data['defaults'] == live.kind_defaults()
 
     def test_save_edit_delete(self, server):

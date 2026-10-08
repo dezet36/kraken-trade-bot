@@ -289,6 +289,8 @@ class BotController:
             return self._toggle_strategy_notify(rest[0], back_to_strategy=(head == 'sn'))
         if head == 'se' and rest:
             return self._toggle_strategy(rest[0])
+        if head == 'ad' and len(rest) >= 2:
+            return self._account_done(rest[0], rest[1])
 
         d = self._collect()
         views = {
@@ -313,6 +315,17 @@ class BotController:
         except IndexError:                             # код без обязательной части
             text, keyboard = panel.main_view(d)
         return '', text, keyboard
+
+    @staticmethod
+    def _account_done(code, item):
+        """«Готово» под инструкцией счёта без API (accounts/manual.py): отметка
+        в книге счёта. Сообщение остаётся как было — ответ всплывающей строкой."""
+        from accounts import manual
+        try:
+            manual.act(code, 'ack', item=item)
+            return '✅ Отмечено: сделано', None, None
+        except ValueError as exc:
+            return str(exc)[:190], None, None
 
     def _collect(self):
         """Всё, что рисует панель, — одним снимком. Отказ части — прочерк, не падение."""

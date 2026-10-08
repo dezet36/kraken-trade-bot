@@ -29,6 +29,9 @@ Live_Bot/data_sources.json
 # Торговые счета (биржи, проп) и ключи бирж — только на машине бота
 Live_Bot/trading_accounts.json
 Live_Bot/secrets/
+# Книги и журнал счетов по инструкциям (проп без API)
+Live_Bot/trading_state.json
+Live_Bot/trading_trades.jsonl
 Live_Bot/state/
 
 # Фантомный счёт: состояние и журнал сделок — данные, а не код

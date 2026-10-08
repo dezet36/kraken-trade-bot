@@ -66,6 +66,8 @@ DATA_FILES = (
     'Live_Bot/data_sources.json',
     'Live_Bot/trading_accounts.json',
     'Live_Bot/secrets/',
+    'Live_Bot/trading_state.json',
+    'Live_Bot/trading_trades.jsonl',
     'Live_Bot/paper_state.json',
     'Live_Bot/paper_trades.csv',
     'Live_Bot/paper_trades.jsonl',

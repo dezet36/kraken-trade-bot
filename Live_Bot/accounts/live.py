@@ -14,8 +14,8 @@
 только на сервере: в панель не возвращаются, в журнал и историю настроек не
 пишутся. Правки правил счёта — в историю настроек.
 
-Исполнение — следующими шагами этапа 7: сначала проп по инструкциям, затем
-биржи (сначала демо).
+Исполнение: проп по инструкциям — accounts/manual.py (этап 7, шаг 2); биржи
+(сначала демо) — следующим шагом.
 """
 
 import json
@@ -215,8 +215,12 @@ def save(changes):
             if not account['name']:
                 raise ValueError('у счёта нет имени')
             code = slug(account['name'])
+            # Код удалённого счёта новому не достаётся: его сделки остались в
+            # журнале и попали бы в статистику нового.
+            from accounts import manual
+            used = set(data) | manual.known_codes()
             stem, n = code, 2
-            while code in data:
+            while code in used:
                 code, n = f'{stem}-{n}', n + 1
             account['created_at'] = datetime.now(timezone.utc).isoformat(timespec='seconds')
         if account['kind'] == 'exchange' and account['enabled'] and not has_keys(code):
@@ -233,16 +237,20 @@ def save(changes):
 
 
 def remove(code):
-    """Удаляет счёт и его ключи. Счёт с позициями удалять нельзя — сначала
-    закрыть (проверяет исполнение, когда оно появится)."""
+    """Удаляет счёт и его ключи. Счёт с заявками или позициями в записи удалять
+    нельзя — сначала закрыть: иначе запись потеряла бы открытые сделки."""
+    from accounts import manual
     with _lock:
         before = json.loads(json.dumps(load(force=True)))
         if code not in before:
             raise ValueError(f'нет счёта «{code}»')
+        if manual.busy(code):
+            raise ValueError('у счёта есть заявки или позиции — сначала закройте их')
         data = {k: v for k, v in before.items() if k != code}
         _write_json(path(), data)
         _cache['key'], _cache['data'] = None, None
         drop_keys(code)
+        manual.forget(code)
     _history(before, data)
     log(f'💼 торговый счёт {code} удалён')
 

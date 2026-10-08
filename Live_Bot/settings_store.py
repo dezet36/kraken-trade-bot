@@ -76,8 +76,11 @@ NOTIFY = 'NOTIFY'
 # отказ плана ИИ (llm_rejected — раньше шёл под одним ключом с принятым
 # планом, и выключить поток отказов, не потеряв планы, было нельзя) и запуск
 # бота (service — раньше уходил без спроса после каждой выкатки).
+# С 08.10.2026 — инструкции по торговым счетам без API (account_orders): что
+# поставить, снять, перенести и закрыть руками (accounts/manual.py).
 NOTIFY_EVENTS = ('trade_opened', 'trade_closed', 'error', 'daily', 'llm_setup',
-                 'plan_dropped', 'tp_hit', 'breakeven', 'llm_rejected', 'service')
+                 'plan_dropped', 'tp_hit', 'breakeven', 'llm_rejected', 'service',
+                 'account_orders')
 NOTIFY_CHANNELS = ('telegram',)
 
 # Поля раздела стратегии в порядке, в котором их видели панель и журнал до
