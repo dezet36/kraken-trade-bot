@@ -81,7 +81,12 @@ def make_signal(strategy, pair, side, p):
         size = (0.01 if tight else 0.08) * p        # тесный — отказ по пределу издержек
         b = p * (1 + d * 0.003)
         entry, stop = b - d * 0.5 * size, b - d * 0.896 * size
-        targets, fr, extra = [b + d * 0.25 * size], [1.0], {'be_level': b, 'breakeven_after_tp': True}
+        # Уровень снятия заявки объявляет сама ФИБО (88.6% отката, этап 5) —
+        # прежде брокер считал его по имени стратегии той же формулой.
+        import config
+        inval = b - size * config.ZONE_B_TOP if d == 1 else b + size * config.ZONE_B_TOP
+        targets, fr, extra = [b + d * 0.25 * size], [1.0], {'be_level': b, 'breakeven_after_tp': True,
+                                                            'pending_invalidation': inval}
         setup = {'type': side, 'start_price': b - d * size, 'end_price': b, 'size': size}
         trig = 'ZONE_LIMIT'
     elif strategy == 'SMC':
@@ -137,14 +142,32 @@ def schedule():
     return sorted(out)
 
 
+# Модули, которые эталон загружает заново под свой каталог данных и свои часы.
+LOADED = ('config', 'settings_store', 'paper_broker', 'dashboard', 'shadow', 'setup_journal',
+          'refused', 'follow_up', 'trade_journal')
+
+
+@pytest.fixture()
+def own_modules():
+    """
+    После эталона его модули убираются из памяти. Иначе следующая проверка
+    получала брокера с подменёнными часами (_now_ms) и файлом состояния
+    эталона: «термостат» видел дневную просадку 85% от чужих депозитов и
+    отказывал test_signal_contract (нашлось 08.10.2026, на этапе 5; в полном
+    прогоне это маскировали проверки между ними, перезагружавшие брокер).
+    """
+    yield
+    for module in LOADED:
+        sys.modules.pop(module, None)
+
+
 def run(tmp_path, monkeypatch):
     monkeypatch.setenv('BOT_DATA_DIR', str(tmp_path))
     monkeypatch.setenv('TRADING_MODE', 'PAPER')
     monkeypatch.setenv('PAPER_FUNDING', 'false')
     for name in STRATEGIES:
         monkeypatch.setenv(f'PAPER_START_BALANCE_{name}', '10000')
-    for module in ('config', 'settings_store', 'paper_broker', 'dashboard', 'shadow', 'setup_journal',
-                   'refused', 'follow_up', 'trade_journal'):
+    for module in LOADED:
         sys.modules.pop(module, None)
     import paper_broker as pb
     import settings_store
@@ -202,7 +225,7 @@ def outcome(tmp_path, broker, opened):
             'pending': {s: sorted(broker.pending(s)) for s in STRATEGIES}}
 
 
-def test_broker_replay_matches_golden(tmp_path, monkeypatch):
+def test_broker_replay_matches_golden(tmp_path, monkeypatch, own_modules):
     broker, opened = run(tmp_path, monkeypatch)
     got = json.loads(json.dumps(outcome(tmp_path, broker, opened), ensure_ascii=False))
     if os.getenv('GOLDEN_UPDATE') == '1' or not os.path.exists(GOLDEN):

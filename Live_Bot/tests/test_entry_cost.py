@@ -59,19 +59,33 @@ class TestTheExitRateFollowsHowWeLeft:
         assert config.PAPER_FEE_MAKER < config.PAPER_FEE_TAKER
 
     def test_no_exit_charges_taker_unconditionally(self):
-        """РОВНО ТОТ ДЕФЕКТ: безусловный тейкер на закрытии."""
+        """
+        РОВНО ТОТ ДЕФЕКТ: безусловный тейкер на закрытии. С этапа 5 итог
+        закрытия считает ядро исполнения (execution/core.close_numbers), брокер
+        его зовёт — проверяем само ядро поведением и что брокер идёт через него.
+        """
+        from execution import core
+        pos = {'direction': 'LONG', 'entry_price': 100.0, 'size': 2.0, 'realized_pnl': 0.0,
+               'fees_paid': 0.0}
+        maker, taker = config.PAPER_FEE_MAKER, config.PAPER_FEE_TAKER
+        fees_tp = core.close_numbers(pos, 110.0, 'TP1', False, 0, maker, taker)[2]
+        fees_sl = core.close_numbers(pos, 95.0, 'SL', False, 0, maker, taker)[2]
+        assert fees_tp == 2.0 * 110.0 * maker, 'выход по цели снова считается тейкером'
+        assert fees_sl == 2.0 * 95.0 * taker
         src = open(os.path.join(ROOT, 'paper_broker.py'), encoding='utf-8').read()
-        code = re.sub(r'"""[\s\S]*?"""', '', src)
-        code = '\n'.join(l for l in code.splitlines() if not l.strip().startswith('#'))
-        spot = code.index('def _close(')
-        body = code[spot:code.index('\n    def ', spot + 10)]
-        assert 'PAPER_FEE_TAKER' not in body, (
-            'выход снова считается тейкером независимо от причины')
-        assert '_exit_fee_rate(' in body
+        spot = src.index('def _close(')
+        body = src[spot:src.index('\n    def ', spot + 10)]
+        assert 'core.close_numbers(' in body
 
     def test_a_partial_target_is_a_maker_too(self):
+        """Частичная фиксация — тот же лимит в стакане (ядро, take_partial)."""
+        from execution import core
+        pos = {'direction': 'LONG', 'entry_price': 100.0, 'size': 2.0, 'initial_size': 2.0,
+               'fractions': [0.5, 0.5], 'realized_pnl': 0.0, 'fees_paid': 0.0, 'tp_hit': 0}
+        core.take_partial(pos, 0, 105.0, config.PAPER_FEE_MAKER)
+        assert pos['fees_paid'] == 1.0 * 105.0 * config.PAPER_FEE_MAKER
         src = open(os.path.join(ROOT, 'paper_broker.py'), encoding='utf-8').read()
-        spot = src.index('def _take_partial')
+        spot = src.index('def _process_position')
         body = src[spot:src.index('\n    def ', spot + 10)]
         assert 'PAPER_FEE_MAKER' in body and 'PAPER_FEE_TAKER' not in body
 

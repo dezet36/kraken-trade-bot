@@ -10,7 +10,8 @@ Telegram и панель:
     params    {entry, stop_loss, take_profit_1, take_profit_2, tp_targets,
                tp_fractions, be_level, breakeven_after_tp, rr, sl_distance,
                необязательные: max_hold_hours, invalidation, cancel_beyond,
-               risk_scale}
+               pending_invalidation (уровень снятия ждущей заявки; нет —
+               стоп), risk_scale}
     htf_trend, zone, score, why, market_price и свой раздел стратегии
     (smc, levels, rsibb, smcs, fib12, llm).
 

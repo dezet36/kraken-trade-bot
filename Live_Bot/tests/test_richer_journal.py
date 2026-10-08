@@ -53,22 +53,35 @@ class TestTheJournalKnowsWhenNotJustHowFar:
         c = paper_broker.COLUMNS
         assert abs(c.index('mfe_min') - c.index('mfe_r')) <= 2
 
+    # С этапа 5 пик и худшую точку хода ведёт ядро исполнения
+    # (execution/core.track_extremes) — проверяем его поведением.
+    @staticmethod
+    def _pos():
+        return {'direction': 'LONG', 'entry_price': 100.0, 'initial_stop': 95.0,
+                'mfe_price': 100.0, 'mae_price': 100.0, 'mfe_ts': 0, 'mae_ts': 0}
+
     def test_the_moment_is_remembered_with_the_price(self):
         """
         Записать цену и не записать момент — вернуться туда, откуда шли:
         насколько ушла, известно, а когда — нет.
         """
-        body = _method('_process_position')
-        assert "pos['mfe_ts']" in body and "pos['mae_ts']" in body
+        from execution import core
+        pos = self._pos()
+        core.track_extremes(pos, 300, 104.0, 98.0)
+        assert (pos['mfe_price'], pos['mfe_ts']) == (104.0, 300)
+        assert (pos['mae_price'], pos['mae_ts']) == (98.0, 300)
+        assert 'core.simulate_position(' in _method('_process_position')
 
     def test_the_moment_moves_only_when_the_price_does(self):
         """
         Обновлять момент на каждой свече значило бы записать время последней
         свечи, а не время пика.
         """
-        body = _method('_process_position')
-        assert "if best != pos['mfe_price']" in body
-        assert "if worst != pos['mae_price']" in body
+        from execution import core
+        pos = self._pos()
+        core.track_extremes(pos, 300, 104.0, 98.0)
+        core.track_extremes(pos, 600, 103.0, 99.0)       # ни пика, ни дна нового
+        assert pos['mfe_ts'] == 300 and pos['mae_ts'] == 300
 
 
 class TestTheEntryContextIsRecorded:

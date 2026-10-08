@@ -57,7 +57,11 @@ STRATEGIES = _registry.codes()
 
 BAR_TF = '5m'
 BAR_MS = 5 * 60 * 1000
-FUNDING_INTERVAL_MS = 8 * 60 * 60 * 1000
+# Правила заявки и позиции — общее ядро исполнения (execution/core.py, этап 5):
+# одни для бумаги и биржи. Здесь — симуляция на 5-минутных свечах, балансы и
+# журналы.
+from execution import core
+FUNDING_INTERVAL_MS = core.FUNDING_INTERVAL_MS
 
 STATE_FILE   = os.path.join(config.DATA_DIR, 'paper_state.json')
 def _refuse(strategy, signal, gate, detail='', cost_share=''):
@@ -809,7 +813,7 @@ class PaperBroker:
         # потому что делили на риск, которого не было.
         import strategy_profile
         offset = strategy_profile.limit_offset_pct(strategy)
-        limit_price = entry * (1 + offset) if is_long else entry * (1 - offset)
+        limit_price = core.limit_price(entry, is_long, offset)
 
         sl_dist = abs(limit_price - stop)
         if sl_dist <= 0:
@@ -835,11 +839,8 @@ class PaperBroker:
             return False
 
         risk_pct = float(params.get('risk_pct') or config.RISK_PER_TRADE)
-        risk_amount = balance * (risk_pct / 100)
-        size = risk_amount / sl_dist
-        if size > config.MAX_POSITION_SIZE_UNITS:
-            size = config.MAX_POSITION_SIZE_UNITS
-            risk_amount = size * sl_dist
+        size, risk_amount = core.position_size(balance, risk_pct, sl_dist,
+                                               config.MAX_POSITION_SIZE_UNITS)
 
         # Тот же предохранитель, что в бою: позиция не может стоить больше
         # депозита с плечом. Без него мелкий депозит «торговал» бы объёмами,
@@ -977,10 +978,8 @@ class PaperBroker:
         Исполнение лимита за рынком: по цене рынка с проскальзыванием против
         нас, но не хуже самого лимита — на то он и лимит; комиссия тейкера.
         """
-        is_long = order['direction'] == 'LONG'
-        slip = market * (config.PAPER_SLIPPAGE_PCT or 0.0)
         limit = order['limit_price']
-        price = min(limit, market + slip) if is_long else max(limit, market - slip)
+        price = core.through_market_price(order, market, config.PAPER_SLIPPAGE_PCT)
         log(f"   👻 [{strategy}] {pair}: лимит ${_fmt_p(limit)} уже за рынком "
             f"(${_fmt_p(market)}) — исполнен по рынку, как на бирже")
         self._fill(strategy, pair, order, ts, price, taker=True,
@@ -991,15 +990,15 @@ class PaperBroker:
         """
         Уровень, за которым сетап перестаёт существовать и лимит снимается.
 
-        У фибо это 88.6%-уровень коррекции (так же считает живой бот), у SMC —
-        стоп: заход цены за зону означает, что зона не отработала.
+        Объявляет стратегия — params['pending_invalidation'] (у ФИБО это
+        88.6%-уровень коррекции); не объявила — стоп: заход цены за него
+        означает, что сетап не отработал. До 08.10.2026 уровень ФИБО брокер
+        считал сам по имени стратегии — ветка по имени в общем модуле
+        (CLAUDE.md, изоляция п. 7).
         """
-        setup = signal['setup']
-        if strategy == 'FIBO' and setup.get('size'):
-            end_price, size = float(setup['end_price']), float(setup['size'])
-            return (end_price - size * config.ZONE_B_TOP if is_long
-                    else end_price + size * config.ZONE_B_TOP)
-        return float(signal['params']['stop_loss'])
+        params = signal['params']
+        level = params.get('pending_invalidation')
+        return float(level) if level else float(params['stop_loss'])
 
     @staticmethod
     def _geometry(strategy, signal):
@@ -1353,108 +1352,47 @@ class PaperBroker:
 
     def _process_pending(self, strategy, pair, order, ts, high, low,
                          open_price=None):
-        is_long = order['direction'] == 'LONG'
-        limit = order['limit_price']
-        # Тип входа берётся У СТРАТЕГИИ. Пока он игнорировался, все четыре
-        # исполнялись как лимит на откате — и для стратегии УРОВНЕЙ это было
-        # ровно наоборот тому, что мерилось.
-        #
-        # Уровни входят ПО ХОДУ движения: замер ставил им stop-заявку, которая
-        # срабатывает, когда цена пробивает уровень возврата в сторону сделки.
-        # Лимит же наливается только если цена вернётся НАЗАД. Условия
-        # противоположные, и последствие было злым: когда сделка шла как надо,
-        # заявка не наливалась, а потом снималась с пометкой «цена дошла до
-        # цели без нас». То есть уровни систематически пропускали именно свои
-        # удачные сценарии.
-        stop_entry = str(order.get('entry_type', '')).upper() in ('MARKET', 'STOP')
+        """
+        Одна свеча для ожидающей заявки. Правила и их порядок — ядро исполнения
+        (execution/core.simulate_pending); здесь — что из них следует для счёта
+        и журналов. Почему порядок именно такой:
 
-        # СРОК ПРОВЕРЯЕТСЯ ДО ЦЕНЫ, И ЭТО СТОИЛО ТРЁХ СДЕЛОК.
-        #
-        # Ниже заполнение идёт раньше инвалидации, и там это верно: чтобы цена
-        # дошла до инвалидации, она обязана была пройти через цену входа. Но
-        # срок — условие ВРЕМЕНИ, а не цены, и то рассуждение на него не
-        # распространяется. Пока проверка стояла после заполнения, до неё
-        # просто не доходило: заявка наливалась и возвращала управление.
-        #
-        # Живой заявке это не мешало — её смотрят каждую свечу, и она умирала
-        # на первой же свече после срока. Но пока бот не работает, свечей
-        # никто не смотрит. На запуске поток продолжается с текущей свечи, и
-        # заявка, мёртвая ещё трое суток назад, встречала её как ни в чём не
-        # бывало.
-        #
-        # Так прошли SMC #15, #16 и #17: простояли 152, 183 и 152 часа при
-        # сроке 72, налились и закрылись по стопу в ТУ ЖЕ секунду — минус
-        # $172.07, то есть 59% всего убытка стратегии. Ход против нас внутри
-        # «одной свечи» составил −1.27R, −3.19R и −1.52R: свеча перекрывала
-        # весь пропущенный интервал.
-        #
-        # Свеча, открывшаяся ПОСЛЕ срока, заявку уже не застаёт. Если же срок
-        # падает внутрь свечи, заявка на её открытии была жива — такое
-        # заполнение честное, и правило его не трогает.
-        if ts >= order['expires_ts']:
+        ТИП ВХОДА — У СТРАТЕГИИ. Уровни входят ПО ХОДУ движения (стоп-заявка),
+        лимит же наливается, только если цена вернётся назад; пока тип
+        игнорировался, уровни систематически пропускали свои удачные сценарии.
+
+        СРОК ПРОВЕРЯЕТСЯ ДО ЦЕНЫ, И ЭТО СТОИЛО ТРЁХ СДЕЛОК. Пока он стоял после
+        налива, заявка, мёртвая трое суток, встречала свечу после простоя как
+        живая: так прошли SMC #15, #16 и #17 (−$172.07, 59% убытка стратегии).
+        Свеча, открывшаяся ПОСЛЕ срока, заявку уже не застаёт.
+
+        УХОД ЗА УРОВЕНЬ ПО ХОДУ СДЕЛКИ — ДО НАЛИВА: в замере минута, где цена
+        ушла за B, налива уже не даёт (Фибо 12ч, params['cancel_beyond']).
+
+        НАЛИВ — РАНЬШЕ ИНВАЛИДАЦИИ И ЦЕЛИ: чтобы дойти до них, цена обязана
+        пройти через цену входа. Стоп-заявка при разрыве через уровень —
+        по открытию свечи: иначе стратегии дарилась бы лучшая цена ровно тогда,
+        когда рынок ушёл против неё.
+
+        ЦЕЛЬ БЕЗ ВХОДА — снимать ли, решает стратегия (strategy_profile): у SMC
+        заявка ждёт свой срок, как в её бэктесте (замер 25.09.2026).
+        """
+        import strategy_profile
+        what, detail = core.simulate_pending(
+            order, ts, high, low, open_price,
+            drops_at_target=strategy_profile.drops_at_target(strategy))
+        if what == 'expired':
             self._drop_pending(strategy, pair,
                                f"лимит не заполнен за "
                                f"{self._expiry_hours(strategy):.0f}ч", ts)
-            return
-
-        # Уход цены за уровень по ходу сделки — ДО заполнения: в замере
-        # (research/fibz, smcz.sim) минута, где цена ушла за B, налива уже не
-        # даёт. На пятиминутке, задевшей и B, и лимит, порядок внутри неизвестен
-        # — снимаем, как замер в худшем для нас случае. Только у стратегий,
-        # объявивших уровень.
-        beyond = order.get('cancel_beyond')
-        if beyond:
-            gone_beyond = (high > beyond) if is_long else (low < beyond)
-            if gone_beyond:
-                self._drop_pending(strategy, pair,
-                                   f"цена ушла за ${_fmt_p(beyond)} до входа — импульс продолжился", ts)
-                return
-
-        # Заполнение проверяем ПЕРВЫМ: чтобы цена дошла до инвалидации или до
-        # цели, она обязана была пройти через цену срабатывания.
-        if stop_entry:
-            filled = (high >= limit) if is_long else (low <= limit)
-        else:
-            filled = (low <= limit) if is_long else (high >= limit)
-        if filled:
-            price = limit
-            # Разрыв через уровень: стоп-заявка исполняется по открытию свечи,
-            # а не по своей цене. Считать иначе значило бы дарить стратегии
-            # лучшую цену ровно тогда, когда рынок ушёл против неё. Тем же
-            # правилом живёт движок замеров.
-            if stop_entry and open_price is not None:
-                gapped = (open_price > limit) if is_long else (open_price < limit)
-                if gapped:
-                    price = open_price
-            self._fill(strategy, pair, order, ts, price, taker=stop_entry)
-            return
-
-        # КАК БЛИЗКО ПОДОШЛА ЦЕНА И СКОЛЬКО УШЛА БЕЗ НАС — для журнала снятых
-        # заявок (setup_journal): зазор до входа в % (>0 — не дошла) и ход к
-        # цели в R от входа, пока заявка ждала. Решений не меняет.
-        risk = abs(limit - order['stop_loss'])
-        gap = ((low - limit) if is_long != stop_entry else (limit - high)) / limit * 100
-        run = max(0.0, ((high - limit) if is_long else (limit - low)) / risk) if risk else 0.0
-        order['min_gap_pct'] = round(min(order.get('min_gap_pct', gap), gap), 4)
-        order['best_run_r'] = round(max(order.get('best_run_r', run), run), 3)
-
-        # Страховка на случай сетапа, у которого уровень инвалидации окажется
-        # БЛИЖЕ к рынку, чем лимит. Пока обе стратегии ставят его дальше, и
-        # эта ветка не срабатывает: цена не может дойти до инвалидации, не
-        # задев по дороге лимит, — а тогда выше уже случился вход.
-        inv = order.get('invalidation')
-        if inv:
-            broken = (low <= inv) if is_long else (high >= inv)
-            if broken:
-                self._drop_pending(strategy, pair, f"сетап разрушен (${_fmt_p(inv)})", ts)
-                return
-
-        # Цель без входа — снимать ли, решает стратегия (strategy_profile):
-        # у SMC заявка ждёт свой срок, как в её бэктесте (замер 25.09.2026).
-        import strategy_profile
-        target = order['targets'][0]
-        gone = (high >= target) if is_long else (low <= target)
-        if gone and strategy_profile.drops_at_target(strategy):
+        elif what == 'beyond':
+            self._drop_pending(strategy, pair,
+                               f"цена ушла за ${_fmt_p(detail)} до входа — импульс продолжился", ts)
+        elif what == 'fill':
+            self._fill(strategy, pair, order, ts, detail, taker=core.stop_entry(order))
+        elif what == 'broken':
+            self._drop_pending(strategy, pair, f"сетап разрушен (${_fmt_p(detail)})", ts)
+        elif what == 'target':
             self._drop_pending(strategy, pair, "цена дошла до цели без нас", ts)
 
     def _drop_pending(self, strategy, pair, reason, ts=None):
@@ -1499,8 +1437,7 @@ class PaperBroker:
         self.state['pending'][strategy].pop(pair, None)
 
         size = order['size']
-        fee = size * price * (config.PAPER_FEE_TAKER if taker
-                              else config.PAPER_FEE_MAKER)
+        fee = core.entry_fee(size, price, taker, config.PAPER_FEE_MAKER, config.PAPER_FEE_TAKER)
         trade_id = self.state['next_trade_id']
         self.state['next_trade_id'] = trade_id + 1
 
@@ -1559,97 +1496,37 @@ class PaperBroker:
             pass
 
     def _apply_funding(self, position, ts, rate):
-        """Списывает фандинг за каждый пройденный 8-часовой интервал."""
-        if not rate:
-            position['funding_ts'] = ts
-            return
-        last = position.get('funding_ts', position['opened_ts'])
-        periods = (ts // FUNDING_INTERVAL_MS) - (last // FUNDING_INTERVAL_MS)
-        if periods <= 0:
-            return
-        notional = position['size'] * position['last_price']
-        # Положительная ставка: лонги платят шортам.
-        sign = 1 if position['direction'] == 'LONG' else -1
-        position['funding_paid'] = position.get('funding_paid', 0.0) + sign * rate * notional * periods
-        position['funding_ts'] = ts
+        """Списывает фандинг за каждый пройденный 8-часовой интервал (ядро)."""
+        core.apply_funding(position, ts, rate)
 
     def _process_position(self, strategy, pair, pos, ts, high, low, close):
-        is_long = pos['direction'] == 'LONG'
+        """
+        Одна свеча для открытой позиции. Правила — ядро исполнения
+        (execution/core.simulate_position): пик хода с моментом (порядок
+        событий внутри сделки отвечает на вопрос, срезал ли безубыток почти
+        дошедшее до цели), срок удержания, безубыток — только если его заказала
+        стратегия (у SMC он выключен: подтянутый стоп выбивает позицию шумом до
+        дальних целей), стоп РАНЬШЕ цели (порядок внутри свечи неизвестен, и
+        трактовка в свою пользу завышает результат), цели по порядку.
 
-        # Момент запоминается ВМЕСТЕ с ценой: иначе порядок событий внутри
-        # сделки восстановить нельзя, а он и отвечает на вопрос, срезал ли
-        # безубыток то, что уже почти дошло до цели.
-        best = max(pos['mfe_price'], high) if is_long else min(pos['mfe_price'], low)
-        if best != pos['mfe_price']:
-            pos['mfe_price'], pos['mfe_ts'] = best, ts
-        worst = min(pos['mae_price'], low) if is_long else max(pos['mae_price'], high)
-        if worst != pos['mae_price']:
-            pos['mae_price'], pos['mae_ts'] = worst, ts
-        # КОГДА сделка впервые дала +1R — для вопроса о безубытке: сколько
-        # стопов случилось ПОСЛЕ того, как +1R уже был на столе.
-        if not pos.get('r1_ts'):
-            dist = abs(pos['entry_price'] - pos['initial_stop'])
-            if dist and ((best - pos['entry_price']) if is_long else (pos['entry_price'] - best)) >= dist:
-                pos['r1_ts'] = ts
-
+        Ядро отдаёт события по ходу — уведомление видит позицию ровно в том
+        состоянии, в каком она была в этот момент.
+        """
         import strategy_profile
         max_hold = pos.get('max_hold_hours') or strategy_profile.max_hold_hours(strategy)
-        if max_hold and (ts - pos['opened_ts']) / 3_600_000 > max_hold:
-            self._close(strategy, pair, pos, ts, close, 'TIME', slip=True)
-            return
-
-        # Безубыток — только если его заказала сама стратегия. У SMC он
-        # выключен: подтянутый стоп выбивает позицию шумом до дальних целей.
-        if pos.get('breakeven_after_tp', True) and not pos['breakeven_set']:
-            be = pos.get('be_level')
-            if be:
-                crossed = (high >= be) if is_long else (low <= be)
-                if crossed:
-                    # Не на вход, а за издержки: см. config.BREAKEVEN_OFFSET_PCT.
-                    from exit_plan import breakeven_price
-                    pos['stop_loss'] = breakeven_price(pos['entry_price'], is_long)
-                    pos['breakeven_set'] = True
-                    self._notify('paper_breakeven', strategy, pair, pos)
-
-        # Стоп проверяем РАНЬШЕ тейка: порядок событий внутри свечи по OHLC
-        # неизвестен, и трактовка в свою пользу завышает результат.
-        stop = pos['stop_loss']
-        stopped = (low <= stop) if is_long else (high >= stop)
-        if stopped:
-            self._close(strategy, pair, pos, ts, stop, 'BE' if pos['breakeven_set'] else 'SL',
-                        slip=True)
-            return
-
-        while pos['tp_hit'] < len(pos['targets']):
-            level = pos['targets'][pos['tp_hit']]
-            reached = (high >= level) if is_long else (low <= level)
-            if not reached:
-                break
-            index = pos['tp_hit']
-            # Минута взятия каждой цели от входа — для журнала сетапов: итог
-            # помнит, сколько целей взято, но не когда.
-            pos.setdefault('tp_min', []).append(int((ts - pos['opened_ts']) / 60000))
-            if index < len(pos['targets']) - 1:
-                self._take_partial(pos, index, level)
-                if pos.get('breakeven_after_tp', True) and not pos['breakeven_set']:
-                    pos['stop_loss'] = pos['entry_price']
-                    pos['breakeven_set'] = True
+        for what, detail in core.simulate_position(pos, ts, high, low, close, max_hold,
+                                                    config.PAPER_FEE_MAKER):
+            if what == 'breakeven':
+                self._notify('paper_breakeven', strategy, pair, pos)
+            elif what == 'target':
+                index, level = detail
+                log(f"   👻 [{pos['strategy']}] {pos['pair']}: TP{index + 1} @ ${_fmt_p(level)}, "
+                    f"закрыто {pos['fractions'][index] * 100:.0f}%")
                 # Одно сообщение на цель: безубыток после неё — его строка.
                 self._notify('paper_target', strategy, pair, pos, index, level)
-            else:
-                self._close(strategy, pair, pos, ts, level, f'TP{index + 1}', slip=False)
-                return
-
-    def _take_partial(self, pos, index, level):
-        portion = min(pos['size'], pos['initial_size'] * pos['fractions'][index])
-        sign = 1 if pos['direction'] == 'LONG' else -1
-        pos['realized_pnl'] += sign * (level - pos['entry_price']) * portion
-        # Частичная фиксация — тот же лимит в стакане, что и полная.
-        pos['fees_paid'] += portion * level * config.PAPER_FEE_MAKER
-        pos['size'] = max(0.0, pos['size'] - portion)
-        pos['tp_hit'] = index + 1
-        log(f"   👻 [{pos['strategy']}] {pos['pair']}: TP{index + 1} @ ${_fmt_p(level)}, "
-            f"закрыто {pos['fractions'][index] * 100:.0f}%")
+            elif what == 'close':
+                price, reason, slip = detail
+                self._close(strategy, pair, pos, ts, price, reason, slip=slip)
 
     @staticmethod
     def _exit_fee_rate(reason):
@@ -1667,25 +1544,15 @@ class PaperBroker:
 
         Разница ставок втрое: 0.02% против 0.055%.
         """
-        return (config.PAPER_FEE_MAKER if str(reason).startswith('TP')
-                else config.PAPER_FEE_TAKER)
+        return core.exit_fee_rate(reason, config.PAPER_FEE_MAKER, config.PAPER_FEE_TAKER)
 
     def _close(self, strategy, pair, pos, ts, price, reason, slip):
-        """Закрывает остаток позиции и пишет сделку в журнал."""
-        is_long = pos['direction'] == 'LONG'
-        exit_price = price
-        if slip and config.PAPER_SLIPPAGE_PCT:
-            # Проскальзывание всегда против нас — на стопе рынок уже бежит.
-            move = price * config.PAPER_SLIPPAGE_PCT
-            exit_price = price - move if is_long else price + move
-
-        sign = 1 if is_long else -1
-        remaining = pos['size']
-        gross = pos['realized_pnl'] + sign * (exit_price - pos['entry_price']) * remaining
-        fees = (pos['fees_paid']
-                + remaining * exit_price * self._exit_fee_rate(reason))
-        funding = pos.get('funding_paid', 0.0)
-        net = gross - fees - funding
+        """Закрывает остаток позиции и пишет сделку в журнал. Числа — ядро
+        исполнения: проскальзывание всегда против нас (на стопе рынок уже
+        бежит), комиссия выхода — по тому, как вышли."""
+        exit_price, gross, fees, funding, net = core.close_numbers(
+            pos, price, reason, slip, config.PAPER_SLIPPAGE_PCT,
+            config.PAPER_FEE_MAKER, config.PAPER_FEE_TAKER)
 
         balance_before = self.balance(strategy)
         balance_after = balance_before + net

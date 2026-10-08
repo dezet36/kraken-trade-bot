@@ -335,6 +335,13 @@ def analyze_market(df_1h, df_5m, trading_pair):
     params = calculate_trade_params(setup, entry_price, trading_pair=trading_pair)
     if not params:
         return None   # причина (RR < MIN_RR) уже залогирована внутри calculate_trade_params
+    # Уровень, за которым ждущая заявка снимается (сетап разрушен): 88.6% отката.
+    # Объявляет стратегия — брокер по её имени его не вычисляет (CLAUDE.md,
+    # изоляция п. 7; до 08.10.2026 считал paper_broker._invalidation).
+    if size:
+        params['pending_invalidation'] = (end_price - size * config.ZONE_B_TOP
+                                          if setup['type'] == 'LONG'
+                                          else end_price + size * config.ZONE_B_TOP)
 
     return {
         'trading_pair': trading_pair,
