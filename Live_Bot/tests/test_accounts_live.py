@@ -252,8 +252,9 @@ class TestPanel:
         assert [a['id'] for a in data['accounts']] == ['hashhedge']
         assert data['exchanges'] == ['bybit', 'bingx'] and data['modes'] == ['demo', 'live']
         assert 'LLM' not in [s['code'] for s in data['strategies']]
-        # проп по инструкциям ведётся (accounts/manual.py), биржи — следующим шагом
-        assert data['engine'] == {'manual': True, 'exchange': False}
+        # проп по инструкциям (accounts/manual.py) и биржи (accounts/onexchange.py)
+        assert data['engine'] == {'manual': True, 'exchange': True}
+        assert data['live_enabled'] is False                # реальные деньги — после демо
         assert list(data['books']) == ['hashhedge']
         assert data['defaults'] == live.kind_defaults()
 

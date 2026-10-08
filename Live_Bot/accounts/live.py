@@ -14,8 +14,8 @@
 только на сервере: в панель не возвращаются, в журнал и историю настроек не
 пишутся. Правки правил счёта — в историю настроек.
 
-Исполнение: проп по инструкциям — accounts/manual.py (этап 7, шаг 2); биржи
-(сначала демо) — следующим шагом.
+Исполнение: проп по инструкциям — accounts/manual.py (этап 7, шаг 2), биржи —
+accounts/onexchange.py (шаг 3, сначала демо); одна дверь — accounts/trading.py.
 """
 
 import json
@@ -217,8 +217,8 @@ def save(changes):
             code = slug(account['name'])
             # Код удалённого счёта новому не достаётся: его сделки остались в
             # журнале и попали бы в статистику нового.
-            from accounts import manual
-            used = set(data) | manual.known_codes()
+            from accounts import books
+            used = set(data) | books.known_codes()
             stem, n = code, 2
             while code in used:
                 code, n = f'{stem}-{n}', n + 1
@@ -239,18 +239,18 @@ def save(changes):
 def remove(code):
     """Удаляет счёт и его ключи. Счёт с заявками или позициями в записи удалять
     нельзя — сначала закрыть: иначе запись потеряла бы открытые сделки."""
-    from accounts import manual
+    from accounts import books
     with _lock:
         before = json.loads(json.dumps(load(force=True)))
         if code not in before:
             raise ValueError(f'нет счёта «{code}»')
-        if manual.busy(code):
+        if books.busy(code):
             raise ValueError('у счёта есть заявки или позиции — сначала закройте их')
         data = {k: v for k, v in before.items() if k != code}
         _write_json(path(), data)
         _cache['key'], _cache['data'] = None, None
         drop_keys(code)
-        manual.forget(code)
+        books.forget(code)
     _history(before, data)
     log(f'💼 торговый счёт {code} удалён')
 

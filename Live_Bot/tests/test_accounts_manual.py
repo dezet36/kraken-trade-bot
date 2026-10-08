@@ -30,9 +30,9 @@ import pytest
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
-from accounts import live, manual  # noqa: E402
+from accounts import books, live, manual  # noqa: E402
 
-BAR = manual.BAR_MS
+BAR = books.BAR_MS
 T0 = 300_000 * 5_866_667          # начало пятиминутки, октябрь 2025
 H = 3_600_000
 
@@ -74,18 +74,18 @@ def profile(monkeypatch):
               'fills_through_market': False}
     for name, value in values.items():
         monkeypatch.setattr(strategy_profile, name, lambda strategy, v=value: v)
-    monkeypatch.setattr(manual, '_notify', None)
-    monkeypatch.setattr(manual, '_outbox', [])
-    monkeypatch.setattr(manual, '_funding', {})
+    monkeypatch.setattr(books, '_notify', None)
+    monkeypatch.setattr(books, '_outbox', [])
+    monkeypatch.setattr(books, '_funding', {})
     return values
 
 
 @pytest.fixture
 def sent(monkeypatch):
     out = []
-    manual.notify_with(lambda name, item: out.append((name, item)))
+    books.notify_with(lambda name, item: out.append((name, item)))
     yield out
-    manual.notify_with(None)
+    books.notify_with(None)
 
 
 def prop(**rules):
@@ -196,7 +196,7 @@ class TestOffer:
         from strategies import contract
         signal = a_setup(risk_pct=1.0, risk_amount=100.0, position_size=5.0, max_same_direction=3)
         signal['scan'] = {'score': 1}
-        copy = manual.setup_copy(signal)
+        copy = books.setup_copy(signal)
         assert not set(copy['params']) & set(contract.MONEY_KEYS)
         assert signal['params']['risk_amount'] == 100.0              # оригинал не тронут
         assert copy['params']['entry'] == 100.0 and copy['setup']['type'] == 'LONG'
@@ -215,7 +215,7 @@ class TestLifecycle:
         assert sent[2][1]['action'] is False and 'стоп' in sent[2][1]['title']
         b = book(code)
         assert not b['positions'] and b['balance'] < 9_900       # −1R и издержки
-        row = manual.read_journal()[-1]
+        row = books.read_journal()[-1]
         assert row['account'] == code and row['exit_reason'] == 'SL' and row['outcome'] == 'минус'
         assert row['pnl_r'] == pytest.approx(-1.0, abs=0.08)
         assert b['quality']['trades'] == 1 and b['quality']['losses'] == 1
@@ -230,7 +230,7 @@ class TestLifecycle:
         target = sent[2][1]
         assert target['action'] is True
         assert 'Перенесите стоп остатка в безубыток: 100.0000' in '\n'.join(target['lines'])
-        row = manual.read_journal()[-1]
+        row = books.read_journal()[-1]
         assert row['exit_reason'] == 'BE' and row['pnl_usd'] > 0 and row['tps_hit'] == 1
         assert book(code)['balance'] > 10_000
 
@@ -254,7 +254,7 @@ class TestLifecycle:
         manual.update(client, now_ms=T0 + 17 * BAR)
         assert kinds(sent) == ['place', 'fill', 'close']
         assert sent[2][1]['action'] is True and 'Срок удержания 1 ч вышел' in sent[2][1]['lines'][0]
-        assert manual.read_journal()[-1]['exit_reason'] == 'TIME'
+        assert books.read_journal()[-1]['exit_reason'] == 'TIME'
 
     def test_disabled_account_still_manages_what_is_open(self, sent):
         code = prop()
@@ -267,12 +267,12 @@ class TestLifecycle:
     def test_notifier_failure_does_not_stop_the_account(self):
         def broken(name, item):
             raise RuntimeError('Telegram лежит')
-        manual.notify_with(broken)
+        books.notify_with(broken)
         try:
             code = prop()
             assert manual.offer('SMCS', a_setup(), now_ms=T0) == [(code, None)]
         finally:
-            manual.notify_with(None)
+            books.notify_with(None)
 
 
 # ── Правила пропа ───────────────────────────────────────────────────────────
@@ -291,12 +291,12 @@ class TestPropRules:
         live.save({'id': code, 'max_drawdown_pct': 0.5})           # пол $9 950
         manual.update(Client({'BTCUSDT': [bar(2, 98.6, 99.2, close=98.7)]}), now_ms=T0 + 4 * BAR)
         b = book(code)
-        assert b['status'] == manual.FAILED and not b['positions'] and not b['pending']
+        assert b['status'] == books.FAILED and not b['positions'] and not b['pending']
         rules = sent[-1][1]
         assert rules['kind'] == 'rules' and rules['action'] is True
         text = '\n'.join(rules['lines'])
         assert 'Закрыть по рынку: BTCUSDT LONG' in text and 'Снять заявку: ETHUSDT LONG' in text
-        assert manual.read_journal()[-1]['exit_reason'] == 'RULES'
+        assert books.read_journal()[-1]['exit_reason'] == 'RULES'
         assert not manual.wants('SMCS')
         assert manual.offer('SMCS', a_setup(pair='SOLUSDT'), now_ms=T0 + 5 * BAR) == []
 
@@ -306,7 +306,7 @@ class TestPropRules:
         live.save({'id': code, 'daily_loss_pct': 0.5})
         manual.update(Client({'BTCUSDT': [bar(2, 98.6, 99.2, close=98.7)]}), now_ms=T0 + 4 * BAR)
         b = book(code)
-        assert b['status'] == manual.FAILED and 'за сутки' in b['status_why']
+        assert b['status'] == books.FAILED and 'за сутки' in b['status_why']
 
     def test_target_locks_the_phase(self, sent):
         code = prop()
@@ -314,7 +314,7 @@ class TestPropRules:
         live.save({'id': code, 'profit_target_pct': 1.0})          # цель $10 100
         manual.update(Client({'BTCUSDT': [bar(2, 101.0, 102.6, close=102.5)]}), now_ms=T0 + 4 * BAR)
         b = book(code)
-        assert b['status'] == manual.TARGET and not b['positions']
+        assert b['status'] == books.TARGET and not b['positions']
         assert sent[-1][1]['kind'] == 'pass' and b['balance'] > 10_100
 
     def test_new_phase_takes_the_size_from_the_rules(self, sent):
@@ -327,7 +327,7 @@ class TestPropRules:
         live.save({'id': code, 'deposit': 20_000})                  # ап-скейл
         manual.act(code, 'new_phase', now_ms=T0 + 5 * BAR)
         b = book(code)
-        assert b['phase'] == 2 and b['status'] == manual.ACTIVE
+        assert b['phase'] == 2 and b['status'] == books.ACTIVE
         assert b['start'] == b['balance'] == 20_000.0
         assert b['quality']['trades'] == 0 and b['quality_all']['trades'] == 1
         assert manual.wants('SMCS') and sent[-1][1]['kind'] == 'phase'
@@ -359,7 +359,7 @@ class TestOwner:
         manual.offer('SMCS', a_setup(pair='ETHUSDT'), now_ms=T0)
         manual.update(Client({'BTCUSDT': [bar(1, 99.8, 101.0, close=101.0)]}), now_ms=T0 + 3 * BAR)
         assert 'закрыта в записи' in manual.act(code, 'close', pair='BTCUSDT', now_ms=T0 + 3 * BAR)
-        assert manual.read_journal()[-1]['exit_reason'] == 'MANUAL'
+        assert books.read_journal()[-1]['exit_reason'] == 'MANUAL'
         manual.act(code, 'cancel', pair='ETHUSDT')
         b = book(code)
         assert not b['positions'] and not b['pending']
@@ -388,7 +388,7 @@ class TestOwner:
             live.remove(code)
         manual.act(code, 'cancel', pair='ETHUSDT')
         live.remove(code)
-        assert code not in manual._state()
+        assert code not in books.state()
         again = prop()
         assert again != code, 'сделки удалённого счёта попали бы в статистику нового'
 
@@ -495,12 +495,12 @@ class TestWiring:
         import telegram_notify as tg
         markups = []
         monkeypatch.setattr(tg, '_send', lambda text, reply_markup=None, **kw: markups.append(reply_markup) or True)
-        manual.notify_with(tg.account_instruction)
+        books.notify_with(tg.account_instruction)
         try:
             code = prop()
             manual.offer('SMCS', a_setup(), now_ms=T0)
         finally:
-            manual.notify_with(None)
+            books.notify_with(None)
         data = markups[0]['inline_keyboard'][0][0]['callback_data']
         assert data == f'ad:{code}:1'
         ctl = telegram_bot.BotController()
@@ -552,7 +552,7 @@ class TestPanel:
         code = prop()
         manual.offer('SMCS', a_setup())
         status, data = self._call(f'{server}/api/accounts')
-        assert status == 200 and data['engine'] == {'manual': True, 'exchange': False}
+        assert status == 200 and data['engine'] == {'manual': True, 'exchange': True}
         b = data['books'][code]
         assert len(b['pending']) == 1 and len(b['waiting']) == 1
         item = b['waiting'][0]['id']

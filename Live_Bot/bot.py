@@ -24,7 +24,7 @@ from pair_scanner import get_liquid_pairs, scan_for_setups
 from paper_broker import PaperBroker, STRATEGIES as PAPER_STRATEGIES
 # Деньги и допуск стратегий — у их тестовых счетов (реорганизация, этап 2).
 from accounts import paper as account
-from accounts import manual as manual_accounts
+from accounts import trading as trading_accounts
 from trade_manager import LiveTradeManager
 from logger import log
 
@@ -120,14 +120,14 @@ def _build_signal(candidate, strategy, balance, setups=None):
     if not signal:
         return None, None
 
-    # Копия сетапа без денег — счетам по инструкциям (accounts/manual.py), до
-    # решения тестового счёта: у них свои стороны и свой риск. Её сбой сделку
-    # теста не трогает.
+    # Копия сетапа без денег — торговым счетам (accounts/trading.py: проп по
+    # инструкциям, биржи), до решения тестового счёта: у них свои стороны и
+    # свой риск. Её сбой сделку теста не трогает.
     if setups is not None:
         try:
-            setups.append(manual_accounts.setup_copy(signal))
+            setups.append(trading_accounts.setup_copy(signal))
         except Exception as exc:                       # noqa: BLE001
-            log(f"   ⚠️ {strategy} {pair}: копия сетапа для счетов по инструкциям — {exc}")
+            log(f"   ⚠️ {strategy} {pair}: копия сетапа для торговых счетов — {exc}")
 
     # Решение счёта стратегии (accounts/paper.py, с 08.10.2026): разрешена ли
     # сторона и на каких деньгах — риск, предел в одну сторону, размер.
@@ -146,17 +146,17 @@ def _build_signal(candidate, strategy, balance, setups=None):
 
 
 def _trading_wants(strategy):
-    """Ждёт ли сетапы стратегии хоть один счёт по инструкциям. Сбой — нет."""
+    """Ждёт ли сетапы стратегии хоть один торговый счёт. Сбой — нет."""
     try:
-        return manual_accounts.wants(strategy)
+        return trading_accounts.wants(strategy)
     except Exception as exc:                           # noqa: BLE001
-        log(f'⚠️ счета по инструкциям: {exc}')
+        log(f'⚠️ торговые счета: {exc}')
         return False
 
 
 def _offer_to_trading(strategy, setup=None, candidate=None):
     """
-    Сетап — счетам по инструкциям (accounts/manual.py). Кандидат сверх предела
+    Сетап — торговым счетам (accounts/trading.py). Кандидат сверх предела
     заявок теста достраивается здесь: адаптер строит сигнал из готового
     кандидата, без сети. Отказ или сбой торговых счетов тест не трогает.
     """
@@ -166,10 +166,10 @@ def _offer_to_trading(strategy, setup=None, candidate=None):
             signal, _ = registry.adapter(strategy).build_signal(candidate)
             if not signal:
                 return
-            setup = manual_accounts.setup_copy(signal)
-        manual_accounts.offer(strategy, setup)
+            setup = trading_accounts.setup_copy(signal)
+        trading_accounts.offer(strategy, setup)
     except Exception as exc:                           # noqa: BLE001
-        log(f'⚠️ счета по инструкциям: {strategy} — {exc}')
+        log(f'⚠️ торговые счета: {strategy} — {exc}')
 
 
 def _open_from_candidate(candidate, strategy, balance):
@@ -264,12 +264,13 @@ def _paper_cycle():
     # срабатывают. Делаем это ДО проверки паузы — пауза запрещает новые входы,
     # а не ведение позиций.
     broker.update()
-    # Счета по инструкциям (проп без API): свечи, события, правила пропа — до
-    # паузы, как и тест: пауза запрещает новые входы, а не ведение.
+    # Торговые счета (проп по инструкциям, биржи): свечи, события, сверка с
+    # биржей, правила пропа — до паузы, как и тест: пауза запрещает новые
+    # входы, а не ведение.
     try:
-        manual_accounts.update(broker.client)
+        trading_accounts.update(broker.client)
     except Exception as exc:                           # noqa: BLE001
-        log(f'⚠️ счета по инструкциям: {exc}')
+        log(f'⚠️ торговые счета: {exc}')
 
     if controller.is_paused():
         log("⏸ Бот на паузе — новые фантомные входы пропускаем")
@@ -742,8 +743,8 @@ def _start_paper():
 
     controller.trade_manager = broker
     controller.start()
-    # Инструкции счетов по инструкциям (проп без API) — в Telegram.
-    manual_accounts.notify_with(tg.account_instruction)
+    # Сообщения торговых счетов (инструкции пропа, события бирж) — в Telegram.
+    trading_accounts.notify_with(tg.account_instruction)
 
     log("\n👻 ФАНТОМНАЯ ТОРГОВЛЯ — ордера на биржу НЕ отправляются")
     for name in broker.strategies:
@@ -779,12 +780,12 @@ def _start_paper():
     if getattr(config, 'PORTFOLIO_DAILY_DD_PAUSE_PCT', 0):
         log(f"   Термостат: новые входы стоят при просадке портфеля за день "
             f"≥ {config.PORTFOLIO_DAILY_DD_PAUSE_PCT:.1f}%")
-    # Торговые счета по инструкциям (проп без API, accounts/manual.py).
+    # Торговые счета (accounts/trading.py): проп по инструкциям и биржи.
     try:
-        for line in manual_accounts.describe():
+        for line in trading_accounts.describe():
             log(line)
     except Exception as exc:                           # noqa: BLE001
-        log(f'⚠️ счета по инструкциям: {exc}')
+        log(f'⚠️ торговые счета: {exc}')
 
     dashboard.start_dashboard(broker=broker)
     tg.bot_started(broker.get_real_balance(), broker=broker)

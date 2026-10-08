@@ -320,9 +320,9 @@ class BotController:
     def _account_done(code, item):
         """«Готово» под инструкцией счёта без API (accounts/manual.py): отметка
         в книге счёта. Сообщение остаётся как было — ответ всплывающей строкой."""
-        from accounts import manual
+        from accounts import trading
         try:
-            manual.act(code, 'ack', item=item)
+            trading.act(code, 'ack', item=item)
             return '✅ Отмечено: сделано', None, None
         except ValueError as exc:
             return str(exc)[:190], None, None

@@ -135,18 +135,21 @@ def _isolate_bot_data(tmp_path, monkeypatch):
     # Счета стратегий и настройки стратегий (с 08.10.2026) путь берут из
     # config.DATA_DIR при каждом обращении — он уже переставлен выше. Кэш у них
     # свой: сбрасываем, чтобы проверка не унаследовала счета соседней.
+    from accounts import books as accounts_books
     from accounts import live as accounts_live
-    from accounts import manual as accounts_manual
+    from accounts import onexchange as accounts_onexchange
     from accounts import paper as accounts_paper
     from strategies import settings as strategy_settings
     monkeypatch.setattr(accounts_paper, '_cache', {'key': None, 'data': None})
     monkeypatch.setattr(accounts_live, '_cache', {'key': None, 'data': None})
-    # Книги счетов по инструкциям: кэш, неотправленное, ставки фандинга и
-    # получатель инструкций — свои у каждой проверки.
-    monkeypatch.setattr(accounts_manual, '_cache', {'path': None, 'state': None})
-    monkeypatch.setattr(accounts_manual, '_outbox', [])
-    monkeypatch.setattr(accounts_manual, '_funding', {})
-    monkeypatch.setattr(accounts_manual, '_notify', None)
+    # Книги торговых счетов: кэш, неотправленное, ставки фандинга и получатель
+    # сообщений — свои у каждой проверки; клиенты бирж и счётчики сбоев — тоже.
+    monkeypatch.setattr(accounts_books, '_cache', {'path': None, 'state': None})
+    monkeypatch.setattr(accounts_books, '_outbox', [])
+    monkeypatch.setattr(accounts_books, '_funding', {})
+    monkeypatch.setattr(accounts_books, '_notify', None)
+    monkeypatch.setattr(accounts_onexchange, '_venues', {})
+    monkeypatch.setattr(accounts_onexchange, '_fails', {})
     monkeypatch.setattr(strategy_settings, '_cache', {'key': None, 'data': {}})
 
     for target in targets.values():

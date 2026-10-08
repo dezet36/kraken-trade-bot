@@ -4514,9 +4514,9 @@ function accCard(a) {
     ${a.draft ? '<div class="acc-draft">Правила — черновик (типичные для пропа): проверьте и сохраните свои.</div>' : ''}
     <div class="acc-rules">${rules}</div>
     <div class="acc-chips">${chips}</div>
-    ${a.enabled && !(ACC.engine || {})[a.kind] ? '<div class="hint" style="margin-top:8px">Исполнение на биржевых счетах подключается следующим шагом этапа 7 — пока счёт только заведён.</div>' : ''}
+    ${a.kind === 'exchange' && a.mode === 'live' && !ACC.live_enabled ? '<div class="acc-warn">Реальные деньги: торговля на этом счёте включится после проверки на демо.</div>' : ''}
     ${edit}${keysForm}
-    ${a.kind === 'manual' ? accBook(a) : ''}
+    ${accBook(a)}
   </div>`;
 }
 
@@ -4551,17 +4551,22 @@ function accInstr(a, it, buttons) {
 function accBook(a) {
   const b = (ACC.books || {})[a.id];
   if (!b) return '';
-  const id = esc(a.id), w = ACC.writable, q = b.quality || {};
+  const id = esc(a.id), w = ACC.writable, q = b.quality || {}, ex = a.kind === 'exchange';
+  const kindAttr = `data-acc-kind="${esc(a.kind)}"`;
+  if (ex && !b.started) {
+    return a.enabled && b.tradable ? `<div class="acc-book"><div class="hint">Счёт ещё не торговал: капитал придёт с биржи
+      с первой заявкой. Заявки ставятся сразу со стопом; события — здесь и в Telegram.</div></div>` : '';
+  }
   const out = [];
   if (b.status !== 'active') {
     out.push(`<div class="acc-status ${b.status === 'target' ? 'pass' : 'fail'}">${b.status === 'target' ? '🏆' : '⛔'}
       <b>${esc(b.status_text)}</b> — ${esc(b.status_why)}
-      ${w ? `<button type="button" class="btn sm" data-acc-act="new_phase" data-acc-id="${id}">Новый этап</button>` : ''}</div>`);
+      ${w ? `<button type="button" class="btn sm" data-acc-act="new_phase" data-acc-id="${id}" ${kindAttr}>Новый этап</button>` : ''}</div>`);
   }
   out.push(stKpis([
-    ['Капитал', accMoney(b.equity), `${b.return_pct >= 0 ? '+' : ''}${Number(b.return_pct || 0).toFixed(2)}% за этап ${b.phase}`, stCls(b.return_pct)],
+    [ex ? 'Капитал на бирже' : 'Капитал', accMoney(b.equity), `${b.return_pct >= 0 ? '+' : ''}${Number(b.return_pct || 0).toFixed(2)}% за этап ${b.phase}`, stCls(b.return_pct)],
     ['Сегодня', stUsd(b.day_pnl), 'с полуночи UTC', stCls(b.day_pnl)],
-    ['Открытый риск', accMoney(b.open_risk), b.room ? `до правила пропа ${accMoney(Math.max(0, b.room.amount))}` : ''],
+    ['Открытый риск', accMoney(b.open_risk), b.room ? `${ex ? 'до предела счёта' : 'до правила пропа'} ${accMoney(Math.max(0, b.room.amount))}` : ''],
     ['Сделок за этап', q.trades || 0, q.trades ? `в плюс ${stPct(q.win_rate)} · ${stR(q.total_r)}` : 'закрытых ещё нет'],
   ]));
   const meters = [];
@@ -4572,13 +4577,13 @@ function accBook(a) {
   if (b.daily_limit) meters.push(accMeter(`Убыток за сутки · предел ${accMoney(b.daily_limit)}`,
     `${b.daily_used_pct || 0}%`, (b.daily_used_pct || 0) / 100, 'bad'));
   if (meters.length) out.push(`<div class="acc-meters">${meters.join('')}</div>`);
-  if (Math.abs((b.deposit_rules || 0) - b.start) >= 0.01 && b.started) {
+  if (!ex && Math.abs((b.deposit_rules || 0) - b.start) >= 0.01 && b.started) {
     out.push(`<div class="hint">В правилах размер счёта ${accMoney(b.deposit_rules)} — применится с нового этапа
       (этап ${b.phase} начат с ${accMoney(b.start)}).</div>`);
   }
   if (b.waiting.length) {
     out.push(`<div class="acc-sub">Ждут исполнения · ${b.waiting.length}</div>` + b.waiting.map(it => accInstr(a, it, true)).join(''));
-  } else if (!b.started) {
+  } else if (!b.started && !ex) {
     out.push(`<div class="hint">Заявок ещё не было. Когда стратегии счёта найдут сетап, инструкция придёт в Telegram
       и появится здесь: пара, сторона, вход, стоп, тейки, объём.</div>`);
   }
@@ -4588,7 +4593,7 @@ function accBook(a) {
       <th class="lbl">${esc(p.pair)} ${accSide(p.direction)}</th><td>${esc(accTitle(p.strategy))}</td>
       <td>${price(p.entry)}</td><td>${price(p.stop)}${p.breakeven ? ' 🛡' : ''}</td><td>${accTargets(p)}</td>
       <td>${accQty(p.size)}</td><td class="${stCls(p.result)}">${stUsd(p.result)} · ${stR(p.result_r)}</td>
-      <td>${w ? `<button type="button" class="btn sm ghost" data-acc-act="close" data-acc-id="${id}" data-acc-pair="${esc(p.pair)}">Закрыл сам</button>` : ''}</td></tr>`));
+      <td>${w ? `<button type="button" class="btn sm ghost" data-acc-act="close" data-acc-id="${id}" ${kindAttr} data-acc-pair="${esc(p.pair)}">${ex ? 'Закрыть на бирже' : 'Закрыл сам'}</button>` : ''}</td></tr>`));
   }
   if (b.pending.length) {
     out.push(`<div class="acc-sub">Заявки · ${b.pending.length}</div>` + stTable(b.pending,
@@ -4596,7 +4601,7 @@ function accBook(a) {
       <th class="lbl">${esc(o.pair)} ${accSide(o.direction)}</th><td>${esc(accTitle(o.strategy))}</td>
       <td>${price(o.entry)}${o.stop_entry ? ' (стоп-заявка)' : ''}</td><td>${price(o.stop)}</td><td>${accTargets(o)}</td>
       <td>${accQty(o.size)}</td><td>${o.distance_pct == null ? '—' : o.distance_pct + '%'}</td><td>${when(o.expires)}</td>
-      <td>${w ? `<button type="button" class="btn sm ghost" data-acc-act="cancel" data-acc-id="${id}" data-acc-pair="${esc(o.pair)}">Снял сам</button>` : ''}</td></tr>`));
+      <td>${w ? `<button type="button" class="btn sm ghost" data-acc-act="cancel" data-acc-id="${id}" ${kindAttr} data-acc-pair="${esc(o.pair)}">${ex ? 'Снять на бирже' : 'Снял сам'}</button>` : ''}</td></tr>`));
   }
   if (b.recent.length) {
     out.push(`<div class="acc-sub">Последние сделки этапа</div>` + stTable(b.recent,
@@ -4606,7 +4611,7 @@ function accBook(a) {
       <td class="${stCls(r.pnl_usd)}">${stUsd(r.pnl_usd)} · ${stR(r.pnl_r)}</td><td>${when(r.closed_at)}</td></tr>`));
   }
   if (b.instructions.length) {
-    out.push(`<details class="acc-log"><summary>Все инструкции · последние ${b.instructions.length}</summary>
+    out.push(`<details class="acc-log"><summary>${ex ? 'События счёта' : 'Все инструкции'} · последние ${b.instructions.length}</summary>
       ${b.instructions.map(it => accInstr(a, it, false)).join('')}</details>`);
   }
   return `<div class="acc-book">${out.join('')}</div>`;
@@ -4740,14 +4745,18 @@ function bindAccounts() {
     try { await accPost('/api/accounts/save', { id, enabled: !a.enabled }); await loadAccounts(); }
     catch (e) { msg.style.color = 'var(--bad)'; msg.textContent = e.message; }
   });
+  /* У пропа кнопка — «я это сделал» (запись счёта), у биржи — действие НА
+     БИРЖЕ: и вопрос перед ним разный. */
   const ACT_ASK = {
-    close: p => `Позиция ${p} закрыта у вас на счёте? В записи она закроется по последней цене.`,
-    cancel: p => `Заявка ${p} снята у вас на счёте? Из записи она уберётся.`,
-    new_phase: () => 'Начать новый этап? Размер счёта — из правил, итоги прошлого этапа останутся в журнале.',
+    close: (p, ex) => ex ? `Закрыть позицию ${p} по рынку на бирже?`
+      : `Позиция ${p} закрыта у вас на счёте? В записи она закроется по последней цене.`,
+    cancel: (p, ex) => ex ? `Снять заявку ${p} на бирже?` : `Заявка ${p} снята у вас на счёте? Из записи она уберётся.`,
+    new_phase: (p, ex) => ex ? 'Начать новый этап от текущего капитала на бирже? Итоги прошлого этапа останутся в журнале.'
+      : 'Начать новый этап? Размер счёта — из правил, итоги прошлого этапа останутся в журнале.',
   };
   document.querySelectorAll('[data-acc-act]').forEach(b => b.onclick = async () => {
     const d = b.dataset, msg = el('acc-msg-' + d.accId);
-    if (ACT_ASK[d.accAct] && !confirm(ACT_ASK[d.accAct](d.accPair || ''))) return;
+    if (ACT_ASK[d.accAct] && !confirm(ACT_ASK[d.accAct](d.accPair || '', d.accKind === 'exchange'))) return;
     try {
       b.disabled = true;
       await accPost('/api/accounts/act', { id: d.accId, action: d.accAct, item: d.accItem, pair: d.accPair });

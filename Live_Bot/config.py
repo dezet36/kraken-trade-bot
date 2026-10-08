@@ -46,6 +46,10 @@ TRADING_MODE = os.getenv('TRADING_MODE', 'DEMO').upper()
 LIVE_CONFIRMED = os.getenv('LIVE_CONFIRMED', '')
 EXCHANGE_NAME = os.getenv('EXCHANGE', 'bybit')
 PAPER_MODE = TRADING_MODE == 'PAPER'
+# Торговые счета на бирже (accounts/onexchange.py, с 08.10.2026): счёт в режиме
+# «реальные деньги» торгует, только когда это включено. Решение владельца:
+# сначала демо Bybit и VST BingX, потом малая сумма — включать после демо.
+EXCHANGE_LIVE_ENABLED = os.getenv('EXCHANGE_LIVE_ENABLED', 'false').lower() == 'true'
 
 # ── Выбор стратегии ──────────────────────────────────────────────────────────
 # FIBO — исходная стратегия «импульс + сетка Фибоначчи» (модель года +252%).

@@ -1727,19 +1727,19 @@ class _Handler(BaseHTTPRequestHandler):
             # Торговые счета (accounts/live.py): правила и признак ключей —
             # без самих ключей.
             try:
-                from accounts import live, manual
+                from accounts import live, onexchange, trading
                 from strategies import registry
-                books = {code: manual.report(code, rules)
-                         for code, rules in live.load().items() if rules['kind'] == 'manual'}
+                books = {code: trading.report(code, rules) for code, rules in live.load().items()}
                 self._send_json({
                     'accounts': live.listing(), 'books': books, 'kinds': live.KINDS,
                     'exchanges': list(live.EXCHANGES), 'modes': list(live.MODES),
                     'limits': live.LIMITS, 'defaults': live.kind_defaults(),
                     'strategies': [{'code': c, 'title': registry.get(c).title}
                                    for c in live.allowed_strategies()],
-                    # Исполнение: проп по инструкциям ведётся (этап 7, шаг 2),
-                    # биржи — следующим шагом.
-                    'engine': {'manual': True, 'exchange': False},
+                    # Исполнение: проп по инструкциям (этап 7, шаг 2) и биржи
+                    # (шаг 3; реальные деньги — после проверки на демо).
+                    'engine': {'manual': True, 'exchange': True},
+                    'live_enabled': onexchange.live_enabled(),
                     'writable': _controls_allowed()})
             except Exception as exc:               # noqa: BLE001
                 self._fail(500, f'счета недоступны: {exc}')
@@ -1841,12 +1841,13 @@ class _Handler(BaseHTTPRequestHandler):
             return
 
         if path == '/api/accounts/act':
-            # Счёт по инструкциям (accounts/manual.py): «Готово» по инструкции,
-            # заявка снята или позиция закрыта владельцем, новый этап.
-            from accounts import manual
+            # Торговый счёт (accounts/trading.py): у пропа — «Готово», заявка
+            # снята или позиция закрыта владельцем; у биржи — снять заявку или
+            # закрыть позицию НА БИРЖЕ; у обоих — новый этап.
+            from accounts import trading
             try:
-                text = manual.act(str(changes.get('id') or ''), str(changes.get('action') or ''),
-                                  item=changes.get('item'), pair=changes.get('pair'))
+                text = trading.act(str(changes.get('id') or ''), str(changes.get('action') or ''),
+                                   item=changes.get('item'), pair=changes.get('pair'))
                 self._send_json({'ok': True, 'message': text})
             except ValueError as exc:
                 self._fail(400, str(exc))
