@@ -170,9 +170,28 @@ def smcs_decisions(df):
     return _fp(out)
 
 
+def fib12_decisions(df):
+    """Фибо 12ч: сетап на последнем баре, как его видит адаптер, с числами из
+    СВОЕГО params (на старшем ТФ синтетического рынка)."""
+    from fib12 import core, params
+    h4 = frames_of(df.copy())['htf']
+    o, h, l, c = (h4[col].astype(float).tolist() for col in ('open', 'high', 'low', 'close'))
+    out = []
+    for i in range(60, len(h4)):
+        setup, reason = core.evaluate(o[:i + 1], h[:i + 1], l[:i + 1], c[:i + 1],
+                                      k=params.SWING_K, atr_period=params.ATR_PERIOD,
+                                      retrace=params.RETRACE, stop_level=params.STOP_LEVEL,
+                                      stop_buffer_atr=params.STOP_BUFFER_ATR,
+                                      target_ext=params.TARGET_EXT)
+        out.append(reason if setup is None else
+                   (setup['direction'], round(setup['entry'], 8), round(setup['stop'], 8),
+                    round(setup['target'], 8)))
+    return _fp(out)
+
+
 def profiles():
     import strategy_profile
-    return _fp({n: strategy_profile.describe(n) for n in ('SMC', 'LEVELS', 'RSIBB', 'LLM', 'SMCS')})
+    return _fp({n: strategy_profile.describe(n) for n in ('SMC', 'LEVELS', 'RSIBB', 'LLM', 'SMCS', 'FIB12')})
 
 
 READERS = {
@@ -183,6 +202,7 @@ READERS = {
     'LEVELS': levels_decisions,
     'RSIBB': rsibb_decisions,
     'SMCS': smcs_decisions,
+    'FIB12': fib12_decisions,
 }
 
 
@@ -283,6 +303,24 @@ class TestDecisionParamsAreIsolated:
         assert strategy_profile.cooldown_hours('SMCS') == 99.0
         before = json.loads(baseline['профили'])
         for other in ('SMC', 'LEVELS', 'RSIBB', 'LLM'):
+            assert _fp(strategy_profile.describe(other)) == _fp(before[other])
+
+    def test_fib12_decisions_do_not_reach_anyone_else(self, df, baseline, monkeypatch):
+        from fib12 import params
+        for name, value in {
+            'SWING_K': 2, 'RETRACE': 0.5, 'STOP_LEVEL': 1.0, 'STOP_BUFFER_ATR': 0.5,
+            'TARGET_EXT': 0.272, 'MAX_POSITION_HOLD_HOURS': 1.0, 'PENDING_ORDER_MAX_HOURS': 9.0,
+            'COOLDOWN_HOURS': 99.0, 'MAX_ENTRY_COST_SHARE_PCT': 50.0, 'MIN_STOP_PCT': 3.0,
+        }.items():
+            monkeypatch.setattr(params, name, value)
+        assert fib12_decisions(df) != baseline['FIB12'], 'правка FIB12 должна менять FIB12 — иначе тест пуст'
+        for name, fn in READERS.items():
+            if name != 'FIB12':
+                assert fn(df) == baseline[name], f'{name} изменился от правки решений FIB12'
+        import strategy_profile
+        assert strategy_profile.cooldown_hours('FIB12') == 99.0
+        before = json.loads(baseline['профили'])
+        for other in ('SMC', 'LEVELS', 'RSIBB', 'LLM', 'SMCS'):
             assert _fp(strategy_profile.describe(other)) == _fp(before[other])
 
     def test_llm_settings_do_not_reach_anyone_else(self, df, baseline, monkeypatch):

@@ -188,6 +188,7 @@ def _strategy_risks():
         ('LEVELS', lambda: __import__('levels.params', fromlist=['x']).RISK_PCT),
         ('RSIBB', lambda: __import__('rsibb.params', fromlist=['x']).RISK_PCT),
         ('SMCS', lambda: __import__('smcs.params', fromlist=['x']).RISK_PCT),
+        ('FIB12', lambda: __import__('fib12.params', fromlist=['x']).RISK_PCT),
     )
     for name, get in sources:
         try:
@@ -274,7 +275,7 @@ def check_limits():
         # Предел расхода на вход — у каждой стратегии свой (strategy_profile);
         # выключен он, если выключен хотя бы у одной.
         cost_limit = min(strategy_profile.cost_limit_pct(name)
-                         for name in ('FIBO', 'SMC', 'LEVELS', 'RSIBB', 'LLM', 'SMCS'))
+                         for name in ('FIBO', 'SMC', 'LEVELS', 'RSIBB', 'LLM', 'SMCS', 'FIB12'))
         off = risk_gate.disabled_limits(settings.portfolio_max_positions(),
                                         settings.portfolio_risk_pct(),
                                         settings.daily_loss_pct(),

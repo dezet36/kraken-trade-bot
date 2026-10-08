@@ -49,7 +49,7 @@ import settings_store as settings
 import setup_geometry
 from logger import log
 
-STRATEGIES = ('FIBO', 'SMC', 'LEVELS', 'RSIBB', 'LLM', 'SMCS')
+STRATEGIES = ('FIBO', 'SMC', 'LEVELS', 'RSIBB', 'LLM', 'SMCS', 'FIB12')
 
 BAR_TF = '5m'
 BAR_MS = 5 * 60 * 1000
@@ -878,6 +878,11 @@ class PaperBroker:
             'size': size,
             'rr': float(params.get('rr') or 0),
             'invalidation': self._invalidation(strategy, signal, is_long),
+            # Уровень по ходу сделки, за которым заявка теряет смысл ещё до
+            # налива (Фибо 12ч: цена ушла за конец импульса B — нога
+            # продолжилась, это уже другая нога). Объявляет стратегия в
+            # params['cancel_beyond']; у кого его нет — ветка не срабатывает.
+            'cancel_beyond': params.get('cancel_beyond'),
             'placed_ts': now,
             # UTC, как и время открытия позиции: иначе две метки в одном
             # состоянии живут в разных часовых поясах, и разница вылезает
@@ -1387,6 +1392,19 @@ class PaperBroker:
                                f"лимит не заполнен за "
                                f"{self._expiry_hours(strategy):.0f}ч", ts)
             return
+
+        # Уход цены за уровень по ходу сделки — ДО заполнения: в замере
+        # (research/fibz, smcz.sim) минута, где цена ушла за B, налива уже не
+        # даёт. На пятиминутке, задевшей и B, и лимит, порядок внутри неизвестен
+        # — снимаем, как замер в худшем для нас случае. Только у стратегий,
+        # объявивших уровень.
+        beyond = order.get('cancel_beyond')
+        if beyond:
+            gone_beyond = (high > beyond) if is_long else (low < beyond)
+            if gone_beyond:
+                self._drop_pending(strategy, pair,
+                                   f"цена ушла за ${_fmt_p(beyond)} до входа — импульс продолжился", ts)
+                return
 
         # Заполнение проверяем ПЕРВЫМ: чтобы цена дошла до инвалидации или до
         # цели, она обязана была пройти через цену срабатывания.

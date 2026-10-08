@@ -16,10 +16,10 @@ from datetime import datetime, timezone
 # Имена стратегий для человека. Внутренние (FIBO, LLM) остаются в данных и
 # в кнопках — по ним панель находит стратегию.
 NAMES = {'FIBO': 'Фибо', 'SMC': 'SMC', 'LEVELS': 'Уровни', 'RSIBB': 'Боллинджер', 'LLM': 'ИИ',
-         'SMCS': 'SMC 4ч'}
+         'SMCS': 'SMC 4ч', 'FIB12': 'Фибо 12ч'}
 
 # Порядок показа: как на сайте.
-ORDER = ('FIBO', 'SMC', 'LEVELS', 'RSIBB', 'LLM', 'SMCS')
+ORDER = ('FIBO', 'SMC', 'LEVELS', 'RSIBB', 'LLM', 'SMCS', 'FIB12')
 
 MINUS = '−'
 RULE = '━━━━━━━━━━━━━━━━━━━━'

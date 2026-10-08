@@ -1032,6 +1032,7 @@ def _portfolio():
         from rsibb import params as rp
         from smc import params as sp
         from smcs import params as cp
+        from fib12 import params as fp
         # ПО СТРАТЕГИЯМ, БЕЗ СЛОЖЕНИЯ. Проценты считаются от РАЗНЫХ депозитов
         # ($20 000 у фибо, $4 000 у боллинджера), и сумма их не относится ни к
         # одному — см. risk_gate.exposure_by_strategy.
@@ -1041,6 +1042,7 @@ def _portfolio():
             ('LEVELS', st.max_slots('LEVELS'), lp.RISK_PCT),
             ('RSIBB', st.max_slots('RSIBB'), rp.RISK_PCT),
             ('SMCS', st.max_slots('SMCS'), cp.RISK_PCT),
+            ('FIB12', st.max_slots('FIB12'), fp.RISK_PCT),
         ])
         unbounded = [n for n, pct in worst if pct is None]
     except Exception:                              # noqa: BLE001

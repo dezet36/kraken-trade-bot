@@ -169,6 +169,15 @@ def build(strategy, signal):
             lines.append({'price': float(sm['level']),
                           'label': 'сломанный свинг 4ч (BOS)', 'main': True})
         band(sm.get('ob_lo'), sm.get('ob_hi'), 'ордер-блок ноги')
+    elif strategy == 'FIB12':
+        fb = signal.get('fib12') or {}
+        # Сетап — импульс 12ч и откат к 38.2%: нога, уровень входа и
+        # уровень 78.6%, за которым стоп (глубже откат уже ломает импульс).
+        leg('начало импульса (A)', 'конец импульса (B)')
+        if fb.get('entry'):
+            lines.append({'price': float(fb['entry']), 'label': 'откат 38.2% — вход', 'main': True})
+        if fb.get('level_786'):
+            lines.append({'price': float(fb['level_786']), 'label': 'откат 78.6% — за ним стоп'})
     elif strategy == 'LEVELS':
         lv = signal.get('levels') or {}
         if lv.get('level'):

@@ -29,7 +29,9 @@ SETTINGS_FILE = os.path.join(config.DATA_DIR, 'runtime_settings.json')
 # SMCS (SMC-структура 4ч) добавлена 02.10.2026 тоже кандидатом: на парах
 # пула её плюс держится на всех трёх периодах, но строгую приёмку VAL она не
 # прошла (smcs/params.py, research/smcz/PROTOCOL.md).
-STRATEGIES = ('FIBO', 'SMC', 'LEVELS', 'RSIBB', 'LLM', 'SMCS')
+# FIB12 (Фибо 12ч) добавлена 07.10.2026: ФИБО, собранная с нуля, прошла приёмку
+# протокола (research/fibz/PROTOCOL.md); торгуется рядом со старой ФИБО.
+STRATEGIES = ('FIBO', 'SMC', 'LEVELS', 'RSIBB', 'LLM', 'SMCS', 'FIB12')
 
 # Ноль в поле «одновременных позиций» означает «без предела». Ноль выбран
 # потому, что так же уже устроены пределы портфеля и дневного убытка: одно

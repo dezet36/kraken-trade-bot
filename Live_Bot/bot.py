@@ -18,6 +18,7 @@ import strategy_llm
 import strategy_rsibb
 import strategy_smc
 import strategy_smcs
+import strategy_fib12
 from strategy import analyze_market
 from pair_scanner import get_liquid_pairs, scan_for_setups
 from paper_broker import PaperBroker, STRATEGIES as PAPER_STRATEGIES
@@ -173,6 +174,23 @@ def _build_signal(candidate, strategy, balance):
         df_for_chart = candidate.get('df_1h')
         log(f"\n[SMCS] {pair}: BOS 4ч {signal['setup'].get('type')}, "
             f"стоп {sm.get('stop_pct', 0):.2f}%, импульс {sm.get('disp_atr', 0):.1f} ATR")
+    elif strategy == 'FIB12':
+        # Сканер уже вернул готовый сигнал: он и есть результат анализа.
+        signal = candidate.get('signal')
+        if not signal:
+            log(f"   FIB12 {pair}: кандидат без сигнала — пропускаю")
+            return None, None
+        fb = signal.get('fib12') or {}
+        signal['scan'] = {
+            'score': candidate.get('score'),
+            'rr_est': candidate.get('rr'),
+            'stop_pct': fb.get('stop_pct'),
+            'size_atr': fb.get('size_atr'),
+            'poi_type': 'FIB',
+        }
+        df_for_chart = candidate.get('df_1h')
+        log(f"\n[FIB12] {pair}: импульс 12ч {signal['setup'].get('type')}, "
+            f"стоп {fb.get('stop_pct', 0):.2f}%, импульс {fb.get('size_atr', 0):.1f} ATR")
     elif strategy == 'LLM':
         # Сигнал собран моделью и уже проверен llm_decide: геометрия,
         # минимальный стоп по издержкам, отношение хода к риску и ожидание с
@@ -268,6 +286,8 @@ def _run_dual_strategy(liquid_pairs, balance, open_pairs):
         ('RSIBB', lambda: strategy_rsibb.scan_for_setups(
             liquid_pairs, trade_manager, balance=balance)),
         ('SMCS', lambda: strategy_smcs.scan_for_setups(
+            liquid_pairs, trade_manager, balance=balance)),
+        ('FIB12', lambda: strategy_fib12.scan_for_setups(
             liquid_pairs, trade_manager, balance=balance)),
     )
 
@@ -434,6 +454,9 @@ def _paper_cycle():
                     liquid_pairs, gate, client=client, balance=balance)
             elif strategy == 'SMCS':
                 candidates = strategy_smcs.scan_for_setups(
+                    liquid_pairs, gate, client=client, balance=balance)
+            elif strategy == 'FIB12':
+                candidates = strategy_fib12.scan_for_setups(
                     liquid_pairs, gate, client=client, balance=balance)
             elif strategy == 'LLM':
                 # Те же пары, что и у остальных, и никаких чужих кандидатов:

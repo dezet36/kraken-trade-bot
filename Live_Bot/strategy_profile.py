@@ -45,6 +45,11 @@ def _smcs():
     return params
 
 
+def _fib12():
+    from fib12 import params
+    return params
+
+
 def _llm_rules():
     """Правила ИИ, если он в режиме «правила» (config.LLM_MODE=rules), иначе None."""
     import llm_rules
@@ -82,6 +87,8 @@ def expiry_hours(strategy):
             return _smc().PENDING_ORDER_MAX_HOURS
         if name == 'SMCS':
             return _smcs().PENDING_ORDER_MAX_HOURS
+        if name == 'FIB12':
+            return _fib12().PENDING_ORDER_MAX_HOURS
         if name == 'LLM':
             if _llm_rules() is not None:
                 return _llm_rules().PENDING_ORDER_MAX_HOURS
@@ -102,6 +109,8 @@ def cooldown_hours(strategy):
             return _smc().COOLDOWN_HOURS
         if name == 'SMCS':
             return _smcs().COOLDOWN_HOURS
+        if name == 'FIB12':
+            return _fib12().COOLDOWN_HOURS
         if name == 'LLM':
             if _llm_rules() is not None:
                 return _llm_rules().COOLDOWN_HOURS
@@ -121,6 +130,8 @@ def cost_limit_pct(strategy):
             return _smc().MAX_ENTRY_COST_SHARE_PCT
         if name == 'SMCS':
             return _smcs().MAX_ENTRY_COST_SHARE_PCT
+        if name == 'FIB12':
+            return _fib12().MAX_ENTRY_COST_SHARE_PCT
         if name == 'LLM':
             if _llm_rules() is not None:
                 return _llm_rules().MAX_ENTRY_COST_SHARE_PCT
@@ -140,6 +151,9 @@ def limit_offset_pct(strategy):
         return 0.0
     if strategy == 'LLM':
         return float(getattr(_config(), 'LLM_LIMIT_ENTRY_OFFSET_PCT', 0.0))
+    if strategy == 'FIB12':
+        # Замер Фибо 12ч ставил лимит ровно на уровень отката.
+        return float(_fib12().LIMIT_OFFSET_PCT)
     return float(getattr(_config(), 'LIMIT_ENTRY_OFFSET_PCT', 0.0))
 
 
@@ -154,6 +168,8 @@ def max_hold_hours(strategy):
             return _smc().MAX_POSITION_HOLD_HOURS
         if name == 'SMCS':
             return _smcs().MAX_POSITION_HOLD_HOURS
+        if name == 'FIB12':
+            return _fib12().MAX_POSITION_HOLD_HOURS
         if name == 'LLM':
             if _llm_rules() is not None:
                 return _llm_rules().MAX_POSITION_HOLD_HOURS
@@ -176,6 +192,8 @@ def drops_at_target(strategy):
             return bool(_smc().CANCEL_PENDING_AT_TARGET)
         if strategy == 'SMCS':
             return bool(_smcs().CANCEL_PENDING_AT_TARGET)
+        if strategy == 'FIB12':
+            return bool(_fib12().CANCEL_PENDING_AT_TARGET)
         if strategy == 'LLM' and _llm_rules() is not None:
             return bool(_llm_rules().CANCEL_PENDING_AT_TARGET)
     except Exception:                              # noqa: BLE001
@@ -210,6 +228,10 @@ def fills_through_market(strategy):
             # Вход SMCS — по рынку: лимит за рынком исполняется сразу, как
             # замер (первая минута после закрытия бара слома, тейкер).
             return bool(_smcs().FILL_THROUGH_MARKET)
+        if strategy == 'FIB12':
+            # Лимит на откате; если к постановке рынок уже за ним — налив по
+            # рынку, как в замере (smcz.sim: тейкер в минуту постановки).
+            return bool(_fib12().FILL_THROUGH_MARKET)
         if strategy == 'LLM':
             if _llm_rules() is not None:
                 return bool(_llm_rules().FILL_THROUGH_MARKET)
@@ -242,6 +264,8 @@ def min_stop_pct(strategy):
             return float(_rsibb().MIN_STOP_PCT)
         if strategy == 'SMCS':
             return float(_smcs().MIN_STOP_PCT)
+        if strategy == 'FIB12':
+            return float(_fib12().MIN_STOP_PCT)
         if strategy == 'LLM':
             if _llm_rules() is not None:
                 return float(_llm_rules().MIN_SL_PCT) * 100
