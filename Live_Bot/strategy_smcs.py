@@ -21,7 +21,9 @@ from datetime import datetime, timezone
 import pandas as pd
 
 import scan_report as report
-from exchange import fetch_ohlcv
+# Данные — через дверь анализа (analysis/market.py), не со сборщиков и не с
+# биржи напрямую (реорганизация, этап 4).
+from analysis.market import fetch_ohlcv
 from logger import log
 from smcs import core, params
 

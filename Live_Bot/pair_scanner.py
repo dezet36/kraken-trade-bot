@@ -5,7 +5,9 @@ In DEMO mode volume filter is skipped (exchange returns 0 volume).
 
 import config
 import scan_report as report
-from exchange import fetch_ohlcv
+# Данные — через дверь анализа (analysis/market.py), не со сборщиков и не с
+# биржи напрямую (реорганизация, этап 4).
+from analysis.market import fetch_ohlcv
 from strategy import find_recent_impulse, get_zones, get_htf_trend, calculate_trade_params
 from logger import log
 
@@ -80,8 +82,8 @@ def _funding_rate(pair, client=None):
     до часа, а в момент решения нужна уже выплаченная (01.10.2026).
     """
     try:
-        import positioning
-        rate = positioning.settled_funding(pair, client=client)
+        from analysis import market
+        rate = market.settled_funding(pair, client=client)
         return None if rate is None else float(rate)
     except Exception as exc:                                  # noqa: BLE001
         log(f"   {pair}: фандинг не прочитан ({exc})")

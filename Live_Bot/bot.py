@@ -235,6 +235,7 @@ def _paper_cycle():
         positioning.collect_if_due(broker.client, pairs=_recorded_pairs(config.TRADING_PAIRS_POOL))
         market_cap.collect_if_due(broker.client)
         market_mood.collect_if_due()
+        _poll_news()
         return
 
     client = broker.client
@@ -351,6 +352,22 @@ def _paper_cycle():
     market_cap.collect_if_due(broker.client)
     # Настроение рынка (DVOL, премия Coinbase у BTC, доля спота): четыре запроса раз в закрытый час.
     market_mood.collect_if_due()
+    # Объявления биржи: раз в час, только запись.
+    _poll_news()
+
+
+def _poll_news():
+    """
+    Объявления Bybit — сырые данные, пока только запись (news_feed). До
+    08.10.2026 их опрашивала тетрадь ИИ внутри своего часа; сбор данных — дело
+    цикла, а не стратегии (реорганизация, этап 4). Раз в час — свой предел у
+    news_feed.poll; отказ — строка в журнал, торговля от него не зависит.
+    """
+    try:
+        import news_feed
+        news_feed.poll()
+    except Exception as exc:                           # noqa: BLE001
+        log(f'   новости биржи не записаны — {exc}')
 
 
 _CYCLE_STAMP = os.path.join(config.DATA_DIR, 'last_cycle.json')

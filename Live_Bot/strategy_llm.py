@@ -904,16 +904,17 @@ def scan_for_setups(pairs, gate, client=None, candles=None,
         return []
 
     if candles is None:
-        import exchange
+        # Свечи — через дверь анализа (analysis/market.py), не с биржи напрямую.
+        from analysis import market as market_data
 
         def candles(pair):
-            return exchange.fetch_ohlcv('1h', limit=500, symbol=pair,
-                                        client=client)
+            return market_data.fetch_ohlcv('1h', limit=500, symbol=pair,
+                                           client=client)
 
         if frames is None:
             def frames(pair, tf, limit):
-                return exchange.fetch_ohlcv(tf, limit=limit, symbol=pair,
-                                            client=client)
+                return market_data.fetch_ohlcv(tf, limit=limit, symbol=pair,
+                                               client=client)
     _frames = frames
 
     out = _collect(_harvest(), candles)

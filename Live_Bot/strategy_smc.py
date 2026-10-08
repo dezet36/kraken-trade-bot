@@ -119,7 +119,9 @@ def market_regime(client=None):
 # SMC, и ИИ, и панель. Здесь остались псевдонимы для старого кода и тестов;
 # правка адаптера SMC не может изменить то, что видит модель.
 import market_structure as _context
-from exchange import fetch_ohlcv
+# Данные — через дверь анализа (analysis/market.py), не со сборщиков и не с
+# биржи напрямую (реорганизация, этап 4).
+from analysis.market import fetch_ohlcv
 
 _drop_forming_candle = _context.drop_forming_candle
 _load_frames = _context.load_frames
@@ -231,8 +233,8 @@ def _funding_rate(pair, client=None):
     же проверялся со ставкой, известной в момент выплаты (01.10.2026).
     """
     try:
-        import positioning
-        rate = positioning.settled_funding(pair, client=client)
+        from analysis import market
+        rate = market.settled_funding(pair, client=client)
         return None if rate is None else float(rate)
     except Exception as exc:                                  # noqa: BLE001
         log(f"   {pair}: фандинг не прочитан ({exc})")

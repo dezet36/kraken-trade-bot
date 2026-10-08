@@ -177,8 +177,8 @@ def swept(setup):
 def funding_rate(pair):
     """Последняя выплаченная ставка фандинга пары (доля за 8 ч) из общего слоя или None."""
     try:
-        import positioning
-        rate = positioning.latest('funding', pair)
+        from analysis import market
+        rate = market.latest('funding', pair)
         return None if rate is None else float(rate)
     except Exception as exc:                       # noqa: BLE001
         log(f'   {NAME} {pair}: фандинг не прочитан ({exc})')

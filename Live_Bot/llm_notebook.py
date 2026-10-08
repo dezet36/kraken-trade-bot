@@ -357,7 +357,7 @@ def _decide_job(ask, question, items):
 def _price_now(pair, client=None):
     """Цена сейчас — закрытие идущей 5-минутной свечи на бирже бота; None — цены нет."""
     try:
-        from exchange import fetch_ohlcv
+        from analysis.market import fetch_ohlcv
         df = fetch_ohlcv('5m', limit=12, symbol=pair, client=client)
         price = float(df['close'].iloc[-1]) if df is not None and len(df) else 0.0
         return price if price > 0 else None
@@ -732,8 +732,8 @@ def mood_line():
     правил на этих данных нет (п. 82) — это контекст анализа. Нет свежей строки — так и сказано.
     """
     try:
-        import market_mood
-        m = market_mood.facts()
+        from analysis import market
+        m = market.mood()
     except Exception:                                  # noqa: BLE001
         m = {}
     if not m:
@@ -841,11 +841,11 @@ def scan(pairs, gate, client=None, now_ms=None, frames_of=None, ask=None, price_
     ответ модели (в бою ask_model); price_of(pair) -> цена сейчас (в бою
     _price_now, биржа бота). Тесты подменяют все три.
     """
-    import flow_data
+    from analysis import market
     now_ms = int(time.time() * 1000) if now_ms is None else int(now_ms)
-    hour_ms = flow_data.last_closed_hour(now_ms)
+    hour_ms = market.last_closed_hour(now_ms)
     if _load_state().get('hour') != hour_ms:
-        _new_hour(hour_ms, gate, now_ms, frames_of or (lambda p: flow_data.frame(p, now_ms)), ask or ask_model)
+        _new_hour(hour_ms, gate, now_ms, frames_of or (lambda p: market.flow_frame(p, now_ms)), ask or ask_model)
     return _collect(gate, now_ms, price_of or (lambda p: _price_now(p, client)))
 
 
@@ -894,11 +894,8 @@ def _new_hour(hour_ms, gate, now_ms, frames_of, ask):
     _save_state(state)
     # Обзор — после вопроса о сделке: в очереди к модели сделка первая.
     _maybe_review(data, t, gate)
-    try:
-        import news_feed                               # объявления биржи: пока только запись
-        news_feed.poll()
-    except Exception as exc:                          # noqa: BLE001
-        log(f'   {NAME}: новости не записаны ({exc})')
+    # Объявления биржи с 08.10.2026 опрашивает цикл бота (bot._poll_news): сбор
+    # данных — не дело стратегии.
 
 
 def status_now():

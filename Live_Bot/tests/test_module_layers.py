@@ -49,7 +49,7 @@ LAYER = {
     'rsibb': 'strategies', 'liquidity': 'strategies',
     'llm_notebook': 'strategies', 'llm_rules': 'strategies', 'llm_decide': 'strategies',
     'llm_prompt': 'strategies', 'llm_grammar': 'strategies', 'llm_journal': 'strategies',
-    'llm_outcomes': 'strategies', 'llm_probe': 'strategies', 'llm_urgency': 'strategies',
+    'llm_outcomes': 'strategies', 'llm_urgency': 'strategies',
     'llm_record': 'strategies', 'setup_geometry': 'strategies', 'scan_report': 'strategies',
     # словарь названий стратегий для человека — язык стратегий (разметка, брокер, Telegram)
     'glossary': 'strategies',
@@ -65,6 +65,8 @@ LAYER = {
     'telegram_panel': 'control', 'telegram_state': 'control', 'tg_format': 'control',
     'chart_generator': 'control', 'chart_frame': 'control',
     'remote': 'control', 'remote_app': 'control', 'doctor': 'control', 'report': 'control',
+    # прогон модели по парам — инструмент оператора, а не стратегия (этап 4)
+    'llm_probe': 'control',
     # дирижёр цикла
     'bot': 'app',
 }
@@ -76,16 +78,20 @@ KNOWN = {
     # Чтение рынка с этапа 3 — через реестр источников (data/sources.py); здесь
     # остаётся торговая половина exchange.py: выбор биржи ТОРГОВЛИ и ключи.
     ('exchange', 'settings_store'): 'этап 7: выбор биржи торговли — у реального счёта',
-    ('llm_context', 'liquidity'): 'этап 4: разметка ИИ читает пакет стратегии',
-    ('llm_context', 'llm_decide'): 'этап 4',
-    ('llm_context', 'llm_outcomes'): 'этап 4',
-    ('llm_context', 'smc'): 'этап 4: структура smc (часть I) — в анализ',
-    ('llm_context', 'strategy_profile'): 'этап 4',
-    ('llm_market', 'smc'): 'этап 4: структура smc (часть I) — в анализ',
+    # Разметка ИИ и общий слой структуры берут функции ядра smc: в нём структура
+    # (часть I) и решения SMC (часть II) живут в одном классе MarketContext.
+    # Ядро делится на «структуру → анализ» и «решения → стратегия» при переносе
+    # файлов (этап 10), разметка режима планов — там же.
+    ('llm_context', 'liquidity'): 'этап 10: разметка ИИ читает пакет стратегии',
+    ('llm_context', 'llm_decide'): 'этап 10',
+    ('llm_context', 'llm_outcomes'): 'этап 10',
+    ('llm_context', 'smc'): 'этап 10: структура smc (часть I) — в анализ',
+    ('llm_context', 'strategy_profile'): 'этап 10',
+    ('llm_market', 'smc'): 'этап 10: структура smc (часть I) — в анализ',
     ('llm_notebook', 'telegram_notify'): 'этап 5: стратегия отдаёт сетап, сообщает исполнение',
-    ('llm_server', 'llm_grammar'): 'этап 4: сервис модели не знает про промт',
-    ('llm_server', 'llm_prompt'): 'этап 4',
-    ('market_structure', 'smc'): 'этап 4: структура smc (часть I) — в анализ',
+    ('llm_server', 'llm_grammar'): 'этап 10: сервис модели не знает про промт',
+    ('llm_server', 'llm_prompt'): 'этап 10',
+    ('market_structure', 'smc'): 'этап 10: структура smc (часть I) — в анализ',
     # Исполнители сами проверяют пределы портфеля и издержки по правилам счёта
     # (risk_gate, settings_store). Этап 5 переносит эти проверки в решение
     # счёта, исполнение получает готовое «можно и сколько».
@@ -165,6 +171,26 @@ def test_no_new_upward_imports():
     fixed = sorted(set(KNOWN) - found)
     assert not new, f'новый импорт «вверх по слоям»: {new}'
     assert not fixed, f'нарушение исправлено — вычеркни из KNOWN: {fixed}'
+
+
+DATA_LAYER = {name for name, layer in LAYER.items() if layer == 'data'} | {'data'}
+
+
+def test_strategies_read_data_only_through_analysis():
+    """
+    Стратегии берут рыночные данные через анализ (analysis/market.py,
+    market_structure, market_regime…), а не у сборщиков и не с биржи: снимок
+    рынка один для всех, и стратегия не знает, откуда он (этап 4).
+    """
+    local = set(LAYER) | set(PACKAGES)
+    found = []
+    for name, path, layer, top in _modules():
+        if layer != 'strategies':
+            continue
+        hits = _local_imports(path, local) & DATA_LAYER
+        if hits:
+            found.append((name, sorted(hits)))
+    assert not found, f'стратегия читает данные мимо анализа: {found}'
 
 
 def test_new_packages_are_clean():

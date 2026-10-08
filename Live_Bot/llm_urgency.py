@@ -170,8 +170,8 @@ def same_reason(refused_at, refused_sig, why, now=None):
 
 
 def _liq_burst(pair, now_ms):
-    import liquidations
-    rows = liquidations.rows(pair, since=now_ms - 24 * 3_600_000, upto=now_ms)
+    from analysis import market
+    rows = market.liquidation_rows(pair, since=now_ms - 24 * 3_600_000, upto=now_ms)
     if len(rows) < 10:
         return ''
     edge = now_ms - 3_600_000
@@ -191,8 +191,8 @@ def _liq_burst(pair, now_ms):
 
 
 def _oi_jump(pair, now_ms):
-    import positioning
-    rows = positioning.series('open_interest', pair, upto=now_ms)
+    from analysis import market
+    rows = market.series('open_interest', pair, upto=now_ms)
     if len(rows) < 2:
         return ''
     rows = sorted(rows, key=lambda r: int(r['ts']))
