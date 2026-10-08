@@ -4558,6 +4558,10 @@ function accBook(a) {
       с первой заявкой. Заявки ставятся сразу со стопом; события — здесь и в Telegram.</div></div>` : '';
   }
   const out = [];
+  if (ex && (b.foreign || []).length) {
+    out.push(`<div class="acc-warn">На бирже есть позиции вне учёта бота: ${b.foreign.map(f =>
+      `${esc(f.pair)} ${f.long ? 'лонг' : 'шорт'} ${accQty(f.size)}`).join(', ')} — бот их не ведёт и не трогает.</div>`);
+  }
   if (b.status !== 'active') {
     out.push(`<div class="acc-status ${b.status === 'target' ? 'pass' : 'fail'}">${b.status === 'target' ? '🏆' : '⛔'}
       <b>${esc(b.status_text)}</b> — ${esc(b.status_why)}
@@ -4609,6 +4613,11 @@ function accBook(a) {
       <th class="lbl">${esc(r.pair)} ${accSide(r.direction)}</th><td>${esc(accTitle(r.strategy))}</td>
       <td>${price(r.entry_price)} → ${price(r.exit_price)}</td><td>${esc(r.exit_reason)}</td>
       <td class="${stCls(r.pnl_usd)}">${stUsd(r.pnl_usd)} · ${stR(r.pnl_r)}</td><td>${when(r.closed_at)}</td></tr>`));
+  }
+  if (ex && w && a.enabled && (b.positions.length || b.pending.length)) {
+    out.push(`<div class="row-actions"><button type="button" class="btn sm danger" data-acc-act="panic"
+      data-acc-id="${id}" ${kindAttr}>Закрыть всё и выключить</button>
+      <span class="hint">аварийно: позиции — по рынку, заявки — снять, счёт — выключить</span></div>`);
   }
   if (b.instructions.length) {
     out.push(`<details class="acc-log"><summary>${ex ? 'События счёта' : 'Все инструкции'} · последние ${b.instructions.length}</summary>
@@ -4751,6 +4760,7 @@ function bindAccounts() {
     close: (p, ex) => ex ? `Закрыть позицию ${p} по рынку на бирже?`
       : `Позиция ${p} закрыта у вас на счёте? В записи она закроется по последней цене.`,
     cancel: (p, ex) => ex ? `Снять заявку ${p} на бирже?` : `Заявка ${p} снята у вас на счёте? Из записи она уберётся.`,
+    panic: () => 'Аварийная остановка: закрыть все позиции счёта по рынку, снять его заявки и выключить счёт?',
     new_phase: (p, ex) => ex ? 'Начать новый этап от текущего капитала на бирже? Итоги прошлого этапа останутся в журнале.'
       : 'Начать новый этап? Размер счёта — из правил, итоги прошлого этапа останутся в журнале.',
   };

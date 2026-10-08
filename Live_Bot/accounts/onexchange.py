@@ -240,6 +240,10 @@ def _sync(code, rules, venue, bars, now):
     for pair, pos in positions:
         _sync_position(code, rules, venue, book, pair, pos, bars.get(pair) or [], held, now)
     with books.lock:
+        # Сверка: позиции на бирже, которых нет в книге (открыты руками или
+        # остались после сбоя), — на панель; бот их не ведёт и не трогает.
+        book['foreign'] = [{'pair': k, 'size': held[k]['size'], 'long': held[k]['long']}
+                           for k in sorted(set(held) - set(book['positions']))]
         books.check_rules(code, rules, book, now,
                           lambda status, why: _finish(code, rules, venue, book, status, why, now))
         books.save()
@@ -478,6 +482,8 @@ def act(code, action, item=None, pair=None, now_ms=None):
     Действие владельца на панели — на бирже. Возвращает текст ответа.
       cancel     снять заявку на бирже (pair);
       close      закрыть позицию по рынку на бирже (pair);
+      panic      аварийная остановка: закрыть все позиции счёта по рынку,
+                 снять его заявки и выключить счёт;
       new_phase  новый этап от текущего капитала счёта;
       ack        отметить сообщение.
     """
@@ -518,6 +524,8 @@ def act(code, action, item=None, pair=None, now_ms=None):
         with books.lock:
             pos['closing'] = 'MANUAL'
         reply = f'{pair}: закрытие по рынку отправлено на биржу'
+    elif action == 'panic':
+        reply = _panic(code, rules, venue, book, now)
     elif action == 'new_phase':
         balance = venue.balance()
         with books.lock:
@@ -531,13 +539,45 @@ def act(code, action, item=None, pair=None, now_ms=None):
     return reply
 
 
+def _panic(code, rules, venue, book, now):
+    """Аварийный выключатель: всё своё закрыть и снять, счёт выключить. Позиции
+    вне учёта бота (открытые владельцем) не трогает."""
+    from accounts import live
+    lines, problems = [], []
+    for pair, pos in sorted(book['positions'].items()):
+        if pos.get('closing'):
+            continue
+        try:
+            venue.close_market(pair, pos['direction'] == 'LONG', pos['size'])
+            with books.lock:
+                pos['closing'] = 'MANUAL'
+            lines.append(f"Закрыта по рынку: {pair} {pos['direction']}")
+        except Exception as exc:                   # noqa: BLE001
+            problems.append(f"НЕ закрыта {pair} {pos['direction']}: {str(exc)[:150]} — закройте на бирже")
+    for pair, order in sorted(book['pending'].items()):
+        venue.cancel(pair, order['order_id'])
+        _dropped(code, rules, book, pair, order, 'аварийная остановка', now)
+        lines.append(f"Снята заявка: {pair} {order['direction']}")
+    live.save({'id': code, 'enabled': False})
+    with books.lock:
+        books.instruct(code, rules, book, 'rules', 'Аварийная остановка счёта',
+                       (lines or ['Открытых позиций и заявок не было.']) + problems
+                       + ['Счёт выключен: новых заявок не будет, пока его не включат на странице «Счета».'],
+                       action=bool(problems), now=now)
+    return 'счёт остановлен: ' + (f'закрыто и снято {len(lines)}' if lines else 'открытого не было') + (
+        f', не удалось {len(problems)}' if problems else '')
+
+
 # ── Для панели и журнала запуска ────────────────────────────────────────────
 
 def report(code, rules, now_ms=None):
     """Книга счёта; пока счёт не торговал — без денег: капитал придёт с биржи."""
     with books.lock:
-        started = code in books.state()
+        stored = books.state().get(code)
+        started = stored is not None
+        foreign = list((stored or {}).get('foreign') or [])
     out = books.report(code, rules, now_ms)
+    out['foreign'] = foreign
     if not started:
         out.update(start=None, balance=None, equity=None, return_pct=None, day_pnl=None,
                    floor=None, target_level=None, daily_limit=None, room=None)

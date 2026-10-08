@@ -407,6 +407,21 @@ class TestOwnerAndFaults:
         b = book(code)
         assert not b['positions'] and not b['pending'] and b['counts']['dropped'] == {'снята владельцем': 1}
 
+    def test_kill_switch_closes_cancels_and_disables(self, venue, sent):
+        code = account()
+        opened(venue, code)
+        onexchange.offer('SMCS', a_setup(pair='ETHUSDT', entry=50.0, stop=49.0, targets=(53.0,)), now_ms=T0)
+        venue.held['SOLUSDT'] = {'size': 3.0, 'long': True, 'entry': 140.0}      # открыта владельцем
+        Venue.last = {'BTCUSDT': 99.0}
+        assert 'счёт остановлен' in onexchange.act(code, 'panic', now_ms=T0 + 3 * BAR)
+        assert ('close', 'BTCUSDT', 50.0) in venue.calls and any(c[0] == 'cancel' for c in venue.calls)
+        assert not any(c[0] == 'close' and c[1] == 'SOLUSDT' for c in venue.calls)
+        assert live.get(code)['enabled'] is False and kinds(sent)[-1] == 'rules'
+        onexchange.update(Candles(), now_ms=T0 + 4 * BAR)
+        b = book(code)
+        assert not b['positions'] and not b['pending']
+        assert b['foreign'] == [{'pair': 'SOLUSDT', 'size': 3.0, 'long': True}]
+
     def test_new_phase_starts_from_exchange_capital(self, venue):
         code = account()
         opened(venue, code)
