@@ -23,9 +23,12 @@ Live_Bot/pair_strategy.json
 Live_Bot/runtime_settings.json
 # Счета стратегий (деньги, с 08.10.2026) и копия настроек при переносе в счета
 Live_Bot/accounts.json
+Live_Bot/runtime_settings.before_accounts.json
 # Адреса и прокси источников данных (правка оператора, с 08.10.2026)
 Live_Bot/data_sources.json
-Live_Bot/runtime_settings.before_accounts.json
+# Торговые счета (биржи, проп) и ключи бирж — только на машине бота
+Live_Bot/trading_accounts.json
+Live_Bot/secrets/
 Live_Bot/state/
 
 # Фантомный счёт: состояние и журнал сделок — данные, а не код

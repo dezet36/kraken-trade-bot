@@ -1723,6 +1723,24 @@ class _Handler(BaseHTTPRequestHandler):
                 self._fail(400, str(exc))
             except Exception as exc:                   # noqa: BLE001
                 self._fail(500, f'статистика не собралась: {exc}')
+        elif path == '/api/accounts':
+            # Торговые счета (accounts/live.py): правила и признак ключей —
+            # без самих ключей.
+            try:
+                from accounts import live
+                from strategies import registry
+                self._send_json({
+                    'accounts': live.listing(), 'kinds': live.KINDS,
+                    'exchanges': list(live.EXCHANGES), 'modes': list(live.MODES),
+                    'limits': live.LIMITS, 'defaults': live.kind_defaults(),
+                    'strategies': [{'code': c, 'title': registry.get(c).title}
+                                   for c in live.allowed_strategies()],
+                    # Исполнение на торговых счетах подключается следующими
+                    # шагами этапа 7: пока счета только заводятся.
+                    'engine': False,
+                    'writable': _controls_allowed()})
+            except Exception as exc:               # noqa: BLE001
+                self._fail(500, f'счета недоступны: {exc}')
         elif path == '/api/sources':
             # Источники данных (data/sources.py): адреса без паролей, что даёт
             # каждый, кто его читает, и отвечает ли он. Только чтение: адреса
@@ -1789,7 +1807,8 @@ class _Handler(BaseHTTPRequestHandler):
         path = self.path.split('?')[0]
         if path not in ('/api/settings', '/api/deposit', '/api/action',
                         '/api/update', '/api/update/rollback',
-                        '/api/errors/clear', '/api/keys'):
+                        '/api/errors/clear', '/api/accounts/save',
+                        '/api/accounts/delete', '/api/accounts/keys'):
             self.send_error(404)
             return
         if not _controls_allowed():
@@ -1818,42 +1837,37 @@ class _Handler(BaseHTTPRequestHandler):
             self._fail(400, f'Неверные данные: {exc}')
             return
 
-        if path == '/api/keys':
-            # Ключи биржи меняются отсюда, а не правкой .env в блокноте.
-            # Окно первого запуска эту работу уже делает, но оно показывается
-            # РОВНО один раз: протух ключ или сменили биржу — и человек снова
-            # оставался наедине с текстовым файлом.
-            #
-            # Ключи не попадают ни в журнал, ни в ответ: в лог пишется только
-            # факт замены. Проверка идёт тем же способом и на том же адресе,
-            # каким потом пойдёт бот, — иначе демо-ключи при боевом режиме
-            # прошли бы молча.
-            import exchange_keys
-            exchange = str(changes.get('exchange') or config.EXCHANGE_NAME).lower()
-            mode = str(changes.get('mode') or config.TRADING_MODE).upper()
-            api_key = str(changes.get('key') or '').strip()
-            secret = str(changes.get('secret') or '').strip()
-            if not api_key or not secret:
-                self._fail(400, 'Заполните оба поля')
-                return
-            ok, error = exchange_keys.check_keys(exchange, mode, api_key, secret)
-            if not ok:
-                self._fail(409, f'Биржа не приняла ключи: {error}')
-                return
-            prefix = exchange.upper()
-            values = {'EXCHANGE': exchange, 'TRADING_MODE': mode,
-                      f'{prefix}_API_KEY': api_key, f'{prefix}_SECRET_KEY': secret}
-            if mode == 'LIVE':
-                values['LIVE_CONFIRMED'] = 'YES'
+        if path in ('/api/accounts/save', '/api/accounts/delete', '/api/accounts/keys'):
+            # Торговые счета (accounts/live.py, этап 7). Ключи биржи вводятся
+            # здесь — на счёт, а не в общий .env: прежняя запись в .env
+            # переключала весь бот в демо или бой и останавливала тест
+            # стратегий. Ключи проверяются на бирже тем же способом и на том же
+            # адресе (демо/реал), каким пойдёт бот, и не попадают ни в журнал,
+            # ни в ответ, ни в историю настроек.
+            from accounts import live
             try:
-                exchange_keys.write_env(values)
+                if path == '/api/accounts/save':
+                    code, account = live.save(changes)
+                    self._send_json({'ok': True, 'id': code, 'account': live.public(code, account)})
+                elif path == '/api/accounts/delete':
+                    live.remove(str(changes.get('id') or ''))
+                    self._send_json({'ok': True})
+                else:
+                    code = str(changes.get('id') or '')
+                    key = str(changes.get('key') or '').strip()
+                    secret = str(changes.get('secret') or '').strip()
+                    if not key or not secret:
+                        raise ValueError('заполните оба поля')
+                    ok, error = live.check_keys(code, key, secret)
+                    if not ok:
+                        self._fail(409, f'Биржа не приняла ключи: {error}')
+                        return
+                    live.set_keys(code, key, secret)
+                    self._send_json({'ok': True, 'message': 'Ключи проверены на бирже и сохранены на сервере.'})
+            except ValueError as exc:
+                self._fail(400, str(exc))
             except Exception as exc:               # noqa: BLE001
-                self._fail(500, f'Не удалось записать настройки: {exc}')
-                return
-            log(f"🔑 ключи биржи заменены оператором ({exchange}, {mode})")
-            self._send_json({'ok': True, 'message':
-                             'Ключи проверены и сохранены. '
-                             'Перезапустите приложение, чтобы они начали действовать.'})
+                self._fail(500, f'счёт не сохранён: {exc}')
             return
 
         if path == '/api/errors/clear':

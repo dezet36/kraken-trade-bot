@@ -201,8 +201,9 @@ class TestActionsArePostAndGuarded:
     """
 
     PY = open(os.path.join(ROOT, 'dashboard.py'), encoding='utf-8').read()
-    ACTIONS = ('/api/settings', '/api/deposit', '/api/action', '/api/keys',
-               '/api/update', '/api/errors/clear')
+    ACTIONS = ('/api/settings', '/api/deposit', '/api/action',
+               '/api/update', '/api/errors/clear', '/api/accounts/save',
+               '/api/accounts/delete', '/api/accounts/keys')
 
     def _handler_of(self, endpoint):
         get = self.PY.index('def do_GET')

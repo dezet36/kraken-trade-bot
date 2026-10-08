@@ -1,44 +1,11 @@
 """
-Ключи биржи из панели: проверить на бирже и записать в .env.
+Проверка ключей биржи тем же способом, каким потом пойдёт бот.
 
-Раньше это жило в окне первого запуска настольного приложения; окна больше
-нет, а вкладка «Подключения» в панели осталась — ей нужны ровно две вещи:
-проверка ключей тем же способом, каким потом пойдёт бот, и запись в .env
-без потери остальных строк.
+С 08.10.2026 ключи хранятся на торговый счёт (accounts/live.py,
+secrets/exchange_keys.json в каталоге данных) и вводятся на странице «Счета».
+Прежняя запись ключей и режима в общий .env убрана: она переключала весь бот
+в демо или бой и останавливала тест стратегий.
 """
-
-import os
-
-import config
-
-ENV_PATH = os.path.join(config.DATA_DIR, '.env')
-
-
-def write_env(values):
-    """
-    Дописывает значения в .env, сохраняя всё остальное.
-
-    Значение подставляется в СУЩЕСТВУЮЩУЮ строку, а не дописывается в конец:
-    иначе в файле оказались бы два TRADING_MODE, и какой из них подействует —
-    вопрос порядка чтения, а не намерения.
-    """
-    lines = []
-    if os.path.exists(ENV_PATH):
-        with open(ENV_PATH, encoding='utf-8') as fh:
-            lines = fh.read().splitlines()
-
-    for key, value in values.items():
-        replaced = False
-        for i, line in enumerate(lines):
-            stripped = line.strip()
-            if stripped.startswith(f'{key}=') or stripped.startswith(f'{key} ='):
-                lines[i] = f'{key}={value}'
-                replaced = True
-        if not replaced:
-            lines.append(f'{key}={value}')
-
-    with open(ENV_PATH, 'w', encoding='utf-8') as fh:
-        fh.write('\n'.join(lines).rstrip() + '\n')
 
 
 def check_keys(exchange, mode, key, secret):

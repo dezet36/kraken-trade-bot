@@ -135,9 +135,11 @@ def _isolate_bot_data(tmp_path, monkeypatch):
     # Счета стратегий и настройки стратегий (с 08.10.2026) путь берут из
     # config.DATA_DIR при каждом обращении — он уже переставлен выше. Кэш у них
     # свой: сбрасываем, чтобы проверка не унаследовала счета соседней.
+    from accounts import live as accounts_live
     from accounts import paper as accounts_paper
     from strategies import settings as strategy_settings
     monkeypatch.setattr(accounts_paper, '_cache', {'key': None, 'data': None})
+    monkeypatch.setattr(accounts_live, '_cache', {'key': None, 'data': None})
     monkeypatch.setattr(strategy_settings, '_cache', {'key': None, 'data': {}})
 
     for target in targets.values():
@@ -209,6 +211,8 @@ def _guard_real_settings():
                 'accounts.json', 'runtime_settings.before_accounts.json',
                 # адреса источников данных (data/sources.py)
                 'data_sources.json',
+                # торговые счета и ключи бирж (accounts/live.py)
+                'trading_accounts.json', os.path.join('secrets', 'exchange_keys.json'),
                 'paper_trades.csv', 'paper_trades.jsonl', 'paper_state.json',
                 'positions_state.json', 'pending_orders.json')]
 

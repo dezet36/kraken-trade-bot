@@ -881,6 +881,21 @@
   .ctl-note { font-size: 12px; color: var(--ink-3); padding: 0 20px 12px;
               margin-top: -2px; line-height: 1.5; }
   .ctl-foot + .ctl-note { margin-top: 10px; }
+  /* Страница «Счета» (этап 7). */
+  .acc-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  .acc-chips span { padding: 2px 9px; border-radius: 10px; background: var(--hairline-2);
+                    font-size: 12px; color: var(--ink-2); display: inline-flex; align-items: center; gap: 6px; }
+  .acc-chips .key { width: 8px; height: 8px; border-radius: 2px; }
+  .acc-rules { font-size: 12.5px; color: var(--ink-2); margin-top: 8px; line-height: 1.6; }
+  .acc-warn { font-size: 12.5px; color: var(--bad); margin-top: 6px; }
+  .acc-draft { font-size: 12.5px; color: var(--ink-2); background: var(--hairline-2);
+               border-radius: var(--r-sm); padding: 8px 10px; margin: 8px 0; }
+  .acc-strats { display: flex; flex-wrap: wrap; gap: 8px 16px; margin: 4px 0 12px; }
+  .acc-strats label { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--ink); }
+  #acc-form, #acc-list { display: flex; flex-direction: column; gap: 14px; }
+  #acc-form:empty { display: none; }
+  /* hidden слабее правила по классу (.keys-grid label — flex): см. .filters */
+  .keys-grid label[hidden] { display: none; }
   /* Страница «Стратегии» (этап 6). */
   .st-bar { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 16px; }
   .st-bar .seg { flex-wrap: wrap; }
@@ -1114,6 +1129,13 @@
         </div>
         <div id="st-report"></div>
         <div id="st-compare"></div>
+      </section>
+
+      <!-- ── Счета: торговые счета (этап 7) ────────────────────────────── -->
+      <section class="page" data-page="accounts" hidden>
+        <div id="acc-head"></div>
+        <div id="acc-form"></div>
+        <div id="acc-list"></div>
       </section>
 
       <section class="page" data-page="ai" hidden>
@@ -2448,6 +2470,8 @@ const PAGES = [
   { id: 'analytics', ic: '◨', title: 'Аналитика', dir: 'exchange' },
   /* Без dir: у страницы свои переключатели — стратегия и период. */
   { id: 'strategies', ic: '▦', title: 'Стратегии' },
+  /* Торговые счета (этап 7): биржи и проп по инструкциям — рядом с тестом. */
+  { id: 'accounts', ic: '⚖', title: 'Счета' },
   /* Без dir намеренно: фильтры периода и стратегии относятся к СДЕЛКАМ, а
      здесь сделок нет — на двадцать разборов приходится одна. Показанный тут
      переключатель «7 дней / Фибоначчи» обещал бы управление, которого нет. */
@@ -2566,6 +2590,7 @@ function showPage() {
   // Разборы ИИ — так же: и по прямой ссылке ?page=ai, а не только по клику.
   if (page === 'ai' && !AI) loadLlm();
   if (page === 'strategies') loadStrategies();
+  if (page === 'accounts') loadAccounts();
   // Настройки могли отрисоваться раньше, чем пришли данные бота: тогда в
   // карточках не было полей, зависящих от режима (депозит есть только в
   // фантоме) и от истории стратегии. Перерисовываем ровно один раз —
@@ -3035,57 +3060,19 @@ async function saveNotify() {
 }
 
 function renderKeys(writable) {
+  /* Ключи бирж с 08.10.2026 вводятся на счёт — на странице «Счета»: прежняя
+     запись в общий .env переключала весь бот в демо или бой. */
   const box = el('keys');
   if (!box) return;
-  if (!writable) { box.innerHTML = ''; return; }
-  const ex = (DATA && DATA.exchange) || 'bybit';
-  const mode = (DATA && DATA.mode) || 'PAPER';
-  const opt = (v, cur) => `<option value="${v}"${v === cur ? ' selected' : ''}>${v}</option>`;
   box.innerHTML = `<div class="panel card-pad">
     <div class="panel-head bare"><h2>Ключи биржи</h2>
-      <span class="hint">меняются здесь, править файл не нужно</span></div>
-    <div class="keys-grid">
-      <label>Биржа<select id="k-ex">${opt('bybit', ex)}${opt('bingx', ex)}</select></label>
-      <label>Режим<select id="k-mode">${opt('PAPER', mode)}${opt('DEMO', mode)}${opt('LIVE', mode)}</select></label>
-      <label>API key<input id="k-key" type="password" autocomplete="off"></label>
-      <label>Secret key<input id="k-secret" type="password" autocomplete="off"></label>
-    </div>
-    <div class="row-actions">
-      <button type="button" class="btn primary" id="k-save">Проверить и сохранить</button>
-      <span id="k-msg" class="hint"></span>
-    </div>
-    <div class="hint">Ключи проверяются на бирже до сохранения — тем же способом и
-      на том же адресе, каким потом пойдёт бот. После сохранения нужен перезапуск.</div>
+      <span class="hint">задаются для каждого торгового счёта</span></div>
+    <div class="hint">Добавьте счёт на странице <a href="?page=accounts">«Счета»</a>: выберите биржу
+      и режим (демо или реальный), введите ключи — они проверяются на бирже и хранятся
+      только на сервере. Тестовые счета стратегий при этом продолжают работать.</div>
   </div>`;
-  el('k-save').onclick = saveKeys;
 }
 
-async function saveKeys() {
-  const msg = el('k-msg');
-  const btn = el('k-save');
-  msg.style.color = 'var(--ink-3)';
-  msg.textContent = 'Проверяю на бирже…';
-  btn.disabled = true;
-  try {
-    const body = JSON.stringify({
-      exchange: el('k-ex').value, mode: el('k-mode').value,
-      key: el('k-key').value, secret: el('k-secret').value,
-    });
-    const resp = await fetch('/api/keys', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body });
-    const data = await resp.json();
-    if (!resp.ok) throw new Error(data.error || resp.status);
-    msg.style.color = 'var(--good)';
-    msg.textContent = data.message;
-    el('k-key').value = '';
-    el('k-secret').value = '';
-  } catch (e) {
-    msg.style.color = 'var(--bad)';
-    msg.textContent = e.message;
-  } finally {
-    btn.disabled = false;
-  }
-}
 
 /* ── Обновление кода ────────────────────────────────────────────────────── */
 /* ── История настроек ───────────────────────────────────────────────────── */
@@ -4440,6 +4427,207 @@ async function loadSettings() {
     renderNotify(WRITABLE);
     renderExchange(WRITABLE);
   } catch (e) { /* панель просто не появится */ }
+}
+
+/* ── Счета: торговые счета (этап 7) ───────────────────────────────────────
+   Свой счёт на бирже (Bybit, BingX — демо или реал) или проп «по инструкциям»
+   (HashHedge: API нет, бот говорит, какие сделки открыть). Работают РЯДОМ с
+   тестовыми счетами стратегий: у каждого свой набор стратегий и свои правила
+   денег. Ключи вводятся здесь, проверяются на бирже и хранятся только на
+   сервере — обратно на страницу не приходят. */
+let ACC = null;          // ответ /api/accounts
+let ACC_EDIT = null;     // код правимого счёта, 'new' — новый, null — формы нет
+let ACC_KEYS = null;     // код счёта, которому вводят ключи
+
+async function loadAccounts() {
+  try {
+    ACC = await (await fetch('/api/accounts', { cache: 'no-store' })).json();
+  } catch (e) { ACC = null; }
+  renderAccounts();
+}
+
+const ACC_SIDES = { both: 'обе стороны', long: 'только лонги', short: 'только шорты' };
+
+function accTitle(code) {
+  return NAMES[code] || ((ACC.strategies || []).find(x => x.code === code) || {}).title || code;
+}
+
+function accNum(v, unit = '') { return (v === null || v === undefined || v === 0) ? null : `${v}${unit}`; }
+
+function accCard(a) {
+  const chips = (a.strategies || []).map(s => `<span><i class="key" style="background:${COLOR[s] || 'var(--ink-4)'}"></i>${esc(accTitle(s))}</span>`).join('')
+    || '<span>стратегии не выбраны — счёт сделок не получит</span>';
+  const where = a.kind === 'exchange'
+    ? `${esc((a.exchange || '').toUpperCase())} · ${a.mode === 'live' ? '<b class="neg">реальные деньги</b>' : 'демо'}`
+    : `счёт $${Number(a.deposit || 0).toLocaleString('ru')}`;
+  const rules = [
+    `риск ${a.risk_pct}% на сделку`, ACC_SIDES[a.sides] || a.sides,
+    `позиций ${a.max_slots || 'без предела'}`, `в одну сторону ${a.max_same_direction || 'без предела'}`,
+    accNum(a.profit_target_pct, '%') ? `цель +${a.profit_target_pct}%` : null,
+    accNum(a.max_drawdown_pct, '%') ? `макс. просадка ${a.max_drawdown_pct}%` : null,
+    accNum(a.daily_loss_pct, '%') ? `дневной убыток ${a.daily_loss_pct}%` : null,
+  ].filter(Boolean).join(' · ');
+  const keys = a.kind === 'exchange'
+    ? (a.has_keys ? '<span class="pos">ключи заданы ✓</span>' : '<span class="neg">ключей нет</span>') : '';
+  const status = a.enabled ? '<b class="pos">торгует</b>' : 'выключен';
+  const edit = ACC.writable ? `<div class="row-actions" style="margin-top:10px">
+      <button type="button" class="btn sm ghost" data-acc-edit="${esc(a.id)}">Изменить</button>
+      ${a.kind === 'exchange' ? `<button type="button" class="btn sm ghost" data-acc-keys="${esc(a.id)}">Ключи</button>` : ''}
+      <button type="button" class="btn sm ghost" data-acc-toggle="${esc(a.id)}">${a.enabled ? 'Выключить' : 'Включить'}</button>
+      <button type="button" class="btn sm danger" data-acc-del="${esc(a.id)}">Удалить</button>
+      <span class="hint" id="acc-msg-${esc(a.id)}"></span></div>` : '';
+  const keysForm = (ACC_KEYS === a.id) ? `<div class="keys-grid">
+      <label>API key<input id="acc-k-key" type="password" autocomplete="off"></label>
+      <label>Secret key<input id="acc-k-secret" type="password" autocomplete="off"></label></div>
+    <div class="row-actions"><button type="button" class="btn sm" data-acc-keysave="${esc(a.id)}">Проверить и сохранить</button>
+      <button type="button" class="btn sm ghost" data-acc-keyscancel="1">Отмена</button></div>
+    <div class="hint">Ключи проверяются на бирже (${a.mode === 'live' ? 'реальный' : 'демо'} адрес) и хранятся только
+      на сервере. Права ключа — только торговля, без вывода средств.</div>` : '';
+  return `<div class="panel card-pad">
+    <div class="group-head"><span class="nm">${esc(a.name || a.id)}</span>
+      <span class="count">${esc(a.kind_title)} · ${where} · ${status}${keys ? ' · ' + keys : ''}</span></div>
+    ${a.draft ? '<div class="acc-draft">Правила — черновик (типичные для пропа): проверьте и сохраните свои.</div>' : ''}
+    <div class="acc-rules">${rules}</div>
+    <div class="acc-chips">${chips}</div>
+    ${a.enabled && !ACC.engine ? '<div class="hint" style="margin-top:8px">Исполнение на торговых счетах подключается следующим шагом этапа 7 — пока счёт только заведён.</div>' : ''}
+    ${edit}${keysForm}
+  </div>`;
+}
+
+function accForm() {
+  const a = ACC_EDIT === 'new' ? null : (ACC.accounts || []).find(x => x.id === ACC_EDIT);
+  const v = a || (ACC.defaults || {}).manual || { kind: 'manual', exchange: 'bybit', mode: 'demo',
+    sides: 'both', strategies: [] };
+  const opt = (val, cur, text) => `<option value="${val}"${val === cur ? ' selected' : ''}>${text}</option>`;
+  const num = (id, label, val, step, only = '') => `<label${only ? ` data-acc-only="${only}"` : ''}>${label}<input id="acc-${id}" type="number" step="${step}" value="${val ?? 0}"></label>`;
+  const strat = (ACC.strategies || []).map(x => `<label><input type="checkbox" data-acc-strat="${esc(x.code)}"
+      ${(v.strategies || []).includes(x.code) ? 'checked' : ''}><i class="key" style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${COLOR[x.code] || 'var(--ink-4)'}"></i>${esc(accTitle(x.code))}</label>`).join('');
+  return `<div class="panel card-pad">
+    <div class="panel-head bare"><h2>${a ? 'Счёт «' + esc(a.name || a.id) + '»' : 'Новый счёт'}</h2>
+      <span class="hint">правила денег счёта — у каждого свои</span></div>
+    <div class="keys-grid">
+      <label>Название<input id="acc-name" type="text" value="${esc(v.name || '')}" placeholder="например, HashHedge 10k"></label>
+      <label>Вид<select id="acc-kind" ${a ? 'disabled' : ''}>${opt('manual', v.kind, 'проп по инструкциям (без API)')}${opt('exchange', v.kind, 'биржа (по ключам)')}</select></label>
+      <label data-acc-only="exchange">Биржа<select id="acc-exchange">${(ACC.exchanges || []).map(x => opt(x, v.exchange, x.toUpperCase())).join('')}</select></label>
+      <label data-acc-only="exchange">Режим<select id="acc-mode">${opt('demo', v.mode, 'демо')}${opt('live', v.mode, 'реальные деньги')}</select></label>
+      ${num('deposit', 'Размер счёта, $', v.deposit, 100, 'manual')}
+      ${num('risk_pct', 'Риск на сделку, %', v.risk_pct, 0.05)}
+      <label>Стороны<select id="acc-sides">${opt('both', v.sides, 'обе')}${opt('long', v.sides, 'только лонги')}${opt('short', v.sides, 'только шорты')}</select></label>
+      ${num('max_slots', 'Позиций одновременно (0 — без предела)', v.max_slots, 1)}
+      ${num('max_same_direction', 'В одну сторону (0 — без предела)', v.max_same_direction, 1)}
+      ${num('profit_target_pct', 'Цель по доходу, % (0 — нет)', v.profit_target_pct, 0.5, 'manual')}
+      ${num('max_drawdown_pct', 'Макс. просадка, % (0 — нет)', v.max_drawdown_pct, 0.5)}
+      ${num('daily_loss_pct', 'Дневной убыток, % (0 — нет)', v.daily_loss_pct, 0.5)}
+    </div>
+    <div class="hint">Стратегии этого счёта (ИИ торгуется только на тесте):</div>
+    <div class="acc-strats">${strat}</div>
+    <div class="acc-warn" id="acc-live-warn" ${v.mode === 'live' && v.kind === 'exchange' ? '' : 'hidden'}>Режим «реальные деньги»: сделки пойдут на настоящий счёт биржи.</div>
+    <div class="row-actions" style="margin-top:12px">
+      <button type="button" class="btn" id="acc-save">Сохранить</button>
+      <button type="button" class="btn ghost" id="acc-cancel">Отмена</button>
+      <span class="hint" id="acc-form-msg"></span></div>
+  </div>`;
+}
+
+function renderAccounts() {
+  const head = el('acc-head'), list = el('acc-list'), form = el('acc-form');
+  if (!head) return;
+  if (!ACC || !ACC.accounts) {
+    head.innerHTML = '<div class="panel card-pad"><div class="empty">Счета не загрузились</div></div>';
+    list.innerHTML = ''; form.innerHTML = ''; return;
+  }
+  head.innerHTML = `<div class="panel card-pad">
+    <div class="panel-head bare"><h2>Торговые счета</h2>
+      <span class="hint">биржи и проп по инструкциям — рядом с тестовыми счетами стратегий</span>
+      ${ACC.writable ? '<div class="row-end"><button type="button" class="btn sm" id="acc-add">Добавить счёт</button></div>' : ''}</div>
+    <div class="hint">У каждого счёта свой набор стратегий и свои правила денег: риск на сделку, стороны,
+      пределы позиций, для пропа — цель, макс. просадка и дневной убыток. Тестовые счета стратегий
+      (риск 1%, по счёту на стратегию) работают как прежде.${ACC.writable ? '' :
+      ' <b>Управление выключено:</b> панель открыта в сеть.'}</div></div>`;
+  form.innerHTML = ACC_EDIT ? accForm() : '';
+  list.innerHTML = ACC.accounts.length ? ACC.accounts.map(accCard).join('')
+    : '<div class="panel card-pad"><div class="empty">Торговых счетов пока нет</div></div>';
+  bindAccounts();
+}
+
+async function accPost(url, body) {
+  const resp = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                                  body: JSON.stringify(body) });
+  const data = await resp.json().catch(() => ({}));
+  if (!resp.ok) throw new Error(data.error || resp.status);
+  return data;
+}
+
+function bindAccounts() {
+  const add = el('acc-add');
+  if (add) add.onclick = () => { ACC_EDIT = 'new'; ACC_KEYS = null; renderAccounts(); };
+  const cancel = el('acc-cancel');
+  if (cancel) cancel.onclick = () => { ACC_EDIT = null; renderAccounts(); };
+  const kind = el('acc-kind'), mode = el('acc-mode');
+  const fit = () => {
+    if (!kind) return;
+    document.querySelectorAll('[data-acc-only]').forEach(x => { x.hidden = x.dataset.accOnly !== kind.value; });
+    el('acc-live-warn').hidden = !(kind.value === 'exchange' && mode.value === 'live');
+  };
+  if (kind) {
+    kind.onchange = () => {
+      /* Новый счёт: правила пропа — с черновика пропа, у биржи — пусто
+         (те же начальные правила, что у сервера при сохранении). */
+      const base = ACC_EDIT === 'new' && (ACC.defaults || {})[kind.value];
+      if (base) for (const f of ['profit_target_pct', 'max_drawdown_pct', 'daily_loss_pct'])
+        el('acc-' + f).value = base[f];
+      fit();
+    };
+    mode.onchange = fit; fit();
+  }
+  const save = el('acc-save');
+  if (save) save.onclick = async () => {
+    const msg = el('acc-form-msg');
+    const val = id => el('acc-' + id).value;
+    /* Скрытое поле — чужого вида счёта: не отправляем (цель пропа у биржи). */
+    const shown = id => !el('acc-' + id).closest('label').hidden;
+    const body = { name: val('name'), kind: val('kind'), sides: val('sides'), draft: false,
+      strategies: [...document.querySelectorAll('[data-acc-strat]')].filter(x => x.checked).map(x => x.dataset.accStrat) };
+    for (const f of ['exchange', 'mode']) if (shown(f)) body[f] = val(f);
+    for (const f of ['deposit', 'risk_pct', 'max_slots', 'max_same_direction', 'profit_target_pct',
+                     'max_drawdown_pct', 'daily_loss_pct']) if (shown(f)) body[f] = Number(val(f));
+    if (ACC_EDIT !== 'new') body.id = ACC_EDIT;
+    if (body.kind === 'exchange' && body.mode === 'live' && !confirm('Счёт с реальными деньгами. Сохранить?')) return;
+    try {
+      save.disabled = true; msg.textContent = 'Сохраняю…';
+      await accPost('/api/accounts/save', body);
+      ACC_EDIT = null; await loadAccounts();
+    } catch (e) { msg.style.color = 'var(--bad)'; msg.textContent = e.message; save.disabled = false; }
+  };
+  document.querySelectorAll('[data-acc-edit]').forEach(b => b.onclick = () => {
+    ACC_EDIT = b.dataset.accEdit; ACC_KEYS = null; renderAccounts(); window.scrollTo(0, 0); });
+  document.querySelectorAll('[data-acc-keys]').forEach(b => b.onclick = () => {
+    ACC_KEYS = b.dataset.accKeys; renderAccounts(); });
+  document.querySelectorAll('[data-acc-keyscancel]').forEach(b => b.onclick = () => {
+    ACC_KEYS = null; renderAccounts(); });
+  document.querySelectorAll('[data-acc-keysave]').forEach(b => b.onclick = async () => {
+    const id = b.dataset.accKeysave, msg = el('acc-msg-' + id);
+    try {
+      b.disabled = true; msg.style.color = 'var(--ink-3)'; msg.textContent = 'Проверяю на бирже…';
+      const data = await accPost('/api/accounts/keys', { id, key: el('acc-k-key').value, secret: el('acc-k-secret').value });
+      ACC_KEYS = null; await loadAccounts();
+      const after = el('acc-msg-' + id);
+      if (after) { after.style.color = 'var(--good)'; after.textContent = data.message; }
+    } catch (e) { msg.style.color = 'var(--bad)'; msg.textContent = e.message; b.disabled = false; }
+  });
+  document.querySelectorAll('[data-acc-toggle]').forEach(b => b.onclick = async () => {
+    const id = b.dataset.accToggle, a = ACC.accounts.find(x => x.id === id), msg = el('acc-msg-' + id);
+    if (!a.enabled && a.mode === 'live' && a.kind === 'exchange'
+        && !confirm('Включить торговлю реальными деньгами на этом счёте?')) return;
+    try { await accPost('/api/accounts/save', { id, enabled: !a.enabled }); await loadAccounts(); }
+    catch (e) { msg.style.color = 'var(--bad)'; msg.textContent = e.message; }
+  });
+  document.querySelectorAll('[data-acc-del]').forEach(b => b.onclick = async () => {
+    const id = b.dataset.accDel, msg = el('acc-msg-' + id);
+    if (!confirm('Удалить счёт и его ключи?')) return;
+    try { await accPost('/api/accounts/delete', { id }); await loadAccounts(); }
+    catch (e) { msg.style.color = 'var(--bad)'; msg.textContent = e.message; }
+  });
 }
 
 /* ── Стратегии: аналитика стратегии и её тестового счёта (этап 6) ─────────
