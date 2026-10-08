@@ -111,7 +111,7 @@ def collect_setups(pair, data):
     out, seen = [], set()
     for i in range(lookback + 10, len(df_1h)):
         window = df_1h.iloc[i - lookback: i + 1]
-        signal = strategy.analyze_market(window, None, pair, 10_000)
+        signal = strategy.analyze_market(window, None, pair)
         if not signal:
             continue
         setup = signal['setup']

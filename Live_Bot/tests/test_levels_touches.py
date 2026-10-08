@@ -130,7 +130,7 @@ def test_live_signal_converts_indices_to_time(monkeypatch, tmp_path):
                    {'index': 33, 'price': 99.9, 'kind': 'high'}],
         'first_index': 4,
     }
-    signal = strategy_levels._to_bot_signal(setup, 'BTCUSDT', 10_000, df)
+    signal = strategy_levels._to_bot_signal(setup, 'BTCUSDT', df)
 
     assert signal['setup']['start_time'] == '2026-08-01T04:00:00Z'
     times = [p['at'] for p in signal['setup']['touches_at']]
@@ -155,7 +155,7 @@ def test_live_signal_survives_bad_index(monkeypatch, tmp_path):
                    {'index': 3, 'price': 99.9, 'kind': 'low'}],
         'first_index': 999,
     }
-    signal = strategy_levels._to_bot_signal(setup, 'BTCUSDT', 10_000, df)
+    signal = strategy_levels._to_bot_signal(setup, 'BTCUSDT', df)
     assert signal['setup']['start_time'] is None
     assert [p['at'] for p in signal['setup']['touches_at']] \
         == ['2026-08-01T03:00:00Z']

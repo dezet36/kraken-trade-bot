@@ -20,10 +20,9 @@
 контексту и переводит их в сигнал брокера.
 """
 
-import config
 import scan_report as report
-import settings_store as settings
 from logger import log
+from strategies import settings
 from smc import params as smc_params
 # Псевдоним обязателен: ниже определена функция market_regime(), и без
 # него она перекрыла бы модуль. Ошибка была бы молчаливой — вызов
@@ -40,9 +39,9 @@ _last_reason = {}
 
 # Что оператор вправе менять из панели: только РЕШЕНИЯ SMC (часть II
 # smc/params). Структура рынка (часть I) — общий слой, её из панели не
-# трогают: правка там изменила бы разметку для ИИ и другие стратегии.
+# трогают: правка там изменила бы разметку для ИИ и другие стратегии. Риска
+# здесь нет с 08.10.2026: деньги решает счёт стратегии (accounts/paper.py).
 _OPERATOR_SETTINGS = {
-    'RISK_PER_TRADE_PCT': lambda: settings.risk_pct('SMC'),
     'MIN_SL_PCT': lambda: settings.min_stop_pct('SMC'),
 }
 
@@ -128,7 +127,7 @@ cached_context = _context.cached
 get_context = _context.get
 
 
-def _to_bot_signal(setup, pair, balance, risk_scale=1.0):
+def _to_bot_signal(setup, pair, risk_scale=1.0):
     """
     Переводит сетап SMC в структуру, понятную trade_manager.
 
@@ -155,14 +154,11 @@ def _to_bot_signal(setup, pair, balance, risk_scale=1.0):
         'breakeven_after_tp': bool(smc_params.BREAKEVEN_AFTER_TP1),
         'tp_targets': list(targets),
         'tp_fractions': list(trade['fractions']),
-        'max_same_direction': smc_params.MAX_SAME_DIRECTION,
-        # Риск режется режимом рынка ЗДЕСЬ, в одном месте: и paper_broker, и
-        # trade_manager считают объём от params['risk_pct'], поэтому фантом и
-        # бой получают одинаковый размер по построению, а не по совпадению.
-        'risk_pct': settings.risk_pct('SMC') * risk_scale,
+        # Множитель риска сетапа — часть замера SMC: в трендовом режиме BTC
+        # сделка идёт вполовину (smc/regime.py). Риск и размер решает счёт
+        # (accounts/paper.py): риск счёта × этот множитель — одинаково для
+        # бумаги и боя.
         'risk_scale': risk_scale,
-        'position_size': trade['position_size'] * risk_scale,
-        'risk_amount': trade['risk_amount'] * risk_scale,
         'rr': trade['rr'],
         'sl_distance': trade['sl_distance'],
     }
@@ -263,7 +259,7 @@ def crowd_reason(direction, rate):
     return f'толпа за сделку (фандинг {rate * 1e4:+.2f} б.п., толпа {crowd})'
 
 
-def _shadow_crowd_refusal(setup, pair, balance, risk_scale, reason):
+def _shadow_crowd_refusal(setup, pair, risk_scale, reason):
     """
     Отказ «толпа за сделку» — в тени (shadow.py): чем кончился бы сетап.
 
@@ -276,18 +272,18 @@ def _shadow_crowd_refusal(setup, pair, balance, risk_scale, reason):
     """
     try:
         import shadow
-        signal = _to_bot_signal(setup, pair, balance, risk_scale=risk_scale)
+        signal = _to_bot_signal(setup, pair, risk_scale=risk_scale)
         shadow.watch('SMC', signal, 'толпа за сделку', reason)
     except Exception as exc:                                  # noqa: BLE001
         log(f"   {pair}: тень отказа по толпе не заведена ({exc})")
 
 
-def analyze_market(pair, balance, client=None, risk_scale=None):
+def analyze_market(pair, client=None, risk_scale=None):
     """
     Проверяет одну пару и возвращает сигнал либо None.
 
     Сигнатура намеренно отличается от strategy.analyze_market(df_1h, df_5m,
-    pair, balance): SMC сам решает, какие таймфреймы ему нужны, и тянет их
+    pair): SMC сам решает, какие таймфреймы ему нужны, и тянет их
     самостоятельно — передавать готовые окна снаружи здесь бессмысленно.
     """
     _apply_settings()
@@ -300,7 +296,7 @@ def analyze_market(pair, balance, client=None, risk_scale=None):
         return None
 
     last_index = len(context.frames['poi']) - 1
-    setup, reason = context.evaluate(last_index, balance=balance)
+    setup, reason = context.evaluate(last_index)
     _last_reason[pair] = reason
 
     if setup is None:
@@ -316,19 +312,19 @@ def analyze_market(pair, balance, client=None, risk_scale=None):
     if blocked:
         _last_reason[pair] = blocked
         log(f"   {pair}: нет сигнала — {blocked}")
-        _shadow_crowd_refusal(setup, pair, balance, risk_scale, blocked)
+        _shadow_crowd_refusal(setup, pair, risk_scale, blocked)
         return None
 
     log(f"   {pair}: {setup['direction']} {setup['poi']['type']} | "
         f"confluence {setup['confluence']} | RR {setup['params']['rr']:.2f}"
         + (f" | фандинг {rate * 1e4:+.2f} б.п." if rate is not None else ''))
-    signal = _to_bot_signal(setup, pair, balance, risk_scale=risk_scale)
+    signal = _to_bot_signal(setup, pair, risk_scale=risk_scale)
     # Ставка в момент решения — в журнал: по ней проверяется фильтр вживую.
     signal['smc']['funding_bp'] = None if rate is None else round(rate * 1e4, 3)
     return signal
 
 
-def scan_for_setups(pairs, trade_manager, client=None, balance=None):
+def scan_for_setups(pairs, trade_manager, client=None):
     """
     Аналог pair_scanner.scan_for_setups на SMC-ядре.
 
@@ -336,7 +332,6 @@ def scan_for_setups(pairs, trade_manager, client=None, balance=None):
     первыми) — именно этот порядок определяет, кого пробовать при нехватке
     свободных слотов.
     """
-    balance = config.BALANCE if balance is None else balance
     candidates = []
     report.begin('SMC')
 
@@ -362,8 +357,7 @@ def scan_for_setups(pairs, trade_manager, client=None, balance=None):
                 report.record('SMC', pair, 'позиция или ордер уже есть')
                 continue
 
-            signal = analyze_market(pair, balance, client=client,
-                                    risk_scale=risk_scale)
+            signal = analyze_market(pair, client=client, risk_scale=risk_scale)
             report.record('SMC', pair, None if signal else _last_reason.get(pair))
             if signal:
                 context = _context.cached(pair)
@@ -391,11 +385,11 @@ def scan_for_setups(pairs, trade_manager, client=None, balance=None):
 # в bot.py, величины исполнения — в strategy_profile.py, разметка — в
 # setup_geometry.py. Поведение не изменилось — его держат эталоны tests/golden/.
 
-def scan(pairs, gate, client=None, balance=None):
-    return scan_for_setups(pairs, gate, client=client, balance=balance)
+def scan(pairs, gate, client=None):
+    return scan_for_setups(pairs, gate, client=client)
 
 
-def build_signal(candidate, balance):
+def build_signal(candidate):
     pair = candidate['pair']
     signal = candidate['signal']
     smc_info = signal['smc']
@@ -418,7 +412,8 @@ def profile():
     from smc import params as p
     return {'expiry_hours': p.PENDING_ORDER_MAX_HOURS, 'cooldown_hours': p.COOLDOWN_HOURS,
             'cost_limit_pct': p.MAX_ENTRY_COST_SHARE_PCT, 'max_hold_hours': p.MAX_POSITION_HOLD_HOURS,
-            'drops_at_target': p.CANCEL_PENDING_AT_TARGET, 'fills_through_market': p.FILL_THROUGH_MARKET}
+            'drops_at_target': p.CANCEL_PENDING_AT_TARGET, 'fills_through_market': p.FILL_THROUGH_MARKET,
+            'max_same_direction': p.MAX_SAME_DIRECTION}
 
 
 def geometry(signal, g):

@@ -47,7 +47,7 @@ def _levels_signal(tmp_path, monkeypatch):
         'points': [{'index': 4, 'price': 100.2, 'kind': 'high'}],
         'first_index': 4,
     }
-    return strategy_levels._to_bot_signal(setup, 'BTCUSDT', 10_000, df)
+    return strategy_levels._to_bot_signal(setup, 'BTCUSDT', df)
 
 
 def test_levels_signal_matches_contract(tmp_path, monkeypatch):
@@ -90,6 +90,10 @@ def test_levels_trade_opens_end_to_end(tmp_path, monkeypatch):
     monkeypatch.setenv('BOT_DATA_DIR', str(tmp_path))
     signal = _levels_signal(tmp_path, monkeypatch)
     signal['strategy'] = 'LEVELS'
+    # Весь путь: стратегия (сетап без денег) → счёт (риск, размер) → брокер.
+    from accounts import paper as account
+    signal, why = account.decide('LEVELS', signal, 10_000)
+    assert why is None
 
     import paper_broker as pb
     # Предел расхода на вход выключен намеренно: в приборе стоп 1.1%, а это

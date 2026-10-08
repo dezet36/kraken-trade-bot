@@ -106,7 +106,7 @@ class TestFedWindow:
 class TestScan:
     def test_setup_becomes_a_broker_signal(self, rules_mode):
         ctx = Ctx(setup())
-        out = llm_rules.scan(['BTCUSDT'], Gate(), balance=10_000, now_ms=ms('2026-10-10T00:00:00'),
+        out = llm_rules.scan(['BTCUSDT'], Gate(), now_ms=ms('2026-10-10T00:00:00'),
                              context_of=lambda pair: ctx)
         assert len(out) == 1
         signal = out[0]['signal']
@@ -114,34 +114,39 @@ class TestScan:
         p = signal['params']
         assert p['tp_targets'] == [115.0, 120.0, 125.0] and p['tp_fractions'] == [0.25, 0.25, 0.5]
         assert p['be_level'] is None and p['breakeven_after_tp'] is False
-        assert p['max_same_direction'] == llm_rules.DECISION.MAX_SAME_DIRECTION
+        # Денег в сетапе нет: риск и предел в одну сторону решает счёт; его
+        # предел по умолчанию — из СВОИХ правил ИИ (strategy_profile).
+        from strategies import contract
+        import strategy_profile
+        assert contract.money_in(signal) == []
+        assert strategy_profile.max_same_direction('LLM') == llm_rules.DECISION.MAX_SAME_DIRECTION
         assert signal['llm']['mode'] == 'rules' and 'ордер-блок' in signal['llm']['why']
         # Ядро спрошено СВОИМИ правилами ИИ, а не правилами SMC.
         assert ctx.decisions == [llm_rules.DECISION]
 
     def test_fed_day_refuses_the_found_setup(self, rules_mode):
         ctx = Ctx(setup())
-        out = llm_rules.scan(['BTCUSDT'], Gate(), balance=10_000,
+        out = llm_rules.scan(['BTCUSDT'], Gate(),
                              now_ms=ms('2026-10-28T18:00:00') - 5 * H, context_of=lambda pair: ctx)
         assert out == []
 
     def test_only_own_pool(self, rules_mode):
         asked = []
-        llm_rules.scan(['ARBUSDT', 'ETHUSDT'], Gate(), balance=10_000, now_ms=ms('2026-10-10T00:00:00'),
+        llm_rules.scan(['ARBUSDT', 'ETHUSDT'], Gate(), now_ms=ms('2026-10-10T00:00:00'),
                        context_of=lambda pair: asked.append(pair) or Ctx())
         assert asked == ['ETHUSDT']
 
     def test_busy_and_cooling_pairs_are_skipped(self, rules_mode):
         asked = []
         llm_rules.scan(['BTCUSDT', 'ETHUSDT', 'SOLUSDT'], Gate(busy={'BTCUSDT'}, cooling={'ETHUSDT'}),
-                       balance=10_000, now_ms=ms('2026-10-10T00:00:00'),
+                       now_ms=ms('2026-10-10T00:00:00'),
                        context_of=lambda pair: asked.append(pair) or Ctx())
         assert asked == ['SOLUSDT']
 
 
 def scan_one(sample, funding=None, now='2026-10-10T00:00:00'):
     ctx = Ctx(sample)
-    return llm_rules.scan(['BTCUSDT'], Gate(), balance=10_000, now_ms=ms(now),
+    return llm_rules.scan(['BTCUSDT'], Gate(), now_ms=ms(now),
                           context_of=lambda pair: ctx, funding_of=lambda pair: funding)
 
 

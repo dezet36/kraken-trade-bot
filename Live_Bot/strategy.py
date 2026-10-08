@@ -1,6 +1,8 @@
 import config
-import settings_store as settings
 from logger import log
+# Ручка оператора «минимальный стоп» — настройка стратегии (strategies/
+# settings.py). Денег стратегия не знает: риск и размер решает счёт.
+from strategies import settings
 
 
 def get_htf_trend(df_4h, return_strength=False):
@@ -217,7 +219,7 @@ def find_local_extremes(df, n=2):
 # detect_break_of_structure удалён в W11: основной вход — лимит в зоне A без BoS
 # (бэктест показал, что BoS-подтверждение основного входа ухудшает результат).
 
-def calculate_trade_params(setup, entry_price, balance, trading_pair=None, log_reject=True):
+def calculate_trade_params(setup, entry_price, trading_pair=None, log_reject=True):
     """
     Параметры сделки (геометрия v2, 2026-07-05):
     - entry_price = граница зоны A (38.2% уровень коррекции)
@@ -228,10 +230,10 @@ def calculate_trade_params(setup, entry_price, balance, trading_pair=None, log_r
     end_price   = setup['end_price']
     size        = setup['size']
 
-    # Минимальный стоп и риск берём из настроек: их меняют из дашборда на ходу,
-    # и перезапускать бота ради этого не нужно.
+    # Минимальный стоп — ручка оператора: её меняют из дашборда на ходу, и
+    # перезапускать бота ради этого не нужно. Риска и размера здесь нет с
+    # 08.10.2026: деньги решает счёт стратегии (accounts/paper.py).
     min_stop = settings.min_stop_pct('FIBO')
-    risk_pct = settings.risk_pct('FIBO')
 
     if setup['type'] == 'LONG':
         # SL ниже: за уровнем SL_LEVEL_R коррекции от B (0.886 = инвалидация)
@@ -262,17 +264,12 @@ def calculate_trade_params(setup, entry_price, balance, trading_pair=None, log_r
             log(f"   {tag}нет сигнала — RR {rr:.2f} < MIN_RR {config.MIN_RR} (entry ${entry_price:.6f})")
         return None
 
-    risk_amount = balance * (risk_pct / 100)
-    position_size = risk_amount / sl_distance
-
     return {
         'entry':         entry_price,
         'stop_loss':     sl_price,
         'take_profit_1': tp1,
         'take_profit_2': tp2,
         'be_level':      end_price,   # уровень B (0%) — пробой => SL в безубыток
-        'position_size': position_size,
-        'risk_amount':   risk_amount,
         'rr':            rr,
         'sl_distance':   sl_distance,
         # ── План выхода едет ВМЕСТЕ с сигналом ───────────────────────────────
@@ -282,13 +279,9 @@ def calculate_trade_params(setup, entry_price, balance, trading_pair=None, log_r
         'tp_targets':    [tp1],
         'tp_fractions':  list(getattr(config, 'TP_CLOSE_FRACTIONS', [1.0]))[:1] or [1.0],
         'breakeven_after_tp': bool(getattr(config, 'BREAKEVEN_AT_B', True)),
-        'max_same_direction': getattr(config, 'MAX_SAME_DIRECTION', 0),
-        # Процент риска едет с сигналом: исполнитель пересчитывает размер по
-        # своему балансу и обязан использовать ту же настройку, что и расчёт.
-        'risk_pct': risk_pct,
     }
 
-def analyze_market(df_1h, df_5m, trading_pair, balance):
+def analyze_market(df_1h, df_5m, trading_pair):
     """
     Текущий конфиг (Фибо-лимит): вход — GTC-лимит на границе зоны A (38.2%),
     БЕЗ ожидания BoS. df_5m оставлен в сигнатуре для совместимости (не используется).
@@ -339,7 +332,7 @@ def analyze_market(df_1h, df_5m, trading_pair, balance):
                 f"[{end_price:.6f}, {entry_price:.6f}]")
             return None
 
-    params = calculate_trade_params(setup, entry_price, balance, trading_pair=trading_pair)
+    params = calculate_trade_params(setup, entry_price, trading_pair=trading_pair)
     if not params:
         return None   # причина (RR < MIN_RR) уже залогирована внутри calculate_trade_params
 

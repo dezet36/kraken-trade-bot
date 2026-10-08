@@ -1317,14 +1317,14 @@ class TestFundingAtDecisionReachesTheJournal:
         """Сборка сигнала ФИБО больше не отбрасывает ставку кандидата."""
         import bot
 
-        def fake_analyze(df_1h, df_5m, pair, balance):
+        def fake_analyze(df_1h, df_5m, pair):
             return {'trading_pair': pair,
                     'setup': {'type': 'SHORT', 'start_price': 110.0, 'end_price': 100.0, 'size': 10.0},
                     'trigger': {'zone': 'Zone_A'}, 'params': {'entry': 104.0, 'stop_loss': 108.0}}
 
         import strategy
         monkeypatch.setattr(strategy, 'analyze_market', fake_analyze)
-        monkeypatch.setattr(bot.settings, 'allows', lambda strategy, direction: True)
+        monkeypatch.setattr(bot.account, 'allows', lambda strategy, direction: True)
         sig, _df = bot._build_signal({'pair': 'ETHUSDT', 'df_1h': object(), 'zone': 'Zone_A',
                                       'funding_bp': 1.0}, 'FIBO', 10_000)
         assert sig is not None

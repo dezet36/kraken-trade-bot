@@ -104,7 +104,7 @@ def test_fibo_still_rebuilds_from_candles():
 
     calls = []
 
-    def fake_analyze(df_1h, df_5m, pair, balance):
+    def fake_analyze(df_1h, df_5m, pair):
         calls.append(pair)
         return None
 

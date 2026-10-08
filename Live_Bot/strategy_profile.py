@@ -124,7 +124,7 @@ def fills_through_market(strategy):
     return _own_flag(strategy, 'fills_through_market', False)
 
 
-# Кто читает ручку оператора «минимальный стоп» (settings_store). Уровни,
+# Кто читает ручку оператора «минимальный стоп» (strategies/settings.py). Уровни,
 # Боллинджер, SMCS, Фибо 12ч считают по своему params.MIN_STOP_PCT, ИИ — по
 # издержкам; для них ручка мертва, и панель обязана это показывать, а не
 # рисовать 0.8%.
@@ -142,10 +142,29 @@ def min_stop_pct(strategy):
         own = _profile(strategy).get('min_stop_pct')
         if own is not None:
             return float(own)
-        import settings_store
-        return float(settings_store.min_stop_pct(strategy)) * 100
+        from strategies import settings
+        return float(settings.min_stop_pct(strategy)) * 100
     except Exception:                              # noqa: BLE001
         return float(getattr(_config(), 'MIN_SL_PERCENT', 0.008)) * 100
+
+
+def max_same_direction(strategy):
+    """
+    С каким пределом позиций в одну сторону стратегия ИЗМЕРЕНА (0 — без
+    предела). Это не решение стратегии, а условие её замера: счёт (accounts/
+    paper.py) берёт его по умолчанию, если владелец счёта не задал своего.
+    Общее из config — запасное для Фибоначчи.
+    """
+    try:
+        value = _profile(strategy).get('max_same_direction')
+        if value is not None:
+            return max(0, int(value))
+    except Exception:                              # noqa: BLE001
+        pass
+    try:
+        return max(0, int(getattr(_config(), 'MAX_SAME_DIRECTION', 0)))
+    except (TypeError, ValueError):
+        return 0
 
 
 def describe(strategy):
@@ -160,4 +179,5 @@ def describe(strategy):
         'min_stop_knob': strategy in MIN_STOP_KNOB_READERS,
         'drops_at_target': drops_at_target(strategy),
         'fills_through_market': fills_through_market(strategy),
+        'max_same_direction': max_same_direction(strategy),
     }

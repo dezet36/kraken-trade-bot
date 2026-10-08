@@ -85,19 +85,24 @@ class TestAdapter:
         ev = a_bos()
         state['df'], g = frame('ETHUSDT', ev['bar'])
         now = bar_close(state['df']) + pd.Timedelta(minutes=5)
-        sig = smcs.analyze_market('ETHUSDT', 10_000, now=now)
+        sig = smcs.analyze_market('ETHUSDT', now=now)
         assert sig is not None, smcs._last_reason.get('ETHUSDT')
         for field in ('trading_pair', 'setup', 'params', 'trigger', 'zone', 'htf_trend',
                       'score', 'why', 'market_price', 'smcs'):
             assert field in sig, field
         for field in ('entry', 'stop_loss', 'take_profit_1', 'tp_targets', 'tp_fractions',
-                      'sl_distance', 'rr', 'max_hold_hours', 'max_same_direction'):
+                      'sl_distance', 'rr', 'max_hold_hours'):
             assert field in sig['params'], field
         p = sig['params']
         assert p['stop_loss'] == pytest.approx(ev['stop'])
         assert p['tp_targets'] == [pytest.approx(ev['target'])]
         assert p['max_hold_hours'] == 720
-        assert p['max_same_direction'] == 8
+        # Денег в сетапе нет; предел в одну сторону — с каким стратегия
+        # измерена: его по умолчанию берёт счёт (strategy_profile).
+        from strategies import contract
+        import strategy_profile
+        assert contract.money_in(sig) == []
+        assert strategy_profile.max_same_direction('SMCS') == 8
         assert p['be_level'] is None and p['breakeven_after_tp'] is False
         # лимит ЗА рынком: исполнится сразу, по рынку
         price = sig['market_price']
@@ -111,7 +116,7 @@ class TestAdapter:
         ev = a_bos()
         state['df'], _ = frame('ETHUSDT', ev['bar'])
         now = bar_close(state['df']) + pd.Timedelta(minutes=45)
-        assert smcs.analyze_market('ETHUSDT', 10_000, now=now) is None
+        assert smcs.analyze_market('ETHUSDT', now=now) is None
         assert 'нового закрытого бара нет' in smcs._last_reason['ETHUSDT']
 
     def test_price_already_past_the_stop_refuses(self, adapter):
@@ -122,7 +127,7 @@ class TestAdapter:
         df.loc[df.index[-1], 'close'] = beyond
         state['df'] = df
         now = bar_close(df) + pd.Timedelta(minutes=5)
-        assert smcs.analyze_market('ETHUSDT', 10_000, now=now) is None
+        assert smcs.analyze_market('ETHUSDT', now=now) is None
 
 
 class TestDispatcher:
@@ -130,7 +135,7 @@ class TestDispatcher:
         smcs, state = adapter
         ev = a_bos()
         state['df'], _ = frame('ETHUSDT', ev['bar'])
-        sig = smcs.analyze_market('ETHUSDT', 10_000,
+        sig = smcs.analyze_market('ETHUSDT',
                                   now=bar_close(state['df']) + pd.Timedelta(minutes=1))
         built, _df = bot._build_signal({'pair': 'ETHUSDT', 'signal': sig, 'score': sig['score'],
                                         'rr': sig['params']['rr'], 'df_1h': None}, 'SMCS', 10_000)
@@ -180,7 +185,7 @@ class TestPaperFill:
         smcs, state = adapter
         ev = a_bos()
         state['df'], _ = frame('ETHUSDT', ev['bar'])
-        sig = smcs.analyze_market('ETHUSDT', 10_000,
+        sig = smcs.analyze_market('ETHUSDT',
                                   now=bar_close(state['df']) + pd.Timedelta(minutes=1))
         sig['strategy'] = 'SMCS'
         assert broker.open('SMCS', sig)

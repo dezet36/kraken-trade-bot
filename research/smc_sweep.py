@@ -43,7 +43,7 @@ def build_orders(ctx, pair, df):
     bar_ns = ctx._durations.get('poi') or 0
 
     for i in range(60, len(df)):
-        setup, _ = ctx.evaluate(i, balance=INITIAL_BALANCE)
+        setup, _ = ctx.evaluate(i)
         if setup is None:
             continue
         poi = setup['poi']

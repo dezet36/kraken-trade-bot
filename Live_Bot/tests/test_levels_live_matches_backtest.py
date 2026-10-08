@@ -114,7 +114,7 @@ def _live(df, monkeypatch, tmp_path):
     monkeypatch.setattr(strategy_levels, 'fetch_ohlcv',
                         lambda *a, **k: feed)
     strategy_levels._cache.clear()
-    return strategy_levels.analyze_market('TESTUSDT', 10_000)
+    return strategy_levels.analyze_market('TESTUSDT')
 
 
 @pytest.mark.parametrize('bars', [170, 180, 200, 240])

@@ -17,9 +17,7 @@
 import numpy as np
 import pandas as pd
 
-import config
 import scan_report as report
-import settings_store as settings
 from exchange import fetch_ohlcv
 from levels import core, params
 from logger import log
@@ -60,7 +58,7 @@ def _context(pair, client=None):
     return _cache[pair][1:]
 
 
-def analyze_market(pair, balance, client=None):
+def analyze_market(pair, client=None):
     """Сетап по паре или None."""
     ctx = _context(pair, client=client)
     if ctx is None:
@@ -78,14 +76,13 @@ def analyze_market(pair, balance, client=None):
     log(f"   {pair}: {setup['direction']} от уровня {setup['level']:.6f} | "
         f"касаний {setup['touches']} | объём {setup['volume_ratio']:.1f}x | "
         f"RR {setup['rr']:.2f}")
-    return _to_bot_signal(setup, pair, balance, df)
+    return _to_bot_signal(setup, pair, df)
 
 
-def _to_bot_signal(setup, pair, balance, df):
-    risk_pct = settings.risk_pct(NAME)
+def _to_bot_signal(setup, pair, df):
+    # Сетап без денег: риск, размер и предел в одну сторону решает счёт
+    # стратегии (accounts/paper.py).
     dist = setup['sl_distance']
-    risk_amount = balance * (risk_pct / 100)
-    size = risk_amount / dist if dist else 0.0
 
     why = (f"{setup['direction']} от уровня {setup['level']:.6f}: прокол с "
            f"возвратом, объём {setup['volume_ratio']:.1f}x от среднего, "
@@ -140,10 +137,6 @@ def _to_bot_signal(setup, pair, balance, df):
             # (research/fibo_breakeven.py), и он остался включённым.
             'be_level': None,
             'breakeven_after_tp': False,
-            'max_same_direction': params.MAX_SAME_DIRECTION,
-            'risk_pct': risk_pct,
-            'position_size': size,
-            'risk_amount': risk_amount,
             'rr': setup['rr'],
             'sl_distance': dist,
         },
@@ -163,9 +156,8 @@ def _to_bot_signal(setup, pair, balance, df):
     }
 
 
-def scan_for_setups(pairs, trade_manager, client=None, balance=None):
+def scan_for_setups(pairs, trade_manager, client=None):
     """Кандидаты, отсортированные по объёму на возврате (сильные первыми)."""
-    balance = config.BALANCE if balance is None else balance
     candidates = []
     report.begin(NAME)
 
@@ -178,7 +170,7 @@ def scan_for_setups(pairs, trade_manager, client=None, balance=None):
                 report.record(NAME, pair, 'позиция или ордер уже есть')
                 continue
 
-            signal = analyze_market(pair, balance, client=client)
+            signal = analyze_market(pair, client=client)
             report.record(NAME, pair, None if signal else _last_reason.get(pair))
             if signal:
                 candidates.append({
@@ -203,11 +195,11 @@ def scan_for_setups(pairs, trade_manager, client=None, balance=None):
 # в bot.py, величины исполнения — в strategy_profile.py, разметка — в
 # setup_geometry.py. Поведение не изменилось — его держат эталоны tests/golden/.
 
-def scan(pairs, gate, client=None, balance=None):
-    return scan_for_setups(pairs, gate, client=client, balance=balance)
+def scan(pairs, gate, client=None):
+    return scan_for_setups(pairs, gate, client=client)
 
 
-def build_signal(candidate, balance):
+def build_signal(candidate):
     pair = candidate['pair']
     # Сканер уровней уже вернул готовый сигнал: он и есть результат анализа.
     signal = candidate.get('signal')
@@ -233,7 +225,8 @@ def profile():
     from levels import params as p
     return {'expiry_hours': p.EXPIRY_HOURS, 'cooldown_hours': p.COOLDOWN_HOURS,
             'cost_limit_pct': p.MAX_ENTRY_COST_SHARE_PCT, 'max_hold_hours': p.MAX_HOLD_HOURS,
-            'fills_through_market': p.FILL_THROUGH_MARKET, 'min_stop_pct': p.MIN_STOP_PCT}
+            'fills_through_market': p.FILL_THROUGH_MARKET, 'min_stop_pct': p.MIN_STOP_PCT,
+            'max_same_direction': p.MAX_SAME_DIRECTION}
 
 
 def geometry(signal, g):

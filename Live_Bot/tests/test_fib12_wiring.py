@@ -95,21 +95,26 @@ class TestAdapter:
         fib, state = adapter
         leg = a_leg()
         state['df'], _ = frame('ETHUSDT', leg['conf'])
-        sig = fib.analyze_market('ETHUSDT', 10_000, now=bar_close(state['df']) + pd.Timedelta(minutes=5))
+        sig = fib.analyze_market('ETHUSDT', now=bar_close(state['df']) + pd.Timedelta(minutes=5))
         assert sig is not None, fib._last_reason.get('ETHUSDT')
         for field in ('trading_pair', 'setup', 'params', 'trigger', 'zone', 'htf_trend',
                       'score', 'why', 'market_price', 'fib12'):
             assert field in sig, field
         p = sig['params']
         for field in ('entry', 'stop_loss', 'take_profit_1', 'tp_targets', 'tp_fractions',
-                      'sl_distance', 'rr', 'max_hold_hours', 'max_same_direction', 'cancel_beyond'):
+                      'sl_distance', 'rr', 'max_hold_hours', 'cancel_beyond'):
             assert field in p, field
         assert p['entry'] == pytest.approx(leg['entry'])
         assert p['stop_loss'] == pytest.approx(leg['stop'], rel=1e-6)
         assert p['tp_targets'] == [pytest.approx(leg['target'])]
         assert p['cancel_beyond'] == pytest.approx(leg['B'])
         assert p['max_hold_hours'] == 720
-        assert p['max_same_direction'] == 0
+        # Денег в сетапе нет; предел в одну сторону — с каким стратегия
+        # измерена: его по умолчанию берёт счёт (strategy_profile).
+        from strategies import contract
+        import strategy_profile
+        assert contract.money_in(sig) == []
+        assert strategy_profile.max_same_direction('FIB12') == 0
         assert p['be_level'] is None and p['breakeven_after_tp'] is False
         assert sig['setup']['type'] == ('LONG' if leg['dir'] == 1 else 'SHORT')
 
@@ -117,7 +122,7 @@ class TestAdapter:
         fib, state = adapter
         leg = a_leg()
         state['df'], _ = frame('ETHUSDT', leg['conf'])
-        assert fib.analyze_market('ETHUSDT', 10_000,
+        assert fib.analyze_market('ETHUSDT',
                                   now=bar_close(state['df']) + pd.Timedelta(minutes=90)) is None
         assert 'нового закрытого бара нет' in fib._last_reason['ETHUSDT']
 
@@ -126,7 +131,7 @@ class TestAdapter:
         leg = a_leg()
         beyond = leg['B'] * (1.01 if leg['dir'] == 1 else 0.99)
         state['df'], _ = frame('ETHUSDT', leg['conf'], price=beyond)
-        assert fib.analyze_market('ETHUSDT', 10_000,
+        assert fib.analyze_market('ETHUSDT',
                                   now=bar_close(state['df']) + pd.Timedelta(minutes=5)) is None
         assert 'концом импульса' in fib._last_reason['ETHUSDT']
 
@@ -136,7 +141,7 @@ class TestDispatcher:
         fib, state = adapter
         leg = a_leg()
         state['df'], _ = frame('ETHUSDT', leg['conf'])
-        sig = fib.analyze_market('ETHUSDT', 10_000, now=bar_close(state['df']) + pd.Timedelta(minutes=1))
+        sig = fib.analyze_market('ETHUSDT', now=bar_close(state['df']) + pd.Timedelta(minutes=1))
         built, _df = bot._build_signal({'pair': 'ETHUSDT', 'signal': sig, 'score': sig['score'],
                                         'rr': sig['params']['rr'], 'df_1h': None}, 'FIB12', 10_000)
         assert built is not None and built['strategy'] == 'FIB12'
@@ -188,7 +193,7 @@ class TestPaperBroker:
         fib, state = adapter
         leg = a_leg()
         state['df'], _ = frame('ETHUSDT', leg['conf'])
-        sig = fib.analyze_market('ETHUSDT', 10_000, now=bar_close(state['df']) + pd.Timedelta(minutes=1))
+        sig = fib.analyze_market('ETHUSDT', now=bar_close(state['df']) + pd.Timedelta(minutes=1))
         sig['strategy'] = 'FIB12'
         assert broker.open('FIB12', sig)
         return broker, leg

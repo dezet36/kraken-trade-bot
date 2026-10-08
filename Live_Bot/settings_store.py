@@ -1,13 +1,23 @@
 """
-Настройки, меняемые на ходу из дашборда.
+Настройки, меняемые на ходу из дашборда и Telegram.
 
 Отдельный слой поверх `.env`, а не замена ему. `.env` задаёт, с чем бот
-СТАРТУЕТ; здесь лежит то, что оператор меняет во время работы: включена ли
-стратегия, каким процентом депозита она рискует, насколько близко ставит стоп.
+СТАРТУЕТ; здесь — то, что оператор меняет во время работы. Файлы читаются на
+каждом цикле, поэтому изменение вступает в силу без перезапуска. Уже открытые
+позиции при этом не трогаются: их размер и стоп посчитаны при входе.
 
-Файл читается на каждом цикле, поэтому изменение вступает в силу без
-перезапуска. Уже открытые позиции при этом не трогаются: их размер и стоп
-посчитаны при входе, и менять их задним числом нельзя.
+С 08.10.2026 (реорганизация, этап 2) у настроек РАЗНЫЕ ХОЗЯЕВА, а этот модуль —
+одно окно к ним для панели и Telegram:
+  - деньги — счёт стратегии (accounts/paper.py, файл accounts.json): допущена
+    ли стратегия, риск на сделку, депозит, стороны, позиций всего и в одну
+    сторону, пределы портфеля;
+  - правила решений стратегии — strategies/settings.py (минимальный стоп,
+    критик ИИ), файл runtime_settings.json;
+  - уведомления и выбор биржи — здесь же, в runtime_settings.json.
+load() отдаёт всё одним словарём в прежнем виде (раздел на стратегию, PORTFOLIO,
+EXCHANGE, NOTIFY), save() делит правку между хозяевами и пишет ОДНУ запись в
+историю настроек. Стратегии этот модуль не читают: денег они не знают, а свои
+правила берут из strategies/settings.py.
 
 Все значения ограничиваются диапазоном при записи. Опечатка в поле «риск»
 (5 вместо 0.5) — это не косметика, а десятикратный размер позиции, поэтому
@@ -21,6 +31,8 @@ import threading
 
 import config
 from logger import log
+from accounts import paper as accounts
+from strategies import settings as strategy_settings
 
 SETTINGS_FILE = os.path.join(config.DATA_DIR, 'runtime_settings.json')
 # RSIBB добавлена ЧЕТВЁРТОЙ и на особом положении: она единственная не прошла
@@ -35,38 +47,13 @@ SETTINGS_FILE = os.path.join(config.DATA_DIR, 'runtime_settings.json')
 from strategies import registry as _registry
 STRATEGIES = _registry.codes()
 
-# Ноль в поле «одновременных позиций» означает «без предела». Ноль выбран
-# потому, что так же уже устроены пределы портфеля и дневного убытка: одно
-# правило «ноль = выключено» на все ограничители, а не три разных.
-UNLIMITED = 0
+UNLIMITED = accounts.UNLIMITED
 
-# Границы разумного. Верхняя граница риска намеренно невелика: 5% на сделку
-# при винрейте около трети — это разорение на серии из десяти минусов.
-LIMITS = {
-    'risk_pct':     (0.05, 5.0),
-    'min_stop_pct': (0.1, 20.0),
-    'deposit':      (10.0, 10_000_000.0),
-    # Одновременные позиции стратегии. НОЛЬ — без предела: стратегия берёт
-    # столько сетапов, сколько нашла. Это значение по умолчанию, и оно
-    # осознанное — см. _default_slots.
-    'max_slots':    (0, 60),
-    # Предел на ВЕСЬ портфель: сколько процентов депозита может стоять под
-    # риском одновременно, считая все стратегии вместе. Ноль отключает.
-    'portfolio_risk_pct':  (0.0, 100.0),
-    # Максимум открытых позиций и ордеров суммарно. Ноль отключает.
-    'portfolio_max_positions': (0, 60),
-    # Дневной предел убытка в процентах от депозита. Ноль отключает.
-    'daily_loss_pct': (0.0, 50.0),
-}
+# Границы разумного — у хозяев полей; здесь одним словарём для панели.
+LIMITS = {**accounts.LIMITS, **strategy_settings.LIMITS}
 
-# Общие настройки портфеля хранятся отдельным разделом: они не принадлежат
-# ни одной стратегии, а ограничивают их все вместе. Без такого предела
-# каждая стратегия соблюдает СВОЙ лимит слотов, и три стратегии по шесть
-# позиций при риске 0.5% дают 9% депозита под риском одновременно — при том
-# что ни одна из них своих правил не нарушила.
-PORTFOLIO = 'PORTFOLIO'
-PORTFOLIO_FIELDS = ('portfolio_risk_pct', 'portfolio_max_positions',
-                    'daily_loss_pct')
+PORTFOLIO = accounts.PORTFOLIO
+PORTFOLIO_FIELDS = accounts.PORTFOLIO_FIELDS
 
 # Выбранная биржа. Отдельным разделом: она не принадлежит ни одной стратегии и
 # не является пределом риска. КЛЮЧИ ЗДЕСЬ НЕ ХРАНЯТСЯ И НЕ ПРИНИМАЮТСЯ — они
@@ -93,222 +80,122 @@ NOTIFY_EVENTS = ('trade_opened', 'trade_closed', 'error', 'daily', 'llm_setup',
                  'plan_dropped', 'tp_hit', 'breakeven', 'llm_rejected', 'service')
 NOTIFY_CHANNELS = ('telegram',)
 
+# Поля раздела стратегии в порядке, в котором их видели панель и журнал до
+# разделения хозяев: деньги (счёт) вперемешку с правилами (стратегия).
+_STRATEGY_FIELDS = ('enabled', 'risk_pct', 'min_stop_pct', 'deposit', 'max_slots', 'sides',
+                    'critic', 'notify', 'max_same_direction')
+
 _lock = threading.Lock()
 _cache = None
 _mtime = None
+_money = None          # словарь счетов, из которого собран _cache
 
 
-def _default_slots(strategy):
-    """
-    По умолчанию предела НЕТ: стратегия берёт столько сетапов, сколько нашла.
-
-    Раньше здесь стояло 5 — число, подобранное в июле 2026 под пул из 16 пар.
-    Пул вырос до 21, стратегий стало три, и каждая ищет во всём пуле: предел
-    выбрасывал сетапы не потому, что они плохи, а потому что не было слота.
-    На бумажном тестировании это прямая потеря наблюдений, ради которых всё и
-    затевалось.
-
-    ЧТО ЭТИМ ПОКУПАЕТСЯ И ЧЕМ ПЛАТИТСЯ. Одновременный риск перестаёт быть
-    ограничен сверху: N позиций по 0.5% — это 0.5N процентов депозита в рынке,
-    а криптопары в проливе ходят вместе и проигрывают тоже вместе. Поэтому
-    рядом остаются два предела на ВЕСЬ портфель (portfolio_risk_pct и
-    portfolio_max_positions) и дневной предел убытка — они выключены по
-    умолчанию, но включаются одним полем на панели.
-
-    ОСОЗНАННЫЙ ВЫБОР ОПЕРАТОРА ВСЕГДА СИЛЬНЕЕ. Если SLOTS_PER_STRATEGY задан в
-    .env — берём его; поле на панели перекрывает и это.
-
-    ЧТО ЗДЕСЬ ПОТЕРЯНО. Раньше уровни по умолчанию брали свой MAX_POSITIONS = 6,
-    чтобы бот торговал ровно то, что измерено. Теперь это соответствие
-    нарушено сознательно, и восстановить его можно, вписав 6 в поле на панели.
-    """
-    if config.SLOTS_PER_STRATEGY:
-        return int(config.SLOTS_PER_STRATEGY)
-    return UNLIMITED
-
-
-def _portfolio_defaults():
-    """
-    По умолчанию предел ВЫКЛЮЧЕН.
-
-    Включённое по умолчанию ограничение, о котором оператор не знает, — это
-    сделки, которые бот молча не открыл. Пусть лучше решение будет
-    осознанным: панель показывает текущую загрузку, и включить предел можно
-    одним полем.
-    """
-    return {
-        'portfolio_risk_pct': float(os.getenv('PORTFOLIO_RISK_PCT', 0) or 0),
-        'portfolio_max_positions': int(os.getenv('PORTFOLIO_MAX_POSITIONS', 0) or 0),
-        'daily_loss_pct': float(os.getenv('DAILY_LOSS_PCT', 0) or 0),
-    }
-
-
-def _defaults():
-    base = {
-        name: {
-            'enabled': True,
-            'risk_pct': float(config.RISK_PER_TRADE),
-            'min_stop_pct': round(float(config.MIN_SL_PERCENT) * 100, 3),
-            'deposit': float(config.PAPER_START_BALANCES.get(name,
-                                                             config.PAPER_START_BALANCE)),
-            'max_slots': _default_slots(name),
-            # Разрешённые стороны. По умолчанию ОБЕ — то, как бот вёл себя
-            # всегда. Замеры показали, что у Фибоначчи лонги дают ровно ноль
-            # на двух независимых периодах, но выключать их молча нельзя:
-            # это сделки, которых человек не досчитается, не понимая почему.
-            # Переключатель есть, решение за оператором.
-            'sides': 'both',
-            # Второе мнение о плане модели. Осмысленно только у LLM, но поле
-            # есть у всех: схема одна, лишний ключ безвреден.
-            'critic': True,
-            # Присылать ли в Telegram сделки ЭТОЙ стратегии (вход, цели,
-            # безубыток, выход, снятые заявки). Торговлю не трогает — только
-            # сообщения: у фибо входов много, у ИИ мало, и человеку может
-            # быть нужен поток одной стратегии без шума другой.
-            'notify': True,
-        }
-        for name in STRATEGIES
-    }
-    base[PORTFOLIO] = _portfolio_defaults()
+def _own_defaults():
+    """Поля этого файла: правила стратегий, уведомления, биржа."""
+    base = {name: {**strategy_settings.defaults(),
+                   # Присылать ли в Telegram сделки ЭТОЙ стратегии (вход, цели,
+                   # безубыток, выход, снятые заявки). Торговлю не трогает —
+                   # только сообщения: у фибо входов много, у ИИ мало, и
+                   # человеку может быть нужен поток одной стратегии без шума
+                   # другой.
+                   'notify': True}
+            for name in STRATEGIES}
     base[EXCHANGE] = {'name': (config.EXCHANGE_NAME or 'bybit').lower()}
     base[NOTIFY] = {f'{event}_{channel}': True
                     for event in NOTIFY_EVENTS for channel in NOTIFY_CHANNELS}
     return base
 
 
-SIDES = ('both', 'long', 'short')
+def _apply_own(data, changes):
+    """Правка (или записанный файл) поверх своих полей — с проверкой."""
+    changes = changes if isinstance(changes, dict) else {}
+    chosen = ((changes.get(EXCHANGE) or {}).get('name') or '').lower()
+    if chosen in EXCHANGES:
+        data[EXCHANGE]['name'] = chosen
+    notify = changes.get(NOTIFY) or {}
+    for key in data[NOTIFY]:
+        if key in notify:
+            data[NOTIFY][key] = bool(notify[key])
+    for name in STRATEGIES:
+        item = changes.get(name)
+        if not isinstance(item, dict):
+            continue
+        data[name] = {**strategy_settings.section(item, data[name]),
+                      'notify': bool(item['notify']) if 'notify' in item else data[name]['notify']}
+    return data
 
 
-def _clean_sides(value, fallback='both'):
-    """
-    Разрешённые стороны — только из известного списка.
-
-    Незнакомое значение НЕ считается «выключить всё»: опечатка в файле
-    настроек не должна тихо остановить торговлю. Возвращаем прежнее.
-    """
-    value = str(value or '').strip().lower()
-    return value if value in SIDES else fallback
-
-
-def _clamp(field, value, fallback):
-    low, high = LIMITS[field]
-    try:
-        value = float(value)
-    except (TypeError, ValueError):
-        return fallback
-    if value != value:                       # NaN
-        return fallback
-    value = min(max(value, low), high)
-    return (int(value) if field in ('max_slots', 'portfolio_max_positions')
-            else value)
+def _compose(own, money):
+    """Один словарь в прежнем виде: раздел на стратегию, портфель, биржа,
+    уведомления."""
+    data = {}
+    for name in STRATEGIES:
+        merged = {**money.get(name, {}), **own.get(name, {})}
+        data[name] = {field: merged.get(field) for field in _STRATEGY_FIELDS}
+    data[PORTFOLIO] = dict(money.get(PORTFOLIO, {}))
+    data[EXCHANGE] = dict(own[EXCHANGE])
+    data[NOTIFY] = dict(own[NOTIFY])
+    return data
 
 
 def load(force=False):
     """
-    Текущие настройки. Перечитывает файл, только если он изменился —
+    Текущие настройки. Перечитывает файлы, только если они изменились —
     вызывается каждый цикл и не должен превращаться в дисковую нагрузку.
     """
-    global _cache, _mtime
+    global _cache, _mtime, _money
+    money = accounts.load(force=force)
     with _lock:
         try:
             stamp = os.path.getmtime(SETTINGS_FILE)
         except OSError:
             stamp = None
 
-        if _cache is not None and not force and stamp == _mtime:
+        key = (SETTINGS_FILE, stamp)
+        if _cache is not None and not force and _mtime == key and _money is money:
             return _cache
 
-        data = _defaults()
+        own = _own_defaults()
         if stamp is not None:
             try:
                 with open(SETTINGS_FILE, 'r', encoding='utf-8') as fh:
-                    stored = json.load(fh)
-                stored_portfolio = stored.get(PORTFOLIO) or {}
-                for field in PORTFOLIO_FIELDS:
-                    if field in stored_portfolio:
-                        data[PORTFOLIO][field] = _clamp(
-                            field, stored_portfolio[field], data[PORTFOLIO][field])
-                chosen = ((stored.get(EXCHANGE) or {}).get('name') or '').lower()
-                if chosen in EXCHANGES:
-                    data[EXCHANGE]['name'] = chosen
-                stored_notify = stored.get(NOTIFY) or {}
-                for key in data[NOTIFY]:
-                    if key in stored_notify:
-                        data[NOTIFY][key] = bool(stored_notify[key])
-                for name in STRATEGIES:
-                    item = (stored.get(name) or {})
-                    data[name]['enabled'] = bool(item.get('enabled', True))
-                    for field in ('risk_pct', 'min_stop_pct', 'deposit', 'max_slots'):
-                        if field in item:
-                            data[name][field] = _clamp(field, item[field],
-                                                       data[name][field])
-                    data[name]['sides'] = _clean_sides(item.get('sides'),
-                                                       data[name]['sides'])
-                    if 'critic' in item:
-                        data[name]['critic'] = bool(item['critic'])
-                    if 'notify' in item:
-                        data[name]['notify'] = bool(item['notify'])
+                    _apply_own(own, json.load(fh))
             except Exception as exc:
                 log(f"⚠️ runtime_settings.json нечитаем ({exc}) — берём значения из .env")
+                own = _own_defaults()
 
-        _cache, _mtime = data, stamp
-        return data
+        _cache, _mtime, _money = _compose(own, money), key, money
+        return _cache
 
 
 def save(changes):
     """
     Применяет изменения и возвращает итоговые настройки.
 
-    Принимает частичный набор: дашборд шлёт только то, что трогали.
+    Принимает частичный набор: дашборд шлёт только то, что трогали. Деньги
+    уходят счёту (accounts/paper.py), остальное — в runtime_settings.json; в
+    историю ложится одна запись на всю правку. Денежных полей в
+    runtime_settings.json после записи нет: их единственное место — счёт.
     """
-    global _cache, _mtime
+    global _cache, _mtime, _money
+    changes = changes if isinstance(changes, dict) else {}
     before = json.loads(json.dumps(load()))   # снимок ДО правки — для истории
-    data = json.loads(json.dumps(load()))     # копия, чтобы не портить кэш
 
-    portfolio = changes.get(PORTFOLIO) or {}
-    for field in PORTFOLIO_FIELDS:
-        if field in portfolio:
-            data[PORTFOLIO][field] = _clamp(field, portfolio[field],
-                                            data[PORTFOLIO][field])
-
-    chosen = ((changes.get(EXCHANGE) or {}).get('name') or '').lower()
-    if chosen in EXCHANGES:
-        data[EXCHANGE]['name'] = chosen
-
-    notify_changes = changes.get(NOTIFY) or {}
-    for key in data[NOTIFY]:
-        if key in notify_changes:
-            data[NOTIFY][key] = bool(notify_changes[key])
-
-    for name in STRATEGIES:
-        item = (changes.get(name) or {})
-        if 'enabled' in item:
-            data[name]['enabled'] = bool(item['enabled'])
-        for field in ('risk_pct', 'min_stop_pct', 'deposit', 'max_slots'):
-            if field in item:
-                data[name][field] = _clamp(field, item[field], data[name][field])
-        if 'sides' in item:
-            data[name]['sides'] = _clean_sides(item['sides'], data[name]['sides'])
-        if 'critic' in item:
-            data[name]['critic'] = bool(item['critic'])
-        if 'notify' in item:
-            data[name]['notify'] = bool(item['notify'])
+    accounts.save(changes, record=False)
+    own = _apply_own(_apply_own(_own_defaults(), before), changes)
 
     with _lock:
         try:
             tmp = SETTINGS_FILE + '.tmp'
             with open(tmp, 'w', encoding='utf-8') as fh:
-                json.dump(data, fh, indent=2, ensure_ascii=False)
+                json.dump(own, fh, indent=2, ensure_ascii=False)
             os.replace(tmp, SETTINGS_FILE)
         except Exception as exc:
             log(f"⚠️ Не удалось сохранить настройки: {exc}")
-            return data
-        _cache = data
-        try:
-            _mtime = os.path.getmtime(SETTINGS_FILE)
-        except OSError:
-            _mtime = None
+        _cache, _mtime, _money = None, None, None
 
+    data = load()
     log('⚙️ Настройки изменены: ' + ', '.join(
         f"{name} {'вкл' if data[name]['enabled'] else 'ВЫКЛ'} "
         f"риск {data[name]['risk_pct']}% стоп>={data[name]['min_stop_pct']}% "
@@ -378,9 +265,21 @@ def history(limit=100):
 
 
 # ── Точечные запросы ─────────────────────────────────────────────────────────
+# Деньги — у счёта стратегии; здесь они повторены для панели, Telegram,
+# doctor и исполнителей (этап 5 переведёт исполнителей на решение счёта).
 
-def enabled(strategy):
-    return bool(load().get(strategy, {}).get('enabled', True))
+enabled = accounts.enabled
+risk_pct = accounts.risk_pct
+deposit = accounts.deposit
+sides = accounts.sides
+allows = accounts.allows
+max_slots = accounts.max_slots
+slots_free = accounts.slots_free
+slots_label = accounts.slots_label
+max_same_direction = accounts.max_same_direction
+portfolio_risk_pct = accounts.portfolio_risk_pct
+portfolio_max_positions = accounts.portfolio_max_positions
+daily_loss_pct = accounts.daily_loss_pct
 
 
 def critic_enabled():
@@ -397,10 +296,6 @@ def critic_enabled():
         return bool(getattr(config, 'LLM_CRITIC', True))
 
 
-def risk_pct(strategy):
-    return float(load().get(strategy, {}).get('risk_pct', config.RISK_PER_TRADE))
-
-
 def min_stop_pct(strategy):
     """Минимальная дистанция стопа, в ДОЛЯХ цены (а не в процентах)."""
     value = load().get(strategy, {}).get('min_stop_pct')
@@ -409,50 +304,10 @@ def min_stop_pct(strategy):
     return float(value) / 100.0
 
 
-def sides(strategy):
-    """Какие стороны разрешены стратегии: both, long или short."""
-    return _clean_sides(load().get(strategy, {}).get('sides'), 'both')
-
-
-def allows(strategy, direction):
-    """
-    Можно ли этой стратегии открывать сделку в такую сторону.
-
-    Направление приходит в разных написаниях: LONG и SHORT у двух стратегий,
-    BULLISH и BEARISH у SMC. Сравнивать напрямую нельзя — фильтр по 'SHORT'
-    не узнал бы шорт у SMC и молча выпустил бы его при выключенных шортах,
-    то есть настройка врала бы ровно у той стратегии, где перекос известен.
-    """
-    allowed = sides(strategy)
-    if allowed == 'both':
-        return True
-    value = str(direction or '').upper()
-    is_long = value in ('LONG', 'BULLISH', 'BUY')
-    is_short = value in ('SHORT', 'BEARISH', 'SELL')
-    if not (is_long or is_short):
-        return True                       # непонятное направление не режем
-    return is_long if allowed == 'long' else is_short
-
-
-def deposit(strategy):
-    return float(load().get(strategy, {}).get('deposit',
-                                              config.PAPER_START_BALANCE))
-
-
 def exchange_name():
     """Выбранная биржа. Ключи здесь не хранятся — только выбор."""
     return (load().get(EXCHANGE, {}).get('name')
             or (config.EXCHANGE_NAME or 'bybit')).lower()
-
-
-def portfolio_risk_pct():
-    """Предел риска на весь портфель в процентах. 0 — выключен."""
-    return float(load().get(PORTFOLIO, {}).get('portfolio_risk_pct', 0) or 0)
-
-
-def portfolio_max_positions():
-    """Предел числа позиций и ордеров на весь портфель. 0 — выключен."""
-    return int(load().get(PORTFOLIO, {}).get('portfolio_max_positions', 0) or 0)
 
 
 def notify_on(event, channel):
@@ -470,42 +325,3 @@ def notify_on(event, channel):
 def notify_strategy(strategy):
     """Присылать ли сообщения о сделках этой стратегии. Незнакомая — да."""
     return bool(load().get(strategy, {}).get('notify', True))
-
-
-def daily_loss_pct():
-    """
-    Дневной предел убытка в процентах от депозита. 0 — выключен.
-
-    Отдельно от предела портфеля: тот ограничивает риск, стоящий в рынке
-    ОДНОВРЕМЕННО, и молчит, когда десять сделок подряд закрылись в минус по
-    очереди. Плохой день так и выглядит: каждая сделка по правилам, а к
-    вечеру депозита нет.
-    """
-    return float(load().get(PORTFOLIO, {}).get('daily_loss_pct', 0) or 0)
-
-
-def max_slots(strategy):
-    """Предел одновременных позиций стратегии. UNLIMITED (0) — без предела."""
-    value = load().get(strategy, {}).get('max_slots')
-    if value is None:
-        return _default_slots(strategy)
-    return int(value)
-
-
-def slots_free(strategy, used):
-    """
-    Сколько ещё можно открыть. None — предела нет.
-
-    Отдельная функция, а не вычитание на месте: «без предела» закодировано
-    нулём, и `budget - used` дало бы при нуле отрицательное число, то есть
-    «слоты заняты» — ровно противоположный смысл. Такая ошибка не падает, а
-    молча останавливает торговлю, поэтому расшифровка живёт в одном месте.
-    """
-    budget = max_slots(strategy)
-    return None if budget <= UNLIMITED else budget - int(used)
-
-
-def slots_label(strategy, used):
-    """«3/8» или «3 (без предела)» — строка для журнала."""
-    budget = max_slots(strategy)
-    return f'{used} (без предела)' if budget <= UNLIMITED else f'{used}/{budget}'

@@ -225,7 +225,7 @@ class TestDecisionParamsAreIsolated:
         for name, value in {
             'MIN_RR': 1.0, 'MAX_RR': 3.0, 'TP_MODE': 'liquidity', 'MIN_SL_PCT': 0.02,
             'SL_MODE': 'aggressive', 'POI_TYPES_ENABLED': (), 'REQUIRE_KILLZONE': False,
-            'KILLZONE_AS_GATE': True, 'MIN_CONFLUENCE_SCORE': 0.5, 'RISK_PER_TRADE_PCT': 3.0,
+            'KILLZONE_AS_GATE': True, 'MIN_CONFLUENCE_SCORE': 0.5, 'MAX_SAME_DIRECTION': 7,
             'POI_ENTRY_DEPTH': 0.5, 'REQUIRE_PREMIUM_DISCOUNT': False,
             'PENDING_ORDER_MAX_HOURS': 1.0, 'COOLDOWN_HOURS': 99.0, 'MAX_ENTRY_COST_SHARE_PCT': 50.0,
             'FILL_THROUGH_MARKET': True,
@@ -263,7 +263,7 @@ class TestDecisionParamsAreIsolated:
         from levels import params
         for name, value in {
             'TRIGGER_ATR': 5.0, 'MIN_GAP_ATR': 0.0, 'PIERCE_ATR': 1.0, 'RECLAIM_BARS': 20,
-            'VOLUME_RATIO': 0.1, 'MIN_STOP_PCT': 5.0, 'MIN_TARGET_R': 0.1, 'RISK_PCT': 5.0,
+            'VOLUME_RATIO': 0.1, 'MIN_STOP_PCT': 5.0, 'MIN_TARGET_R': 0.1, 'MAX_SAME_DIRECTION': 7,
             'EXPIRY_HOURS': 1.0, 'COOLDOWN_HOURS': 99.0, 'MAX_ENTRY_COST_SHARE_PCT': 50.0,
             'MAX_HOLD_HOURS': 1.0, 'FILL_THROUGH_MARKET': True,
         }.items():
@@ -361,15 +361,16 @@ class TestTheSharedLayerIsNotWrittenByStrategies:
         # Модули берём те, что держит САМ адаптер: другие наборы перезагружают
         # settings_store и smc.params, и свежий import был бы чужим объектом.
         params = strategy_smc.smc_params
-        monkeypatch.setattr(strategy_smc.settings, 'risk_pct', lambda s: 7.5)
+        # Исходное значение — под monkeypatch ДО записи: после проверки вернётся оно.
+        monkeypatch.setattr(params, 'MIN_SL_PCT', params.MIN_SL_PCT)
         monkeypatch.setattr(strategy_smc.settings, 'min_stop_pct', lambda s: 4.2)
         before = _fp(params.structural_snapshot())
         strategy_smc._apply_settings()
         assert _fp(params.structural_snapshot()) == before, 'настройка оператора записана в структуру рынка'
-        assert params.RISK_PER_TRADE_PCT == 7.5 and params.MIN_SL_PCT == 4.2
+        assert params.MIN_SL_PCT == 4.2
         assert set(strategy_smc._OPERATOR_SETTINGS) <= params.DECISION
-        monkeypatch.setattr(params, 'RISK_PER_TRADE_PCT', 1.0)
-        monkeypatch.setattr(params, 'MIN_SL_PCT', 0.005)
+        # Риска среди настроек стратегии нет с 08.10.2026: деньги решает счёт.
+        assert 'RISK_PER_TRADE_PCT' not in strategy_smc._OPERATOR_SETTINGS
 
     def test_a_setting_aimed_at_the_structure_is_refused(self, monkeypatch):
         import strategy_smc

@@ -31,7 +31,10 @@ def test_adapter_has_the_uniform_functions(code):
 @pytest.mark.parametrize('code', registry.codes())
 def test_profile_is_a_dict_of_known_keys(code):
     known = {'expiry_hours', 'cooldown_hours', 'cost_limit_pct', 'max_hold_hours',
-             'drops_at_target', 'fills_through_market', 'min_stop_pct', 'limit_offset_pct'}
+             'drops_at_target', 'fills_through_market', 'min_stop_pct', 'limit_offset_pct',
+             # с каким пределом в одну сторону стратегия измерена — счёт берёт его
+             # по умолчанию (этап 2)
+             'max_same_direction'}
     prof = registry.adapter(code).profile()
     assert isinstance(prof, dict)
     assert set(prof) <= known, f'{code}: незнакомые ключи профиля {set(prof) - known}'

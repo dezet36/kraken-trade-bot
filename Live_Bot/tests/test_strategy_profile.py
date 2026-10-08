@@ -168,10 +168,15 @@ class TestDescribeListsEverything:
             d = sp.describe(name)
             assert set(d) == {'expiry_hours', 'cooldown_hours', 'cost_limit_pct',
                               'limit_offset_pct', 'max_hold_hours', 'min_stop_pct',
-                              'min_stop_knob', 'drops_at_target', 'fills_through_market'}
+                              'min_stop_knob', 'drops_at_target', 'fills_through_market',
+                              'max_same_direction'}
             flags = ('min_stop_knob', 'drops_at_target', 'fills_through_market')
-            assert all(isinstance(v, float) for k, v in d.items() if k not in flags)
+            # Предел в одну сторону, с которым стратегия измерена (этап 2) — число
+            # позиций, целое; счёт берёт его по умолчанию.
+            counts = ('max_same_direction',)
+            assert all(isinstance(v, float) for k, v in d.items() if k not in flags + counts)
             assert all(isinstance(d[k], bool) for k in flags)
+            assert isinstance(d['max_same_direction'], int) and d['max_same_direction'] >= 0
 
 
 class TestTheMinStopKnobIsHonest:
@@ -197,8 +202,8 @@ class TestTheMinStopKnobIsHonest:
         assert sp.min_stop_pct('LLM') == pytest.approx(llm_context.min_stop_pct())
 
     def test_fibo_and_smc_report_the_operator_knob(self, monkeypatch):
-        import settings_store
-        monkeypatch.setattr(settings_store, 'min_stop_pct', lambda s: 0.0123)
+        from strategies import settings
+        monkeypatch.setattr(settings, 'min_stop_pct', lambda s: 0.0123)
         assert sp.min_stop_pct('FIBO') == pytest.approx(1.23)
         assert sp.min_stop_pct('SMC') == pytest.approx(1.23)
         # а чужие от ручки не зависят

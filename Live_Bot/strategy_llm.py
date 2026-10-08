@@ -54,7 +54,6 @@ import llm_decide
 import llm_journal
 import llm_local
 import llm_market
-import settings_store as settings
 from logger import log
 
 NAME = 'LLM'
@@ -769,10 +768,9 @@ def _reshape(pair, verdict, df=None):
     if order != sorted(order) and verdict['entry'] != verdict['stop']:
         # R:R такого плана считался по дальней цели — здесь честно, по ближней.
         rr = round(abs(targets[0] - verdict['entry']) / abs(verdict['entry'] - verdict['stop']), 2)
+    # Денег в плане нет: риск, предел в одну сторону и размер решает счёт
+    # (accounts/paper.py), объём — исполнитель по цене заполнения.
     params = {
-        # Размер позиции считает брокер по этой доле, текущему депозиту и
-        # дистанции стопа. Здесь его не бывает.
-        'risk_pct': settings.risk_pct(NAME),
         'entry': verdict['entry'],
         'stop_loss': verdict['stop'],
         'take_profit_1': targets[0],
@@ -866,7 +864,7 @@ def _refuse(pair, verdict):
         pass
 
 
-def scan_for_setups(pairs, gate, client=None, balance=None, candles=None,
+def scan_for_setups(pairs, gate, client=None, candles=None,
                     market=None, frames=None):
     """
     Забирает готовые вердикты и отдаёт модели следующую пару. Не ждёт.
@@ -893,13 +891,13 @@ def scan_for_setups(pairs, gate, client=None, balance=None, candles=None,
     # вовсе — стратегия торгует и когда она занята или недоступна.
     import llm_rules
     if llm_rules.enabled():
-        return llm_rules.scan(pairs, gate, client=client, balance=balance)
+        return llm_rules.scan(pairs, gate, client=client)
 
     # РЕЖИМ ТЕТРАДИ: модель торгует сама по закономерностям, найденным и
     # проверенным на истории (llm_notebook, config.LLM_MODE=notebook).
     import llm_notebook
     if llm_notebook.enabled():
-        return llm_notebook.scan(pairs, gate, client=client, balance=balance)
+        return llm_notebook.scan(pairs, gate, client=client)
 
     if not llm_local.available():
         log(f'   {NAME}: модель недоступна — стратегия простаивает')
@@ -1106,13 +1104,13 @@ def _collect(finished, candles=None):
 # в bot.py, величины исполнения — в strategy_profile.py, разметка — в
 # setup_geometry.py. Поведение не изменилось — его держат эталоны tests/golden/.
 
-def scan(pairs, gate, client=None, balance=None):
+def scan(pairs, gate, client=None):
     # Те же пары, что и у остальных, и никаких чужих кандидатов: модель обходит
     # рынок сама (см. шапку модуля).
-    return scan_for_setups(pairs, gate, client=client, balance=balance)
+    return scan_for_setups(pairs, gate, client=client)
 
 
-def build_signal(candidate, balance):
+def build_signal(candidate):
     pair = candidate['pair']
     # Сигнал собран моделью и уже проверен llm_decide: геометрия, минимальный
     # стоп по издержкам, отношение хода к риску и ожидание с настоящей
@@ -1160,7 +1158,8 @@ def profile():
                 'drops_at_target': rules.CANCEL_PENDING_AT_TARGET,
                 'fills_through_market': rules.FILL_THROUGH_MARKET,
                 'limit_offset_pct': getattr(config, 'LLM_LIMIT_ENTRY_OFFSET_PCT', 0.0),
-                'min_stop_pct': float(rules.MIN_SL_PCT) * 100}
+                'min_stop_pct': float(rules.MIN_SL_PCT) * 100,
+                'max_same_direction': rules.MAX_SAME_DIRECTION}
     import llm_context
     # План модели: заявка живёт столько же, сколько ждёт условия план.
     return {'expiry_hours': getattr(config, 'LLM_TRIGGER_TTL_H', 12) or 12,

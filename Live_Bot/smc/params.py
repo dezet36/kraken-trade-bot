@@ -326,9 +326,10 @@ LONG_CONFLUENCE_PREMIUM = _f('LONG_CONFLUENCE_PREMIUM', 0.0)
 # 1.25 против 1.00. Единица полностью отключает правило.
 REGIME_RISK_SCALE = _f('REGIME_RISK_SCALE', 0.5)
 
-# ── Риск и управление позицией (§14-16) ──────────────────────────────────────
-RISK_PER_TRADE_PCT = _f('RISK_PER_TRADE_PCT', 1.0)     # §15.1: 1% на сделку
-MAX_TOTAL_RISK_PCT = _f('MAX_TOTAL_RISK_PCT', 5.0)     # §15.1: суммарно не >5%
+# ── Управление позицией (§14-16) ─────────────────────────────────────────────
+# Риска на сделку (§15.1: 1%) и суммарного предела риска (§15.1: 5%) здесь нет
+# с 08.10.2026: деньги решает счёт стратегии (accounts/paper.py), стратегия
+# отдаёт сетап без денег (strategies/contract.py).
 # §16 требует минимум 1:3; бэктест показал, что порог 4.0 работает заметно
 # лучше (+98.8% против +88.5% при том же наборе прочих настроек). RR здесь
 # ВЗВЕШЕННЫЙ по долям частичной фиксации, а не расстояние до дальнего тейка:
@@ -578,7 +579,7 @@ DECISION = frozenset((
     'REQUIRE_PREMIUM_DISCOUNT', 'REQUIRE_KILLZONE', 'KILLZONE_AS_GATE',
     'CONFLUENCE_WEIGHTS', 'MIN_CONFLUENCE_SCORE', 'LONG_CONFLUENCE_PREMIUM',
     'REGIME_RISK_SCALE',
-    'RISK_PER_TRADE_PCT', 'MAX_TOTAL_RISK_PCT', 'MIN_RR', 'MAX_RR', 'REQUIRE_OTE',
+    'MIN_RR', 'MAX_RR', 'REQUIRE_OTE',
     'LEG_BARS_MIN', 'LEG_BARS_MAX', 'SL_BUFFER_PCT', 'MIN_SL_PCT', 'SL_MODE',
     'TP_MODE', 'LIQ_MIN_R', 'LIQ_MERGE_PCT', 'LIQ_MIN_WEIGHT', 'TP_CLOSE_FRACTIONS',
     'ENTRY_MODE', 'PENDING_ORDER_MAX_HOURS', 'MAX_ENTRY_COST_SHARE_PCT',

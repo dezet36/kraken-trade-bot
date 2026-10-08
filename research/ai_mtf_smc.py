@@ -69,7 +69,7 @@ def orders_for(pair, data, layout):
     expiry = np.timedelta64(int(48 * BAR_H[poi_tf] * 3600), 's')
     out, seen = [], set()
     for i in range(60, len(df)):
-        setup, _why = ctx.evaluate(i, balance=bt.INITIAL_BALANCE, decision=R)
+        setup, _why = ctx.evaluate(i, decision=R)
         if setup is None:
             continue
         poi = setup['poi']

@@ -117,16 +117,16 @@ class TestDefaultsAndFlags:
 class TestEveryStrategyKeepsItsOwnSettings:
     """
     Префикс — это и есть требование «каждая стратегия работает отдельно по
-    своим параметрам». Общее имя RISK_PCT меняло бы сразу две.
+    своим параметрам». Общее имя COOLDOWN_HOURS меняло бы сразу две.
     """
 
     def test_prefixes_do_not_collide(self, env):
         lf = params_env.reader('LEVELS')[0]
         rf = params_env.reader('RSIBB')[0]
-        env.setenv('LEVELS_RISK_PCT', '0.9')
-        env.setenv('RSIBB_RISK_PCT', '0.2')
-        assert lf('RISK_PCT', 0) == 0.9
-        assert rf('RISK_PCT', 0) == 0.2
+        env.setenv('LEVELS_COOLDOWN_HOURS', '0.9')
+        env.setenv('RSIBB_COOLDOWN_HOURS', '0.2')
+        assert lf('COOLDOWN_HOURS', 0) == 0.9
+        assert rf('COOLDOWN_HOURS', 0) == 0.2
 
     def test_all_three_strategies_use_the_shared_reader(self):
         """
@@ -146,9 +146,9 @@ class TestTheBotSurvivesTheTypo:
         Итоговая проверка смысла: с опечаткой в настройках стратегии модуль
         параметров обязан загрузиться, а не уронить импорт бота.
         """
-        env.setenv('RSIBB_RISK_PCT', '0,5')
+        env.setenv('RSIBB_COOLDOWN_HOURS', '0,5')
         for name in [k for k in list(sys.modules)
                      if k.split('.')[0] in ('rsibb', 'levels', 'smc')]:
             del sys.modules[name]
         import rsibb.params as rp
-        assert rp.RISK_PCT == 0.5
+        assert rp.COOLDOWN_HOURS == 0.5

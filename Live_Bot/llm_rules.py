@@ -72,8 +72,6 @@ DECISION = SimpleNamespace(
     MIN_CONFLUENCE_SCORE=4.5,
     LONG_CONFLUENCE_PREMIUM=0.0,
     REGIME_RISK_SCALE=0.5,
-    RISK_PER_TRADE_PCT=1.0,
-    MAX_TOTAL_RISK_PCT=5.0,
     MIN_RR=4.0,
     MAX_RR=0.0,
     REQUIRE_OTE=False,
@@ -208,8 +206,8 @@ def crowd_reason(direction, rate):
 
 # ── Сигнал брокеру ────────────────────────────────────────────────────────────
 def to_signal(setup, pair):
-    """Сетап ядра → сигнал брокеру (формат тот же, что у остальных стратегий)."""
-    import settings_store as settings
+    """Сетап ядра → сигнал брокеру (формат тот же, что у остальных стратегий;
+    без денег — риск и предел в одну сторону решает счёт, accounts/paper.py)."""
     trade = setup['params']
     direction = 'LONG' if setup['direction'] == 'BULLISH' else 'SHORT'
     leg = setup['leg']
@@ -225,8 +223,6 @@ def to_signal(setup, pair):
         'breakeven_after_tp': bool(DECISION.BREAKEVEN_AFTER_TP1),
         'tp_targets': targets,
         'tp_fractions': list(trade['fractions']),
-        'max_same_direction': DECISION.MAX_SAME_DIRECTION,
-        'risk_pct': settings.risk_pct(NAME),
         'rr': trade['rr'],
         'sl_distance': trade['sl_distance'],
         'invalidation': poi.get('invalidation'),
@@ -275,7 +271,7 @@ def to_signal(setup, pair):
 
 
 # ── Сканер ────────────────────────────────────────────────────────────────────
-def scan(pairs, gate, client=None, balance=None, now_ms=None, context_of=None, funding_of=None):
+def scan(pairs, gate, client=None, now_ms=None, context_of=None, funding_of=None):
     """
     Сетапы по своим правилам на своём пуле. -> список кандидатов для bot.
 
@@ -292,7 +288,6 @@ def scan(pairs, gate, client=None, balance=None, now_ms=None, context_of=None, f
         def context_of(pair):
             return market_structure.get(pair, client=client)
 
-    balance = config.BALANCE if balance is None else balance
     report.begin(NAME)
     _warn_if_calendar_ends(now_ms)
     event = event_near(now_ms)
@@ -312,7 +307,7 @@ def scan(pairs, gate, client=None, balance=None, now_ms=None, context_of=None, f
                 report.record(NAME, pair, 'мало данных по паре')
                 continue
             last = len(context.frames['poi']) - 1
-            setup, why = context.evaluate(last, balance=balance, decision=DECISION)
+            setup, why = context.evaluate(last, decision=DECISION)
             if setup is None:
                 report.record(NAME, pair, why)
                 continue

@@ -46,6 +46,10 @@ from smc_engine import Order, compute_stats, run_portfolio  # noqa: E402
 from smc_market_regime import (BEAR_CACHE, BEAR_PAIRS, BULL_CACHE,  # noqa: E402
                                BULL_PAIRS, REGIMES, ci, load_period)
 
+# Риск стенда — как у счёта стратегии на тесте (1%, CLAUDE.md «Риск»); в
+# пакете стратегии риска нет с 08.10.2026 (деньги решает счёт).
+RISK_PCT = 1.0
+
 RNG = np.random.default_rng(20260805)
 BOOTSTRAP = 10_000
 
@@ -139,7 +143,7 @@ def run(period, orders):
     # Слотов без предела — как в бою (settings_store: max_slots 0).
     result = run_portfolio(
         orders, {p: period['data'][p]['5m'] for p in period['data']},
-        risk_pct=LP.RISK_PCT, max_positions=99,
+        risk_pct=RISK_PCT, max_positions=99,
         cooldown_hours=LP.COOLDOWN_HOURS,
         max_same_direction=LP.MAX_SAME_DIRECTION,
         max_hold_hours=LP.MAX_HOLD_HOURS,
@@ -179,7 +183,7 @@ def main():
           f'касаний {LP.MIN_TOUCHES}, стоп >= {LP.MIN_STOP_PCT}%, '
           f'цель >= {LP.MIN_TARGET_R}R')
     print(f'портфель: слотов без предела, кулдаун {LP.COOLDOWN_HOURS} ч, '
-          f'риск {LP.RISK_PCT}%')
+          f'риск {RISK_PCT}%')
     print()
     head = (f'{"период":<20}{"заявок":>8}{"сделок":>8}{"винрейт":>9}{"R/сделку":>10}'
             f'{"сумма R":>9}{"доход%":>9}{"DD%":>7}{"доход/DD":>10}{"дней":>7}')

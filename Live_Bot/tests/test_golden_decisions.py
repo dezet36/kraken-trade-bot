@@ -49,16 +49,17 @@ def fibo_decisions(df):
     """Старая ФИБО: analyze_market на скользящем окне часа. Решение
     сканера по тренду 4ч и толпе — отдельно (не меняется при переносе файлов
     отдельно от этого), здесь — геометрия сетапа."""
-    import settings_store
     import strategy
-    orig = (settings_store.min_stop_pct, settings_store.risk_pct)
-    settings_store.min_stop_pct = lambda name: 0.008      # доля, как в settings_store
-    settings_store.risk_pct = lambda name: 1.0
+    # Ручка «минимальный стоп» — настройка стратегии (strategies/settings.py,
+    # с этапа 2; до него — settings_store). Денег стратегия не знает.
+    knobs = strategy.settings
+    orig = knobs.min_stop_pct
+    knobs.min_stop_pct = lambda name: 0.008      # доля
     try:
         out = []
         for i in range(120, len(df), 5):
             window = df.iloc[i - 68:i].reset_index(drop=True)
-            sig = strategy.analyze_market(window, None, 'TEST', 10_000)
+            sig = strategy.analyze_market(window, None, 'TEST')
             if not sig:
                 out.append(None)
                 continue
@@ -67,7 +68,7 @@ def fibo_decisions(df):
                         round(p['take_profit_1'], 8), round(p['be_level'] or 0, 8)))
         return iso._fp(out)
     finally:
-        settings_store.min_stop_pct, settings_store.risk_pct = orig
+        knobs.min_stop_pct = orig
 
 
 def levels_every_hour(df):

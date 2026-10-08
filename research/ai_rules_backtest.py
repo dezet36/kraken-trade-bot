@@ -60,7 +60,7 @@ def rules_orders(pair, data, decision):
     orders, seen = [], set()
     expiry = np.timedelta64(int(R.PENDING_ORDER_MAX_HOURS * 3600), 's')
     for i in range(60, len(df)):
-        setup, _why = ctx.evaluate(i, balance=bt.INITIAL_BALANCE, decision=decision)
+        setup, _why = ctx.evaluate(i, decision=decision)
         if setup is None:
             continue
         poi = setup['poi']

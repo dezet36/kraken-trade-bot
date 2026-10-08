@@ -22,7 +22,8 @@ import strategy_fib12
 from strategy import analyze_market
 from pair_scanner import get_liquid_pairs, scan_for_setups
 from paper_broker import PaperBroker, STRATEGIES as PAPER_STRATEGIES
-import settings_store as settings
+# Деньги и допуск стратегий — у их тестовых счетов (реорганизация, этап 2).
+from accounts import paper as account
 from trade_manager import LiveTradeManager
 from logger import log
 
@@ -114,18 +115,20 @@ def _build_signal(candidate, strategy, balance):
             f"Молча отдать кандидата чужой стратегии нельзя: она откроет "
             f"свой сетап под этим именем.")
         return None, None
-    signal, df_for_chart = registry.adapter(strategy).build_signal(candidate, balance)
+    signal, df_for_chart = registry.adapter(strategy).build_signal(candidate)
     if not signal:
         return None, None
 
-    # Разрешённые стороны. Проверка стоит ЗДЕСЬ, после сборки сигнала, а не в
-    # сканере: направление известно только у готового сетапа, и каждая
-    # стратегия называет его по-своему. Отказ пишется в журнал — иначе
-    # выключенное направление выглядит как «бот перестал находить сетапы».
-    direction = (signal.get('setup') or {}).get('type') or signal.get('direction')
-    if not settings.allows(strategy, direction):
-        log(f"   {strategy} {pair}: {direction} пропущен — "
-            f"в настройках разрешены только «{settings.sides(strategy)}»")
+    # Решение счёта стратегии (accounts/paper.py, с 08.10.2026): разрешена ли
+    # сторона и на каких деньгах — риск, предел в одну сторону, размер.
+    # Стратегия отдаёт сетап без денег. Проверка сторон стоит ЗДЕСЬ, после
+    # сборки сигнала, а не в сканере: направление известно только у готового
+    # сетапа, и каждая стратегия называет его по-своему. Отказ пишется в
+    # журнал — иначе выключенное направление выглядит как «бот перестал
+    # находить сетапы».
+    signal, why = account.decide(strategy, signal, balance)
+    if signal is None:
+        log(f"   {strategy} {pair}: {why}")
         return None, None
 
     signal['strategy'] = strategy
@@ -164,17 +167,17 @@ def _run_dual_strategy(liquid_pairs, balance, open_pairs):
     # Стратегии боевого цикла — из реестра (ИИ торгуется только на бумаге).
     from strategies import registry
     scanners = [(code, (lambda code=code: registry.adapter(code).scan(
-        liquid_pairs, trade_manager, client=None, balance=balance)))
+        liquid_pairs, trade_manager, client=None)))
         for code in registry.live_codes()]
 
     for strategy, scan in scanners:
-        if not settings.enabled(strategy):
+        if not account.enabled(strategy):
             log(f"\n=== {strategy}: выключена оператором, пропускаем ===")
             continue
 
         used = trade_manager.slots_used_by(strategy)
-        free = settings.slots_free(strategy, used)
-        log(f"\n=== {strategy}: занято {settings.slots_label(strategy, used)} слотов ===")
+        free = account.slots_free(strategy, used)
+        log(f"\n=== {strategy}: занято {account.slots_label(strategy, used)} слотов ===")
         if free is not None and free <= 0:
             log(f"   {strategy}: слоты заняты, пропускаем")
             continue
@@ -272,7 +275,6 @@ def _paper_cycle():
     except Exception as exc:                           # noqa: BLE001
         log(f'   режим рынка для журнала не посчитан — {exc}')
 
-    hour_utc = datetime.now(timezone.utc).hour
     total_opened = 0
     # Кандидаты этого цикла по стратегиям: их разбирает модель, когда доходит
     # очередь до пятой стратегии. Сканировать пул заново ради неё значило бы
@@ -280,19 +282,19 @@ def _paper_cycle():
     found = {}
 
     for strategy in broker.strategies:
-        if not settings.enabled(strategy):
+        if not account.enabled(strategy):
             log(f"\n=== {strategy}: выключена оператором, пропускаем ===")
             continue
 
         balance = broker.balance(strategy)
         used = broker.slots_used_by(strategy)
-        free = settings.slots_free(strategy, used)
+        free = account.slots_free(strategy, used)
         equity = broker.equity(strategy)
         start = broker.start_balance(strategy)
         growth = (equity / start - 1) * 100 if start else 0.0
 
         log(f"\n=== {strategy}: депозит ${equity:,.2f} ({growth:+.2f}%) | "
-            f"слотов {settings.slots_label(strategy, used)} ===")
+            f"слотов {account.slots_label(strategy, used)} ===")
         if free is not None and free <= 0:
             log(f"   {strategy}: слоты заняты, пропускаем")
             continue
@@ -313,8 +315,7 @@ def _paper_cycle():
                 f"уйдут в журнал под этим именем.")
             continue
         try:
-            candidates = registry.adapter(strategy).scan(liquid_pairs, gate, client=client,
-                                                         balance=balance)
+            candidates = registry.adapter(strategy).scan(liquid_pairs, gate, client=client)
         except Exception as exc:
             log(f"   {strategy}: ошибка сканирования — {exc}")
             continue
@@ -524,14 +525,13 @@ def trading_cycle():
         _run_dual_strategy(liquid_pairs, balance, open_pairs)
         return
 
-    if not settings.enabled(config.STRATEGY):
+    if not account.enabled(config.STRATEGY):
         log(f"{config.STRATEGY}: выключена оператором — новые входы пропускаем")
         return
 
     if config.STRATEGY == 'SMC':
         log("\nПоиск SMC-сетапов (bias 1D/4H -> зоны 1H)...")
-        candidates = strategy_smc.scan_for_setups(liquid_pairs, trade_manager,
-                                                  balance=balance)
+        candidates = strategy_smc.scan_for_setups(liquid_pairs, trade_manager)
     else:
         log("\nПоиск активных сетапов на 1H...")
         candidates = scan_for_setups(liquid_pairs, trade_manager)
@@ -565,7 +565,7 @@ def trading_cycle():
             else:
                 log(f"\nПроверяю вход в зону A: {pair} "
                     f"({candidate['setup']['type']} {candidate['zone']})")
-                signal = analyze_market(candidate['df_1h'], None, pair, balance)
+                signal = analyze_market(candidate['df_1h'], None, pair)
 
             if signal:
                 if config.STRATEGY == 'SMC':
@@ -588,15 +588,13 @@ def trading_cycle():
                                        'proximity', 'size_pct', 'funding_bp')}
                     df_for_chart = candidate['df_1h']
 
-                # Та же проверка сторон, что и в фантомном пути. Живой путь
-                # собирает сигнал своим кодом, поэтому проверку приходится
-                # ставить дважды: одна на двоих означала бы, что настройка
-                # действует в наблюдении и не действует в бою.
-                direction = ((signal.get('setup') or {}).get('type')
-                             or signal.get('direction'))
-                if not settings.allows(config.STRATEGY, direction):
-                    log(f"   {pair}: {direction} пропущен — в настройках "
-                        f"разрешены только «{settings.sides(config.STRATEGY)}»")
+                # То же решение счёта, что и в фантомном пути: стороны и
+                # деньги. Живой путь собирает сигнал своим кодом, поэтому
+                # решение приходится звать дважды: одно на двоих означало бы,
+                # что настройка действует в наблюдении и не действует в бою.
+                signal, why = account.decide(config.STRATEGY, signal, balance)
+                if signal is None:
+                    log(f"   {pair}: {why}")
                     continue
 
                 signal['strategy'] = config.STRATEGY
@@ -692,6 +690,13 @@ def _start_paper():
             f"издержки ≤ {d['cost_limit_pct']:.0f}% риска | смещение лимита {d['limit_offset_pct'] * 100:.2f}% | "
             f"держать ≤ {d['max_hold_hours']:.0f} ч"
             + (" | лимит за рынком — по рынку" if d.get('fills_through_market') else ""))
+    # Счета стратегий (accounts/paper.py): чем каждая торгует на тесте.
+    for name in broker.strategies:
+        a = account.describe(name)
+        log(f"   {name}: счёт — {'торгует' if a['enabled'] else 'ВЫКЛЮЧЕНА'} | "
+            f"риск {a['risk_pct']:g}% | стороны {a['sides']} | "
+            f"позиций {a['max_slots'] or 'без предела'} | "
+            f"в одну сторону {a['max_same_direction'] or 'без предела'}")
     if getattr(config, 'PAPER_EXCLUSIVE_PAIRS', True):
         log("   Одна пара — одна позиция на все стратегии, как на бирже "
             "(результаты завышены меньше, сравнение честнее)")

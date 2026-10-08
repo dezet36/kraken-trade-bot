@@ -173,7 +173,7 @@ def orders_for_pair(args):
             candidates = pair_scanner.scan_for_setups([pair], _NoCooldown())
             if not candidates:
                 continue
-            signal = strategy.analyze_market(candidates[0]['df_1h'], None, pair, 10_000)
+            signal = strategy.analyze_market(candidates[0]['df_1h'], None, pair)
             if not signal or not settings_store.allows('FIBO', signal['setup']['type']):
                 continue
             key = (pair, signal['setup']['type'], round(signal['setup']['start_price'], 8),

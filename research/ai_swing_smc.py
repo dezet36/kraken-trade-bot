@@ -51,7 +51,7 @@ def swing_orders(pair, data, ttl_h):
     orders, seen = [], set()
     expiry = np.timedelta64(int(ttl_h * 3600), 's')
     for i in range(30, len(df)):
-        setup, _why = ctx.evaluate(i, balance=bt.INITIAL_BALANCE)
+        setup, _why = ctx.evaluate(i)
         if setup is None:
             continue
         poi = setup['poi']

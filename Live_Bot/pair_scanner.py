@@ -215,8 +215,7 @@ def scan_for_setups(liquid_pairs, trade_manager, client=None):
                 report.record('FIBO', pair, blocked)
                 continue
 
-            params_est = calculate_trade_params(setup, entry_level, config.SCORE_NOMINAL_BALANCE,
-                                                 log_reject=False)
+            params_est = calculate_trade_params(setup, entry_level, log_reject=False)
             rr_est = params_est['rr'] if params_est else 0.0
 
             window_size = abs(ep - entry_level)

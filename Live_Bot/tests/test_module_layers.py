@@ -69,8 +69,9 @@ LAYER = {
     'bot': 'app',
 }
 
-# Нарушения на 08.10.2026 (до этапа 1). Исправляются по этапам — вычёркивать
-# по мере исправления; добавлять сюда новые нельзя.
+# Нарушения на 08.10.2026. Исправляются по этапам — вычёркивать по мере
+# исправления; добавлять сюда новые нельзя. Этап 1 убрал 2, этап 2 — 11
+# (стратегии больше не читают деньги из настроек: их решает счёт).
 KNOWN = {
     ('exchange', 'settings_store'): 'этап 3: выбор биржи для данных — реестр источников',
     ('llm_context', 'liquidity'): 'этап 4: разметка ИИ читает пакет стратегии',
@@ -78,33 +79,25 @@ KNOWN = {
     ('llm_context', 'llm_outcomes'): 'этап 4',
     ('llm_context', 'smc'): 'этап 4: структура smc (часть I) — в анализ',
     ('llm_context', 'strategy_profile'): 'этап 4',
-    ('llm_decide', 'settings_store'): 'этап 2: настройки ИИ — у стратегии, деньги — у счёта',
     ('llm_market', 'smc'): 'этап 4: структура smc (часть I) — в анализ',
-    ('llm_notebook', 'settings_store'): 'этап 2',
-    ('llm_notebook', 'telegram_notify'): 'этап 1/5: стратегия отдаёт сетап, сообщает счёт',
-    ('llm_rules', 'settings_store'): 'этап 2',
+    ('llm_notebook', 'telegram_notify'): 'этап 5: стратегия отдаёт сетап, сообщает исполнение',
     ('llm_server', 'llm_grammar'): 'этап 4: сервис модели не знает про промт',
     ('llm_server', 'llm_prompt'): 'этап 4',
     ('market_structure', 'smc'): 'этап 4: структура smc (часть I) — в анализ',
-    ('paper_broker', 'risk_gate'): 'этап 2/5',
-    ('paper_broker', 'settings_store'): 'этап 2',
+    # Исполнители сами проверяют пределы портфеля и издержки по правилам счёта
+    # (risk_gate, settings_store). Этап 5 переносит эти проверки в решение
+    # счёта, исполнение получает готовое «можно и сколько».
+    ('paper_broker', 'risk_gate'): 'этап 5',
+    ('paper_broker', 'settings_store'): 'этап 5: пределы портфеля — в решении счёта',
     ('paper_broker', 'telegram_notify'): 'этап 5',
-    ('shadow', 'risk_gate'): 'этап 2/5',
-    ('strategy', 'settings_store'): 'этап 2',
-    ('strategy_fib12', 'settings_store'): 'этап 2',
-    ('strategy_levels', 'settings_store'): 'этап 2',
-    ('strategy_llm', 'refused'): 'этап 1: отказ — результатом сканера',
-    ('strategy_llm', 'settings_store'): 'этап 2',
-    ('strategy_llm', 'telegram_notify'): 'этап 1/5',
-    ('strategy_profile', 'settings_store'): 'этап 2',
-    ('strategy_rsibb', 'settings_store'): 'этап 2',
-    ('strategy_smc', 'settings_store'): 'этап 2',
-    ('strategy_smc', 'shadow'): 'этап 1/5',
-    ('strategy_smcs', 'settings_store'): 'этап 2',
-    ('trade_journal', 'risk_gate'): 'этап 2/5',
+    ('shadow', 'risk_gate'): 'этап 5',
+    ('strategy_llm', 'refused'): 'этап 5: отказ — результатом сканера',
+    ('strategy_llm', 'telegram_notify'): 'этап 5',
+    ('strategy_smc', 'shadow'): 'этап 5',
+    ('trade_journal', 'risk_gate'): 'этап 5',
     ('trade_manager', 'live_costs'): 'этап 5/7',
-    ('trade_manager', 'risk_gate'): 'этап 2/5',
-    ('trade_manager', 'settings_store'): 'этап 2/5',
+    ('trade_manager', 'risk_gate'): 'этап 5',
+    ('trade_manager', 'settings_store'): 'этап 5: пределы портфеля — в решении счёта',
     ('trade_manager', 'telegram_notify'): 'этап 5',
 }
 

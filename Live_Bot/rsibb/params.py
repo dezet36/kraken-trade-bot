@@ -166,6 +166,10 @@ MAX_ENTRY_COST_SHARE_PCT = _f('MAX_ENTRY_COST_SHARE_PCT', 8.0)
 FILL_THROUGH_MARKET = _b('FILL_THROUGH_MARKET', False)
 
 # ── Портфель ─────────────────────────────────────────────────────────────────
-RISK_PCT = _f('RISK_PCT', 1.0)          # стандарт 1% для всех стратегий (правило 08.10.2026)
+# Риска на сделку здесь нет с 08.10.2026: деньги решает счёт стратегии
+# (accounts/paper.py; на тесте у всех 1%, CLAUDE.md «Риск»).
 COOLDOWN_HOURS = _f('COOLDOWN_HOURS', 2.0)
+# Предел позиций в одну сторону — то, с чем стратегия измерена: счёт берёт
+# его по умолчанию (strategy_profile.max_same_direction), владелец счёта
+# может задать свой.
 MAX_SAME_DIRECTION = _i('MAX_SAME_DIRECTION', 0)

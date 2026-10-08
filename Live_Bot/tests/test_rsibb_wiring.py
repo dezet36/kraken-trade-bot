@@ -49,8 +49,7 @@ def a_signal(direction='LONG'):
         'params': {'entry': 99.0, 'stop_loss': 98.0, 'take_profit_1': 100.0,
                    'take_profit_2': 100.0, 'tp_targets': [100.0],
                    'tp_fractions': [1.0], 'be_level': None,
-                   'breakeven_after_tp': False, 'max_same_direction': 0,
-                   'risk_pct': 0.5, 'position_size': 1.0, 'risk_amount': 50.0,
+                   'breakeven_after_tp': False,
                    'rr': 1.0, 'sl_distance': 1.0},
         'trigger': {'zone': 'BAND', 'entry_type': 'LIMIT', 'trigger_price': 99.0},
         'zone': 'BAND', 'htf_trend': 'NEUTRAL', 'score': 20.0, 'why': 'тест',
@@ -132,14 +131,17 @@ class TestContract:
         import pandas as pd
         df = pd.DataFrame({'timestamp': pd.date_range('2026-08-01', periods=size,
                                                       freq='h')})
-        signal = strategy_rsibb._to_bot_signal(setup, trade, 'BTCUSDT', 10_000, df)
+        signal = strategy_rsibb._to_bot_signal(setup, trade, 'BTCUSDT', df)
 
         for field in ('trading_pair', 'setup', 'params', 'trigger', 'zone',
                       'htf_trend', 'score', 'why', 'rsibb'):
             assert field in signal, field
         for field in ('entry', 'stop_loss', 'take_profit_1', 'tp_targets',
-                      'tp_fractions', 'sl_distance', 'rr', 'position_size'):
+                      'tp_fractions', 'sl_distance', 'rr'):
             assert field in signal['params'], field
+        # Денег стратегия не кладёт: их вписывает счёт (strategies/contract.py).
+        from strategies import contract
+        assert contract.money_in(signal) == []
         # Вход обязан быть лимитным: вся арифметика издержек держится на
         # мейкерской комиссии, вход по рынку сделал бы стратегию убыточной.
         assert signal['trigger']['entry_type'] == 'LIMIT'

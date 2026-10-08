@@ -22,9 +22,7 @@ from datetime import datetime, timezone
 
 import pandas as pd
 
-import config
 import scan_report as report
-import settings_store as settings
 from exchange import fetch_ohlcv
 from fib12 import core, params
 from logger import log
@@ -53,7 +51,7 @@ def _bar_close_utc(df):
     return stamp.tz_convert('UTC') + pd.Timedelta(minutes=BAR_MIN)
 
 
-def analyze_market(pair, balance, client=None, now=None):
+def analyze_market(pair, client=None, now=None):
     """Сигнал по паре или None (причина — в _last_reason)."""
     df, price = _closed_bars(pair, client=client)
     if df is None or price is None or price <= 0:
@@ -103,7 +101,6 @@ def _stamp(df, idx):
 def _to_bot_signal(setup, pair, df, price):
     is_long = setup['direction'] == 'LONG'
     entry, stop, target = setup['entry'], setup['stop'], setup['target']
-    risk_pct = settings.risk_pct(NAME)
     dist = abs(entry - stop)
     rr = abs(target - entry) / dist if dist else 0.0
     side_word = 'вверх' if is_long else 'вниз'
@@ -134,9 +131,7 @@ def _to_bot_signal(setup, pair, df, price):
             # Безубытка нет: в замере стоп не двигался.
             'be_level': None,
             'breakeven_after_tp': False,
-            'max_same_direction': params.MAX_SAME_DIRECTION,
             'max_hold_hours': params.MAX_POSITION_HOLD_HOURS,
-            'risk_pct': risk_pct,
             'rr': rr,
             'sl_distance': dist,
             'invalidation': stop,
@@ -158,9 +153,8 @@ def _to_bot_signal(setup, pair, df, price):
     }
 
 
-def scan_for_setups(pairs, trade_manager, client=None, balance=None, now=None):
+def scan_for_setups(pairs, trade_manager, client=None, now=None):
     """Кандидаты, отсортированные по размеру импульса."""
-    balance = config.BALANCE if balance is None else balance
     candidates = []
     report.begin(NAME)
     for pair in pairs:
@@ -171,7 +165,7 @@ def scan_for_setups(pairs, trade_manager, client=None, balance=None, now=None):
             if trade_manager.has_position_or_order(pair):
                 report.record(NAME, pair, 'позиция или ордер уже есть')
                 continue
-            signal = analyze_market(pair, balance, client=client, now=now)
+            signal = analyze_market(pair, client=client, now=now)
             report.record(NAME, pair, None if signal else _last_reason.get(pair))
             if signal:
                 candidates.append({
@@ -195,11 +189,11 @@ def scan_for_setups(pairs, trade_manager, client=None, balance=None, now=None):
 # в bot.py, величины исполнения — в strategy_profile.py, разметка — в
 # setup_geometry.py. Поведение не изменилось — его держат эталоны tests/golden/.
 
-def scan(pairs, gate, client=None, balance=None):
-    return scan_for_setups(pairs, gate, client=client, balance=balance)
+def scan(pairs, gate, client=None):
+    return scan_for_setups(pairs, gate, client=client)
 
 
-def build_signal(candidate, balance):
+def build_signal(candidate):
     pair = candidate['pair']
     # Сканер уже вернул готовый сигнал: он и есть результат анализа.
     signal = candidate.get('signal')
@@ -229,7 +223,8 @@ def profile():
             # Лимит на откате; если к постановке рынок уже за ним — налив по рынку.
             'fills_through_market': p.FILL_THROUGH_MARKET, 'min_stop_pct': p.MIN_STOP_PCT,
             # Замер Фибо 12ч ставил лимит ровно на уровень отката.
-            'limit_offset_pct': p.LIMIT_OFFSET_PCT}
+            'limit_offset_pct': p.LIMIT_OFFSET_PCT,
+            'max_same_direction': p.MAX_SAME_DIRECTION}
 
 
 def geometry(signal, g):

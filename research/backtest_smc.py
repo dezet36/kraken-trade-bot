@@ -128,7 +128,7 @@ def smc_orders(pair, data, reasons=None):
     expiry = np.timedelta64(int(smc_params.PENDING_ORDER_MAX_HOURS * 3600), 's')
 
     for i in range(60, len(df)):
-        setup, why = ctx.evaluate(i, balance=INITIAL_BALANCE)
+        setup, why = ctx.evaluate(i)
         if setup is None:
             if reasons is not None:
                 reasons[why.split('(')[0].strip()] += 1
@@ -226,7 +226,7 @@ def fibo_orders(pair, data, reasons=None):
                 reasons['контртренд'] += 1
             continue
 
-        signal = strategy.analyze_market(window, None, pair, INITIAL_BALANCE)
+        signal = strategy.analyze_market(window, None, pair)
         if not signal:
             if reasons is not None:
                 reasons['analyze_market отказал'] += 1

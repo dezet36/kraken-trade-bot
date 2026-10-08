@@ -206,7 +206,7 @@ class TestАдаптер:
         setup, reason = core.evaluate(high, low, close, volume, 77)
         assert setup is not None, reason
 
-        signal = strategy_levels._to_bot_signal(setup, 'BTCUSDT', 10000.0, None)
+        signal = strategy_levels._to_bot_signal(setup, 'BTCUSDT', None)
         params_ = signal['params']
         assert params_['entry'] == setup['entry']
         assert params_['stop_loss'] == setup['stop_loss']
@@ -215,5 +215,7 @@ class TestАдаптер:
         # Безубыток выключен: замер показал вред у всех трёх стратегий
         assert params_['be_level'] is None
         assert params_['breakeven_after_tp'] is False
-        assert params_['position_size'] > 0
+        # Денег стратегия не кладёт: риск и размер решает счёт (accounts/paper.py).
+        from strategies import contract
+        assert contract.money_in(signal) == []
         assert 'уровня' in signal['why']

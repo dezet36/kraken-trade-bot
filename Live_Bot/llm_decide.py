@@ -1274,15 +1274,15 @@ def decide(pair, df, ask, news=None, at=None, max_tokens=None, market=None,
 
 def critic_enabled():
     """
-    Включён ли проверяющий. Тумблер на панели (settings_store), запасной
-    ответ — config.LLM_CRITIC. Оба должны разрешать: .env выключает
-    жёстко, панель — на время.
+    Включён ли проверяющий. Тумблер на панели (настройка стратегии ИИ,
+    strategies/settings.py), запасной ответ — config.LLM_CRITIC. Оба должны
+    разрешать: .env выключает жёстко, панель — на время.
     """
     if not getattr(config, 'LLM_CRITIC', True):
         return False
     try:
-        import settings_store
-        return bool(settings_store.critic_enabled())
+        from strategies import settings
+        return bool(settings.critic_enabled())
     except Exception:                              # noqa: BLE001
         return True
 

@@ -90,8 +90,6 @@ def run_now(fn, *args):
 def notebook_mode(monkeypatch, tmp_path):
     monkeypatch.setattr(config, 'LLM_MODE', 'notebook', raising=False)
     monkeypatch.setattr(config, 'DATA_DIR', str(tmp_path))
-    import settings_store
-    monkeypatch.setattr(settings_store, 'risk_pct', lambda name: 0.5)
     # Обзор рынка (поток к модели) и Telegram в тестах решений не нужны.
     monkeypatch.setattr(llm_notebook, '_maybe_review', lambda *a, **k: False)
     monkeypatch.setattr(llm_notebook, '_notify_decision', lambda *a, **k: None)

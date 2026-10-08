@@ -79,16 +79,15 @@ def test_rr_matches_arithmetic(depth, rr, monkeypatch):
     геометрию когда-нибудь тронут, тест скажет об этом раньше замера.
     """
     import config
-    import settings_store as settings
     import strategy
 
     monkeypatch.setattr(config, 'ENTRY_RETRACE', depth)
-    monkeypatch.setattr(settings, 'min_stop_pct', lambda name: 0.0)
+    # Ручка «минимальный стоп» — у самой стратегии (strategies/settings.py).
+    monkeypatch.setattr(strategy.settings, 'min_stop_pct', lambda name: 0.0)
     setup = {'type': 'LONG', 'start_price': 1000.0, 'end_price': 2000.0,
              'size': 1000.0}
     entry = setup['end_price'] - setup['size'] * depth
-    params = strategy.calculate_trade_params(setup, entry, 10_000,
-                                             log_reject=False)
+    params = strategy.calculate_trade_params(setup, entry, log_reject=False)
     assert params is not None, 'сетап отвергнут по RR — геометрия разошлась'
     assert params['rr'] == pytest.approx(rr, abs=0.02)
 

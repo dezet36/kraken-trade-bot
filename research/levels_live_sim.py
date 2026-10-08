@@ -38,6 +38,10 @@ sys.path.insert(0, HERE)
 from levels import core, params as LP  # noqa: E402
 from smc_engine import Order, compute_stats, run_portfolio  # noqa: E402
 
+# Риск стенда — как у счёта стратегии на тесте (1%, CLAUDE.md «Риск»); в
+# пакете стратегии риска нет с 08.10.2026 (деньги решает счёт).
+RISK_PCT = 1.0
+
 RESULTS = os.path.join(HERE, 'results')
 PERIODS = {
     'fresh': ('backtest_cache_fresh', None),
@@ -133,7 +137,7 @@ def build(period):
 
 
 def portfolio(orders, exec_data):
-    return run_portfolio(orders, exec_data, risk_pct=LP.RISK_PCT, max_positions=99,
+    return run_portfolio(orders, exec_data, risk_pct=RISK_PCT, max_positions=99,
                          cooldown_hours=LP.COOLDOWN_HOURS, breakeven_after_tp1=False,
                          max_hold_hours=LP.MAX_HOLD_HOURS, max_same_direction=LP.MAX_SAME_DIRECTION,
                          cancel_at_target=True, occupy_while_pending=True,

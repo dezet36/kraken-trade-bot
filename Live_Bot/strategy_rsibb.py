@@ -52,9 +52,7 @@
 
 import pandas as pd
 
-import config
 import scan_report as report
-import settings_store as settings
 from exchange import fetch_ohlcv
 from logger import log
 from rsibb import core, params
@@ -101,7 +99,7 @@ def _context(pair, client=None):
     return _cache[pair][1:]
 
 
-def analyze_market(pair, balance, client=None):
+def analyze_market(pair, client=None):
     """Сетап по паре или None."""
     ctx = _context(pair, client=client)
     if ctx is None:
@@ -124,14 +122,13 @@ def analyze_market(pair, balance, client=None):
     log(f"   {pair}: {setup['direction']} от полосы {setup['band']:.6f} | "
         f"RSI {setup['rsi']:.0f} | стоп {trade['stop_pct']:.2f}% | "
         f"RR {trade['rr']:.2f}")
-    return _to_bot_signal(setup, trade, pair, balance, df)
+    return _to_bot_signal(setup, trade, pair, df)
 
 
-def _to_bot_signal(setup, trade, pair, balance, df):
-    risk_pct = settings.risk_pct(NAME)
+def _to_bot_signal(setup, trade, pair, df):
+    # Сетап без денег: риск, размер и предел в одну сторону решает счёт
+    # стратегии (accounts/paper.py).
     dist = abs(trade['entry'] - trade['stop'])
-    risk_amount = balance * (risk_pct / 100)
-    size = risk_amount / dist if dist else 0.0
 
     why = (f"{setup['direction']} от {'нижней' if setup['direction'] == 'LONG' else 'верхней'} "
            f"полосы {setup['band']:.6f}: RSI {setup['rsi']:.0f} — импульс не "
@@ -174,10 +171,6 @@ def _to_bot_signal(setup, trade, pair, balance, df):
             # что измерено. Ровно эта ошибка стоила месяца у стратегии уровней.
             'be_level': None,
             'breakeven_after_tp': False,
-            'max_same_direction': params.MAX_SAME_DIRECTION,
-            'risk_pct': risk_pct,
-            'position_size': size,
-            'risk_amount': risk_amount,
             'rr': trade['rr'],
             'sl_distance': dist,
         },
@@ -215,9 +208,8 @@ def _bar_minutes():
     return table.get(params.TIMEFRAME, 60)
 
 
-def scan_for_setups(pairs, trade_manager, client=None, balance=None):
+def scan_for_setups(pairs, trade_manager, client=None):
     """Кандидаты, отсортированные по силе расхождения RSI с ценой."""
-    balance = config.BALANCE if balance is None else balance
     candidates = []
     report.begin(NAME)
 
@@ -230,7 +222,7 @@ def scan_for_setups(pairs, trade_manager, client=None, balance=None):
                 report.record(NAME, pair, 'позиция или ордер уже есть')
                 continue
 
-            signal = analyze_market(pair, balance, client=client)
+            signal = analyze_market(pair, client=client)
             report.record(NAME, pair, None if signal else _last_reason.get(pair))
             if signal:
                 candidates.append({
@@ -259,11 +251,11 @@ _BAR_HOURS = {'1m': 1 / 60, '5m': 1 / 12, '15m': 0.25, '30m': 0.5,
               '1h': 1.0, '2h': 2.0, '4h': 4.0, '1d': 24.0}
 
 
-def scan(pairs, gate, client=None, balance=None):
-    return scan_for_setups(pairs, gate, client=client, balance=balance)
+def scan(pairs, gate, client=None):
+    return scan_for_setups(pairs, gate, client=client)
 
 
-def build_signal(candidate, balance):
+def build_signal(candidate):
     pair = candidate['pair']
     # Сканер уже вернул готовый сигнал: он и есть результат анализа.
     signal = candidate.get('signal')
@@ -290,7 +282,8 @@ def profile():
     bar = _BAR_HOURS.get(str(p.TIMEFRAME), 1.0)
     return {'expiry_hours': p.EXPIRY_BARS * bar, 'cooldown_hours': p.COOLDOWN_HOURS,
             'cost_limit_pct': p.MAX_ENTRY_COST_SHARE_PCT, 'max_hold_hours': p.MAX_HOLD_BARS * bar,
-            'fills_through_market': p.FILL_THROUGH_MARKET, 'min_stop_pct': p.MIN_STOP_PCT}
+            'fills_through_market': p.FILL_THROUGH_MARKET, 'min_stop_pct': p.MIN_STOP_PCT,
+            'max_same_direction': p.MAX_SAME_DIRECTION}
 
 
 def geometry(signal, g):

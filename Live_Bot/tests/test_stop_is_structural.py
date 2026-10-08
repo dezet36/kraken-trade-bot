@@ -31,7 +31,7 @@ class TestFibo:
         entry = setup['end_price'] - setup['size'] * config.ENTRY_RETRACE
         structural = entry - (setup['end_price'] - setup['size'] * config.SL_LEVEL_R
                               - setup['size'] * config.SL_BUFFER)
-        return strategy.calculate_trade_params(setup, entry, 10_000, log_reject=False), entry, structural
+        return strategy.calculate_trade_params(setup, entry, log_reject=False), entry, structural
 
     def test_the_stop_is_the_invalidation_level_when_wide_enough(self, monkeypatch):
         params, entry, structural = self._params(monkeypatch, min_stop=0.0)

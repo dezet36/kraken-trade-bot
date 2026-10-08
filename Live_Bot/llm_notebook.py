@@ -60,6 +60,9 @@ EXECUTION = SimpleNamespace(
     CANCEL_PENDING_AT_TARGET=False,
     FILL_THROUGH_MARKET=True,
     MIN_SL_PCT=0.0,
+    # Позиций в одну сторону — сколько мест (так тетрадь измерена). Решает
+    # счёт (accounts/paper.py): это его значение по умолчанию.
+    MAX_SAME_DIRECTION=SLOTS,
 )
 
 POOL = ('AAVEUSDT', 'ADAUSDT', 'ARBUSDT', 'AVAXUSDT', 'BNBUSDT', 'BTCUSDT', 'COTIUSDT',
@@ -388,8 +391,8 @@ def picks_from(text, items):
 
 
 def to_signal(pair, key, feat, price, reason):
-    """Сигнал брокеру: вход по рынку в сторону закономерности, стоп — доля суточного размаха, выход по сроку."""
-    import settings_store as settings
+    """Сигнал брокеру: вход по рынку в сторону закономерности, стоп — доля суточного размаха, выход по сроку.
+    Без денег: риск и предел в одну сторону решает счёт (accounts/paper.py)."""
     pat = PATTERNS[key]
     sgn = 1.0 if pat['side'] == 'long' else -1.0
     dist = pat['stop'] * float(feat['atr_d']) / 100.0
@@ -408,9 +411,7 @@ def to_signal(pair, key, feat, price, reason):
             'entry': entry, 'stop_loss': stop, 'take_profit_1': target, 'take_profit_2': target,
             'tp_targets': [target], 'tp_fractions': [1.0],
             'be_level': None, 'breakeven_after_tp': False,
-            'max_same_direction': SLOTS,
             'max_hold_hours': pat['hold'],
-            'risk_pct': settings.risk_pct(NAME),
             'rr': 20.0, 'sl_distance': abs(entry - stop),
             'invalidation': stop,
         },
@@ -830,7 +831,7 @@ def _maybe_review(data, t, gate, run=None):
     return True
 
 
-def scan(pairs, gate, client=None, balance=None, now_ms=None, frames_of=None, ask=None, price_of=None):
+def scan(pairs, gate, client=None, now_ms=None, frames_of=None, ask=None, price_of=None):
     """
     Каждый цикл: готовые ответы модели -> кандидаты брокеру (_collect).
     Раз в закрытый час: новые сигналы -> вопрос модели в поток тетради (_new_hour);

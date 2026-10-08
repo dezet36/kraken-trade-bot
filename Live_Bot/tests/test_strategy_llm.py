@@ -239,16 +239,12 @@ class TestTheSignalIsItsOwn:
         signal = strategy_llm._reshape('BTCUSDT', approving_verdict(side='SHORT'))
         assert signal['setup']['type'] == 'SHORT'
 
-    def test_the_risk_is_the_strategys_own(self, monkeypatch):
-        # Подменяем В ТОМ объекте, которым пользуется стратегия: проверки
-        # выгружают settings_store и импортируют заново, и «свежий»
-        # settings_store и strategy_llm.settings бывают разными модулями.
-        monkeypatch.setattr(strategy_llm.settings, 'risk_pct', lambda name: 0.7)
-        params = strategy_llm._reshape('BTCUSDT', approving_verdict())['params']
-        assert params['risk_pct'] == 0.7
-        # Размер считает брокер по доле, депозиту и дистанции стопа.
-        assert 'position_size' not in params
-        assert 'risk_amount' not in params
+    def test_the_plan_carries_no_money(self):
+        """Риск, предел в одну сторону и размер решает счёт (accounts/paper.py),
+        а не план модели (strategies/contract.py)."""
+        from strategies import contract
+        signal = strategy_llm._reshape('BTCUSDT', approving_verdict())
+        assert contract.money_in(signal) == []
 
     def test_the_exit_plan_matches_the_targets(self):
         params = strategy_llm._reshape('BTCUSDT', approving_verdict())['params']

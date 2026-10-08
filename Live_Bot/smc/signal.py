@@ -243,7 +243,7 @@ class MarketContext:
         return NEUTRAL
 
     # ── Основная оценка ───────────────────────────────────────────────────
-    def evaluate(self, at_index, balance=10_000.0, decision=None):
+    def evaluate(self, at_index, decision=None):
         """
         Строит сетап на свече `at_index` рабочего ТФ или возвращает None.
 
@@ -356,7 +356,7 @@ class MarketContext:
         # Причина несобравшейся геометрии — для воронки отказов: тесный стоп
         # называется отдельно, иначе он тонет в общем «геометрия не собралась».
         self._no_trade_reason = None
-        trade = self._build_trade(best, leg, bias, swept, at_index, balance, d=d)
+        trade = self._build_trade(best, leg, bias, swept, at_index, d=d)
         if trade is None:
             return None, self._no_trade_reason or 'геометрия не собралась'
         # 8.5) Цена уже за первой целью. Выключено: по бэктесту вредно, см.
@@ -433,9 +433,10 @@ class MarketContext:
         # молча. Одно вычисление — один ответ.
         return factors, score, recent_break
 
-    def _build_trade(self, candidate, leg, direction, swept, at_index, balance, d=None):
+    def _build_trade(self, candidate, leg, direction, swept, at_index, d=None):
         """
-        Вход, стоп, цели, размер позиции.
+        Вход, стоп, цели. Размера позиции здесь нет с 08.10.2026: деньги решает
+        счёт стратегии (accounts/paper.py), ядро отдаёт сетап без денег.
 
         Стоп (§5.2, §5.3):
             aggressive   — за дальнюю границу зоны: выше RR, ниже винрейт;
@@ -547,9 +548,6 @@ class MarketContext:
         )
         rr = weighted_gain / sl_distance
 
-        risk_amount = balance * (d.RISK_PER_TRADE_PCT / 100)
-        position_size = risk_amount / sl_distance
-
         return {
             'entry': float(entry),
             'stop_loss': float(stop),
@@ -559,8 +557,6 @@ class MarketContext:
             'rr_first': float(abs(targets[0] - entry) / sl_distance),
             'rr_final': float(abs(targets[-1] - entry) / sl_distance),
             'sl_distance': float(sl_distance),
-            'position_size': float(position_size),
-            'risk_amount': float(risk_amount),
             'sl_mode': d.SL_MODE,
         }
 

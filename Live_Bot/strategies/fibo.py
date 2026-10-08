@@ -17,7 +17,7 @@ from logger import log
 NAME = 'FIBO'
 
 
-def scan(pairs, gate, client=None, balance=None):
+def scan(pairs, gate, client=None):
     """Кандидаты сканера ФИБО. Блок-лист часов входа — её собственный фильтр
     (откалиброван под ФИБО; сейчас пуст)."""
     import config
@@ -29,11 +29,11 @@ def scan(pairs, gate, client=None, balance=None):
     return pair_scanner.scan_for_setups(pairs, gate, client=client)
 
 
-def build_signal(candidate, balance):
+def build_signal(candidate):
     """Сигнал по кандидату сканера: сетап считает strategy.analyze_market."""
     from strategy import analyze_market
     pair = candidate['pair']
-    signal = analyze_market(candidate['df_1h'], None, pair, balance)
+    signal = analyze_market(candidate['df_1h'], None, pair)
     if not signal:
         return None, None
     signal['htf_trend'] = candidate.get('htf_trend', 'NEUTRAL')

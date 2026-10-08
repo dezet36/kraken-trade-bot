@@ -88,7 +88,7 @@ def _job(args):
             continue
         ctx = smc_signal.build_context(window, pair=pair)
         at = len(window['poi']) - 1
-        setup, _why = ctx.evaluate(at, balance=10_000.0, decision=decision)
+        setup, _why = ctx.evaluate(at, decision=decision)
         if setup is None:
             continue
         poi, leg, trade = setup['poi'], setup['leg'], setup['params']

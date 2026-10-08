@@ -661,7 +661,6 @@ SCORE_WEIGHT_HTF       = 0.20   # сила HTF-тренда (тай-брейк �
 SCORE_WEIGHT_PROXIMITY = 0.25   # близость текущей цены к границе входа зоны A
 SCORE_RR_CAP           = 3.5    # нормировка RR (чуть выше p75 реального распределения)
 SCORE_HTF_STRENGTH_CAP = 0.10   # нормировка |EMA50-EMA200|/EMA200 (4H)
-SCORE_NOMINAL_BALANCE  = 10_000.0   # для оценки RR на этапе скана (RR от баланса не зависит)
 
 
 # Кулдаун

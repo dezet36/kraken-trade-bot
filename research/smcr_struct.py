@@ -167,7 +167,7 @@ def _job(args):
     stamps = df['timestamp']
     rows = []
     for i in range(60, len(df)):
-        setup, _why = ctx.evaluate(i, balance=10_000.0, decision=decision)
+        setup, _why = ctx.evaluate(i, decision=decision)
         if setup is None:
             continue
         p, leg, trade = setup['poi'], setup['leg'], setup['params']

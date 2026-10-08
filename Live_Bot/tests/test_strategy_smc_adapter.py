@@ -72,7 +72,7 @@ class TestSignalMapping:
         trade_manager обращается к этим ключам напрямую. Отсутствие любого —
         KeyError в момент отправки ордера на биржу.
         """
-        signal = strategy_smc._to_bot_signal(make_setup(), 'BTCUSDT', 10_000)
+        signal = strategy_smc._to_bot_signal(make_setup(), 'BTCUSDT')
 
         assert set(signal) >= {'trading_pair', 'setup', 'trigger', 'params'}
         assert signal['trading_pair'] == 'BTCUSDT'
@@ -84,19 +84,29 @@ class TestSignalMapping:
             assert key in signal['trigger'], f'trigger.{key} отсутствует'
 
         for key in ('entry', 'stop_loss', 'take_profit_1', 'take_profit_2',
-                    'be_level', 'position_size', 'risk_amount', 'rr', 'sl_distance'):
+                    'be_level', 'rr', 'sl_distance'):
             assert key in signal['params'], f'params.{key} отсутствует'
+
+        # Денег стратегия не кладёт (strategies/contract.py): риск, предел в
+        # одну сторону и размер вписывает счёт — после него ключи на месте.
+        from strategies import contract
+        from accounts import paper as account
+        assert contract.money_in(signal) == []
+        signal, why = account.decide('SMC', signal, 10_000)
+        assert why is None
+        for key in contract.MONEY_KEYS:
+            assert key in signal['params'], f'счёт не вписал params.{key}'
 
     def test_direction_translated_to_bot_vocabulary(self):
         """Ядро говорит BULLISH/BEARISH, исполнитель понимает LONG/SHORT."""
         assert strategy_smc._to_bot_signal(
-            make_setup('BULLISH'), 'BTCUSDT', 10_000)['setup']['type'] == 'LONG'
+            make_setup('BULLISH'), 'BTCUSDT')['setup']['type'] == 'LONG'
         assert strategy_smc._to_bot_signal(
-            make_setup('BEARISH'), 'BTCUSDT', 10_000)['setup']['type'] == 'SHORT'
+            make_setup('BEARISH'), 'BTCUSDT')['setup']['type'] == 'SHORT'
 
     def test_stop_on_correct_side_of_entry(self):
         """Стоп по ту сторону входа — иначе позиция закроется мгновенно."""
-        long_signal = strategy_smc._to_bot_signal(make_setup('BULLISH'), 'BTCUSDT', 10_000)
+        long_signal = strategy_smc._to_bot_signal(make_setup('BULLISH'), 'BTCUSDT')
         prm = long_signal['params']
         assert prm['stop_loss'] < prm['entry']
         assert prm['take_profit_1'] > prm['entry']
@@ -107,7 +117,7 @@ class TestSignalMapping:
         получить валидную цену, а не None и не KeyError.
         """
         setup = make_setup(targets=(110.0,))
-        signal = strategy_smc._to_bot_signal(setup, 'BTCUSDT', 10_000)
+        signal = strategy_smc._to_bot_signal(setup, 'BTCUSDT')
 
         assert signal['params']['take_profit_2'] == signal['params']['take_profit_1']
 
@@ -120,7 +130,7 @@ class TestSignalMapping:
         винрейте около 25%. Сигнал обязан нести это решение, а не отдавать его
         глобальной настройке, откалиброванной под другую стратегию.
         """
-        signal = strategy_smc._to_bot_signal(make_setup(), 'BTCUSDT', 10_000)
+        signal = strategy_smc._to_bot_signal(make_setup(), 'BTCUSDT')
 
         assert signal['params']['breakeven_after_tp'] is False
         assert signal['params']['be_level'] is None
@@ -131,7 +141,7 @@ class TestSignalMapping:
         брался из глобального config (одна цель на 100%), SMC исполнялась в
         конфигурации, которая по бэктесту убыточна: −9.1% против +40.6%.
         """
-        signal = strategy_smc._to_bot_signal(make_setup(), 'BTCUSDT', 10_000)
+        signal = strategy_smc._to_bot_signal(make_setup(), 'BTCUSDT')
 
         assert signal['params']['tp_targets'] == [110.0, 115.0, 120.0]
         assert signal['params']['tp_fractions'] == [0.25, 0.25, 0.50]
@@ -141,7 +151,7 @@ class TestSignalMapping:
         Поля take_profit_1/2 остаются для журнала и Telegram, но полная картина
         сетапа должна быть видна и в блоке smc.
         """
-        signal = strategy_smc._to_bot_signal(make_setup(), 'BTCUSDT', 10_000)
+        signal = strategy_smc._to_bot_signal(make_setup(), 'BTCUSDT')
         assert signal['smc']['targets'] == [110.0, 115.0, 120.0]
         assert signal['smc']['fractions'] == [0.25, 0.25, 0.50]
         assert signal['smc']['poi_type'] == 'ORDER_BLOCK'
@@ -193,7 +203,7 @@ class TestScanCarriesTheCandlesForTheChart:
         # Пул SMC (TRADE_POOL) здесь ни при чём: пара учебная.
         monkeypatch.setattr(strategy_smc.smc_params, 'TRADE_POOL', ())
         monkeypatch.setattr(strategy_smc, 'market_regime', lambda client=None: ('RANGE', 1.0, 'тест'))
-        monkeypatch.setattr(strategy_smc, 'analyze_market', lambda pair, balance, client=None, risk_scale=None: {
+        monkeypatch.setattr(strategy_smc, 'analyze_market', lambda pair, client=None, risk_scale=None: {
             'smc': {'confluence': 5.0, 'poi_type': 'ORDER_BLOCK'}, 'params': {'rr': 3.0}})
 
         class TM:
@@ -204,7 +214,7 @@ class TestScanCarriesTheCandlesForTheChart:
                 return False
 
         try:
-            out = strategy_smc.scan_for_setups(['TEST'], TM(), balance=1000.0)
+            out = strategy_smc.scan_for_setups(['TEST'], TM())
         finally:
             market_structure.clear()
         assert len(out) == 1

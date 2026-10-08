@@ -79,7 +79,7 @@ class TestAnalyzeMarket:
         self._patch(monkeypatch, make_setup('BULLISH'), +0.0001)
         import shadow
         monkeypatch.setattr(shadow, 'watch', lambda *a, **k: None)
-        assert strategy_smc.analyze_market('BTCUSDT', 10_000, risk_scale=1.0) is None
+        assert strategy_smc.analyze_market('BTCUSDT', risk_scale=1.0) is None
         assert strategy_smc._last_reason['BTCUSDT'].startswith('толпа за сделку')
 
     def test_the_refused_setup_goes_to_the_shadows(self, monkeypatch):
@@ -89,7 +89,7 @@ class TestAnalyzeMarket:
         seen = []
         monkeypatch.setattr(shadow, 'watch', lambda strategy, signal, gate, detail='', **k:
                             seen.append((strategy, signal['setup']['type'], signal['params']['entry'], gate)))
-        strategy_smc.analyze_market('BTCUSDT', 10_000, risk_scale=1.0)
+        strategy_smc.analyze_market('BTCUSDT', risk_scale=1.0)
         assert seen == [('SMC', 'LONG', 101.0, 'толпа за сделку')]
 
     def test_a_broken_shadow_does_not_break_the_scan(self, monkeypatch):
@@ -99,17 +99,17 @@ class TestAnalyzeMarket:
         def boom(*a, **k):
             raise RuntimeError('диск')
         monkeypatch.setattr(shadow, 'watch', boom)
-        assert strategy_smc.analyze_market('BTCUSDT', 10_000, risk_scale=1.0) is None
+        assert strategy_smc.analyze_market('BTCUSDT', risk_scale=1.0) is None
 
     def test_crowd_against_passes_and_rate_goes_to_the_journal(self, monkeypatch):
         self._patch(monkeypatch, make_setup('BEARISH', targets=(90.0, 85.0, 80.0)), +0.0001)
-        signal = strategy_smc.analyze_market('BTCUSDT', 10_000, risk_scale=1.0)
+        signal = strategy_smc.analyze_market('BTCUSDT', risk_scale=1.0)
         assert signal is not None
         assert signal['smc']['funding_bp'] == pytest.approx(1.0)
 
     def test_unknown_rate_does_not_block(self, monkeypatch):
         self._patch(monkeypatch, make_setup('BULLISH'), None)
-        signal = strategy_smc.analyze_market('BTCUSDT', 10_000, risk_scale=1.0)
+        signal = strategy_smc.analyze_market('BTCUSDT', risk_scale=1.0)
         assert signal is not None
         assert signal['smc']['funding_bp'] is None
 
@@ -124,7 +124,7 @@ class TestAnalyzeMarket:
         monkeypatch.setattr(positioning, 'settled_funding',
                             lambda pair, client=None, **k: seen.append((pair, client)) or 0.0001)
         client = object()
-        signal = strategy_smc.analyze_market('BTCUSDT', 10_000, client=client, risk_scale=1.0)
+        signal = strategy_smc.analyze_market('BTCUSDT', client=client, risk_scale=1.0)
         assert seen == [('BTCUSDT', client)]
         assert signal['smc']['funding_bp'] == pytest.approx(1.0)
 
@@ -135,7 +135,7 @@ class TestPool:
         monkeypatch.setattr(params, 'TRADE_POOL', ('BTCUSDT',))
         monkeypatch.setattr(strategy_smc, 'market_regime', lambda client=None: ('RANGE', 1.0, 'тест'))
         monkeypatch.setattr(strategy_smc, 'analyze_market',
-                            lambda pair, balance, client=None, risk_scale=None: seen.append(pair))
+                            lambda pair, client=None, risk_scale=None: seen.append(pair))
 
         class TM:
             def check_cooldown(self, pair):
@@ -144,7 +144,7 @@ class TestPool:
             def has_position_or_order(self, pair):
                 return False
 
-        strategy_smc.scan_for_setups(['BTCUSDT', 'BICOUSDT', 'ZECUSDT'], TM(), balance=1000.0)
+        strategy_smc.scan_for_setups(['BTCUSDT', 'BICOUSDT', 'ZECUSDT'], TM())
         assert seen == ['BTCUSDT']
 
     def test_default_pool_is_the_measured_ten(self):

@@ -35,6 +35,10 @@ sys.path.insert(0, HERE)
 from rsibb import core, params as RP  # noqa: E402
 from smc_engine import Order, compute_stats, run_portfolio  # noqa: E402
 
+# Риск стенда — как у счёта стратегии на тесте (1%, CLAUDE.md «Риск»); в
+# пакете стратегии риска нет с 08.10.2026 (деньги решает счёт).
+RISK_PCT = 1.0
+
 COST_ROUND_TRIP = 0.00075      # мейкер 0.02% + тейкер 0.055%, как у брокера
 COST_LIMIT_PCT = RP.MAX_ENTRY_COST_SHARE_PCT
 LIMIT_OFFSET = 0.001
@@ -102,7 +106,7 @@ def orders(pair, df, found, old_gap, offset, cost_limit, at_open=False):
 
 
 def run(all_orders, exec_data, live_rules, slots=99):
-    res = run_portfolio(all_orders, exec_data, risk_pct=RP.RISK_PCT, max_positions=slots,
+    res = run_portfolio(all_orders, exec_data, risk_pct=RISK_PCT, max_positions=slots,
                         cooldown_hours=RP.COOLDOWN_HOURS, breakeven_after_tp1=False,
                         max_hold_hours=RP.MAX_HOLD_BARS, max_same_direction=RP.MAX_SAME_DIRECTION,
                         cancel_at_target=live_rules, occupy_while_pending=live_rules,
