@@ -92,7 +92,7 @@ FUNDING_HOURS = (0, 8, 16)
 FUNDING_WINDOW = _i('FUNDING_WINDOW', 0)
 
 # ── Портфель ─────────────────────────────────────────────────────────────────
-RISK_PCT = _f('RISK_PCT', 0.5)
+RISK_PCT = _f('RISK_PCT', 1.0)          # стандарт 1% для всех стратегий (правило 08.10.2026)
 MAX_POSITIONS = _i('MAX_POSITIONS', 6)
 COOLDOWN_HOURS = _f('COOLDOWN_HOURS', 6.0)
 MAX_SAME_DIRECTION = _i('MAX_SAME_DIRECTION', 0)
