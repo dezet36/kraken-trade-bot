@@ -71,7 +71,6 @@ DECISION = SimpleNamespace(
                         'liquidity_swept': 0.3, 'law_of_effort': 0.1, 'killzone': 0.0},
     MIN_CONFLUENCE_SCORE=4.5,
     LONG_CONFLUENCE_PREMIUM=0.0,
-    REGIME_RISK_SCALE=0.5,
     MIN_RR=4.0,
     MAX_RR=0.0,
     REQUIRE_OTE=False,

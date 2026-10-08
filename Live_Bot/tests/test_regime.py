@@ -1,5 +1,8 @@
 """
-Проверка разметки режима рынка и множителя риска.
+Проверка разметки режима рынка.
+
+Множителя риска по режиму больше нет (решение владельца 08.10.2026: риск у всех
+стратегий один, решает его счёт): режим — описание рынка для журнала.
 
 Главное, что здесь защищается, — причинность. Разметка обязана зависеть
 только от прошлого: правило, настроенное на порог из будущего, вживую не
@@ -52,7 +55,6 @@ def test_rezhim_neizvesten_poka_malo_istorii():
     assert name is regime.UNKNOWN
     assert er is not None      # сам ER посчитан
     assert threshold is None   # а порога ещё нет
-    assert regime.risk_multiplier(name) == 1.0
 
 
 def test_rost_i_padenie_razlichayutsya_znakom():
@@ -93,24 +95,12 @@ def test_porog_ne_zavisit_ot_budushchego():
     assert now == later
 
 
-def test_mnozhitel_tolko_umenshaet(monkeypatch):
-    monkeypatch.setattr(params, 'REGIME_RISK_SCALE', 2.5)
-    assert regime.risk_multiplier(regime.TREND_UP) == 1.0
-    monkeypatch.setattr(params, 'REGIME_RISK_SCALE', -1.0)
-    assert regime.risk_multiplier(regime.TREND_DOWN) == 0.0
-
-
-def test_v_bokovike_i_bez_rezhima_razmer_polnyi(monkeypatch):
-    monkeypatch.setattr(params, 'REGIME_RISK_SCALE', 0.5)
-    assert regime.risk_multiplier(regime.RANGE) == 1.0
-    assert regime.risk_multiplier(regime.UNKNOWN) == 1.0
-    assert regime.risk_multiplier(regime.TREND_UP) == 0.5
-
-
-def test_edinica_polnostyu_otklyuchaet_pravilo(monkeypatch):
-    monkeypatch.setattr(params, 'REGIME_RISK_SCALE', 1.0)
-    for name in (regime.TREND_UP, regime.TREND_DOWN, regime.RANGE, regime.UNKNOWN):
-        assert regime.risk_multiplier(name) == 1.0
+def test_rezhim_ne_menyaet_risk():
+    """SMC в тренде BTC торгует тем же 1%, что и все (решение 08.10.2026):
+    ни параметра множителя, ни функции, которая его применяла бы."""
+    assert not hasattr(params, 'REGIME_RISK_SCALE')
+    assert 'REGIME_RISK_SCALE' not in params.DECISION
+    assert not hasattr(regime, 'risk_multiplier')
 
 
 def test_opisanie_chitaemo():

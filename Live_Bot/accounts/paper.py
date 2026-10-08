@@ -463,24 +463,15 @@ def describe(strategy):
 
 # ── Решение счёта по сетапу ─────────────────────────────────────────────────
 
-def _risk_scale(value):
-    """Множитель риска сетапа (strategies/contract.py); нет или мусор — 1."""
-    try:
-        value = float(value)
-    except (TypeError, ValueError):
-        return 1.0
-    if value != value or value < 0:
-        return 1.0
-    return value
-
-
 def decide(strategy, signal, balance):
     """
     Решение счёта по сетапу стратегии: (сигнал, None) — счёт берёт его, в
     params вписаны деньги; (None, причина) — отказ.
 
     Деньги — поля, которые читают исполнители (strategies/contract.MONEY_KEYS):
-      risk_pct            % депозита на сделку: риск счёта × множитель сетапа;
+      risk_pct            % депозита на сделку — риск счёта (у всех стратегий
+                          один; множителей у сетапа нет — решение владельца
+                          08.10.2026);
       max_same_direction  предел позиций стратегии в одну сторону;
       risk_amount, position_size — размер по плану: от депозита balance и
                           расчётного входа; исполнитель пересчитает его от
@@ -491,7 +482,7 @@ def decide(strategy, signal, balance):
     if not allows(strategy, direction):
         return None, f"{direction} пропущен — на счёте разрешены только «{sides(strategy)}»"
     params = signal.setdefault('params', {})
-    risk = risk_pct(strategy) * _risk_scale(params.get('risk_scale'))
+    risk = risk_pct(strategy)
     params['risk_pct'] = risk
     params['max_same_direction'] = max_same_direction(strategy)
     amount = float(balance or 0) * (risk / 100)

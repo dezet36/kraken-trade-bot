@@ -202,8 +202,8 @@ class TestScanCarriesTheCandlesForTheChart:
         market_structure._cache['TEST'] = (0, Ctx())
         # Пул SMC (TRADE_POOL) здесь ни при чём: пара учебная.
         monkeypatch.setattr(strategy_smc.smc_params, 'TRADE_POOL', ())
-        monkeypatch.setattr(strategy_smc, 'market_regime', lambda client=None: ('RANGE', 1.0, 'тест'))
-        monkeypatch.setattr(strategy_smc, 'analyze_market', lambda pair, client=None, risk_scale=None: {
+        monkeypatch.setattr(strategy_smc, 'market_regime', lambda client=None: ('RANGE', 'тест'))
+        monkeypatch.setattr(strategy_smc, 'analyze_market', lambda pair, client=None: {
             'smc': {'confluence': 5.0, 'poi_type': 'ORDER_BLOCK'}, 'params': {'rr': 3.0}})
 
         class TM:

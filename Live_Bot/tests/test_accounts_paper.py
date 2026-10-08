@@ -111,15 +111,17 @@ class TestDecision:
         signal = a_signal()
         assert account.decide('LEVELS', signal, 10_000)[0] is signal
 
-    def test_setup_risk_scale_multiplies_the_account_risk(self):
-        """SMC в трендовом режиме BTC идёт вполовину — так она измерена."""
+    def test_no_setup_multiplies_the_risk(self):
+        """Риск у всех один (решение владельца 08.10.2026): множитель в сигнале,
+        если он там остался, счёт не принимает — SMC в тренде тоже 1%."""
         signal, _ = account.decide('SMC', a_signal(risk_scale=0.5), 10_000)
-        assert signal['params']['risk_pct'] == pytest.approx(account.risk_pct('SMC') * 0.5)
-        assert signal['params']['risk_amount'] == pytest.approx(10_000 * account.risk_pct('SMC') * 0.5 / 100)
-
-    def test_garbage_scale_counts_as_one(self):
-        signal, _ = account.decide('SMC', a_signal(risk_scale='половина'), 10_000)
         assert signal['params']['risk_pct'] == account.risk_pct('SMC')
+        assert signal['params']['risk_amount'] == pytest.approx(10_000 * account.risk_pct('SMC') / 100)
+
+    def test_smc_signal_carries_no_multiplier(self):
+        import strategy_smc
+        from test_strategy_smc_adapter import make_setup
+        assert 'risk_scale' not in strategy_smc._to_bot_signal(make_setup(), 'BTCUSDT')['params']
 
     def test_owner_cap_overrides_the_measured_one(self):
         import strategy_profile

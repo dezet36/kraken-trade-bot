@@ -122,25 +122,9 @@ def classify(closes, window=None, quantile=None, min_history=None):
     return (TREND_UP if moved > 0 else TREND_DOWN), er, threshold
 
 
-def risk_multiplier(regime, trend_scale, range_scale=1.0):
-    """
-    Множитель риска для режима. Реакция на режим — дело СТРАТЕГИИ, поэтому
-    коэффициенты передаются, а не берутся отсюда.
-
-    Множитель никогда не превышает единицы: правило умеет только уменьшать
-    ставку. Увеличение размера по сигналу режима не проверялось, а
-    непроверенное увеличение риска — это не улучшение, а новый риск.
-    """
-    if regime in (TREND_UP, TREND_DOWN):
-        value = trend_scale
-    elif regime == RANGE:
-        value = range_scale
-    else:
-        return 1.0
-    try:
-        return min(1.0, max(0.0, float(value)))
-    except (TypeError, ValueError):
-        return 1.0
+# Множителя риска по режиму здесь больше нет (решение владельца 08.10.2026):
+# риск у всех стратегий один, его решает счёт. Режим — описание рынка, не
+# размер позиции.
 
 
 def describe(regime, er, threshold, multiplier=1.0):

@@ -1094,9 +1094,10 @@ def _regime():
     """
     try:
         import strategy_smc
-        name, mult, text = strategy_smc.regime_snapshot()
-        return {'name': name, 'scale': mult, 'text': text,
-                'reduced': mult < 1.0}
+        # С 08.10.2026 режим на риск не влияет (риск у всех один): плашки
+        # «риск уменьшен» на панели больше не бывает.
+        name, text = strategy_smc.regime_snapshot()
+        return {'name': name, 'scale': 1.0, 'text': text, 'reduced': False}
     except Exception as exc:
         return {'name': None, 'scale': 1.0, 'text': f'режим неизвестен ({exc})',
                 'reduced': False}

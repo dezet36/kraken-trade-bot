@@ -153,6 +153,29 @@ def _isolate_bot_data(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _restore_smc_decisions():
+    """
+    Параметры решений SMC — после каждой проверки как были.
+
+    Анализ SMC пишет настройку оператора (минимальный стоп) прямо в параметры
+    решений ядра — strategy_smc._apply_settings, так задумано: ядро считает по
+    числам своего модуля. Но модуль один на процесс, и проверка, позвавшая
+    analyze_market, оставляла там 0.8% вместо 0.5% для всех следующих: эталон
+    решений расходился, если шёл после неё (08.10.2026; в полном прогоне это
+    прятал алфавитный порядок файлов).
+    """
+    try:
+        from smc import params
+    except Exception:                               # noqa: BLE001
+        yield
+        return
+    saved = {name: getattr(params, name) for name in params.DECISION if hasattr(params, name)}
+    yield
+    for name, value in saved.items():
+        setattr(params, name, value)
+
+
+@pytest.fixture(autouse=True)
 def _guard_real_settings():
     """
     Ловушка на случай, если страховка выше не сработала.
