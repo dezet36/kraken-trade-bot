@@ -881,6 +881,14 @@
   .ctl-note { font-size: 12px; color: var(--ink-3); padding: 0 20px 12px;
               margin-top: -2px; line-height: 1.5; }
   .ctl-foot + .ctl-note { margin-top: 10px; }
+  /* Источники данных (страница «Подключения»): строка на источник. */
+  .src-row { padding: 10px 20px; border-top: 1px solid var(--hairline-2); }
+  .src-head { display: flex; align-items: center; gap: 8px; }
+  .src-head .nm { font-weight: 600; }
+  .src-state { margin-left: auto; font-size: 12px; }
+  .src-line { font-size: 12.5px; color: var(--ink-2); margin-top: 3px;
+              overflow-wrap: anywhere; line-height: 1.45; }
+  .src-line.muted { color: var(--ink-3); }
   /* Внутри карточки с полями отступ уже есть у самой карточки: без этого
      подсказка оказывалась сдвинутой на 40px и не совпадала с кнопками. */
   .card-pad > .ctl-note { padding-left: 0; padding-right: 0; }
@@ -975,6 +983,7 @@
       <section class="page" data-page="connect" hidden>
         <div id="connect-intro"></div>
         <div id="exchange"></div>
+        <div id="sources"></div>
         <div id="keys"></div>
       </section>
 
@@ -2534,6 +2543,7 @@ function showPage() {
   if (page === 'connect') {
     renderKeys(DATA && DATA.writable !== false);
     if (!SETTINGS) loadSettings();
+    loadSources();
   }
 
   const def = PAGE_IDS.find(p => p.id === page);
@@ -4398,6 +4408,63 @@ async function loadSettings() {
     renderNotify(WRITABLE);
     renderExchange(WRITABLE);
   } catch (e) { /* панель просто не появится */ }
+}
+
+/* ── Источники данных ─────────────────────────────────────────────────────
+   Откуда бот берёт информацию для торговли (реестр data/sources.py): адрес,
+   запасные адреса, прокси, что источник даёт, кто его читает и отвечает ли
+   он. Отказ источника неотличим от тихого рынка, если не показать, когда он
+   отвечал в последний раз. Адреса меняются файлом на сервере, а не здесь: у
+   панели нет пароля, а подменённый адрес — это подменённые котировки. */
+let SOURCES = null;
+
+async function loadSources() {
+  try {
+    SOURCES = await (await fetch('/api/sources', { cache: 'no-store' })).json();
+  } catch (e) { SOURCES = null; }
+  renderSources();
+}
+
+function renderSources() {
+  const box = el('sources');
+  if (!box) return;
+  const list = (SOURCES && SOURCES.sources) || [];
+  if (!list.length) { box.innerHTML = ''; return; }
+  const minsAgo = t => t ? Math.max(0, Math.round((Date.now() / 1000 - t) / 60)) : null;
+  const rows = list.map(s => {
+    const okAge = minsAgo(s.last_ok);
+    const color = s.status === 'отвечает' ? 'var(--good)'
+      : s.status === 'сбой' ? 'var(--bad)' : 'var(--ink-3)';
+    const extra = [];
+    if ((s.fallbacks || []).length) extra.push('запасные: ' + s.fallbacks.map(u => `<code>${esc(u)}</code>`).join(', '));
+    if (s.proxy) extra.push('прокси: <code>' + esc(s.proxy) + '</code>');
+    if (s.overridden) extra.push('задано оператором');
+    const health = s.status === 'нет запросов' ? 'запросов с запуска не было'
+      : `отвечал ${okAge === null ? 'ещё ни разу' : okAge + ' мин назад'}`
+        + (s.ms != null ? ` · ${Math.round(s.ms)} мс` : '')
+        + ` · ответов ${s.ok}` + (s.fail ? `, отказов ${s.fail}` : '');
+    return `<div class="src-row">
+      <div class="src-head"><b style="color:${color}">●</b>
+        <span class="nm">${esc(s.title)}</span>
+        <span class="src-state" style="color:${color}">${esc(s.status)}</span></div>
+      <div class="src-line"><code>${esc(s.url)}</code>${extra.length ? ' · ' + extra.join(' · ') : ''}</div>
+      <div class="src-line">даёт: ${(s.provides || []).map(esc).join(', ')}</div>
+      <div class="src-line muted">читают: ${(s.readers || []).map(esc).join(', ')}${s.limit ? ' · ' + esc(s.limit) : ''}</div>
+      <div class="src-line muted">${health}</div>
+      ${s.status === 'сбой' && s.error ? `<div class="src-line neg">${esc(s.error)}</div>` : ''}
+    </div>`;
+  }).join('');
+  box.innerHTML = `<div class="panel">
+    <div class="ctl-head"><span class="nm">Источники данных</span>
+      <span style="margin-left:auto;font-size:12px;color:var(--ink-3)">откуда бот берёт информацию</span></div>
+    ${rows}
+    <div class="ctl-note" style="margin-top:10px">Адрес, запасные адреса и прокси
+      меняются файлом <code>${esc(SOURCES.file || 'data_sources.json')}</code> на
+      сервере (как — в описании <code>data/sources.py</code>), а не здесь: у
+      панели нет пароля, а подменённый адрес — это подменённые котировки.
+      Отказ источника не останавливает торговлю: в разметке будет прочерк, в
+      журнале — строка.</div>
+  </div>`;
 }
 
 /* ── Подключение к бирже ──────────────────────────────────────────────────

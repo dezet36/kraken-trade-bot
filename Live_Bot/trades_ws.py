@@ -29,10 +29,10 @@ import threading
 import time
 
 import config
+from data import sources
 from logger import log
 
 PATH = os.path.join(config.DATA_DIR, 'positioning', 'delta.jsonl')
-WS_URL = os.getenv('BYBIT_WS_PUBLIC', 'wss://stream.bybit.com/v5/public/linear')
 PING_SEC = 20
 BUCKET_MS = 60_000
 
@@ -99,6 +99,7 @@ def _run():
                 _stats['error'] = str(exc)[:200]
                 _stats['connected'] = False
                 _stats['reconnects'] += 1
+            sources.mark_fail('bybit_ws', exc)
             log(f'   лента сделок: соединение оборвалось — {exc}; повтор через {backoff} с')
         flush(force=True)
         time.sleep(backoff)
@@ -112,9 +113,15 @@ async def _session():
 
     subscribed = set()
     connector = aiohttp.TCPConnector(resolver=aiohttp.ThreadedResolver())
+    # Адрес и прокси — из реестра источников (data/sources.py); после обрыва —
+    # следующий запасной адрес, если оператор их задал.
+    choices = sources.urls('bybit_ws')
+    address = choices[_stats['reconnects'] % len(choices)]
     async with aiohttp.ClientSession(connector=connector) as session:
-        async with session.ws_connect(WS_URL, heartbeat=None, timeout=30,
-                                      max_msg_size=4 * 1024 * 1024) as ws:
+        async with session.ws_connect(address, heartbeat=None, timeout=30,
+                                      max_msg_size=4 * 1024 * 1024,
+                                      proxy=sources.proxy('bybit_ws')) as ws:
+            sources.mark_ok('bybit_ws', via=address)
             with _lock:
                 _stats['connected'] = True
                 _stats['since'] = _stats['since'] or int(time.time() * 1000)
@@ -154,6 +161,7 @@ async def _session():
                 if now - last_flush >= 15:
                     flush()
                     last_flush = now
+                    sources.mark_ok('bybit_ws')
 
 
 def handle(text, now_ms=None):

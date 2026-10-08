@@ -187,15 +187,24 @@ def effective_mode(client, requested):
 
 
 def make_market_client(exchange_name: str = 'bybit'):
-    """Keyless клиент для публичных market-data (OHLCV) — общий на весь скан, LIVE endpoint."""
+    """
+    Keyless клиент для публичных market-data (OHLCV) — общий на весь скан, LIVE endpoint.
+
+    Адрес и прокси — из реестра источников (data/sources.py, этап 3): без правок
+    оператора адреса те же, что всегда; каждый запрос клиента отмечает здоровье
+    источника на панели.
+    """
     global _market_client
     if _market_client is not None:
         return _market_client
+    from data import sources
     name = (exchange_name or 'bybit').lower()
     if name == 'bingx':
         _market_client = ccxt.bingx({'enableRateLimit': True, 'options': {'defaultType': 'swap'}, 'timeout': 30000})
+        sources.instrument_ccxt(_market_client, 'bingx')
     else:
         _market_client = ccxt.bybit({'enableRateLimit': True, 'options': {'defaultType': 'linear'}, 'timeout': 30000})
+        sources.instrument_ccxt(_market_client, 'bybit')
     return _market_client
 
 

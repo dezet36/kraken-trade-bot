@@ -12,12 +12,13 @@
 import json
 import os
 import time
-import urllib.request
 
 import config
+from data import sources
 from logger import log
 
-URL = 'https://api.bybit.com/v5/announcements/index?locale=en-US&limit=20'
+# Адрес Bybit — в реестре источников (data/sources.py), путь — здесь.
+PATH = '/v5/announcements/index?locale=en-US&limit=20'
 _last_poll = {'ts': 0}
 _seen = set()
 
@@ -47,8 +48,7 @@ def poll(now_s=None, every_s=3600):
         return 0
     _last_poll['ts'] = now_s
     try:
-        with urllib.request.urlopen(URL, timeout=20) as r:
-            items = (json.loads(r.read()).get('result') or {}).get('list') or []
+        items = (sources.get('bybit', PATH).get('result') or {}).get('list') or []
     except Exception as exc:                          # noqa: BLE001
         log(f'   новости Bybit: не прочитаны ({exc})')
         return 0

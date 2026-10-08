@@ -1645,6 +1645,15 @@ class _Handler(BaseHTTPRequestHandler):
                 self._fail(404, 'свечей за этот период нет')
                 return
             self._send_json(data)
+        elif path == '/api/sources':
+            # Источники данных (data/sources.py): адреса без паролей, что даёт
+            # каждый, кто его читает, и отвечает ли он. Только чтение: адреса
+            # меняются файлом на сервере, не с панели.
+            try:
+                from data import sources
+                self._send_json(sources.snapshot())
+            except Exception as exc:               # noqa: BLE001
+                self._fail(500, f'источники данных недоступны: {exc}')
         elif path == '/api/settings/history':
             # Отдельная выдача, а не часть общей: история нужна редко, а
             # общая выдача опрашивается каждые несколько секунд.

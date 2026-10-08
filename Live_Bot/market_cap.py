@@ -27,14 +27,14 @@ STALE_MIN минут — прочерк, не последнее известн�
 import json
 import os
 import time
-import urllib.request
 
 import config
+from data import sources
 from logger import log
 
 TOP = 125
-SUPPLY_URL = ('https://api.coingecko.com/api/v3/coins/markets'
-              f'?vs_currency=usd&order=market_cap_desc&per_page={TOP}&page=1')
+# Адрес CoinGecko — в реестре источников (data/sources.py), путь — здесь.
+SUPPLY_PATH = f'/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page={TOP}&page=1'
 SUPPLY_REFRESH_SEC = 3600          # предложение обновляется раз в час
 SUPPLY_MAX_AGE_SEC = 48 * 3600     # старше двух суток — не считаем
 COLLECT_EVERY_SEC = 290            # раз в цикл бота
@@ -67,9 +67,7 @@ def _load_supply():
 
 
 def _fetch_supply(timeout=20):
-    req = urllib.request.Request(SUPPLY_URL, headers={'User-Agent': 'kraken-bot/1.0'})
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
-        raw = json.loads(resp.read().decode('utf-8'))
+    raw = sources.get('coingecko', SUPPLY_PATH, timeout=timeout)
     coins = []
     for c in raw or []:
         try:

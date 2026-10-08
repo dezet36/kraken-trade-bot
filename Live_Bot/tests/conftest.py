@@ -184,6 +184,8 @@ def _guard_real_settings():
                 # счета стратегий (accounts/paper.py, с 08.10.2026) и копия
                 # настроек, сделанная при переносе денег в счета
                 'accounts.json', 'runtime_settings.before_accounts.json',
+                # адреса источников данных (data/sources.py)
+                'data_sources.json',
                 'paper_trades.csv', 'paper_trades.jsonl', 'paper_state.json',
                 'positions_state.json', 'pending_orders.json')]
 

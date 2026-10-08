@@ -22,11 +22,11 @@ tests/test_market_mood.py.
 import json
 import os
 import time
-import urllib.request
 
 import pandas as pd
 
 import config
+from data import sources
 from logger import log
 
 H = 3_600_000
@@ -36,12 +36,6 @@ _state = {'hour': None}
 
 def path():
     return os.path.join(config.DATA_DIR, 'market_mood.jsonl')
-
-
-def _get(url, timeout=20):
-    req = urllib.request.Request(url, headers={'User-Agent': 'kraken-bot'})
-    with urllib.request.urlopen(req, timeout=timeout) as r:
-        return json.loads(r.read())
 
 
 def _last_closed_hour(now_ms):
@@ -86,26 +80,27 @@ def _fetch(t_ms):
     got = {}
     try:
         start = t_ms - 31 * 24 * H
-        r = _get(f'https://www.deribit.com/api/v2/public/get_volatility_index_data?currency=BTC'
-                 f'&start_timestamp={start}&end_timestamp={t_ms + H - 1}&resolution=3600')['result']['data']
+        # Адреса — из реестра источников (data/sources.py), пути — здесь.
+        r = sources.get('deribit', f'/api/v2/public/get_volatility_index_data?currency=BTC'
+                        f'&start_timestamp={start}&end_timestamp={t_ms + H - 1}&resolution=3600')['result']['data']
         got['dvol'] = _series(r, 0, 4)
     except Exception as exc:                          # noqa: BLE001
         log(f'   настроение рынка: DVOL не прочитан ({exc})')
     try:
         a = (t - pd.Timedelta(hours=6)).strftime('%Y-%m-%dT%H:%M:%SZ')
         b = (t + pd.Timedelta(hours=1)).strftime('%Y-%m-%dT%H:%M:%SZ')
-        r = _get(f'https://api.exchange.coinbase.com/products/BTC-USD/candles?granularity=3600&start={a}&end={b}')
+        r = sources.get('coinbase', f'/products/BTC-USD/candles?granularity=3600&start={a}&end={b}')
         got['cb_close'] = _series(r, 0, 4, scale=1000)
     except Exception as exc:                          # noqa: BLE001
         log(f'   настроение рынка: Coinbase не прочитан ({exc})')
     try:
-        r = _get(f'https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1h&endTime={t_ms + H - 1}&limit=30')
+        r = sources.get('binance_spot', f'/api/v3/klines?symbol=BTCUSDT&interval=1h&endTime={t_ms + H - 1}&limit=30')
         got['spot_close'] = _series(r, 0, 4)
         got['spot_qv'] = _series(r, 0, 7)
     except Exception as exc:                          # noqa: BLE001
         log(f'   настроение рынка: спот Binance не прочитан ({exc})')
     try:
-        r = _get(f'https://fapi.binance.com/fapi/v1/klines?symbol=BTCUSDT&interval=1h&endTime={t_ms + H - 1}&limit=30')
+        r = sources.get('binance_futures', f'/fapi/v1/klines?symbol=BTCUSDT&interval=1h&endTime={t_ms + H - 1}&limit=30')
         got['perp_qv'] = _series(r, 0, 7)
     except Exception as exc:                          # noqa: BLE001
         log(f'   настроение рынка: фьючерс Binance не прочитан ({exc})')

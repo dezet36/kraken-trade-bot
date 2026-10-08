@@ -18,11 +18,11 @@ DATA_DIR/flow/<пара>.jsonl — новый источник сначала л
 import json
 import os
 import time
-import urllib.request
 
 import pandas as pd
 
 import config
+from data import sources
 from logger import log
 
 H = 3_600_000
@@ -35,11 +35,6 @@ _frames = {}              # пара -> та же таблица с индекс
 _last_hour = {}           # пара -> метка последнего закрытого часа в таблице (мс)
 
 
-def _get(url, timeout=20):
-    with urllib.request.urlopen(url, timeout=timeout) as r:
-        return json.loads(r.read())
-
-
 def last_closed_hour(now_ms=None):
     """Метка открытия последнего ЗАКРЫТОГО часа (мс)."""
     now_ms = int(time.time() * 1000) if now_ms is None else int(now_ms)
@@ -50,8 +45,9 @@ def _binance(pair, start_ms, end_ms):
     sym = BINANCE.get(pair, pair)
     rows, start = [], start_ms
     while start <= end_ms:
-        batch = _get(f'https://fapi.binance.com/fapi/v1/klines?symbol={sym}&interval=1h'
-                     f'&startTime={start}&endTime={end_ms + H - 1}&limit=1500')
+        # Адрес — из реестра источников (data/sources.py), путь — здесь.
+        batch = sources.get('binance_futures', f'/fapi/v1/klines?symbol={sym}&interval=1h'
+                            f'&startTime={start}&endTime={end_ms + H - 1}&limit=1500')
         if not batch:
             break
         rows += batch
@@ -68,18 +64,18 @@ def _bybit_ratio(pair, start_ms, end_ms):
     out, start = {}, start_ms
     while start <= end_ms:
         stop = min(start + 499 * H, end_ms)
-        r = _get(f'https://api.bybit.com/v5/market/account-ratio?category=linear&symbol={pair}&period=1h'
-                 f'&limit=500&startTime={start}&endTime={stop}')
+        r = sources.get('bybit', f'/v5/market/account-ratio?category=linear&symbol={pair}&period=1h'
+                        f'&limit=500&startTime={start}&endTime={stop}')
         for x in (r.get('result') or {}).get('list') or []:
             out[int(x['timestamp'])] = float(x['buyRatio'])
         start = stop + H
     return pd.Series(out, dtype=float).sort_index()
 
 
-def _bybit_back(url_of, key_ts, key_val, start_ms, end_ms):
+def _bybit_back(path_of, key_ts, key_val, start_ms, end_ms):
     out, end = {}, end_ms
     while end >= start_ms:
-        batch = (_get(url_of(end)).get('result') or {}).get('list') or []
+        batch = (sources.get('bybit', path_of(end)).get('result') or {}).get('list') or []
         if not batch:
             break
         for x in batch:
@@ -102,7 +98,7 @@ def _fetch(pair, start_ms, end_ms):
         log(f'   flow {pair}: доля счетов в лонге не прочитана ({exc})')
         df['buy_ratio'] = float('nan')
     try:
-        oi = _bybit_back(lambda e: f'https://api.bybit.com/v5/market/open-interest?category=linear&symbol={pair}'
+        oi = _bybit_back(lambda e: f'/v5/market/open-interest?category=linear&symbol={pair}'
                                    f'&intervalTime=1h&limit=200&endTime={e}',
                          'timestamp', 'openInterest', start_ms, end_ms)
         df['oi'] = oi.reindex(df.index)
@@ -112,7 +108,7 @@ def _fetch(pair, start_ms, end_ms):
     try:
         # Фандинг выплачивается раз в 8 ч: берём с запасом назад и протягиваем
         # вперёд с момента выплаты — будущего в строке нет.
-        fr = _bybit_back(lambda e: f'https://api.bybit.com/v5/market/funding/history?category=linear'
+        fr = _bybit_back(lambda e: f'/v5/market/funding/history?category=linear'
                                    f'&symbol={pair}&limit=200&endTime={e}',
                          'fundingRateTimestamp', 'fundingRate', start_ms - 9 * H, end_ms)
         df['funding'] = fr.reindex(df.index, method='ffill') if len(fr) else float('nan')
