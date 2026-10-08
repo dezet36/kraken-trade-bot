@@ -175,3 +175,9 @@ Live_Bot/window_profile/
 Live_Bot/*.csv
 Live_Bot/*.jsonl
 Live_Bot/bot_log.txt.*
+
+# Архив локальных данных, убранных из папки кода (реорганизация, этап 0,
+# 08.10.2026): сотни мегабайт журналов и профилей окна — не для git; в git —
+# только README с описанием.
+History/live_bot_local_*/*
+!History/live_bot_local_*/README.md
