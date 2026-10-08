@@ -384,3 +384,62 @@ def scan_for_setups(pairs, trade_manager, client=None, balance=None):
     report.finish('SMC')
     candidates.sort(key=lambda c: (-c['score'], -c['rr']))
     return candidates
+
+
+# ── Единый набор функций реестра стратегий (strategies/registry.py, 08.10.2026) ──
+# Раньше эти куски жили ветками в общих модулях: сканирование и сборка сигнала —
+# в bot.py, величины исполнения — в strategy_profile.py, разметка — в
+# setup_geometry.py. Поведение не изменилось — его держат эталоны tests/golden/.
+
+def scan(pairs, gate, client=None, balance=None):
+    return scan_for_setups(pairs, gate, client=client, balance=balance)
+
+
+def build_signal(candidate, balance):
+    pair = candidate['pair']
+    signal = candidate['signal']
+    smc_info = signal['smc']
+    signal['scan'] = {
+        'confluence': smc_info['confluence'],
+        'poi_type': smc_info['poi_type'],
+        'factors': [k for k, ok in smc_info['factors'].items() if ok],
+        'sweep': smc_info['sweep'],
+        'rr_first': smc_info['rr_first'],
+        'rr_final': smc_info['rr_final'],
+    }
+    log(f"\n[SMC] {pair}: зона {candidate['poi_type']}, "
+        f"confluence {candidate['score']}, RR {candidate['rr']:.2f}")
+    return signal, candidate.get('df_1h')
+
+
+def profile():
+    # Модуль параметров — заново при каждом вызове: тесты перезагружают его, и
+    # схваченный при импорте адаптера был бы чужим (как и в strategy_profile).
+    from smc import params as p
+    return {'expiry_hours': p.PENDING_ORDER_MAX_HOURS, 'cooldown_hours': p.COOLDOWN_HOURS,
+            'cost_limit_pct': p.MAX_ENTRY_COST_SHARE_PCT, 'max_hold_hours': p.MAX_POSITION_HOLD_HOURS,
+            'drops_at_target': p.CANCEL_PENDING_AT_TARGET, 'fills_through_market': p.FILL_THROUGH_MARKET}
+
+
+def geometry(signal, g):
+    import glossary
+    smc = signal.get('smc') or {}
+    g.band(smc.get('poi_bottom'), smc.get('poi_top'),
+           glossary.poi_type(smc.get('poi_type')), main=True)
+    # Имбаланс — вторая половина основания сделки. Он участвует в отборе, но на
+    # графике его не было вовсе.
+    g.band(smc.get('fvg_bottom'), smc.get('fvg_top'), 'имбаланс (FVG)')
+    g.leg('начало движения', 'конец движения')
+    # ОТ ЧЕГО СТРОИЛАСЬ СТРУКТУРА. Ордер-блок показывает, ГДЕ вход; пробитый
+    # уровень и снятая ликвидность отвечают, ПОЧЕМУ вообще эта сторона.
+    if smc.get('structure_level'):
+        g.lines.append({
+            'price': float(smc['structure_level']),
+            'label': (glossary.structure_event(smc.get('structure_type'))
+                      + ' · пробитый уровень'),
+        })
+    if smc.get('sweep_price'):
+        g.lines.append({
+            'price': float(smc['sweep_price']),
+            'label': (glossary.liquidity_side(smc.get('sweep_side')) + ' · снята'),
+        })

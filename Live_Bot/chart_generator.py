@@ -44,14 +44,8 @@ def _strategy_of(signal: dict) -> str:
     Неизвестный сигнал отдаёт пустую строку, и разметка получится пустой:
     график останется прежним, но не сломается.
     """
-    for section, name in (('llm', 'LLM'), ('smc', 'SMC'), ('levels', 'LEVELS'),
-                          ('rsibb', 'RSIBB'), ('smcs', 'SMCS'),
-                          ('fib12', 'FIB12')):
-        if signal.get(section):
-            return name
-    if signal.get('zone_a') or signal.get('zone_b'):
-        return 'FIBO'
-    return ''
+    from strategies import registry
+    return registry.strategy_of(signal)
 
 
 # Окно картинки плана ИИ в свечах и сколько пулов ликвидности подписывать.

@@ -16,8 +16,6 @@ Telegram. Второй её не получал вовсе и годами ри�
 ордер-блок перед ним или зона Фибоначчи.
 """
 
-import config
-import glossary
 
 
 def build(strategy, signal):
@@ -97,133 +95,14 @@ def build(strategy, signal):
                     'to': end_at, 'to_price': float(setup['end_price']),
                 }
 
-    if strategy == 'FIBO':
-        za, zb = signal.get('zone_a') or {}, signal.get('zone_b') or {}
-        # Границы в подписи берутся ИЗ КОНФИГА, а не пишутся руками.
-        # Написанная руками подпись зоны B утверждала «61.8–88.6%», тогда
-        # как зона стоит на 78.6–88.6%: на графике всё было нарисовано
-        # правильно, а прочитать с него можно было неверное число.
-        def _pct(value):
-            return f'{value * 100:.1f}'.rstrip('0').rstrip('.')
-
-        # Зона A — главная: именно в ней стоит лимит. Зона B показывает,
-        # где сетап перестаёт быть действительным.
-        band(za.get('bottom'), za.get('top'),
-             f'зона A · {_pct(config.ZONE_A_BOTTOM)}–{_pct(config.ZONE_A_TOP)}%',
-             main=True)
-        band(zb.get('bottom'), zb.get('top'),
-             f'зона B · {_pct(config.ZONE_B_BOTTOM)}–{_pct(config.ZONE_B_TOP)}%')
-        leg('начало импульса', 'конец импульса')
-    elif strategy == 'LLM':
-        # План модели: уровни, из которых она выбирала, — те, что вошли в
-        # план (вход, стоп, цели, инвалидация), плюс уровень условия входа.
-        # Остальные уровни списка не рисуются: шестнадцать подписей делают
-        # график нечитаемым, а решение стояло на этих.
-        llm = signal.get('llm') or {}
-        ids = llm.get('ids') or {}
-        by_id = {lv.get('id'): lv for lv in (llm.get('levels') or [])}
-        used = {ids.get('entry'): 'вход', ids.get('stop'): 'стоп', ids.get('inval'): 'инвалидация'}
-        for k, tp_id in enumerate(ids.get('tp') or [], start=1):
-            used.setdefault(tp_id, f'цель {k}')
-        trigger_id = llm.get('trigger_id')
-        if trigger_id and trigger_id not in used:
-            used[trigger_id] = f"условие · {llm.get('trigger_when', '')}"
-        for level_id, role in used.items():
-            lv = by_id.get(level_id)
-            if not lv or not lv.get('price'):
-                continue
-            lines.append({'price': float(lv['price']),
-                          'label': f"{level_id} · {lv.get('kind', '')} · {role}",
-                          'main': role in ('вход', 'стоп')})
-    elif strategy == 'SMC':
-        smc = signal.get('smc') or {}
-        band(smc.get('poi_bottom'), smc.get('poi_top'),
-             glossary.poi_type(smc.get('poi_type')), main=True)
-        # Имбаланс — вторая половина основания сделки. Он участвует в
-        # отборе, но на графике его не было вовсе.
-        band(smc.get('fvg_bottom'), smc.get('fvg_top'), 'имбаланс (FVG)')
-        leg('начало движения', 'конец движения')
-        # ОТ ЧЕГО СТРОИЛАСЬ СТРУКТУРА. Ордер-блок показывает, ГДЕ вход;
-        # пробитый уровень и снятая ликвидность отвечают, ПОЧЕМУ вообще
-        # эта сторона. Оба значились в факторах отбора и оба до графика не
-        # доходили — на картинке было видно следствие без причины.
-        if smc.get('structure_level'):
-            lines.append({
-                'price': float(smc['structure_level']),
-                'label': (glossary.structure_event(smc.get('structure_type'))
-                          + ' · пробитый уровень'),
-            })
-        if smc.get('sweep_price'):
-            lines.append({
-                'price': float(smc['sweep_price']),
-                'label': (glossary.liquidity_side(smc.get('sweep_side'))
-                          + ' · снята'),
-            })
-    elif strategy == 'SMCS':
-        sm = signal.get('smcs') or {}
-        # Сетап SMCS — сам слом: свинг, за которым закрылась свеча 4ч, и
-        # нога, его сломавшая. Вход по рынку, поэтому главной зоны нет;
-        # ордер-блок ноги — граница, за которой стоит стоп.
-        leg('начало ноги — за ним стоп', 'экстремум ноги')
-        if sm.get('level'):
-            lines.append({'price': float(sm['level']),
-                          'label': 'сломанный свинг 4ч (BOS)', 'main': True})
-        band(sm.get('ob_lo'), sm.get('ob_hi'), 'ордер-блок ноги')
-    elif strategy == 'FIB12':
-        fb = signal.get('fib12') or {}
-        # Сетап — импульс 12ч и откат к 38.2%: нога, уровень входа и
-        # уровень 78.6%, за которым стоп (глубже откат уже ломает импульс).
-        leg('начало импульса (A)', 'конец импульса (B)')
-        if fb.get('entry'):
-            lines.append({'price': float(fb['entry']), 'label': 'откат 38.2% — вход', 'main': True})
-        if fb.get('level_786'):
-            lines.append({'price': float(fb['level_786']), 'label': 'откат 78.6% — за ним стоп'})
-    elif strategy == 'LEVELS':
-        lv = signal.get('levels') or {}
-        if lv.get('level'):
-            count = lv.get('touches')
-            lines.append({
-                'price': float(lv['level']),
-                'label': f"уровень · касаний {count}" if count else 'уровень',
-                # Главная линия сетапа: у этой стратегии уровень — не
-                # вспомогательная разметка, а сам повод для сделки.
-                # Рисовалась она тем же бледным пунктиром, что и края
-                # импульса у соседей, и на графике её приходилось искать.
-                'main': True,
-            })
-        # Сетап этой стратегии — сам уровень, а уровень сделан касаниями.
-        # Поэтому её график разворачивается до ПЕРВОГО касания, а не до
-        # начала какого-то движения: движения тут нет вовсе. Без этого
-        # окно начиналось за час до входа, подпись обещала «касаний 3», а
-        # проверить это на картинке было нечем.
-        start_at = _iso_time(setup.get('start_time'))
-        if start_at:
-            out['from'] = start_at
-        points = [p for p in (setup.get('touches_at') or [])
-                  if p.get('at') and p.get('price')]
-        if points:
-            out['touches'] = points
-    elif strategy == 'RSIBB':
-        bb = signal.get('rsibb') or {}
-        # Канал целиком — это и есть сетап: цена вышла за край, цель на
-        # середине. Без обеих границ на графике видно только вход и цель,
-        # а откуда они взялись — нет.
-        band(bb.get('lower'), bb.get('upper'),
-             f"канал Боллинджера · RSI {bb['rsi']:.0f}" if bb.get('rsi')
-             is not None else 'канал Боллинджера')
-        if bb.get('mid'):
-            lines.append({'price': float(bb['mid']),
-                          'label': 'средняя линия — цель', 'main': True})
-        if bb.get('band'):
-            lines.append({
-                'price': float(bb['band']),
-                'label': 'полоса — вход',
-                # Главная линия сетапа: именно на ней стоит лимитная
-                # заявка, и вся арифметика издержек держится на том, что
-                # цена приходит к ней сама.
-                'main': True,
-            })
-        start_at = _iso_time(setup.get('start_time'))
-        if start_at:
-            out['from'] = start_at
+    # Разметка своя у каждой стратегии и живёт в её адаптере (geometry): здесь
+    # — общие помощники и один вызов. Неизвестная стратегия — пустая разметка:
+    # график останется прежним, но не сломается.
+    from types import SimpleNamespace
+    from strategies import registry
+    if registry.get(strategy) is None:
+        return out
+    g = SimpleNamespace(band=band, leg=leg, lines=lines, out=out, setup=setup,
+                        iso_time=_iso_time)
+    registry.adapter(strategy).geometry(signal, g)
     return out

@@ -1155,6 +1155,13 @@ const NAMES  = { FIBO: 'Фибоначчи', SMC: 'Smart Money', LEVELS: 'Уро
 const COLOR  = { FIBO: 'var(--fibo)', SMC: 'var(--smc)', LEVELS: 'var(--levels)',
                  RSIBB: 'var(--rsibb)', LLM: 'var(--llm)', SMCS: 'var(--smcs)',
                  FIB12: 'var(--fib12)' };
+// Реестр стратегий (strategies/registry.py) вставляет панель при отдаче страницы:
+// имена — оттуда, цвет — переменная CSS с кодом стратегии. Новая стратегия
+// появляется здесь без правки этого файла.
+(window.STRATEGY_REGISTRY || []).forEach(s => {
+  NAMES[s.code] = s.title;
+  if (!COLOR[s.code]) COLOR[s.code] = `var(--${s.code.toLowerCase()})`;
+});
 /* ── Описания стратегий ──────────────────────────────────────────────────
    Числа здесь — НЕ круглые примеры, а фактические значения из кода: пороги
    импульса, множитель полос, доли отката. Описание, разошедшееся с кодом,

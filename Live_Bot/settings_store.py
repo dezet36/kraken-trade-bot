@@ -31,7 +31,9 @@ SETTINGS_FILE = os.path.join(config.DATA_DIR, 'runtime_settings.json')
 # прошла (smcs/params.py, research/smcz/PROTOCOL.md).
 # FIB12 (Фибо 12ч) добавлена 07.10.2026: ФИБО, собранная с нуля, прошла приёмку
 # протокола (research/fibz/PROTOCOL.md); торгуется рядом со старой ФИБО.
-STRATEGIES = ('FIBO', 'SMC', 'LEVELS', 'RSIBB', 'LLM', 'SMCS', 'FIB12')
+# С 08.10.2026 список — из реестра стратегий (strategies/registry.py).
+from strategies import registry as _registry
+STRATEGIES = _registry.codes()
 
 # Ноль в поле «одновременных позиций» означает «без предела». Ноль выбран
 # потому, что так же уже устроены пределы портфеля и дневного убытка: одно

@@ -1099,3 +1099,96 @@ def _collect(finished, candles=None):
         ready['df_1h'] = df
         out.append(ready)
     return out
+
+
+# ── Единый набор функций реестра стратегий (strategies/registry.py, 08.10.2026) ──
+# Раньше эти куски жили ветками в общих модулях: сканирование и сборка сигнала —
+# в bot.py, величины исполнения — в strategy_profile.py, разметка — в
+# setup_geometry.py. Поведение не изменилось — его держат эталоны tests/golden/.
+
+def scan(pairs, gate, client=None, balance=None):
+    # Те же пары, что и у остальных, и никаких чужих кандидатов: модель обходит
+    # рынок сама (см. шапку модуля).
+    return scan_for_setups(pairs, gate, client=client, balance=balance)
+
+
+def build_signal(candidate, balance):
+    pair = candidate['pair']
+    # Сигнал собран моделью и уже проверен llm_decide: геометрия, минимальный
+    # стоп по издержкам, отношение хода к риску и ожидание с настоящей
+    # комиссией. Пересобирать нечего.
+    signal = candidate.get('signal')
+    if not signal:
+        log(f"   LLM {pair}: кандидат без сигнала — пропускаю")
+        return None, None
+    llm = signal.get('llm') or {}
+    signal['scan'] = {
+        'score': candidate.get('score'),
+        'rr_est': candidate.get('rr'),
+        'p': llm.get('p'),
+        'ev': llm.get('ev'),
+        'poi_type': 'LLM',
+    }
+    if llm.get('mode') == 'notebook':
+        # У тетради нет вероятности и конфлюенса — её «почему» и есть суть сделки.
+        log(f"\n[LLM] {pair}: {signal['setup'].get('type')} · {str(llm.get('why') or '')[:160]}")
+    else:
+        log(f"\n[LLM] {pair}: {signal['setup'].get('type')}, "
+            f"вероятность {llm.get('p')}, конфлюенс {llm.get('votes')}/5")
+    return signal, candidate.get('df_1h')
+
+
+def _rules():
+    """Правила ИИ, если он в режиме «правила» (LLM_MODE=rules); в режиме тетради
+    — её исполнение (те же имена); иначе None."""
+    import llm_rules
+    if llm_rules.enabled():
+        return llm_rules.DECISION
+    import llm_notebook
+    return llm_notebook.EXECUTION if llm_notebook.enabled() else None
+
+
+def profile():
+    # config — заново при каждом вызове: тесты перезагружают его, и
+    # схваченный при импорте адаптера был бы чужим (как и в strategy_profile).
+    import config
+    rules = _rules()
+    if rules is not None:
+        return {'expiry_hours': rules.PENDING_ORDER_MAX_HOURS, 'cooldown_hours': rules.COOLDOWN_HOURS,
+                'cost_limit_pct': rules.MAX_ENTRY_COST_SHARE_PCT,
+                'max_hold_hours': rules.MAX_POSITION_HOLD_HOURS,
+                'drops_at_target': rules.CANCEL_PENDING_AT_TARGET,
+                'fills_through_market': rules.FILL_THROUGH_MARKET,
+                'limit_offset_pct': getattr(config, 'LLM_LIMIT_ENTRY_OFFSET_PCT', 0.0),
+                'min_stop_pct': float(rules.MIN_SL_PCT) * 100}
+    import llm_context
+    # План модели: заявка живёт столько же, сколько ждёт условия план.
+    return {'expiry_hours': getattr(config, 'LLM_TRIGGER_TTL_H', 12) or 12,
+            'cooldown_hours': getattr(config, 'LLM_COOLDOWN_HOURS', 4.0),
+            'cost_limit_pct': getattr(config, 'LLM_MAX_ENTRY_COST_SHARE_PCT', 5.0),
+            'max_hold_hours': getattr(config, 'LLM_MAX_HOLD_HOURS', 336.0),
+            'fills_through_market': getattr(config, 'LLM_FILL_THROUGH_MARKET', True),
+            'limit_offset_pct': getattr(config, 'LLM_LIMIT_ENTRY_OFFSET_PCT', 0.0),
+            'min_stop_pct': float(llm_context.min_stop_pct())}
+
+
+def geometry(signal, g):
+    # План модели: уровни, из которых она выбирала, — те, что вошли в план
+    # (вход, стоп, цели, инвалидация), плюс уровень условия входа. Остальные
+    # уровни списка не рисуются: шестнадцать подписей делают график нечитаемым.
+    llm = signal.get('llm') or {}
+    ids = llm.get('ids') or {}
+    by_id = {lv.get('id'): lv for lv in (llm.get('levels') or [])}
+    used = {ids.get('entry'): 'вход', ids.get('stop'): 'стоп', ids.get('inval'): 'инвалидация'}
+    for k, tp_id in enumerate(ids.get('tp') or [], start=1):
+        used.setdefault(tp_id, f'цель {k}')
+    trigger_id = llm.get('trigger_id')
+    if trigger_id and trigger_id not in used:
+        used[trigger_id] = f"условие · {llm.get('trigger_when', '')}"
+    for level_id, role in used.items():
+        lv = by_id.get(level_id)
+        if not lv or not lv.get('price'):
+            continue
+        g.lines.append({'price': float(lv['price']),
+                        'label': f"{level_id} · {lv.get('kind', '')} · {role}",
+                        'main': role in ('вход', 'стоп')})

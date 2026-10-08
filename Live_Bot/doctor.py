@@ -182,14 +182,11 @@ def _strategy_risks():
     import config
     import settings_store as settings
     out = []
-    sources = (
-        ('FIBO', lambda: config.RISK_PER_TRADE),
-        ('SMC', lambda: __import__('smc.params', fromlist=['x']).RISK_PER_TRADE_PCT),
-        ('LEVELS', lambda: __import__('levels.params', fromlist=['x']).RISK_PCT),
-        ('RSIBB', lambda: __import__('rsibb.params', fromlist=['x']).RISK_PCT),
-        ('SMCS', lambda: __import__('smcs.params', fromlist=['x']).RISK_PCT),
-        ('FIB12', lambda: __import__('fib12.params', fromlist=['x']).RISK_PCT),
-    )
+    # Риск — тот, с которым стратегия торгует (настройки оператора), один для
+    # всех на тесте (CLAUDE.md «Риск»); список стратегий — из реестра.
+    from strategies import registry
+    sources = tuple((name, (lambda name=name: settings.risk_pct(name))) for name in registry.codes()
+                    if name != 'LLM')
     for name, get in sources:
         try:
             risk = float(get())
@@ -275,7 +272,7 @@ def check_limits():
         # Предел расхода на вход — у каждой стратегии свой (strategy_profile);
         # выключен он, если выключен хотя бы у одной.
         cost_limit = min(strategy_profile.cost_limit_pct(name)
-                         for name in ('FIBO', 'SMC', 'LEVELS', 'RSIBB', 'LLM', 'SMCS', 'FIB12'))
+                         for name in __import__('strategies.registry', fromlist=['x']).codes())
         off = risk_gate.disabled_limits(settings.portfolio_max_positions(),
                                         settings.portfolio_risk_pct(),
                                         settings.daily_loss_pct(),

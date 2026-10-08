@@ -100,6 +100,7 @@ def test_fibo_still_rebuilds_from_candles():
     analyze_market — и обязана вернуть None, когда сетапа там нет.
     """
     import bot
+    import strategy
 
     calls = []
 
@@ -107,13 +108,15 @@ def test_fibo_still_rebuilds_from_candles():
         calls.append(pair)
         return None
 
-    saved = bot.analyze_market
-    bot.analyze_market = fake_analyze
+    # Сетап ФИБО считает strategy.analyze_market; адаптер (strategies/fibo.py)
+    # берёт её в момент вызова.
+    saved = strategy.analyze_market
+    strategy.analyze_market = fake_analyze
     try:
         signal, df = bot._build_signal(
             {'pair': 'ETHUSDT', 'df_1h': object()}, 'FIBO', 10_000)
     finally:
-        bot.analyze_market = saved
+        strategy.analyze_market = saved
 
     assert calls == ['ETHUSDT']
     assert signal is None and df is None

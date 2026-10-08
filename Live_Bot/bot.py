@@ -106,132 +106,16 @@ def _build_signal(candidate, strategy, balance):
     позже, упрётся в явный отказ в журнале вместо тихой подмены.
     """
     pair = candidate['pair']
-
-    if strategy == 'LEVELS':
-        # Сканер уровней уже вернул готовый сигнал: он и есть результат
-        # анализа, повторять нечего.
-        signal = candidate.get('signal')
-        if not signal:
-            log(f"   LEVELS {pair}: кандидат без сигнала — пропускаю")
-            return None, None
-        lv = signal.get('levels') or {}
-        signal['scan'] = {
-            'score': candidate.get('score'),
-            'rr_est': candidate.get('rr'),
-            'touches': lv.get('touches'),
-            'volume_ratio': lv.get('volume_ratio'),
-            'mirror': lv.get('mirror'),
-        }
-        df_for_chart = candidate.get('df_1h')
-        log(f"\n[LEVELS] {pair}: уровень {lv.get('level')}, "
-            f"касаний {lv.get('touches')}, RR {candidate.get('rr', 0):.2f}")
-    elif strategy == 'SMC':
-        signal = candidate['signal']
-        smc_info = signal['smc']
-        signal['scan'] = {
-            'confluence': smc_info['confluence'],
-            'poi_type': smc_info['poi_type'],
-            'factors': [k for k, ok in smc_info['factors'].items() if ok],
-            'sweep': smc_info['sweep'],
-            'rr_first': smc_info['rr_first'],
-            'rr_final': smc_info['rr_final'],
-        }
-        df_for_chart = candidate.get('df_1h')
-        log(f"\n[SMC] {pair}: зона {candidate['poi_type']}, "
-            f"confluence {candidate['score']}, RR {candidate['rr']:.2f}")
-    elif strategy == 'RSIBB':
-        # Сканер уже вернул готовый сигнал: он и есть результат анализа.
-        signal = candidate.get('signal')
-        if not signal:
-            log(f"   RSIBB {pair}: кандидат без сигнала — пропускаю")
-            return None, None
-        bb = signal.get('rsibb') or {}
-        signal['scan'] = {
-            'score': candidate.get('score'),
-            'rr_est': candidate.get('rr'),
-            'rsi': bb.get('rsi'),
-            'adx': bb.get('adx'),
-            'stop_pct': bb.get('stop_pct'),
-        }
-        df_for_chart = candidate.get('df_1h')
-        log(f"\n[RSIBB] {pair}: полоса {bb.get('band')}, "
-            f"RSI {bb.get('rsi', 0):.0f}, RR {candidate.get('rr', 0):.2f}")
-    elif strategy == 'SMCS':
-        # Сканер уже вернул готовый сигнал: он и есть результат анализа.
-        signal = candidate.get('signal')
-        if not signal:
-            log(f"   SMCS {pair}: кандидат без сигнала — пропускаю")
-            return None, None
-        sm = signal.get('smcs') or {}
-        signal['scan'] = {
-            'score': candidate.get('score'),
-            'rr_est': candidate.get('rr'),
-            'kind': sm.get('kind'),
-            'stop_pct': sm.get('stop_pct'),
-            'disp_atr': sm.get('disp_atr'),
-            'poi_type': 'BOS',
-        }
-        df_for_chart = candidate.get('df_1h')
-        log(f"\n[SMCS] {pair}: BOS 4ч {signal['setup'].get('type')}, "
-            f"стоп {sm.get('stop_pct', 0):.2f}%, импульс {sm.get('disp_atr', 0):.1f} ATR")
-    elif strategy == 'FIB12':
-        # Сканер уже вернул готовый сигнал: он и есть результат анализа.
-        signal = candidate.get('signal')
-        if not signal:
-            log(f"   FIB12 {pair}: кандидат без сигнала — пропускаю")
-            return None, None
-        fb = signal.get('fib12') or {}
-        signal['scan'] = {
-            'score': candidate.get('score'),
-            'rr_est': candidate.get('rr'),
-            'stop_pct': fb.get('stop_pct'),
-            'size_atr': fb.get('size_atr'),
-            'poi_type': 'FIB',
-        }
-        df_for_chart = candidate.get('df_1h')
-        log(f"\n[FIB12] {pair}: импульс 12ч {signal['setup'].get('type')}, "
-            f"стоп {fb.get('stop_pct', 0):.2f}%, импульс {fb.get('size_atr', 0):.1f} ATR")
-    elif strategy == 'LLM':
-        # Сигнал собран моделью и уже проверен llm_decide: геометрия,
-        # минимальный стоп по издержкам, отношение хода к риску и ожидание с
-        # настоящей комиссией. Пересобирать нечего.
-        signal = candidate.get('signal')
-        if not signal:
-            log(f"   LLM {pair}: кандидат без сигнала — пропускаю")
-            return None, None
-        llm = signal.get('llm') or {}
-        signal['scan'] = {
-            'score': candidate.get('score'),
-            'rr_est': candidate.get('rr'),
-            'p': llm.get('p'),
-            'ev': llm.get('ev'),
-            'poi_type': 'LLM',
-        }
-        df_for_chart = candidate.get('df_1h')
-        if llm.get('mode') == 'notebook':
-            # У тетради нет вероятности и конфлюенса — её «почему» и есть суть сделки.
-            log(f"\n[LLM] {pair}: {signal['setup'].get('type')} · {str(llm.get('why') or '')[:160]}")
-        else:
-            log(f"\n[LLM] {pair}: {signal['setup'].get('type')}, "
-                f"вероятность {llm.get('p')}, конфлюенс {llm.get('votes')}/5")
-    elif strategy == 'FIBO':
-        signal = analyze_market(candidate['df_1h'], None, pair, balance)
-        if not signal:
-            return None, None
-        signal['htf_trend'] = candidate.get('htf_trend', 'NEUTRAL')
-        # funding_bp — ставка в момент решения: сканер кладёт её в кандидата,
-        # чтобы фильтр толпы проверялся вживую, а до 01.10.2026 она здесь
-        # отбрасывалась и до журнала не доходила.
-        signal['scan'] = {k: candidate.get(k) for k in
-                          ('score', 'score_legacy', 'rr_est', 'htf_strength',
-                           'proximity', 'size_pct', 'funding_bp')}
-        df_for_chart = candidate['df_1h']
-        log(f"\n[FIBO] {pair}: зона {candidate.get('zone')}, "
-            f"HTF {signal['htf_trend']}")
-    else:
+    # С 08.10.2026 сборку ведёт адаптер стратегии из реестра (strategies/
+    # registry.py): у каждой своя функция build_signal, общих веток здесь нет.
+    from strategies import registry
+    if registry.get(strategy) is None:
         log(f"   {strategy}: нет ветки сборки сигнала — вход отменён. "
             f"Молча отдать кандидата чужой стратегии нельзя: она откроет "
             f"свой сетап под этим именем.")
+        return None, None
+    signal, df_for_chart = registry.adapter(strategy).build_signal(candidate, balance)
+    if not signal:
         return None, None
 
     # Разрешённые стороны. Проверка стоит ЗДЕСЬ, после сборки сигнала, а не в
@@ -277,19 +161,11 @@ def _run_dual_strategy(liquid_pairs, balance, open_pairs):
     taken = set(open_pairs)
     total_opened = 0
 
-    scanners = (
-        ('FIBO', lambda: scan_for_setups(liquid_pairs, trade_manager)),
-        ('SMC', lambda: strategy_smc.scan_for_setups(liquid_pairs, trade_manager,
-                                                     balance=balance)),
-        ('LEVELS', lambda: strategy_levels.scan_for_setups(
-            liquid_pairs, trade_manager, balance=balance)),
-        ('RSIBB', lambda: strategy_rsibb.scan_for_setups(
-            liquid_pairs, trade_manager, balance=balance)),
-        ('SMCS', lambda: strategy_smcs.scan_for_setups(
-            liquid_pairs, trade_manager, balance=balance)),
-        ('FIB12', lambda: strategy_fib12.scan_for_setups(
-            liquid_pairs, trade_manager, balance=balance)),
-    )
+    # Стратегии боевого цикла — из реестра (ИИ торгуется только на бумаге).
+    from strategies import registry
+    scanners = [(code, (lambda code=code: registry.adapter(code).scan(
+        liquid_pairs, trade_manager, client=None, balance=balance)))
+        for code in registry.live_codes()]
 
     for strategy, scan in scanners:
         if not settings.enabled(strategy):
@@ -303,13 +179,7 @@ def _run_dual_strategy(liquid_pairs, balance, open_pairs):
             log(f"   {strategy}: слоты заняты, пропускаем")
             continue
 
-        # Сессионный фильтр откалиброван под фибо; у SMC своя модель времени
-        if strategy == 'FIBO':
-            hour = datetime.now(timezone.utc).hour
-            if hour in config.BLOCK_ENTRY_HOURS_UTC:
-                log(f"   FIBO: {hour:02d}:xx UTC в блок-листе, пропускаем")
-                continue
-
+        # Блок-лист часов входа — фильтр самой ФИБО: он в её адаптере (scan).
         try:
             candidates = scan()
         except Exception as exc:
@@ -430,47 +300,21 @@ def _paper_cycle():
             log(f"   {strategy}: депозит обнулён, торговля остановлена")
             continue
 
-        # Сессионный фильтр откалиброван под фибо; у SMC своя модель времени
-        if strategy == 'FIBO' and hour_utc in config.BLOCK_ENTRY_HOURS_UTC:
-            log(f"   FIBO: {hour_utc:02d}:xx UTC в блок-листе, пропускаем")
-            continue
-
         gate = broker.gate(strategy)
-        # ВЕТКА ПОД КАЖДУЮ СТРАТЕГИЮ, БЕЗ else ПО УМОЛЧАНИЮ. Здесь стояло
-        # «иначе — сканер фибо», и это та же ловушка, что однажды уже стоила
-        # месяца недостоверных наблюдений у стратегии уровней: новая стратегия
-        # молча получала бы чужих кандидатов и торговала их под своим именем.
+        # Сканер — адаптер стратегии из реестра (strategies/registry.py). Чужого
+        # сканера по умолчанию нет: стратегия без записи в реестре не торгует —
+        # иначе она молча получала бы чужих кандидатов и торговала их под своим
+        # именем (так однажды стоило месяца недостоверных наблюдений уровней).
+        # Блок-лист часов входа ФИБО — в её адаптере.
+        from strategies import registry
+        if registry.get(strategy) is None:
+            log(f"   {strategy}: нет сканера — пропускаем. Отдать пул "
+                f"чужому сканеру нельзя: он найдёт свои сетапы и они "
+                f"уйдут в журнал под этим именем.")
+            continue
         try:
-            if strategy == 'FIBO':
-                candidates = scan_for_setups(liquid_pairs, gate, client=client)
-            elif strategy == 'SMC':
-                candidates = strategy_smc.scan_for_setups(
-                    liquid_pairs, gate, client=client, balance=balance)
-            elif strategy == 'LEVELS':
-                candidates = strategy_levels.scan_for_setups(
-                    liquid_pairs, gate, client=client, balance=balance)
-            elif strategy == 'RSIBB':
-                candidates = strategy_rsibb.scan_for_setups(
-                    liquid_pairs, gate, client=client, balance=balance)
-            elif strategy == 'SMCS':
-                candidates = strategy_smcs.scan_for_setups(
-                    liquid_pairs, gate, client=client, balance=balance)
-            elif strategy == 'FIB12':
-                candidates = strategy_fib12.scan_for_setups(
-                    liquid_pairs, gate, client=client, balance=balance)
-            elif strategy == 'LLM':
-                # Те же пары, что и у остальных, и никаких чужих кандидатов:
-                # модель обходит рынок сама. Первый вариант отдавал ей пул
-                # `found` — сетапы других стратегий за цикл, — но сетапа она
-                # не видела, а пары получала лишь когда что-то находили
-                # другие. См. шапку strategy_llm.
-                candidates = strategy_llm.scan_for_setups(
-                    liquid_pairs, gate, client=client, balance=balance)
-            else:
-                log(f"   {strategy}: нет сканера — пропускаем. Отдать пул "
-                    f"чужому сканеру нельзя: он найдёт свои сетапы и они "
-                    f"уйдут в журнал под этим именем.")
-                continue
+            candidates = registry.adapter(strategy).scan(liquid_pairs, gate, client=client,
+                                                         balance=balance)
         except Exception as exc:
             log(f"   {strategy}: ошибка сканирования — {exc}")
             continue

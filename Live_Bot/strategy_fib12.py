@@ -188,3 +188,56 @@ def scan_for_setups(pairs, trade_manager, client=None, balance=None, now=None):
     report.finish(NAME)
     candidates.sort(key=lambda c: -c['score'])
     return candidates
+
+
+# ── Единый набор функций реестра стратегий (strategies/registry.py, 08.10.2026) ──
+# Раньше эти куски жили ветками в общих модулях: сканирование и сборка сигнала —
+# в bot.py, величины исполнения — в strategy_profile.py, разметка — в
+# setup_geometry.py. Поведение не изменилось — его держат эталоны tests/golden/.
+
+def scan(pairs, gate, client=None, balance=None):
+    return scan_for_setups(pairs, gate, client=client, balance=balance)
+
+
+def build_signal(candidate, balance):
+    pair = candidate['pair']
+    # Сканер уже вернул готовый сигнал: он и есть результат анализа.
+    signal = candidate.get('signal')
+    if not signal:
+        log(f"   FIB12 {pair}: кандидат без сигнала — пропускаю")
+        return None, None
+    fb = signal.get('fib12') or {}
+    signal['scan'] = {
+        'score': candidate.get('score'),
+        'rr_est': candidate.get('rr'),
+        'stop_pct': fb.get('stop_pct'),
+        'size_atr': fb.get('size_atr'),
+        'poi_type': 'FIB',
+    }
+    log(f"\n[FIB12] {pair}: импульс 12ч {signal['setup'].get('type')}, "
+        f"стоп {fb.get('stop_pct', 0):.2f}%, импульс {fb.get('size_atr', 0):.1f} ATR")
+    return signal, candidate.get('df_1h')
+
+
+def profile():
+    # Модуль параметров — заново при каждом вызове: тесты перезагружают его, и
+    # схваченный при импорте адаптера был бы чужим (как и в strategy_profile).
+    from fib12 import params as p
+    return {'expiry_hours': p.PENDING_ORDER_MAX_HOURS, 'cooldown_hours': p.COOLDOWN_HOURS,
+            'cost_limit_pct': p.MAX_ENTRY_COST_SHARE_PCT, 'max_hold_hours': p.MAX_POSITION_HOLD_HOURS,
+            'drops_at_target': p.CANCEL_PENDING_AT_TARGET,
+            # Лимит на откате; если к постановке рынок уже за ним — налив по рынку.
+            'fills_through_market': p.FILL_THROUGH_MARKET, 'min_stop_pct': p.MIN_STOP_PCT,
+            # Замер Фибо 12ч ставил лимит ровно на уровень отката.
+            'limit_offset_pct': p.LIMIT_OFFSET_PCT}
+
+
+def geometry(signal, g):
+    fb = signal.get('fib12') or {}
+    # Сетап — импульс 12ч и откат к 38.2%: нога, уровень входа и уровень 78.6%,
+    # за которым стоп (глубже откат уже ломает импульс).
+    g.leg('начало импульса (A)', 'конец импульса (B)')
+    if fb.get('entry'):
+        g.lines.append({'price': float(fb['entry']), 'label': 'откат 38.2% — вход', 'main': True})
+    if fb.get('level_786'):
+        g.lines.append({'price': float(fb['level_786']), 'label': 'откат 78.6% — за ним стоп'})

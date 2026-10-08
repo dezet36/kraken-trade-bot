@@ -248,3 +248,66 @@ def scan_for_setups(pairs, trade_manager, client=None, balance=None):
     report.finish(NAME)
     candidates.sort(key=lambda c: (-c['score'], -c['rr']))
     return candidates
+
+
+# ── Единый набор функций реестра стратегий (strategies/registry.py, 08.10.2026) ──
+# Раньше эти куски жили ветками в общих модулях: сканирование и сборка сигнала —
+# в bot.py, величины исполнения — в strategy_profile.py, разметка — в
+# setup_geometry.py. Поведение не изменилось — его держат эталоны tests/golden/.
+
+_BAR_HOURS = {'1m': 1 / 60, '5m': 1 / 12, '15m': 0.25, '30m': 0.5,
+              '1h': 1.0, '2h': 2.0, '4h': 4.0, '1d': 24.0}
+
+
+def scan(pairs, gate, client=None, balance=None):
+    return scan_for_setups(pairs, gate, client=client, balance=balance)
+
+
+def build_signal(candidate, balance):
+    pair = candidate['pair']
+    # Сканер уже вернул готовый сигнал: он и есть результат анализа.
+    signal = candidate.get('signal')
+    if not signal:
+        log(f"   RSIBB {pair}: кандидат без сигнала — пропускаю")
+        return None, None
+    bb = signal.get('rsibb') or {}
+    signal['scan'] = {
+        'score': candidate.get('score'),
+        'rr_est': candidate.get('rr'),
+        'rsi': bb.get('rsi'),
+        'adx': bb.get('adx'),
+        'stop_pct': bb.get('stop_pct'),
+    }
+    log(f"\n[RSIBB] {pair}: полоса {bb.get('band')}, "
+        f"RSI {bb.get('rsi', 0):.0f}, RR {candidate.get('rr', 0):.2f}")
+    return signal, candidate.get('df_1h')
+
+
+def profile():
+    # Модуль параметров — заново при каждом вызове: тесты перезагружают его, и
+    # схваченный при импорте адаптера был бы чужим (как и в strategy_profile).
+    from rsibb import params as p
+    bar = _BAR_HOURS.get(str(p.TIMEFRAME), 1.0)
+    return {'expiry_hours': p.EXPIRY_BARS * bar, 'cooldown_hours': p.COOLDOWN_HOURS,
+            'cost_limit_pct': p.MAX_ENTRY_COST_SHARE_PCT, 'max_hold_hours': p.MAX_HOLD_BARS * bar,
+            'fills_through_market': p.FILL_THROUGH_MARKET, 'min_stop_pct': p.MIN_STOP_PCT}
+
+
+def geometry(signal, g):
+    bb = signal.get('rsibb') or {}
+    # Канал целиком — это и есть сетап: цена вышла за край, цель на середине.
+    g.band(bb.get('lower'), bb.get('upper'),
+           f"канал Боллинджера · RSI {bb['rsi']:.0f}" if bb.get('rsi') is not None
+           else 'канал Боллинджера')
+    if bb.get('mid'):
+        g.lines.append({'price': float(bb['mid']), 'label': 'средняя линия — цель', 'main': True})
+    if bb.get('band'):
+        g.lines.append({
+            'price': float(bb['band']),
+            'label': 'полоса — вход',
+            # Главная линия сетапа: на ней стоит лимитная заявка.
+            'main': True,
+        })
+    start_at = g.iso_time(g.setup.get('start_time'))
+    if start_at:
+        g.out['from'] = start_at

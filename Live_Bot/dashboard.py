@@ -44,6 +44,30 @@ def _app_version():
         return ''
 
 
+def _with_strategy_registry(body):
+    """
+    Имена и цвета стратегий — из реестра (strategies/registry.py), вставкой в
+    страницу перед </head>: новая стратегия появляется на панели записью в
+    реестре, без правки dashboard.html. Цвета — переменные CSS для светлой и
+    тёмной темы теми же селекторами, что в самой странице; имена дополняют
+    NAMES/COLOR страницы (window.STRATEGY_REGISTRY).
+    """
+    try:
+        import json as _json
+        from strategies import registry
+        items = registry.as_json()
+        light = ''.join(f"--{s['code'].lower()}: {s['color_light']};" for s in items)
+        dark = ''.join(f"--{s['code'].lower()}: {s['color_dark']};" for s in items)
+        block = (
+            '<style id="strategy-registry">:root{' + light + '}'
+            '@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){' + dark + '}}'
+            ':root[data-theme="dark"]{' + dark + '}</style>'
+            '<script>window.STRATEGY_REGISTRY = ' + _json.dumps(items, ensure_ascii=False) + ';</script>')
+        return body.replace(b'</head>', block.encode('utf-8') + b'</head>', 1)
+    except Exception:                              # noqa: BLE001
+        return body
+
+
 def _page_stamp():
     """Отпечаток dashboard.html: меняется с каждой выкаткой, пусто — если файла нет."""
     try:
@@ -1028,22 +1052,13 @@ def _portfolio():
     off = risk_gate.disabled_limits(max_positions, limit, day_limit)
     try:
         import settings_store as st
-        from levels import params as lp
-        from rsibb import params as rp
-        from smc import params as sp
-        from smcs import params as cp
-        from fib12 import params as fp
-        # ПО СТРАТЕГИЯМ, БЕЗ СЛОЖЕНИЯ. Проценты считаются от РАЗНЫХ депозитов
-        # ($20 000 у фибо, $4 000 у боллинджера), и сумма их не относится ни к
-        # одному — см. risk_gate.exposure_by_strategy.
+        from strategies import registry
+        # ПО СТРАТЕГИЯМ, БЕЗ СЛОЖЕНИЯ. Проценты считаются от РАЗНЫХ депозитов,
+        # и сумма их не относится ни к одному — см. risk_gate.exposure_by_strategy.
+        # Риск — тот, с которым стратегия торгует (настройки оператора).
         worst = risk_gate.exposure_by_strategy([
-            ('FIBO', st.max_slots('FIBO'), config.RISK_PER_TRADE),
-            ('SMC', st.max_slots('SMC'), sp.RISK_PER_TRADE_PCT),
-            ('LEVELS', st.max_slots('LEVELS'), lp.RISK_PCT),
-            ('RSIBB', st.max_slots('RSIBB'), rp.RISK_PCT),
-            ('SMCS', st.max_slots('SMCS'), cp.RISK_PCT),
-            ('FIB12', st.max_slots('FIB12'), fp.RISK_PCT),
-        ])
+            (name, st.max_slots(name), st.risk_pct(name))
+            for name in registry.codes() if name != 'LLM'])
         unbounded = [n for n, pct in worst if pct is None]
     except Exception:                              # noqa: BLE001
         worst, unbounded = [], []
@@ -1920,6 +1935,7 @@ class _Handler(BaseHTTPRequestHandler):
         except Exception as exc:
             self._fail(500, f'dashboard.html не найден: {exc}')
             return
+        body = _with_strategy_registry(body)
         self.send_response(200)
         self.send_header('Content-Type', 'text/html; charset=utf-8')
         # Страница меняется с каждым обновлением кода, а окно приложения —

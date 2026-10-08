@@ -196,3 +196,62 @@ def scan_for_setups(pairs, trade_manager, client=None, balance=None):
     report.finish(NAME)
     candidates.sort(key=lambda c: (-c['score'], -c['rr']))
     return candidates
+
+
+# ── Единый набор функций реестра стратегий (strategies/registry.py, 08.10.2026) ──
+# Раньше эти куски жили ветками в общих модулях: сканирование и сборка сигнала —
+# в bot.py, величины исполнения — в strategy_profile.py, разметка — в
+# setup_geometry.py. Поведение не изменилось — его держат эталоны tests/golden/.
+
+def scan(pairs, gate, client=None, balance=None):
+    return scan_for_setups(pairs, gate, client=client, balance=balance)
+
+
+def build_signal(candidate, balance):
+    pair = candidate['pair']
+    # Сканер уровней уже вернул готовый сигнал: он и есть результат анализа.
+    signal = candidate.get('signal')
+    if not signal:
+        log(f"   LEVELS {pair}: кандидат без сигнала — пропускаю")
+        return None, None
+    lv = signal.get('levels') or {}
+    signal['scan'] = {
+        'score': candidate.get('score'),
+        'rr_est': candidate.get('rr'),
+        'touches': lv.get('touches'),
+        'volume_ratio': lv.get('volume_ratio'),
+        'mirror': lv.get('mirror'),
+    }
+    log(f"\n[LEVELS] {pair}: уровень {lv.get('level')}, "
+        f"касаний {lv.get('touches')}, RR {candidate.get('rr', 0):.2f}")
+    return signal, candidate.get('df_1h')
+
+
+def profile():
+    # Модуль параметров — заново при каждом вызове: тесты перезагружают его, и
+    # схваченный при импорте адаптера был бы чужим (как и в strategy_profile).
+    from levels import params as p
+    return {'expiry_hours': p.EXPIRY_HOURS, 'cooldown_hours': p.COOLDOWN_HOURS,
+            'cost_limit_pct': p.MAX_ENTRY_COST_SHARE_PCT, 'max_hold_hours': p.MAX_HOLD_HOURS,
+            'fills_through_market': p.FILL_THROUGH_MARKET, 'min_stop_pct': p.MIN_STOP_PCT}
+
+
+def geometry(signal, g):
+    lv = signal.get('levels') or {}
+    if lv.get('level'):
+        count = lv.get('touches')
+        g.lines.append({
+            'price': float(lv['level']),
+            'label': f"уровень · касаний {count}" if count else 'уровень',
+            # Главная линия сетапа: у этой стратегии уровень — не
+            # вспомогательная разметка, а сам повод для сделки.
+            'main': True,
+        })
+    # Сетап этой стратегии — сам уровень, а уровень сделан касаниями. Поэтому
+    # её график разворачивается до ПЕРВОГО касания, а не до начала движения.
+    start_at = g.iso_time(g.setup.get('start_time'))
+    if start_at:
+        g.out['from'] = start_at
+    points = [p for p in (g.setup.get('touches_at') or []) if p.get('at') and p.get('price')]
+    if points:
+        g.out['touches'] = points

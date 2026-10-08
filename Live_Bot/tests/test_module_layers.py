@@ -51,6 +51,8 @@ LAYER = {
     'llm_prompt': 'strategies', 'llm_grammar': 'strategies', 'llm_journal': 'strategies',
     'llm_outcomes': 'strategies', 'llm_probe': 'strategies', 'llm_urgency': 'strategies',
     'llm_record': 'strategies', 'setup_geometry': 'strategies', 'scan_report': 'strategies',
+    # словарь названий стратегий для человека — язык стратегий (разметка, брокер, Telegram)
+    'glossary': 'strategies',
     # исполнение и учёт
     'paper_broker': 'execution', 'trade_manager': 'execution', 'exit_plan': 'execution',
     'follow_up': 'execution', 'trade_journal': 'execution', 'setup_journal': 'execution',
@@ -61,7 +63,7 @@ LAYER = {
     # интерфейсы
     'dashboard': 'control', 'telegram_bot': 'control', 'telegram_notify': 'control',
     'telegram_panel': 'control', 'telegram_state': 'control', 'tg_format': 'control',
-    'chart_generator': 'control', 'chart_frame': 'control', 'glossary': 'control',
+    'chart_generator': 'control', 'chart_frame': 'control',
     'remote': 'control', 'remote_app': 'control', 'doctor': 'control', 'report': 'control',
     # дирижёр цикла
     'bot': 'app',
@@ -84,11 +86,9 @@ KNOWN = {
     ('llm_server', 'llm_grammar'): 'этап 4: сервис модели не знает про промт',
     ('llm_server', 'llm_prompt'): 'этап 4',
     ('market_structure', 'smc'): 'этап 4: структура smc (часть I) — в анализ',
-    ('paper_broker', 'glossary'): 'этап 5',
     ('paper_broker', 'risk_gate'): 'этап 2/5',
     ('paper_broker', 'settings_store'): 'этап 2',
     ('paper_broker', 'telegram_notify'): 'этап 5',
-    ('setup_geometry', 'glossary'): 'этап 1: имена — в реестр стратегий',
     ('shadow', 'risk_gate'): 'этап 2/5',
     ('strategy', 'settings_store'): 'этап 2',
     ('strategy_fib12', 'settings_store'): 'этап 2',

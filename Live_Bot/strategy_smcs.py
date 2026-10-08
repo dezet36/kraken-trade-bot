@@ -200,3 +200,55 @@ def scan_for_setups(pairs, trade_manager, client=None, balance=None, now=None):
     report.finish(NAME)
     candidates.sort(key=lambda c: -c['score'])
     return candidates
+
+
+# ── Единый набор функций реестра стратегий (strategies/registry.py, 08.10.2026) ──
+# Раньше эти куски жили ветками в общих модулях: сканирование и сборка сигнала —
+# в bot.py, величины исполнения — в strategy_profile.py, разметка — в
+# setup_geometry.py. Поведение не изменилось — его держат эталоны tests/golden/.
+
+def scan(pairs, gate, client=None, balance=None):
+    return scan_for_setups(pairs, gate, client=client, balance=balance)
+
+
+def build_signal(candidate, balance):
+    pair = candidate['pair']
+    # Сканер уже вернул готовый сигнал: он и есть результат анализа.
+    signal = candidate.get('signal')
+    if not signal:
+        log(f"   SMCS {pair}: кандидат без сигнала — пропускаю")
+        return None, None
+    sm = signal.get('smcs') or {}
+    signal['scan'] = {
+        'score': candidate.get('score'),
+        'rr_est': candidate.get('rr'),
+        'kind': sm.get('kind'),
+        'stop_pct': sm.get('stop_pct'),
+        'disp_atr': sm.get('disp_atr'),
+        'poi_type': 'BOS',
+    }
+    log(f"\n[SMCS] {pair}: BOS 4ч {signal['setup'].get('type')}, "
+        f"стоп {sm.get('stop_pct', 0):.2f}%, импульс {sm.get('disp_atr', 0):.1f} ATR")
+    return signal, candidate.get('df_1h')
+
+
+def profile():
+    # Модуль параметров — заново при каждом вызове: тесты перезагружают его, и
+    # схваченный при импорте адаптера был бы чужим (как и в strategy_profile).
+    from smcs import params as p
+    return {'expiry_hours': p.PENDING_ORDER_MAX_HOURS, 'cooldown_hours': p.COOLDOWN_HOURS,
+            'cost_limit_pct': p.MAX_ENTRY_COST_SHARE_PCT, 'max_hold_hours': p.MAX_POSITION_HOLD_HOURS,
+            'drops_at_target': p.CANCEL_PENDING_AT_TARGET,
+            # Вход SMCS — по рынку: лимит за рынком исполняется сразу, как замер.
+            'fills_through_market': p.FILL_THROUGH_MARKET, 'min_stop_pct': p.MIN_STOP_PCT}
+
+
+def geometry(signal, g):
+    sm = signal.get('smcs') or {}
+    # Сетап SMCS — сам слом: свинг, за которым закрылась свеча 4ч, и нога, его
+    # сломавшая. Вход по рынку, поэтому главной зоны нет; ордер-блок ноги —
+    # граница, за которой стоит стоп.
+    g.leg('начало ноги — за ним стоп', 'экстремум ноги')
+    if sm.get('level'):
+        g.lines.append({'price': float(sm['level']), 'label': 'сломанный свинг 4ч (BOS)', 'main': True})
+    g.band(sm.get('ob_lo'), sm.get('ob_hi'), 'ордер-блок ноги')

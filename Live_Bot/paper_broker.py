@@ -49,7 +49,11 @@ import settings_store as settings
 import setup_geometry
 from logger import log
 
-STRATEGIES = ('FIBO', 'SMC', 'LEVELS', 'RSIBB', 'LLM', 'SMCS', 'FIB12')
+from strategies import registry as _registry
+
+# Стратегии — из реестра (strategies/registry.py): новая стратегия получает
+# бумажный счёт записью там, а не правкой этого файла.
+STRATEGIES = _registry.codes()
 
 BAR_TF = '5m'
 BAR_MS = 5 * 60 * 1000
