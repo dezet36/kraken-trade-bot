@@ -106,6 +106,10 @@ research/results/smc1/*.pkl
 # прогоном (smcz.run_events / run_model_c); текстовые итоги рядом в git.
 research/results/smcz/*/
 research/results/smcz/*.log
+# ФИБО с нуля (research/fibz): итоги прогонов по парам — гигабайты, пересоздаются
+# прогоном (python -m fibz.run); текстовые итоги и карты (csv) рядом в git.
+research/results/fibz/*/
+research/results/fibz_*.log
 # Заявки точной симуляции (research/fibo_live_sim.py) — пересоздаются прогоном,
 # по 3–5 МБ на период; текстовые итоги рядом с ними в git.
 research/results/*.pkl
