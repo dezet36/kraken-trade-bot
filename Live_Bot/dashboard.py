@@ -1534,6 +1534,67 @@ def _journal_export(strategy):
     return setup_journal.to_csv(rows), setup_journal.filename(strategy)
 
 
+# ── Аналитика стратегий и их счетов (этап 6) ─────────────────────────────────
+
+REPORT_TTL_S = 60
+_report_cache = {}
+
+
+def _period(value):
+    """Период в сутках из запроса: число или пусто/«all» — всё время."""
+    try:
+        days = float(value)
+    except (TypeError, ValueError):
+        return None
+    return days if 0 < days <= 3650 else None
+
+
+def _strategy_rows(strategy):
+    import setup_journal
+    return setup_journal.build(strategy, _broker, text=False)
+
+
+def _strategy_report(strategy, days):
+    """
+    Статистика стратегии и её тестового счёта (accounts/stats.py) — страница
+    «Стратегии». Журнал сетапов собирается из нескольких файлов, а панель
+    спрашивает часто: пересчёт не чаще раза в REPORT_TTL_S на (стратегию, период).
+    ValueError — такой стратегии нет.
+    """
+    import time as _time
+    import setup_journal
+    from accounts import stats
+    known = _journal_strategies()
+    if strategy not in known:
+        raise ValueError(f'нет стратегии «{strategy}»; есть: {", ".join(known)}')
+    key = ('one', strategy, days)
+    hit = _report_cache.get(key)
+    if hit and _time.monotonic() - hit[0] < REPORT_TTL_S:
+        return hit[1]
+    rows = _strategy_rows(strategy)
+    out = stats.report(strategy, rows, days=days)
+    out['account'] = stats.account(strategy, _broker,
+                                   [r for r in rows if r.get('stage') == setup_journal.TRADE])
+    _report_cache[key] = (_time.monotonic(), out)
+    return out
+
+
+def _strategy_compare(days):
+    """Все стратегии рядом: воронка, качество и счёт — таблица сравнения."""
+    out = []
+    for strategy in _journal_strategies():
+        try:
+            rep = _strategy_report(strategy, days)
+        except Exception as exc:                       # noqa: BLE001
+            out.append({'strategy': strategy, 'error': str(exc)[:120]})
+            continue
+        acc = rep.get('account') or {}
+        out.append({'strategy': strategy, 'funnel': rep['funnel'], 'quality': rep['quality'],
+                    'enabled': (acc.get('settings') or {}).get('enabled', True),
+                    'return_pct': acc.get('return_pct'), 'max_dd_pct': acc.get('max_dd_pct')})
+    return {'days': days, 'strategies': out}
+
+
 # ── HTTP ─────────────────────────────────────────────────────────────────────
 
 class _Handler(BaseHTTPRequestHandler):
@@ -1646,6 +1707,22 @@ class _Handler(BaseHTTPRequestHandler):
                 self._fail(404, 'свечей за этот период нет')
                 return
             self._send_json(data)
+        elif path in ('/api/strategy_report', '/api/strategy_compare'):
+            # Аналитика стратегий и их тестовых счетов (accounts/stats.py):
+            # воронка сетапов, качество сделок, разрезы, несделанное, счёт.
+            from urllib.parse import parse_qs, urlparse
+            q = parse_qs(urlparse(self.path).query)
+            days = _period((q.get('days') or [''])[0])
+            try:
+                if path == '/api/strategy_report':
+                    strategy = (q.get('strategy') or [''])[0].upper()
+                    self._send_json(_strategy_report(strategy, days))
+                else:
+                    self._send_json(_strategy_compare(days))
+            except ValueError as exc:
+                self._fail(400, str(exc))
+            except Exception as exc:                   # noqa: BLE001
+                self._fail(500, f'статистика не собралась: {exc}')
         elif path == '/api/sources':
             # Источники данных (data/sources.py): адреса без паролей, что даёт
             # каждый, кто его читает, и отвечает ли он. Только чтение: адреса

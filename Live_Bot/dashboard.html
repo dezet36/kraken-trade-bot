@@ -881,6 +881,25 @@
   .ctl-note { font-size: 12px; color: var(--ink-3); padding: 0 20px 12px;
               margin-top: -2px; line-height: 1.5; }
   .ctl-foot + .ctl-note { margin-top: 10px; }
+  /* Страница «Стратегии» (этап 6). */
+  .st-bar { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 16px; }
+  .st-bar .seg { flex-wrap: wrap; }
+  [data-page="strategies"] .panel { margin-bottom: 14px; }
+  [data-page="strategies"] .st-cols .panel { margin-bottom: 0; }
+  [data-page="strategies"] .st-cols { margin-bottom: 14px; }
+  .st-funnel .row { display: flex; align-items: center; gap: 10px; margin-bottom: 7px; }
+  .st-funnel .lbl { width: 190px; font-size: 12.5px; color: var(--ink-2); flex: none; }
+  .st-funnel .track { flex: 1; height: 10px; border-radius: 5px; background: var(--hairline-2); }
+  .st-funnel .fill { height: 10px; border-radius: 5px; }
+  .st-funnel .num { width: 88px; text-align: right; font-size: 12px; flex: none;
+                    font-variant-numeric: tabular-nums; color: var(--ink-3); }
+  @media (max-width: 520px) { .st-funnel .lbl { width: 120px; } .st-funnel .num { width: 64px; } }
+  .st-note { font-size: 12px; color: var(--ink-3); line-height: 1.5; margin-top: 8px; }
+  .st-cols { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(380px, 1fr)); }
+  /* Пять столбцов в половине ширины: отступы таблицы сравнения здесь шире,
+     чем помещается, и итог с средним уезжали за край карточки. */
+  .st-cols .cmp th, .st-cols .cmp td { padding: 7px 8px; }
+  @media (max-width: 520px) { .st-cols { grid-template-columns: 1fr; } }
   /* Источники данных (страница «Подключения»): строка на источник. */
   .src-row { padding: 10px 20px; border-top: 1px solid var(--hairline-2); }
   .src-head { display: flex; align-items: center; gap: 8px; }
@@ -1087,6 +1106,16 @@
            приходится одна сделка. Не показать его значит не показать ничего:
            19 сентября 2026 модель сделала 123 вызова и ни одной сделки, и по
            панели её не существовало вовсе. -->
+      <!-- ── Стратегии: аналитика стратегии и её счёта (этап 6) ─────────── -->
+      <section class="page" data-page="strategies" hidden>
+        <div class="st-bar">
+          <span class="seg" id="st-pick" role="group"></span>
+          <span class="seg" id="st-days" role="group"></span>
+        </div>
+        <div id="st-report"></div>
+        <div id="st-compare"></div>
+      </section>
+
       <section class="page" data-page="ai" hidden>
         <div class="panel card-pad">
           <div class="panel-head bare"><h2>Модель</h2>
@@ -2417,6 +2446,8 @@ const PAGES = [
   { id: 'positions', ic: '▤', title: 'Позиции',   dir: 'exchange' },
   { id: 'history',   ic: '≡', title: 'История',   dir: 'exchange' },
   { id: 'analytics', ic: '◨', title: 'Аналитика', dir: 'exchange' },
+  /* Без dir: у страницы свои переключатели — стратегия и период. */
+  { id: 'strategies', ic: '▦', title: 'Стратегии' },
   /* Без dir намеренно: фильтры периода и стратегии относятся к СДЕЛКАМ, а
      здесь сделок нет — на двадцать разборов приходится одна. Показанный тут
      переключатель «7 дней / Фибоначчи» обещал бы управление, которого нет. */
@@ -2534,6 +2565,7 @@ function showPage() {
   if (page === 'diag' && currentSub('diag') === 'errors') loadErrors();
   // Разборы ИИ — так же: и по прямой ссылке ?page=ai, а не только по клику.
   if (page === 'ai' && !AI) loadLlm();
+  if (page === 'strategies') loadStrategies();
   // Настройки могли отрисоваться раньше, чем пришли данные бота: тогда в
   // карточках не было полей, зависящих от режима (депозит есть только в
   // фантоме) и от истории стратегии. Перерисовываем ровно один раз —
@@ -4408,6 +4440,203 @@ async function loadSettings() {
     renderNotify(WRITABLE);
     renderExchange(WRITABLE);
   } catch (e) { /* панель просто не появится */ }
+}
+
+/* ── Стратегии: аналитика стратегии и её тестового счёта (этап 6) ─────────
+   Что владелец хочет видеть: сколько сетапов дала стратегия, сколько дошло до
+   входа, сколько отработало в плюс и в минус — и всё для разбора: качество
+   сделок, разрезы, что не стало сделкой и чем кончилось бы. Считает сервер
+   (accounts/stats.py) из журнала сетапов; страница только рисует. */
+const ST = { code: null, days: 30, report: null, compare: null, busy: false };
+const ST_DAYS = [[7, '7 дней'], [30, '30 дней'], [90, '90 дней'], [0, 'всё время']];
+
+async function loadStrategies() {
+  if (ST.busy) return;
+  ST.busy = true;
+  const reg = window.STRATEGY_REGISTRY || [];
+  if (!ST.code) ST.code = reg.length ? reg[0].code : 'FIBO';
+  const days = ST.days || '';
+  try {
+    const [rep, cmp] = await Promise.all([
+      fetch(`/api/strategy_report?strategy=${encodeURIComponent(ST.code)}&days=${days}`,
+            { cache: 'no-store' }).then(r => r.json()),
+      fetch(`/api/strategy_compare?days=${days}`, { cache: 'no-store' }).then(r => r.json())]);
+    ST.report = rep; ST.compare = cmp;
+  } catch (e) { ST.report = null; }
+  ST.busy = false;
+  renderStrategies();
+}
+
+function stR(v, digits = 2) {
+  if (v === null || v === undefined || isNaN(v)) return '—';
+  return (v > 0 ? '+' : '') + Number(v).toFixed(digits) + 'R';
+}
+function stPct(v, digits = 0) {
+  return (v === null || v === undefined || isNaN(v)) ? '—' : (v * 100).toFixed(digits) + '%';
+}
+function stUsd(v) {
+  if (v === null || v === undefined || isNaN(v)) return '—';
+  return (v > 0 ? '+' : v < 0 ? '−' : '') + '$' + Math.abs(Number(v)).toLocaleString('ru', { maximumFractionDigits: 0 });
+}
+function stCls(v) { return v > 0 ? 'pos' : v < 0 ? 'neg' : ''; }
+function stMinutes(m) {
+  if (m === null || m === undefined) return '—';
+  return m >= 1440 ? (m / 1440).toFixed(1) + ' сут' : m >= 60 ? (m / 60).toFixed(1) + ' ч' : Math.round(m) + ' мин';
+}
+const ST_SIDES = { both: 'обе', long: 'только лонги', short: 'только шорты' };
+
+function stPicker() {
+  const reg = window.STRATEGY_REGISTRY || [];
+  el('st-pick').innerHTML = reg.map(s => `<button type="button" data-st="${esc(s.code)}"
+      aria-pressed="${s.code === ST.code}"><span class="key" style="background:${COLOR[s.code] || 'var(--ink-4)'}"></span>${esc(NAMES[s.code] || s.title)}</button>`).join('');
+  el('st-days').innerHTML = ST_DAYS.map(([d, t]) => `<button type="button" data-st-days="${d}"
+      aria-pressed="${(ST.days || 0) === d}">${t}</button>`).join('');
+  el('st-pick').querySelectorAll('[data-st]').forEach(b => b.onclick = () => {
+    ST.code = b.dataset.st; loadStrategies(); });
+  el('st-days').querySelectorAll('[data-st-days]').forEach(b => b.onclick = () => {
+    ST.days = Number(b.dataset.stDays); loadStrategies(); });
+}
+
+function stKpis(items) {
+  return '<div class="kpis">' + items.map(([k, v, n, cls]) => `<div class="kpi"><div class="k">${k}</div>
+    <div class="v ${cls || ''}">${v}</div>${n ? `<div class="n">${n}</div>` : ''}</div>`).join('') + '</div>';
+}
+
+function stTable(rows, head, line) {
+  if (!rows || !rows.length) return '<div class="empty">Сделок нет</div>';
+  return `<div class="tbl-wrap"><table class="cmp"><thead><tr>${head.map((h, i) =>
+    `<th${i === 0 ? ' class="lbl"' : ''}>${h}</th>`).join('')}</tr></thead><tbody>${rows.map(line).join('')}</tbody></table></div>`;
+}
+const stLine = g => `<tr><th class="lbl">${esc(g.name)}</th><td>${g.trades}</td><td>${stPct(g.win_rate)}</td>
+  <td class="${stCls(g.total_r)}">${stR(g.total_r)}</td><td class="${stCls(g.avg_r)}">${stR(g.avg_r)}</td></tr>`;
+const ST_HEAD = ['', 'сделок', 'в плюс', 'итог', 'в среднем'];
+
+function renderStrategies() {
+  if (!el('st-pick')) return;
+  stPicker();
+  const box = el('st-report');
+  const r = ST.report;
+  if (!r || r.error || !r.funnel) {
+    box.innerHTML = `<div class="panel card-pad"><div class="empty">${esc((r && r.error) || 'Статистика не загрузилась')}</div></div>`;
+    renderStrategyCompare();
+    return;
+  }
+  const f = r.funnel, q = r.quality, a = r.account || {}, set = a.settings || {};
+  const name = NAMES[r.strategy] || r.strategy;
+  const color = COLOR[r.strategy] || 'var(--accent)';
+
+  // Счёт стратегии: деньги, просадка, открытый риск, настройки счёта.
+  const account = `<div class="panel card-pad">
+    <div class="group-head"><span class="key" style="background:${color}"></span>
+      <span class="nm">Счёт стратегии «${esc(name)}»</span>
+      <span class="count">${set.enabled === false ? 'выключена' : 'торгует'} · риск ${set.risk_pct ?? '—'}% на сделку ·
+        стороны: ${ST_SIDES[set.sides] || set.sides || '—'} · позиций ${set.max_slots || 'без предела'} ·
+        в одну сторону ${set.max_same_direction || 'без предела'}</span></div>
+    ${stKpis([
+      ['Капитал', a.equity != null ? '$' + Number(a.equity).toLocaleString('ru', { maximumFractionDigits: 0 }) : '—',
+        a.start != null ? `старт $${Number(a.start).toLocaleString('ru')}` : '', ''],
+      ['Доход счёта', a.return_pct != null ? (a.return_pct > 0 ? '+' : '') + a.return_pct.toFixed(2) + '%' : '—', '', stCls(a.return_pct)],
+      ['Макс. просадка счёта', a.max_dd_pct != null ? '−' + a.max_dd_pct.toFixed(2) + '%' : '—', 'по закрытым сделкам', ''],
+      ['Открытый риск', a.open_risk != null ? '$' + Math.round(a.open_risk) : '—',
+        `позиций ${a.positions ?? 0} · заявок ${a.pending ?? 0}`, ''],
+      ['Итог сделок за период', stUsd(q.total_usd), stR(q.total_r), stCls(q.total_usd)],
+      ['Сделок за период', q.trades, `в плюс ${q.wins} · в минус ${q.losses}`, ''],
+    ])}</div>`;
+
+  // Воронка: от сетапа до результата.
+  const max = Math.max(f.setups, 1);
+  const bar = (label, n, col, note) => `<div class="row"><div class="lbl">${label}</div>
+    <div class="track"><div class="fill" style="width:${n / max * 100}%;background:${col}"></div></div>
+    <div class="num">${n}${note ? ' · ' + note : ''}</div></div>`;
+  const share = (n, of) => of ? Math.round(n / of * 100) + '%' : '';
+  const funnel = `<div class="panel card-pad st-funnel">
+    <div class="panel-head bare"><h2>Путь сетапов</h2>
+      <span class="hint">сколько стратегия нашла и чем это кончилось</span></div>
+    ${bar('Сетапов найдено', f.setups, color)}
+    ${f.plans ? bar('из них планов ИИ без заявки', f.plans, 'var(--ink-4)', share(f.plans, f.setups)) : ''}
+    ${bar('Стало заявкой', f.orders, color, share(f.orders, f.setups))}
+    ${bar('Налилось', f.filled, color, share(f.filled, f.orders))}
+    ${bar('Закрыто', f.closed, color, f.open ? `ещё ${f.open} открыто` : '')}
+    ${bar('В плюс', f.wins, 'var(--good)', share(f.wins, f.closed))}
+    ${bar('В минус', f.losses, 'var(--bad)', share(f.losses, f.closed))}
+    ${f.flat ? bar('В ноль', f.flat, 'var(--ink-4)', share(f.flat, f.closed)) : ''}
+    ${bar('Заявка снята', f.dropped, 'var(--ink-4)')}
+    ${bar('Не пустил счёт', f.refused, 'var(--ink-4)')}
+    ${f.pending ? bar('Заявка ждёт цену', f.pending, 'var(--ink-4)') : ''}
+  </div>`;
+
+  // Качество сделок.
+  const quality = `<div class="panel card-pad">
+    <div class="panel-head bare"><h2>Качество сделок</h2>
+      <span class="hint">R — результат в долях риска сделки</span></div>
+    ${stKpis([
+      ['Доля выигрышей', stPct(q.win_rate), `${q.wins} из ${q.trades}`, ''],
+      ['Средний итог', stR(q.avg_r), 'на сделку', stCls(q.avg_r)],
+      ['Профит-фактор', q.profit_factor != null ? q.profit_factor.toFixed(2) : '—', 'плюсы ÷ минусы', ''],
+      ['Лучшая / худшая', `${stR(q.best_r, 1)} / ${stR(q.worst_r, 1)}`, '', ''],
+      ['Ход за нас / против', `${stR(q.avg_mfe_r, 1)} / ${stR(q.avg_mae_r, 1)}`, 'в среднем до выхода', ''],
+      ['Просадка в R', q.max_dd_r ? '−' + q.max_dd_r.toFixed(1) + 'R' : '—', `худшая серия: ${q.max_loss_streak} в минус`, ''],
+    ])}
+    <div class="st-note">Время в сделке (медиана): ${stMinutes(q.median_minutes)}.</div>
+  </div>`;
+
+  // Разрезы.
+  const cuts = `<div class="st-cols">
+    <div class="panel card-pad"><div class="panel-head bare"><h2>По сторонам</h2></div>
+      ${stTable(r.sides, ST_HEAD, stLine)}</div>
+    <div class="panel card-pad"><div class="panel-head bare"><h2>Чем закончились</h2></div>
+      ${stTable(r.exits, ST_HEAD, stLine)}</div>
+    <div class="panel card-pad"><div class="panel-head bare"><h2>По месяцам</h2></div>
+      ${stTable(r.months, ST_HEAD, stLine)}</div>
+    <div class="panel card-pad"><div class="panel-head bare"><h2>Пары: лучшие</h2></div>
+      ${stTable(r.pairs_best, ST_HEAD, stLine)}
+      ${(r.pairs_worst || []).length ? '<div class="panel-head bare" style="margin-top:14px"><h2>Пары: худшие</h2></div>'
+        + stTable(r.pairs_worst, ST_HEAD, stLine) : ''}</div>
+  </div>`;
+
+  // Что не стало сделкой — и чем кончилось бы.
+  const nt = r.not_traded || {};
+  const dropped = Object.entries(nt.dropped || {});
+  const refused = nt.refused || [];
+  const missed = `<div class="panel card-pad">
+    <div class="panel-head bare"><h2>Что не стало сделкой</h2>
+      <span class="hint">снятые заявки и отказы счёта — с тем, чем кончились бы</span></div>
+    ${dropped.length ? stTable(dropped, ['Заявка снята', 'сколько'],
+        ([why, n]) => `<tr><th class="lbl">${esc(why)}</th><td>${n}</td></tr>`) : '<div class="empty">Снятых заявок нет</div>'}
+    <div style="margin-top:14px"></div>
+    ${refused.length ? stTable(refused, ['Не пустил счёт', 'сколько', 'досмотрено', 'было бы'],
+        g => `<tr><th class="lbl">${esc(g.gate)}</th><td>${g.count}</td><td>${g.finished}</td>
+          <td class="${stCls(g.would_r)}">${g.finished ? stR(g.would_r) : '—'}</td></tr>`)
+      : '<div class="empty">Отказов счёта нет</div>'}
+    <div class="st-note">«Было бы» — итог отказанных сетапов, которые тень довела до цели или стопа
+      (shadow): минус там значит, что предел уберёг счёт.</div>
+  </div>`;
+
+  box.innerHTML = account + funnel + quality + cuts + missed;
+  renderStrategyCompare();
+}
+
+function renderStrategyCompare() {
+  const box = el('st-compare');
+  if (!box) return;
+  const list = (ST.compare && ST.compare.strategies) || [];
+  if (!list.length) { box.innerHTML = ''; return; }
+  const rows = list.filter(x => x.quality).map(x => {
+    const q = x.quality, f = x.funnel;
+    const key = `<span class="key" style="display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:6px;background:${COLOR[x.strategy] || 'var(--ink-4)'}"></span>`;
+    return `<tr><th class="lbl">${key}${esc(NAMES[x.strategy] || x.strategy)}${x.enabled === false ? ' · выкл' : ''}</th>
+      <td>${f.setups}</td><td>${f.orders}</td><td>${q.trades}</td><td>${stPct(q.win_rate)}</td>
+      <td class="${stCls(q.avg_r)}">${stR(q.avg_r)}</td><td class="${stCls(q.total_r)}">${stR(q.total_r, 1)}</td>
+      <td>${q.profit_factor != null ? q.profit_factor.toFixed(2) : '—'}</td>
+      <td>${q.max_dd_r ? '−' + q.max_dd_r.toFixed(1) + 'R' : '—'}</td>
+      <td class="${stCls(x.return_pct)}">${x.return_pct != null ? (x.return_pct > 0 ? '+' : '') + x.return_pct.toFixed(1) + '%' : '—'}</td></tr>`;
+  }).join('');
+  box.innerHTML = `<div class="panel card-pad">
+    <div class="panel-head bare"><h2>Все стратегии рядом</h2>
+      <span class="hint">за выбранный период; доход счёта — с его старта</span></div>
+    <div class="tbl-wrap"><table class="cmp"><thead><tr><th class="lbl"></th><th>сетапов</th><th>заявок</th>
+      <th>сделок</th><th>в плюс</th><th>в среднем</th><th>итог</th><th>проф.-фактор</th><th>просадка</th>
+      <th>доход счёта</th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
 }
 
 /* ── Источники данных ─────────────────────────────────────────────────────
