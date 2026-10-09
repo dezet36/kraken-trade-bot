@@ -1844,6 +1844,10 @@ class _Handler(BaseHTTPRequestHandler):
                 'exchange': _exchange_state(stored),
                 'writable': _controls_allowed()})
         elif path in ('/', '/index.html'):
+            # С 09.10.2026 главная — новая панель (control/panel). Прежняя
+            # страница — на /old, пока владелец не убедится, что всё переехало.
+            self._send_panel('index.html')
+        elif path in ('/old', '/old/'):
             self._send_html()
         elif path in ('/v2', '/v2/') or path.startswith('/v2/'):
             self._send_panel(path[4:])

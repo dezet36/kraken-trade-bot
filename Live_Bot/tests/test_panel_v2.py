@@ -45,6 +45,10 @@ class TestServing:
     def test_route_and_registry(self):
         src = open(os.path.join(ROOT, 'control', 'dashboard.py'), encoding='utf-8').read()
         assert "path.startswith('/v2/')" in src and "self._send_panel(path[4:])" in src
+        # С 09.10.2026 главная — новая панель, прежняя — на /old
+        root = src.index("elif path in ('/', '/index.html'):")
+        assert "self._send_panel('index.html')" in src[root:root + 400], 'главная — новая панель'
+        assert "elif path in ('/old', '/old/'):" in src
         html = open(os.path.join(PANEL, 'index.html'), encoding='utf-8').read()
         assert '</head>' in html, 'реестр стратегий вставляется перед </head>'
         assert '<script type="module" src="/v2/js/app.js">' in html
@@ -113,4 +117,4 @@ class TestModules:
 
     def test_old_panel_links_to_the_new(self):
         old = open(os.path.join(ROOT, 'control', 'dashboard.html'), encoding='utf-8').read()
-        assert 'href="/v2/"' in old
+        assert 'href="/"' in old and 'Новая' in old
