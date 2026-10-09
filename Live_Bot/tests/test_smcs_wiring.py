@@ -29,14 +29,14 @@ GOLDEN = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data', 'smcs_
 @pytest.fixture()
 def bot(monkeypatch, tmp_path):
     monkeypatch.setenv('BOT_DATA_DIR', str(tmp_path))
-    for module in ('config', 'settings_store'):
+    for module in ('config', 'accounts.settings_store'):
         sys.modules.pop(module, None)
     import bot as module
-    import settings_store
+    settings_store = __import__('importlib').import_module('accounts.settings_store')
     settings_store.SETTINGS_FILE = str(tmp_path / 'runtime_settings.json')
     settings_store._cache = None
     settings_store._mtime = None
-    for name in ('bot', 'settings_store', 'strategies.smcs.adapter'):
+    for name in ('bot', 'accounts.settings_store', 'strategies.smcs.adapter'):
         loaded = sys.modules.get(name)
         if loaded is not None and hasattr(loaded, 'settings'):
             loaded.settings = settings_store
@@ -152,7 +152,7 @@ class TestDispatcher:
 class TestRegistration:
     def test_known_everywhere(self):
         import paper_broker
-        import settings_store
+        settings_store = __import__('importlib').import_module('accounts.settings_store')
         import config
         assert 'SMCS' in settings_store.STRATEGIES
         assert 'SMCS' in paper_broker.STRATEGIES

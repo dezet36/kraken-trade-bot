@@ -223,7 +223,7 @@ def _settings():
     try:
         import json
 
-        import settings_store as settings
+        from accounts import settings_store as settings
         return json.dumps(settings.load(), ensure_ascii=False, indent=2)
     except Exception as exc:                       # noqa: BLE001
         return f'настройки недоступны: {exc}'

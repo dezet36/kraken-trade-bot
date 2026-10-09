@@ -52,7 +52,7 @@ class TestEveryStrategyIsDescribed:
     def test_guide_covers_all_trading_strategies(self):
         import sys
         sys.path.insert(0, BOT)
-        import settings_store
+        settings_store = __import__('importlib').import_module('accounts.settings_store')
 
         text = page_text()
         for name in settings_store.STRATEGIES:
@@ -63,7 +63,7 @@ class TestEveryStrategyIsDescribed:
     def test_each_guide_has_all_four_parts(self):
         import sys
         sys.path.insert(0, BOT)
-        import settings_store
+        settings_store = __import__('importlib').import_module('accounts.settings_store')
 
         for name in settings_store.STRATEGIES:
             block = guide_block(name)
@@ -82,7 +82,7 @@ class TestEveryStrategyIsDescribed:
         """
         import sys
         sys.path.insert(0, BOT)
-        import settings_store
+        settings_store = __import__('importlib').import_module('accounts.settings_store')
         for name in settings_store.STRATEGIES:
             block = guide_block(name)
             assert "['Где стоп'" in block, f'{name}: описание не говорит, где стоп'

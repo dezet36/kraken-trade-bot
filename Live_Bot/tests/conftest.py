@@ -122,7 +122,7 @@ def _isolate_bot_data(tmp_path, monkeypatch):
     # в полном прогоне settings_store к этому моменту ещё не загружен, ничего
     # не переставлялось, а тест импортировал его сам и получал БОЕВЫЕ пути. За
     # вечер так набежало двенадцать записей в настоящий журнал настроек.
-    import settings_store as store
+    store = __import__('importlib').import_module('accounts.settings_store')
 
     # ПЕРЕСТАВЛЯЕМ ВО ВСЕХ ЗАГРУЖЕННЫХ КОПИЯХ, а не в одной. Тесты выгружают
     # settings_store из sys.modules и импортируют заново, поэтому bot.settings

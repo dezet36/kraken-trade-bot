@@ -276,7 +276,7 @@ def check_keys(code, key, secret):
     account = get(code)
     if not account or account['kind'] != 'exchange':
         return False, 'ключи нужны только счёту биржи'
-    import exchange_keys
+    from accounts import exchange_keys
     return exchange_keys.check_keys(account['exchange'], account['mode'].upper(), key, secret)
 
 

@@ -38,7 +38,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
 import config                                            # noqa: E402
-import risk_gate                                         # noqa: E402
+from accounts import risk_gate  # noqa: E402
 from paper_broker import PaperBroker                     # noqa: E402
 
 

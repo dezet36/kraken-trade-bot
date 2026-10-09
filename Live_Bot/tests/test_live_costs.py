@@ -24,7 +24,7 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import config
-import live_costs
+from accounts import live_costs
 
 
 def make_position(entry=100.0, size=10.0, direction='LONG', entry_mode='MARKET',

@@ -142,7 +142,7 @@ def build_orders(setups, depth, sides, min_rr):
     до стопа из настроек, цель 25% за концом импульса.
     """
     import config
-    import settings_store as settings
+    from accounts import settings_store as settings
     from smc_engine import Order
 
     min_stop = settings.min_stop_pct('FIBO')

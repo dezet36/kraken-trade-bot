@@ -45,7 +45,7 @@ import config
 import csv_journal
 import glossary
 from exit_plan import cooldown_hours, direction_cap, tp_plan, wants_breakeven
-import settings_store as settings
+from accounts import settings_store as settings
 import setup_geometry
 from logger import log
 
@@ -522,7 +522,7 @@ class PaperBroker:
         второй экземпляр этой арифметики однажды разошёлся бы с первым — ровно
         так, как разошёлся весь дневной стоп.
         """
-        import risk_gate
+        from accounts import risk_gate
         deposit = sum(float(self.balance(s) or 0) for s in self.strategies)
         pnl, pct = risk_gate.day_result(read_journal(), deposit,
                                         _iso(_now_ms())[:10])
@@ -536,7 +536,7 @@ class PaperBroker:
         чисел: у бумажного пути депозиты раздельные по стратегиям, и риск
         новой сделки считается от депозита СВОЕЙ.
         """
-        import risk_gate
+        from accounts import risk_gate
         try:
             max_positions = settings.portfolio_max_positions()
             risk_limit = settings.portfolio_risk_pct()
@@ -823,7 +823,7 @@ class PaperBroker:
         # Предел расхода на вход. Тесный стоп даёт большой объём на тот же
         # риск, и комиссии съедают его долю ещё до того, как цена двинулась.
         # Проверка ОДНА на оба пути — см. risk_gate.cost_too_high.
-        import risk_gate
+        from accounts import risk_gate
         pricey, cost_share, why = risk_gate.cost_too_high(
             limit_price, sl_dist, config.ENTRY_COST_ROUND_TRIP,
             self._cost_limit(strategy))

@@ -26,14 +26,14 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 @pytest.fixture()
 def bot(monkeypatch, tmp_path):
     monkeypatch.setenv('BOT_DATA_DIR', str(tmp_path))
-    for module in ('config', 'settings_store'):
+    for module in ('config', 'accounts.settings_store'):
         sys.modules.pop(module, None)
     import bot as module
-    import settings_store
+    settings_store = __import__('importlib').import_module('accounts.settings_store')
     settings_store.SETTINGS_FILE = str(tmp_path / 'runtime_settings.json')
     settings_store._cache = None
     settings_store._mtime = None
-    for name in ('bot', 'settings_store'):
+    for name in ('bot', 'accounts.settings_store'):
         loaded = sys.modules.get(name)
         if loaded is not None and hasattr(loaded, 'settings'):
             loaded.settings = settings_store
@@ -88,7 +88,7 @@ class TestDispatcher:
         assert signal is None
 
     def test_sides_setting_applies(self, bot):
-        import settings_store
+        settings_store = __import__('importlib').import_module('accounts.settings_store')
         settings_store.save({'RSIBB': {'sides': 'short'}})
         signal, _df = bot._build_signal(
             {'pair': 'BTCUSDT', 'signal': a_signal('LONG'), 'score': 1.0,
@@ -151,7 +151,7 @@ class TestContract:
 class TestRegistration:
     def test_strategy_known_everywhere(self):
         import paper_broker
-        import settings_store
+        settings_store = __import__('importlib').import_module('accounts.settings_store')
         assert 'RSIBB' in settings_store.STRATEGIES
         assert 'RSIBB' in paper_broker.STRATEGIES
 

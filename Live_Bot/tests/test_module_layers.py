@@ -53,8 +53,6 @@ LAYER = {
     'follow_up': 'execution', 'trade_journal': 'execution', 'setup_journal': 'execution',
     'refused': 'execution', 'shadow': 'execution',
     # счета
-    'settings_store': 'accounts', 'risk_gate': 'accounts', 'exchange_keys': 'accounts',
-    'live_costs': 'accounts',
     # интерфейсы
     'dashboard': 'control', 'telegram_bot': 'control', 'telegram_notify': 'control',
     'telegram_panel': 'control', 'telegram_state': 'control', 'tg_format': 'control',
@@ -89,14 +87,14 @@ KNOWN = {
     # Исполнители сами проверяют пределы портфеля и издержки по правилам счёта
     # (risk_gate, settings_store). Этап 5 переносит эти проверки в решение
     # счёта, исполнение получает готовое «можно и сколько».
-    ('paper_broker', 'risk_gate'): 'этап 5',
-    ('paper_broker', 'settings_store'): 'этап 5: пределы портфеля — в решении счёта',
+    # С переноса модулей счетов в accounts/ (этап 10, часть 4) — одной записью
+    # на модуль: брокер и боевой исполнитель сами проверяют пределы портфеля
+    # и издержки по правилам счёта (risk_gate, settings_store, live_costs).
+    ('paper_broker', 'accounts'): 'этап 5: пределы портфеля — в решении счёта',
     ('paper_broker', 'telegram_notify'): 'этап 5',
-    ('shadow', 'risk_gate'): 'этап 5',
-    ('trade_journal', 'risk_gate'): 'этап 5',
-    ('trade_manager', 'live_costs'): 'этап 5/7',
-    ('trade_manager', 'risk_gate'): 'этап 5',
-    ('trade_manager', 'settings_store'): 'этап 5: пределы портфеля — в решении счёта',
+    ('shadow', 'accounts'): 'этап 5',
+    ('trade_journal', 'accounts'): 'этап 5',
+    ('trade_manager', 'accounts'): 'этап 5/7: пределы портфеля — в решении счёта',
     ('trade_manager', 'telegram_notify'): 'этап 5',
 }
 

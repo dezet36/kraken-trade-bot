@@ -525,7 +525,7 @@ class TestNotebookSignalThroughTheBroker:
         for name, value in (('PAPER_FEE_MAKER', 0.0), ('PAPER_FEE_TAKER', 0.0), ('PAPER_SLIPPAGE_PCT', 0.0003),
                             ('MAX_POSITION_HOLD_HOURS', 0.0)):
             monkeypatch.setattr(cfg, name, value)
-        import settings_store
+        settings_store = __import__('importlib').import_module('accounts.settings_store')
         import telegram_notify
         monkeypatch.setattr(settings_store, 'load', lambda: {})           # стороны — обе, риск — общий
         monkeypatch.setattr(telegram_notify, '_send', lambda *a, **k: True)

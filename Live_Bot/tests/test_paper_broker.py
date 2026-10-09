@@ -900,7 +900,7 @@ class TestDailyStop:
 
     def test_stops_new_trades_after_daily_loss(self, broker_env, monkeypatch):
         broker, client, pb, _cfg = broker_env
-        import settings_store
+        settings_store = __import__('importlib').import_module('accounts.settings_store')
         pb._now_ms = lambda: 1_700_000_000_000
         broker.open('FIBO', signal(entry=100.0, stop=90.0, tp1=130.0))
         feed(broker, client, 'BTCUSDT', [(100, 100, 100), (100, 89, 89)])
@@ -921,7 +921,7 @@ class TestDailyStop:
     def test_open_positions_are_not_touched(self, broker_env, monkeypatch):
         """Предел запрещает НОВЫЕ сделки, а не закрывает уже открытые."""
         broker, client, pb, _cfg = broker_env
-        import settings_store
+        settings_store = __import__('importlib').import_module('accounts.settings_store')
         pb._now_ms = lambda: 1_700_000_000_000
         broker.open('SMC', signal(pair='ETHUSDT', strategy='SMC'))
         feed(broker, client, 'ETHUSDT', [(100, 100, 100)])

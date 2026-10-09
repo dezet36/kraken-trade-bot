@@ -388,7 +388,7 @@ def trade_closed(pair: str, direction: str, reason: str, pnl: float,
 def _allowed(event: str) -> bool:
     """Разрешено ли это событие в канал «телеграм»."""
     try:
-        import settings_store as settings
+        from accounts import settings_store as settings
         return settings.notify_on(event, 'telegram')
     except Exception:                              # noqa: BLE001
         return True                                # настройка недоступна — не молчим
@@ -731,7 +731,7 @@ def plan_dropped(strategy: str, pair: str, side: str, entry: float,
 def _strategy_on(strategy):
     """Сделки этой стратегии присылать? (settings_store, поле notify)."""
     try:
-        import settings_store as settings
+        from accounts import settings_store as settings
         return settings.notify_strategy(strategy)
     except Exception:                                  # noqa: BLE001
         return True

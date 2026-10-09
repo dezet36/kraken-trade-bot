@@ -44,7 +44,7 @@ def history_text():
 @pytest.fixture
 def checked(monkeypatch):
     """Проверка ключей на бирже — подменена: сеть в тестах не трогаем."""
-    import exchange_keys
+    exchange_keys = __import__('importlib').import_module('accounts.exchange_keys')
     calls = []
 
     def fake(exchange, mode, key, secret):

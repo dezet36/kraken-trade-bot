@@ -56,7 +56,7 @@ import pandas as pd  # noqa: E402
 
 import backtest_smc as bt  # noqa: E402
 import config  # noqa: E402
-import risk_gate  # noqa: E402
+from accounts import risk_gate  # noqa: E402
 import strategy  # noqa: E402
 import strategy_profile  # noqa: E402
 from smc_engine import Order, compute_stats, run_portfolio  # noqa: E402
@@ -125,7 +125,7 @@ def orders_for_pair(args):
     подставленные свечи вместо запроса к бирже — и только.
     """
     import pair_scanner
-    import settings_store
+    from accounts import settings_store
     cache, pair = args
     bt.CACHE_DIR = os.path.join(HERE, cache)
     strategy.find_local_extremes = fast_local_extremes

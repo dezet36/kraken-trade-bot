@@ -180,7 +180,7 @@ def _strategy_risks():
     промолчать обо всём.
     """
     import config
-    import settings_store as settings
+    from accounts import settings_store as settings
     out = []
     # Риск — тот, с которым стратегия торгует (настройки оператора), один для
     # всех на тесте (CLAUDE.md «Риск»); список стратегий — из реестра.
@@ -222,7 +222,7 @@ def check_risk():
 
     Теперь каждая судится в своих рамках, и числа не складываются.
     """
-    import risk_gate
+    from accounts import risk_gate
     rows = _strategy_risks()
 
     broken = [n for n, _s, r in rows if r is None]
@@ -265,8 +265,8 @@ def check_limits():
     портфельных предела стояли выключенными, а панель показывала их значения
     так, будто они работают.
     """
-    import risk_gate
-    import settings_store as settings
+    from accounts import risk_gate
+    from accounts import settings_store as settings
     try:
         import strategy_profile
         # Предел расхода на вход — у каждой стратегии свой (strategy_profile);

@@ -349,7 +349,7 @@ def close_trade(position: dict, exit_price: float, exit_reason: str,
     # потому известна ещё при входе — записываем, чтобы можно было проверить
     # на НОВЫХ данных догадку, что дешёвые входы прибыльнее дорогих.
     if sl_dist > 0 and entry > 0:
-        import risk_gate
+        from accounts import risk_gate
         share = risk_gate.entry_cost_share(entry, sl_dist,
                                            import_config.ENTRY_COST_ROUND_TRIP)
         row['cost_share_pct'] = round(share * 100, 2)

@@ -30,7 +30,7 @@ import pytest
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
-import risk_gate                                            # noqa: E402
+from accounts import risk_gate  # noqa: E402
 
 
 class TestBothPathsCallTheSameGate:

@@ -205,7 +205,7 @@ class TestNothingHappensWithoutAConfirmation:
 class TestSwitchesAreSharedWithTheSite:
 
     def test_turning_a_strategy_off_asks_and_writes_the_site_switch(self, env):
-        import settings_store
+        settings_store = __import__('importlib').import_module('accounts.settings_store')
         _t, text, kb = env.ctl._render('se:FIBO')
         assert 'Выключить входы' in text and settings_store.enabled('FIBO')
         env.ctl._render(code_starting(kb, 'y:f:'))
@@ -214,7 +214,7 @@ class TestSwitchesAreSharedWithTheSite:
         assert toast == 'Входы включены' and settings_store.enabled('FIBO') is True
 
     def test_notification_switches_write_the_shared_settings(self, env):
-        import settings_store
+        settings_store = __import__('importlib').import_module('accounts.settings_store')
         env.ctl._render('ne:trade_opened')
         assert settings_store.notify_on('trade_opened', 'telegram') is False
         env.ctl._render('ns:FIBO')
@@ -223,7 +223,7 @@ class TestSwitchesAreSharedWithTheSite:
         assert settings_store.notify_strategy('FIBO') is True
 
     def test_an_unknown_event_is_not_written(self, env):
-        import settings_store
+        settings_store = __import__('importlib').import_module('accounts.settings_store')
         env.ctl._render('ne:whatever')
         assert 'whatever_telegram' not in (settings_store.load().get('NOTIFY') or {})
 

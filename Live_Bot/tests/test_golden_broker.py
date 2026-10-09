@@ -143,7 +143,7 @@ def schedule():
 
 
 # Модули, которые эталон загружает заново под свой каталог данных и свои часы.
-LOADED = ('config', 'settings_store', 'paper_broker', 'dashboard', 'shadow', 'setup_journal',
+LOADED = ('config', 'accounts.settings_store', 'paper_broker', 'dashboard', 'shadow', 'setup_journal',
           'refused', 'follow_up', 'trade_journal')
 
 
@@ -170,7 +170,7 @@ def run(tmp_path, monkeypatch):
     for module in LOADED:
         sys.modules.pop(module, None)
     import paper_broker as pb
-    import settings_store
+    settings_store = __import__('importlib').import_module('accounts.settings_store')
     settings_store.SETTINGS_FILE = str(tmp_path / 'runtime_settings.json')
     settings_store._cache = None
     settings_store._mtime = None

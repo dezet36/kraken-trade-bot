@@ -173,7 +173,7 @@ class TestTheCostLimitComesFromTheStrategy:
     def test_an_smc_entry_with_a_1_percent_stop_is_not_refused(self, broker):
         # 19–21.09.2026: девять сетапов SMC ушли в «предел издержек» при
         # стопе 0.8–1.2% (доля 6–9%) — общий предел 5% запирал стратегию.
-        import risk_gate
+        risk_gate = __import__('importlib').import_module('accounts.risk_gate')
         for stop in (0.8, 1.0, 1.2):
             pricey, share, _ = risk_gate.cost_too_high(100.0, stop, 0.00075, broker.PaperBroker._cost_limit('SMC'))
             assert pricey is False, f'стоп {stop}%: доля {share:.1f}%'
@@ -183,7 +183,7 @@ class TestTheCostLimitComesFromTheStrategy:
 
     def test_a_levels_entry_with_a_1_2_percent_stop_is_not_refused(self, broker, monkeypatch):
         import config
-        import risk_gate
+        risk_gate = __import__('importlib').import_module('accounts.risk_gate')
         monkeypatch.setattr(config, 'MAX_ENTRY_COST_SHARE_PCT', 5.0)
         share = risk_gate.entry_cost_share(100.0, 1.2, 0.00075) * 100
         assert 5.0 < share < 8.0, 'типичный сетап уровней — между общим и своим пределом'

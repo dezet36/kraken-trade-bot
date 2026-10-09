@@ -30,7 +30,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import config
 import scan_report
-import settings_store
+from accounts import settings_store
 import strategy_profile
 from logger import log
 
@@ -1048,10 +1048,10 @@ def _portfolio():
     # Рядом — сколько депозита МОЖЕТ оказаться под риском одновременно, если
     # каждая стратегия займёт свои слоты: без этого числа «предела нет» звучит
     # безобидно.
-    import risk_gate
+    from accounts import risk_gate
     off = risk_gate.disabled_limits(max_positions, limit, day_limit)
     try:
-        import settings_store as st
+        from accounts import settings_store as st
         from strategies import registry
         # ПО СТРАТЕГИЯМ, БЕЗ СЛОЖЕНИЯ. Проценты считаются от РАЗНЫХ депозитов,
         # и сумма их не относится ни к одному — см. risk_gate.exposure_by_strategy.

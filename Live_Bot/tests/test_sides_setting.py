@@ -19,7 +19,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 @pytest.fixture()
 def store(tmp_path, monkeypatch):
     monkeypatch.setenv('BOT_DATA_DIR', str(tmp_path))
-    import settings_store
+    settings_store = __import__('importlib').import_module('accounts.settings_store')
     settings_store.SETTINGS_FILE = str(tmp_path / 'runtime_settings.json')
     settings_store.load(force=True)
     return settings_store

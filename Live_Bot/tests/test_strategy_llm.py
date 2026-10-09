@@ -380,7 +380,7 @@ class TestItIsAStrategyLikeTheOthers:
 
     def test_both_lists_agree(self):
         import paper_broker
-        import settings_store
+        settings_store = __import__('importlib').import_module('accounts.settings_store')
 
         assert 'LLM' in paper_broker.STRATEGIES
         assert paper_broker.STRATEGIES == settings_store.STRATEGIES

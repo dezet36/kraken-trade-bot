@@ -1,5 +1,5 @@
 import config
-import live_costs
+from accounts import live_costs
 import market_regime
 import telegram_notify as tg
 import trade_journal as journal
@@ -508,7 +508,7 @@ class LiveTradeManager:
         приборная доска показывала «сегодня $0.00»: не потому что не потеряли,
         а потому что не спросили.
         """
-        import risk_gate
+        from accounts import risk_gate
         import trade_journal
         from datetime import datetime, timezone
         deposit = float(self.get_trading_balance() or 0)
@@ -527,9 +527,9 @@ class LiveTradeManager:
         Сами правила — в risk_gate, общем для бумаги и боя. Здесь только сбор
         чисел: у боевого пути счёт один, и риск новой сделки считается от него.
         """
-        import risk_gate
+        from accounts import risk_gate
         try:
-            import settings_store as settings
+            from accounts import settings_store as settings
             max_positions = settings.portfolio_max_positions()
             risk_limit = settings.portfolio_risk_pct()
             day_limit = settings.daily_loss_pct()
@@ -1087,7 +1087,7 @@ class LiveTradeManager:
 
         # Тот же предел расхода, что на бумаге, и той же реализацией: правило,
         # написанное дважды, расходится — так уже вышло с дневным стоп-краном.
-        import risk_gate
+        from accounts import risk_gate
         pricey, cost_share, why = risk_gate.cost_too_high(
             sizing_entry, sig_sl_dist, config.ENTRY_COST_ROUND_TRIP,
             strategy_profile.cost_limit_pct(signal.get('strategy')))

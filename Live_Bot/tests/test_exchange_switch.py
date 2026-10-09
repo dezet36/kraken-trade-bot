@@ -64,7 +64,7 @@ BINGX_IDS = ['BTC-USDT', 'ETH-USDT']          # SHIB1000 у него нет
 @pytest.fixture()
 def ex(monkeypatch, tmp_path):
     monkeypatch.setenv('BOT_DATA_DIR', str(tmp_path))
-    for module in ('config', 'settings_store', 'data.exchange'):
+    for module in ('config', 'accounts.settings_store', 'data.exchange'):
         sys.modules.pop(module, None)
     # import_module, а не «from data import exchange»: тот взял бы прежний
     # модуль из атрибута пакета data, хотя из sys.modules его выгрузили.
@@ -173,21 +173,21 @@ class TestSelection:
         Выбор биржи без ключей не должен применяться: бот упал бы при старте
         на решении, принятом когда-то мышкой.
         """
-        import settings_store
+        settings_store = __import__('importlib').import_module('accounts.settings_store')
         settings_store.save({settings_store.EXCHANGE: {'name': 'bingx'}})
         monkeypatch.setattr(ex, 'configured_exchanges',
                             lambda: {'bybit': True, 'bingx': False})
         assert ex.active_exchange_name() == 'bybit'
 
     def test_choice_applies_when_configured(self, ex, monkeypatch):
-        import settings_store
+        settings_store = __import__('importlib').import_module('accounts.settings_store')
         settings_store.save({settings_store.EXCHANGE: {'name': 'bingx'}})
         monkeypatch.setattr(ex, 'configured_exchanges',
                             lambda: {'bybit': True, 'bingx': True})
         assert ex.active_exchange_name() == 'bingx'
 
     def test_unknown_exchange_ignored(self, ex):
-        import settings_store
+        settings_store = __import__('importlib').import_module('accounts.settings_store')
         saved = settings_store.save({settings_store.EXCHANGE:
                                      {'name': 'кракен-которого-нет'}})
         assert saved[settings_store.EXCHANGE]['name'] in ex.SUPPORTED_EXCHANGES
@@ -200,7 +200,7 @@ class TestKeysNeverPassThroughSettings:
         виден всем, кто открыл страницу, — и это не гипотетическая придирка,
         а прямое следствие того, что файл отдаётся в /api/settings.
         """
-        import settings_store
+        settings_store = __import__('importlib').import_module('accounts.settings_store')
         settings_store.save({settings_store.EXCHANGE:
                              {'name': 'bingx', 'api_key': 'секрет',
                               'secret': 'тоже секрет'}})

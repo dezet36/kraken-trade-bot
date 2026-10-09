@@ -512,7 +512,7 @@ class TestWiring:
         assert 'не найдена' in toast
 
     def test_telegram_message_can_be_switched_off(self, monkeypatch):
-        import settings_store
+        settings_store = __import__('importlib').import_module('accounts.settings_store')
         import telegram_notify as tg
         out = []
         monkeypatch.setattr(tg, '_send', lambda text, **kw: out.append(text) or True)

@@ -348,7 +348,7 @@ class BotController:
         except Exception as e:                         # noqa: BLE001
             log(f"Telegram: состояние брокера не прочитано — {e}")
         try:
-            import settings_store
+            from accounts import settings_store
             d['settings'] = settings_store.load()
         except Exception:                              # noqa: BLE001
             pass
@@ -386,7 +386,7 @@ class BotController:
     # ── Переключатели ────────────────────────────────────────────────────────
 
     def _toggle_event(self, event):
-        import settings_store
+        from accounts import settings_store
         import telegram_panel as panel
         if event in {e for e, _l, _w in panel.EVENTS}:
             on = settings_store.notify_on(event, 'telegram')
@@ -398,7 +398,7 @@ class BotController:
         return (toast, *panel.notify_view(self._collect()))
 
     def _toggle_strategy_notify(self, name, back_to_strategy=False):
-        import settings_store
+        from accounts import settings_store
         import telegram_panel as panel
         on = settings_store.notify_strategy(name)
         settings_store.save({name: {'notify': not on}})
@@ -409,7 +409,7 @@ class BotController:
 
     def _toggle_strategy(self, name):
         """Выключить входы — через подтверждение; включить — сразу (это снятие ограничения)."""
-        import settings_store
+        from accounts import settings_store
         import telegram_panel as panel
         d = self._collect()
         if settings_store.enabled(name):
@@ -421,7 +421,7 @@ class BotController:
     # ── Действия после подтверждения ─────────────────────────────────────────
 
     def _confirmed(self, rest):
-        import settings_store
+        from accounts import settings_store
         import telegram_panel as panel
         if len(rest) < 3:
             return ('', *panel.main_view(self._collect()))

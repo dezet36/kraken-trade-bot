@@ -27,4 +27,4 @@ def install():
     # Биржа торговли, выбранная на панели, — у счетов; данные спрашивают её
     # через крючок (data/exchange.active_exchange_name).
     hooks.provide('trading_exchange',
-                  lambda: importlib.import_module('settings_store').exchange_name())
+                  lambda: importlib.import_module('accounts.settings_store').exchange_name())

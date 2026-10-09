@@ -220,7 +220,7 @@ class TestMigration:
 
 class TestPanelWindow:
     def test_panel_sees_the_moved_money_and_the_strategy_knobs(self):
-        import settings_store
+        settings_store = __import__('importlib').import_module('accounts.settings_store')
         write_legacy(data_dir())
         stored = settings_store.load(force=True)
         assert stored['FIBO']['sides'] == 'short' and stored['FIBO']['deposit'] == 20000.0
@@ -229,7 +229,7 @@ class TestPanelWindow:
         assert settings_store.critic_enabled() is False
 
     def test_save_routes_money_to_the_account_and_knobs_to_the_strategy(self):
-        import settings_store
+        settings_store = __import__('importlib').import_module('accounts.settings_store')
         from strategies import settings as knobs
         result = settings_store.save({'FIBO': {'risk_pct': 0.7, 'min_stop_pct': 1.2, 'notify': False}})
         assert result['FIBO']['risk_pct'] == 0.7 and account.risk_pct('FIBO') == 0.7
@@ -243,7 +243,7 @@ class TestPanelWindow:
         assert money['FIBO']['risk_pct'] == 0.7 and 'min_stop_pct' not in money['FIBO']
 
     def test_old_money_fields_leave_the_settings_file_on_the_next_save(self):
-        import settings_store
+        settings_store = __import__('importlib').import_module('accounts.settings_store')
         write_legacy(data_dir())
         settings_store.save({'NOTIFY': {'daily_telegram': False}})
         with open(settings_store.SETTINGS_FILE, encoding='utf-8') as fh:
@@ -254,14 +254,14 @@ class TestPanelWindow:
         assert account.sides('FIBO') == 'short'           # деньги — на счёте
 
     def test_one_history_record_per_panel_save(self):
-        import settings_store
+        settings_store = __import__('importlib').import_module('accounts.settings_store')
         settings_store.save({'FIBO': {'risk_pct': 0.7, 'min_stop_pct': 1.2}})
         rows = settings_store.history()
         assert len(rows) == 1
         assert {c['field'] for c in rows[0]['changes']} == {'FIBO.risk_pct', 'FIBO.min_stop_pct'}
 
     def test_telegram_toggle_reaches_the_account(self):
-        import settings_store
+        settings_store = __import__('importlib').import_module('accounts.settings_store')
         settings_store.save({'SMCS': {'enabled': False}})
         assert account.enabled('SMCS') is False and settings_store.enabled('SMCS') is False
 
