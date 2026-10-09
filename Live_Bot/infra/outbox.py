@@ -8,7 +8,7 @@
 повторяют имена функций получателей, поэтому вызов в стратегии читается как
 прежде:
 
-    from strategies.outbox import telegram as tg
+    from infra.outbox import telegram as tg
     tg.plan_dropped(NAME, pair, side, entry, reason)
 
     telegram  → telegram_notify (уведомления)

@@ -32,7 +32,7 @@ import fibo_live_sim as FS                            # noqa: E402
 import ai_setups as S                                 # noqa: E402
 import backtest_smc as bt                             # noqa: E402
 from infra import config  # noqa: E402
-from accounts import risk_gate  # noqa: E402
+from execution import risk_gate  # noqa: E402
 from accounts import settings_store  # noqa: E402
 import smc_engine                                     # noqa: E402
 from common import ci                                 # noqa: E402

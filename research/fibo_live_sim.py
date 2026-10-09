@@ -56,7 +56,7 @@ import pandas as pd  # noqa: E402
 
 import backtest_smc as bt  # noqa: E402
 from infra import config  # noqa: E402
-from accounts import risk_gate  # noqa: E402
+from execution import risk_gate  # noqa: E402
 from strategies.fibo import strategy  # noqa: E402
 from strategies import strategy_profile  # noqa: E402
 from smc_engine import Order, compute_stats, run_portfolio  # noqa: E402

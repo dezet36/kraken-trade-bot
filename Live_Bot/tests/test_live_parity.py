@@ -33,8 +33,8 @@ class TestBothPathsAreNamedTheSame:
     """
 
     def test_the_costs_reach_the_live_journal(self):
-        import paper_broker
-        import trade_journal
+        paper_broker = __import__('importlib').import_module('execution.paper_broker')
+        trade_journal = __import__('importlib').import_module('execution.trade_journal')
 
         measured = {'gross_pnl_usd', 'fees_usd', 'funding_usd', 'pnl_r',
                     'cost_share_pct', 'mfe_r', 'mae_r', 'mfe_min', 'mae_min',
@@ -51,7 +51,7 @@ class TestBothPathsAreNamedTheSame:
         Комиссии берутся у биржи, а при её отказе оцениваются по тарифу.
         Смешав их молча, через месяц не отличишь факт от модели.
         """
-        import trade_journal
+        trade_journal = __import__('importlib').import_module('execution.trade_journal')
         assert 'fees_source' in trade_journal.COLUMNS
 
 

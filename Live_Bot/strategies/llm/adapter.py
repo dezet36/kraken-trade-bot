@@ -615,7 +615,7 @@ def _check_armed(candles):
             # Сказать об этом вслух: план висел в списке живых сетапов, и его
             # исчезновение без объяснения читается как сбой, а не как исход.
             try:
-                from strategies.outbox import telegram as tg
+                from infra.outbox import telegram as tg
                 tg.plan_dropped(NAME, pair, verdict.get('side', ''),
                                 float(verdict.get('entry') or 0),
                                 f'условие входа не наступило за {ttl // 3600} ч',
@@ -649,7 +649,7 @@ def _check_armed(candles):
                                      f'{verdict.get("trigger_level")} не наступило, а {missed}'})
             _refused[pair] = {'at': time.time(), 'sig': frozenset()}
             try:
-                from strategies.outbox import telegram as tg
+                from infra.outbox import telegram as tg
                 tg.llm_setup_rejected(pair, verdict.get('side', ''), float(verdict.get('entry') or 0),
                                       'цель достигнута без входа',
                                       f'условие {verdict.get("trigger_when")} '
@@ -731,7 +731,7 @@ _frames = None
 def _notify_setup(signal, df):
     """План принят — сообщение с графиком. Отказ отправки торговле не мешает."""
     try:
-        from strategies.outbox import telegram as tg
+        from infra.outbox import telegram as tg
         tg.llm_setup_found(signal, df if hasattr(df, 'columns') else None,
                            frames=_frames)
     except Exception as exc:                       # noqa: BLE001
@@ -740,7 +740,7 @@ def _notify_setup(signal, df):
 
 def _notify_rejected(pair, verdict):
     try:
-        from strategies.outbox import telegram as tg
+        from infra.outbox import telegram as tg
         tg.llm_setup_rejected(pair, verdict.get('side', ''), float(verdict.get('entry') or 0),
                               verdict.get('gate', ''), verdict.get('detail', ''))
     except Exception:                              # noqa: BLE001
@@ -856,7 +856,7 @@ def _fractions(count):
 def _refuse(pair, verdict):
     """Пишет отказ модели в общий журнал отказов."""
     try:
-        from strategies.outbox import refused
+        from infra.outbox import refused
         refused.record(NAME, {'trading_pair': pair}, f"ИИ: {verdict.get('gate', '')}",
                        verdict.get('detail') or verdict.get('why', ''),
                        verdict.get('cost_r', ''))
@@ -994,7 +994,7 @@ def _alert_broken(pair, verdict, now=None):
         return
     _alerted[gate] = now
     try:
-        from strategies.outbox import telegram as tg
+        from infra.outbox import telegram as tg
         tg.error_alert(f'ИИ {pair}: {gate} — {str(verdict.get("detail", ""))[:200]}')
     except Exception:                              # noqa: BLE001
         pass

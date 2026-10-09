@@ -45,7 +45,6 @@ from infra import config
 from infra import csv_journal
 from strategies import glossary
 from execution.exit_plan import cooldown_hours, direction_cap, tp_plan, wants_breakeven
-from accounts import settings_store as settings
 from strategies import setup_geometry
 from infra.logger import log
 
@@ -76,7 +75,7 @@ def _refuse(strategy, signal, gate, detail='', cost_share=''):
         pass
     # Тень: чем кончился бы отвергнутый сетап (shadow.py). Молча, как и запись.
     try:
-        import shadow
+        from execution import shadow
         shadow.watch(strategy, signal, gate, detail)
     except Exception:                              # noqa: BLE001
         pass
@@ -522,7 +521,7 @@ class PaperBroker:
         второй экземпляр этой арифметики однажды разошёлся бы с первым — ровно
         так, как разошёлся весь дневной стоп.
         """
-        from accounts import risk_gate
+        from execution import risk_gate
         deposit = sum(float(self.balance(s) or 0) for s in self.strategies)
         pnl, pct = risk_gate.day_result(read_journal(), deposit,
                                         _iso(_now_ms())[:10])
@@ -536,11 +535,9 @@ class PaperBroker:
         чисел: у бумажного пути депозиты раздельные по стратегиям, и риск
         новой сделки считается от депозита СВОЕЙ.
         """
-        from accounts import risk_gate
+        from execution import risk_gate
         try:
-            max_positions = settings.portfolio_max_positions()
-            risk_limit = settings.portfolio_risk_pct()
-            day_limit = settings.daily_loss_pct()
+            max_positions, risk_limit, day_limit = risk_gate.portfolio_limits()
             risk_gate.remember(max_positions, risk_limit, day_limit)
         except Exception as exc:                   # noqa: BLE001
             known = risk_gate.settings_unavailable(exc)
@@ -648,7 +645,7 @@ class PaperBroker:
         }
 
     def get_stats_dict(self):
-        from trade_manager import compute_stats
+        from execution.trade_manager import compute_stats
         rows = read_journal()
         return compute_stats(rows) if rows else None
 
@@ -663,7 +660,7 @@ class PaperBroker:
         mark['paused_alerted'] = True
         self._save_state()
         try:
-            from control import telegram_notify as tg
+            from infra.outbox import telegram as tg
             tg.error_alert(f'Термостат: просадка портфеля за день {drawdown:.2f}% '
                            f'при пределе {limit:.2f}% — новые входы остановлены '
                            f'до следующих суток UTC. Позиции ведутся как обычно.')
@@ -823,7 +820,7 @@ class PaperBroker:
         # Предел расхода на вход. Тесный стоп даёт большой объём на тот же
         # риск, и комиссии съедают его долю ещё до того, как цена двинулась.
         # Проверка ОДНА на оба пути — см. risk_gate.cost_too_high.
-        from accounts import risk_gate
+        from execution import risk_gate
         pricey, cost_share, why = risk_gate.cost_too_high(
             limit_price, sl_dist, config.ENTRY_COST_ROUND_TRIP,
             self._cost_limit(strategy))
@@ -927,7 +924,7 @@ class PaperBroker:
         self.state['cooldown'][strategy][pair] = now
         self._save_state()
         try:
-            import shadow
+            from execution import shadow
             shadow.opened(strategy, pair, direction, entry, stop)
         except Exception:                          # noqa: BLE001
             pass
@@ -1115,7 +1112,7 @@ class PaperBroker:
         except Exception as exc:                       # noqa: BLE001
             log(f'⚠️ наблюдения за вердиктами: {exc}')
         try:
-            import shadow
+            from execution import shadow
             for pair, since in shadow.pairs().items():
                 pairs[pair] = min(pairs.get(pair, since), since)
         except Exception as exc:                       # noqa: BLE001
@@ -1268,7 +1265,7 @@ class PaperBroker:
             except Exception as exc:                   # noqa: BLE001
                 log(f'⚠️ наблюдения за вердиктами {pair}: {exc}')
             try:
-                import shadow
+                from execution import shadow
                 shadow.advance(pair, ts, high, low, close, _open)
             except Exception as exc:                   # noqa: BLE001
                 log(f'⚠️ тени отказов {pair}: {exc}')
@@ -1416,7 +1413,7 @@ class PaperBroker:
         except Exception:                              # noqa: BLE001
             pass
         try:
-            from control import telegram_notify as tg
+            from infra.outbox import telegram as tg
             tg.plan_dropped(strategy, pair, order.get('direction', ''),
                             float(order.get('limit_price') or 0), reason,
                             (order.get('context') or {}).get('why', ''))
@@ -1490,7 +1487,7 @@ class PaperBroker:
         # Уведомление — вспомогательное: его отказ не имеет права мешать
         # торговле, поэтому глушится целиком.
         try:
-            from control import telegram_notify as tg
+            from infra.outbox import telegram as tg
             tg.paper_entry(strategy, pair, position, self.balance(strategy))
         except Exception:                          # noqa: BLE001
             pass
@@ -1596,7 +1593,7 @@ class PaperBroker:
     def _notify(name, *args):
         """Уведомление в Telegram. Его отказ торговле не мешает — глушится целиком."""
         try:
-            from control import telegram_notify as tg
+            from infra.outbox import telegram as tg
             getattr(tg, name)(*args)
         except Exception:                          # noqa: BLE001
             pass

@@ -1,8 +1,15 @@
+import os
+import sys
+
+if __package__ in (None, ''):
+    # Запуск файлом (python Live_Bot/execution/trade_manager.py): модули бота — в папке выше.
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from infra import config
-from accounts import live_costs
+from execution import live_costs
 from analysis import market_regime
-from control import telegram_notify as tg
-import trade_journal as journal
+from infra.outbox import telegram as tg
+from execution import trade_journal as journal
 from execution.exit_plan import direction_cap, tp_plan, tps_completed, wants_breakeven
 from infra.logger import log, log_trade
 from data.exchange import get_exchange, reset_exchange
@@ -508,8 +515,8 @@ class LiveTradeManager:
         приборная доска показывала «сегодня $0.00»: не потому что не потеряли,
         а потому что не спросили.
         """
-        from accounts import risk_gate
-        import trade_journal
+        from execution import risk_gate
+        from execution import trade_journal
         from datetime import datetime, timezone
         deposit = float(self.get_trading_balance() or 0)
         today = datetime.now(timezone.utc).strftime('%Y-%m-%d')
@@ -527,12 +534,9 @@ class LiveTradeManager:
         Сами правила — в risk_gate, общем для бумаги и боя. Здесь только сбор
         чисел: у боевого пути счёт один, и риск новой сделки считается от него.
         """
-        from accounts import risk_gate
+        from execution import risk_gate
         try:
-            from accounts import settings_store as settings
-            max_positions = settings.portfolio_max_positions()
-            risk_limit = settings.portfolio_risk_pct()
-            day_limit = settings.daily_loss_pct()
+            max_positions, risk_limit, day_limit = risk_gate.portfolio_limits()
             risk_gate.remember(max_positions, risk_limit, day_limit)
         except Exception as exc:                   # noqa: BLE001
             known = risk_gate.settings_unavailable(exc)
@@ -1087,7 +1091,7 @@ class LiveTradeManager:
 
         # Тот же предел расхода, что на бумаге, и той же реализацией: правило,
         # написанное дважды, расходится — так уже вышло с дневным стоп-краном.
-        from accounts import risk_gate
+        from execution import risk_gate
         pricey, cost_share, why = risk_gate.cost_too_high(
             sizing_entry, sig_sl_dist, config.ENTRY_COST_ROUND_TRIP,
             strategy_profile.cost_limit_pct(signal.get('strategy')))

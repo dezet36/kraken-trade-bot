@@ -36,9 +36,9 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 @pytest.fixture()
 def broker(tmp_path, monkeypatch):
     monkeypatch.setenv('BOT_DATA_DIR', str(tmp_path))
-    for module in ('infra.config', 'paper_broker'):
+    for module in ('infra.config', 'execution.paper_broker'):
         forget(module, None)
-    import paper_broker
+    paper_broker = __import__('importlib').import_module('execution.paper_broker')
     return paper_broker
 
 
@@ -174,7 +174,7 @@ class TestTheCostLimitComesFromTheStrategy:
     def test_an_smc_entry_with_a_1_percent_stop_is_not_refused(self, broker):
         # 19–21.09.2026: девять сетапов SMC ушли в «предел издержек» при
         # стопе 0.8–1.2% (доля 6–9%) — общий предел 5% запирал стратегию.
-        risk_gate = __import__('importlib').import_module('accounts.risk_gate')
+        risk_gate = __import__('importlib').import_module('execution.risk_gate')
         for stop in (0.8, 1.0, 1.2):
             pricey, share, _ = risk_gate.cost_too_high(100.0, stop, 0.00075, broker.PaperBroker._cost_limit('SMC'))
             assert pricey is False, f'стоп {stop}%: доля {share:.1f}%'
@@ -184,7 +184,7 @@ class TestTheCostLimitComesFromTheStrategy:
 
     def test_a_levels_entry_with_a_1_2_percent_stop_is_not_refused(self, broker, monkeypatch):
         config = __import__('importlib').import_module('infra.config')
-        risk_gate = __import__('importlib').import_module('accounts.risk_gate')
+        risk_gate = __import__('importlib').import_module('execution.risk_gate')
         monkeypatch.setattr(config, 'MAX_ENTRY_COST_SHARE_PCT', 5.0)
         share = risk_gate.entry_cost_share(100.0, 1.2, 0.00075) * 100
         assert 5.0 < share < 8.0, 'типичный сетап уровней — между общим и своим пределом'

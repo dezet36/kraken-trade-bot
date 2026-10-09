@@ -41,7 +41,7 @@ import ai_doctrine as D                               # noqa: E402
 import backtest_smc as bt                             # noqa: E402
 from infra import config  # noqa: E402
 from strategies.llm import llm_rules  # noqa: E402
-from accounts import risk_gate  # noqa: E402
+from execution import risk_gate  # noqa: E402
 import smc_engine                                     # noqa: E402
 from ai_filter_study import FOMC                      # noqa: E402
 from common import ci                                 # noqa: E402

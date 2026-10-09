@@ -59,10 +59,10 @@ def env(monkeypatch):
     monkeypatch.setenv('PAPER_FUNDING', 'false')
     for name in ('FIBO', 'SMC', 'LEVELS', 'RSIBB', 'LLM'):
         monkeypatch.setenv(f'PAPER_START_BALANCE_{name}', '10000')
-    for module in ('infra.config', 'paper_broker', 'control.dashboard', 'shadow', 'execution.setup_journal', 'control.telegram_bot'):
+    for module in ('infra.config', 'execution.paper_broker', 'control.dashboard', 'execution.shadow', 'execution.setup_journal', 'control.telegram_bot'):
         forget(module, None)
     config = __import__('importlib').import_module('infra.config')
-    import paper_broker
+    paper_broker = __import__('importlib').import_module('execution.paper_broker')
     telegram_bot = __import__('importlib').import_module('control.telegram_bot')
     for key, value in (('PAPER_FEE_MAKER', 0.0), ('PAPER_FEE_TAKER', 0.0), ('PAPER_SLIPPAGE_PCT', 0.0),
                        ('RISK_PER_TRADE', 1.0), ('LIMIT_ENTRY_OFFSET_PCT', 0.0),

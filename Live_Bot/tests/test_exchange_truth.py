@@ -73,7 +73,7 @@ class TestTheModeIsWhatHappened:
             'утверждение устарело и стоило реальных денег под подписью DEMO')
 
     def test_the_trade_label_asks_the_client(self):
-        text = open(os.path.join(ROOT, 'trade_manager.py'), encoding='utf-8').read()
+        text = open(os.path.join(ROOT, 'execution/trade_manager.py'), encoding='utf-8').read()
         spot = text.index('mode_text =')
         block = text[max(0, spot - 400):spot + 300]
         assert 'effective_mode' in block, (
@@ -82,7 +82,7 @@ class TestTheModeIsWhatHappened:
 
 class TestTheStopIsAttachedEverywhere:
 
-    SRC = open(os.path.join(ROOT, 'trade_manager.py'), encoding='utf-8').read()
+    SRC = open(os.path.join(ROOT, 'execution/trade_manager.py'), encoding='utf-8').read()
 
     def _limit_block(self):
         spot = self.SRC.index('limit_params = {')
@@ -249,7 +249,7 @@ class TestTheStopMoveIsBuildableOnEveryExchange:
         assert float(body.get('quantity')) == 0.01
 
     def test_the_code_asks_for_the_size(self):
-        src = open(os.path.join(ROOT, 'trade_manager.py'), encoding='utf-8').read()
+        src = open(os.path.join(ROOT, 'execution/trade_manager.py'), encoding='utf-8').read()
         spot = src.index('def _set_position_stop')
         body = src[spot:src.index('\n    def ', spot + 10)]
         # Только код: в описании метод объясняет, ПОЧЕМУ amount=None было
@@ -266,14 +266,14 @@ class TestTheStopMoveIsBuildableOnEveryExchange:
         держим. Просить у биржи лишнее — получить отказ и остаться без
         перенесённого стопа.
         """
-        src = open(os.path.join(ROOT, 'trade_manager.py'), encoding='utf-8').read()
+        src = open(os.path.join(ROOT, 'execution/trade_manager.py'), encoding='utf-8').read()
         spot = src.index('def _open_size')
         body = src[spot:src.index('\n    def ', spot + 10)]
         assert 'remaining_size' in body
 
     def test_no_position_means_no_order(self):
         """Нечего защищать — нечего и отправлять."""
-        src = open(os.path.join(ROOT, 'trade_manager.py'), encoding='utf-8').read()
+        src = open(os.path.join(ROOT, 'execution/trade_manager.py'), encoding='utf-8').read()
         spot = src.index('def _set_position_stop')
         body = src[spot:src.index('\n    def ', spot + 10)]
         assert 'if not size:' in body and 'return False' in body

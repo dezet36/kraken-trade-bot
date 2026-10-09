@@ -469,7 +469,7 @@ class BotController:
     def _closed_text(strategy, pair):
         """Итог только что закрытой вручную позиции — из журнала сделок."""
         try:
-            import paper_broker
+            from execution import paper_broker
             from control import tg_format as fmt
             rows = [r for r in paper_broker.read_journal()
                     if r.get('strategy') == strategy and r.get('pair') == pair]
@@ -490,7 +490,7 @@ class BotController:
         семидесяти семи сделках.
         """
         if self._paper():
-            import paper_broker
+            from execution import paper_broker
             files = [paper_broker.JOURNAL_CSV, paper_broker.JOURNAL_JSON]
         else:
             files = [os.path.join(config.DATA_DIR, 'trades_detail.jsonl'),

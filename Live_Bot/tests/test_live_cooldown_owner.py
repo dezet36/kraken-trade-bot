@@ -19,7 +19,7 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import trade_manager  # noqa: E402
+from execution import trade_manager  # noqa: E402
 from strategies import strategy_profile  # noqa: E402
 
 

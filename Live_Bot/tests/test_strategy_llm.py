@@ -379,7 +379,7 @@ class TestRefusalsAreRecorded:
 class TestItIsAStrategyLikeTheOthers:
 
     def test_both_lists_agree(self):
-        import paper_broker
+        paper_broker = __import__('importlib').import_module('execution.paper_broker')
         settings_store = __import__('importlib').import_module('accounts.settings_store')
 
         assert 'LLM' in paper_broker.STRATEGIES
@@ -397,8 +397,8 @@ class TestTheJournalsStayInStep:
     """
 
     def test_llm_columns_exist_in_both(self):
-        import paper_broker
-        import trade_journal
+        paper_broker = __import__('importlib').import_module('execution.paper_broker')
+        trade_journal = __import__('importlib').import_module('execution.trade_journal')
 
         paper = {c for c in paper_broker.COLUMNS if c.startswith('llm_')}
         live = {c for c in trade_journal.COLUMNS if c.startswith('llm_')}
@@ -406,7 +406,7 @@ class TestTheJournalsStayInStep:
         assert paper == live, f'расходятся: {paper ^ live}'
 
     def test_a_non_llm_trade_leaves_them_empty(self):
-        import paper_broker
+        paper_broker = __import__('importlib').import_module('execution.paper_broker')
         empty = paper_broker._llm_columns(None)
         assert set(empty) == {c for c in paper_broker.COLUMNS
                               if c.startswith('llm_')}

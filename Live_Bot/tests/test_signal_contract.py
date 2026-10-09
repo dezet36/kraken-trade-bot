@@ -71,7 +71,7 @@ def test_levels_signal_builds_context(tmp_path, monkeypatch):
     """
     signal = _levels_signal(tmp_path, monkeypatch)
     signal['strategy'] = 'LEVELS'
-    import paper_broker as pb
+    pb = __import__('importlib').import_module('execution.paper_broker')
 
     ctx = pb.PaperBroker._context('LEVELS', signal)
     assert ctx['zone'] == 'LEVEL'
@@ -95,7 +95,7 @@ def test_levels_trade_opens_end_to_end(tmp_path, monkeypatch):
     signal, why = account.decide('LEVELS', signal, 10_000)
     assert why is None
 
-    import paper_broker as pb
+    pb = __import__('importlib').import_module('execution.paper_broker')
     # Предел расхода на вход выключен намеренно: в приборе стоп 1.1%, а это
     # 6.2% риска в комиссиях, и обычный вход с такими числами не проходит.
     # Проверка эта про ФОРМУ сигнала — доходит ли он от стратегии до брокера

@@ -21,15 +21,15 @@ from strategies.smcs import adapter as strategy_smcs
 from strategies.fib12 import adapter as strategy_fib12
 from strategies.fibo.strategy import analyze_market
 from strategies.pair_scanner import get_liquid_pairs, scan_for_setups
-from paper_broker import PaperBroker, STRATEGIES as PAPER_STRATEGIES
+from execution.paper_broker import PaperBroker, STRATEGIES as PAPER_STRATEGIES
 # Деньги и допуск стратегий — у их тестовых счетов (реорганизация, этап 2).
 from accounts import paper as account
 from accounts import trading as trading_accounts
 # Сообщения стратегий (уведомления, тень отказа, журнал отказов) — через порты
-# strategies/outbox; здесь они соединяются с модулями (этап 10).
+# infra/outbox; здесь они соединяются с модулями (этап 10).
 from control import wiring
 wiring.install()
-from trade_manager import LiveTradeManager
+from execution.trade_manager import LiveTradeManager
 from infra.logger import log
 
 trade_manager   = None

@@ -75,7 +75,7 @@ def test_first_index_is_earliest_not_latest():
 def test_geometry_carries_touches_and_start(monkeypatch, tmp_path):
     """Разметка сделки получает и время первого касания, и сами касания."""
     monkeypatch.setenv('BOT_DATA_DIR', str(tmp_path))
-    import paper_broker as pb
+    pb = __import__('importlib').import_module('execution.paper_broker')
 
     signal = {
         'setup': {
@@ -100,7 +100,7 @@ def test_geometry_carries_touches_and_start(monkeypatch, tmp_path):
 def test_geometry_without_touches_still_works(monkeypatch, tmp_path):
     """Старые записи без касаний не должны ронять разметку."""
     monkeypatch.setenv('BOT_DATA_DIR', str(tmp_path))
-    import paper_broker as pb
+    pb = __import__('importlib').import_module('execution.paper_broker')
 
     geo = pb.PaperBroker._geometry(
         'LEVELS', {'setup': {'type': 'LONG'}, 'levels': {'level': 50.0}})

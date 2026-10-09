@@ -107,7 +107,7 @@ class TestУчёт:
         значило бы обходить собственный предел: бот набрал бы полный лимит
         ордерами, а потом они превратились бы в позиции все разом.
         """
-        import paper_broker
+        paper_broker = __import__('importlib').import_module('execution.paper_broker')
 
         broker = paper_broker.PaperBroker.__new__(paper_broker.PaperBroker)
         broker.strategies = ('FIBO', 'SMC')

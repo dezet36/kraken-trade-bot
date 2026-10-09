@@ -165,7 +165,7 @@ class TestPendingInvalidationIsDeclaredByTheStrategy:
         assert checked > 50
 
     def test_broker_takes_the_declared_level_or_the_stop(self):
-        import paper_broker
+        paper_broker = __import__('importlib').import_module('execution.paper_broker')
         sig = {'setup': {'type': 'LONG', 'size': 5.0, 'end_price': 100.0},
                'params': {'stop_loss': 94.0, 'pending_invalidation': 95.57}}
         assert paper_broker.PaperBroker._invalidation('FIBO', sig, True) == 95.57

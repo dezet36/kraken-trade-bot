@@ -30,7 +30,7 @@ import pytest
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
-from accounts import risk_gate  # noqa: E402
+from execution import risk_gate  # noqa: E402
 
 
 class TestBothPathsCallTheSameGate:
@@ -40,18 +40,18 @@ class TestBothPathsCallTheSameGate:
     """
 
     def _source(self, module, method):
-        path = os.path.join(ROOT, f'{module}.py')
+        path = os.path.join(ROOT, *module.split('.')) + '.py'      # execution.paper_broker → execution/paper_broker.py
         text = open(path, encoding='utf-8').read()
         start = text.index(f'    def {method}(')
         end = text.index('\n    def ', start + 10)
         return text[start:end]
 
     def test_paper_calls_the_gate(self):
-        body = self._source('paper_broker', '_portfolio_room')
+        body = self._source('execution.paper_broker', '_portfolio_room')
         assert 'risk_gate.check(' in body
 
     def test_live_calls_the_gate(self):
-        body = self._source('trade_manager', '_portfolio_room')
+        body = self._source('execution.trade_manager', '_portfolio_room')
         assert 'risk_gate.check(' in body, (
             'боевой путь снова считает пределы сам — именно так из него '
             'выпал дневной стоп-кран')
@@ -65,7 +65,7 @@ class TestBothPathsCallTheSameGate:
         он делает, и слово «предел» там законно.
         """
         import re
-        for module in ('paper_broker', 'trade_manager'):
+        for module in ('execution.paper_broker', 'execution.trade_manager'):
             body = self._source(module, '_portfolio_room')
             code = re.sub(r'""".*?"""', '', body, flags=re.S)
             assert 'return False' not in code, (
@@ -79,7 +79,7 @@ class TestBothPathsCallTheSameGate:
         Забыть один аргумент — то же самое, что забыть проверку: gate получит
         ноль и решит, что предел выключен.
         """
-        for module in ('paper_broker', 'trade_manager'):
+        for module in ('execution.paper_broker', 'execution.trade_manager'):
             body = self._source(module, '_portfolio_room')
             for field in ('max_positions=', 'risk_limit_pct=', 'day_limit_pct=',
                           'risk_used=', 'deposit=', 'adding=', 'slots_used='):
@@ -90,8 +90,8 @@ class TestBothPathsCallTheSameGate:
         Дневной предел без дневного итога не работает. У боевого пути метода
         не было — отсюда и ноль в панели.
         """
-        import paper_broker
-        import trade_manager
+        paper_broker = __import__('importlib').import_module('execution.paper_broker')
+        trade_manager = __import__('importlib').import_module('execution.trade_manager')
         assert hasattr(paper_broker.PaperBroker, 'daily_result')
         assert hasattr(trade_manager.LiveTradeManager, 'daily_result'), (
             'панель спрашивает дневной итог через hasattr: без метода она '
@@ -297,12 +297,12 @@ class TestSettingsFailureDoesNotDisarmTheLimits:
         Без этого откат пуст: помнить нечего, и защита снимается ровно так же,
         как раньше.
         """
-        for module in ('paper_broker', 'trade_manager'):
+        for module in ('execution.paper_broker', 'execution.trade_manager'):
             body = TestBothPathsCallTheSameGate()._source(module, '_portfolio_room')
             assert 'risk_gate.remember(' in body, module
 
     def test_both_paths_use_the_fallback(self):
-        for module in ('paper_broker', 'trade_manager'):
+        for module in ('execution.paper_broker', 'execution.trade_manager'):
             body = TestBothPathsCallTheSameGate()._source(module, '_portfolio_room')
             assert 'known is None' in body, (
                 f'{module} снова выходит без пределов при сбое чтения')
@@ -332,7 +332,7 @@ class TestTrailingCannotDivergeSilently:
         return int(getattr(config, 'TRAIL_AFTER_TP', 99)) < 10
 
     def _paper_has_trailing(self):
-        text = open(os.path.join(ROOT, 'paper_broker.py'), encoding='utf-8').read()
+        text = open(os.path.join(ROOT, 'execution/paper_broker.py'), encoding='utf-8').read()
         # Настоящий трейлинг двигает стоп за ценой. Константа
         # 'trailing_active': False в снимке для панели — не реализация.
         return 'trail_distance' in text or 'TRAIL_AFTER_TP' in text

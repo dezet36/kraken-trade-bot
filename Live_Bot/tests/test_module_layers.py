@@ -42,8 +42,7 @@ LAYER = {
     # ИИ, ФИБО и общие модули стратегий — в strategies/ (этап 10, часть 6)
     # исполнение и учёт
     # exit_plan, follow_up, setup_journal, refused — в execution/ (этап 10, часть 7)
-    'paper_broker': 'execution', 'trade_manager': 'execution', 'trade_journal': 'execution',
-    'shadow': 'execution',
+    # paper_broker, trade_manager, trade_journal, shadow — в execution/ (часть 9)
     # счета
     # интерфейсы — в control/ (этап 10, часть 5)
     # дирижёр цикла
@@ -66,18 +65,10 @@ KNOWN = {
     ('llm_market', 'strategies'): 'этап 10: структура smc (часть I) — в анализ',
     ('llm_server', 'strategies'): 'этап 10: сервис модели не знает про промт и грамматику',
     ('market_structure', 'strategies'): 'этап 10: структура smc (часть I) — в анализ',
-    # Исполнители сами проверяют пределы портфеля и издержки по правилам счёта
-    # (risk_gate, settings_store). Этап 5 переносит эти проверки в решение
-    # счёта, исполнение получает готовое «можно и сколько».
-    # С переноса модулей счетов в accounts/ (этап 10, часть 4) — одной записью
-    # на модуль: брокер и боевой исполнитель сами проверяют пределы портфеля
-    # и издержки по правилам счёта (risk_gate, settings_store, live_costs).
-    ('paper_broker', 'accounts'): 'этап 5: пределы портфеля — в решении счёта',
-    ('paper_broker', 'control'): 'этап 5: уведомления брокера — через порт',
-    ('shadow', 'accounts'): 'этап 5',
-    ('trade_journal', 'accounts'): 'этап 5',
-    ('trade_manager', 'accounts'): 'этап 5/7: пределы портфеля — в решении счёта',
-    ('trade_manager', 'control'): 'этап 5: уведомления исполнителя — через порт',
+    # Исполнители (брокер, боевой исполнитель, тень, журнал сделок) с этапа 10,
+    # часть 9, не импортируют счета и интерфейсы: арифметика пределов и
+    # издержек — execution/risk_gate и live_costs, сами пределы — крючок
+    # portfolio_limits, Telegram — порт infra/outbox.
 }
 
 

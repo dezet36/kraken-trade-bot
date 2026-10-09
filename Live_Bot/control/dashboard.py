@@ -797,7 +797,7 @@ def build_payload():
     payload['funnel'] = scan_report.snapshot()
     # Что отклонили предохранители брокера — и чем бы это кончилось (shadow.py).
     try:
-        import shadow
+        from execution import shadow
         payload['shadow'] = shadow.snapshot()
     except Exception:                                  # noqa: BLE001
         payload['shadow'] = {'active': [], 'closed': {}}
@@ -1052,7 +1052,7 @@ def _portfolio():
     # Рядом — сколько депозита МОЖЕТ оказаться под риском одновременно, если
     # каждая стратегия займёт свои слоты: без этого числа «предела нет» звучит
     # безобидно.
-    from accounts import risk_gate
+    from execution import risk_gate
     off = risk_gate.disabled_limits(max_positions, limit, day_limit)
     try:
         from accounts import settings_store as st
@@ -1522,7 +1522,7 @@ def _journal_strategies():
     """Стратегии фантомного счёта — у каждой свой журнал сетапов."""
     if _broker is not None:
         return tuple(_broker.strategies)
-    import paper_broker
+    from execution import paper_broker
     return paper_broker.STRATEGIES
 
 

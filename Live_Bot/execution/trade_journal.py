@@ -349,7 +349,7 @@ def close_trade(position: dict, exit_price: float, exit_reason: str,
     # потому известна ещё при входе — записываем, чтобы можно было проверить
     # на НОВЫХ данных догадку, что дешёвые входы прибыльнее дорогих.
     if sl_dist > 0 and entry > 0:
-        from accounts import risk_gate
+        from execution import risk_gate
         share = risk_gate.entry_cost_share(entry, sl_dist,
                                            import_config.ENTRY_COST_ROUND_TRIP)
         row['cost_share_pct'] = round(share * 100, 2)
@@ -370,7 +370,7 @@ def close_trade(position: dict, exit_price: float, exit_reason: str,
 
     # Разбор модели. Берётся из ОДНОЙ функции с бумажным журналом: колонки,
     # заполненные дважды, разойдутся.
-    import paper_broker
+    from execution import paper_broker
     row.update(paper_broker._llm_columns(
         (position.get('signal') or {}).get('llm')))
 

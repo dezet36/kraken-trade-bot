@@ -167,7 +167,7 @@ def watch(strategy, signal, gate, detail='', now_ms=None):
     """Заводит тень отвергнутого сетапа или прибавляет счётчик уже заведённой. Молча."""
     try:
         from execution import exit_plan
-        from accounts import risk_gate
+        from execution import risk_gate
         from strategies import strategy_profile
         params = (signal or {}).get('params') or {}
         direction = ((signal or {}).get('setup') or {}).get('type', '')

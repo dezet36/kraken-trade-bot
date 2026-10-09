@@ -77,7 +77,7 @@ class TestAnalyzeMarket:
 
     def test_crowd_with_the_trade_is_refused_with_a_reason(self, monkeypatch):
         self._patch(monkeypatch, make_setup('BULLISH'), +0.0001)
-        import shadow
+        shadow = __import__('importlib').import_module('execution.shadow')
         monkeypatch.setattr(shadow, 'watch', lambda *a, **k: None)
         assert strategy_smc.analyze_market('BTCUSDT') is None
         assert strategy_smc._last_reason['BTCUSDT'].startswith('толпа за сделку')
@@ -85,7 +85,7 @@ class TestAnalyzeMarket:
     def test_the_refused_setup_goes_to_the_shadows(self, monkeypatch):
         """Отказ по толпе — в тени: чем кончился бы сетап, пишется вживую."""
         self._patch(monkeypatch, make_setup('BULLISH'), +0.0001)
-        import shadow
+        shadow = __import__('importlib').import_module('execution.shadow')
         seen = []
         monkeypatch.setattr(shadow, 'watch', lambda strategy, signal, gate, detail='', **k:
                             seen.append((strategy, signal['setup']['type'], signal['params']['entry'], gate)))
@@ -94,7 +94,7 @@ class TestAnalyzeMarket:
 
     def test_a_broken_shadow_does_not_break_the_scan(self, monkeypatch):
         self._patch(monkeypatch, make_setup('BULLISH'), +0.0001)
-        import shadow
+        shadow = __import__('importlib').import_module('execution.shadow')
 
         def boom(*a, **k):
             raise RuntimeError('диск')

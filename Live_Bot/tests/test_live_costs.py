@@ -24,7 +24,7 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from infra import config
-from accounts import live_costs
+from execution import live_costs
 
 
 def make_position(entry=100.0, size=10.0, direction='LONG', entry_mode='MARKET',
@@ -258,7 +258,7 @@ def test_history_is_requested_from_before_the_entry():
 
 @pytest.fixture()
 def journal(tmp_path, monkeypatch):
-    import trade_journal
+    trade_journal = __import__('importlib').import_module('execution.trade_journal')
     monkeypatch.setattr(trade_journal, 'JOURNAL_FILE', str(tmp_path / 'trades.csv'))
     monkeypatch.setattr(trade_journal, 'DETAIL_JSONL', str(tmp_path / 'detail.jsonl'))
     monkeypatch.setattr(trade_journal, 'COUNTER_FILE',

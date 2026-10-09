@@ -118,6 +118,22 @@ def check(*, slots_used, max_positions, risk_used, deposit, adding,
 _last_good = None
 
 
+def portfolio_limits():
+    """
+    Пределы портфеля из правил счёта: (позиций, риск %, дневной убыток %).
+
+    Их хранит счёт (accounts/settings_store), исполнение его не импортирует —
+    спрашивает через крючок, который подставляет control/wiring. Крючок не
+    подключён (разовый скрипт) — это отказ чтения, как битый файл настроек:
+    судят по последним известным (settings_unavailable).
+    """
+    from infra import hooks
+    limits = hooks.call('portfolio_limits')
+    if limits is None:
+        raise RuntimeError('пределы портфеля не подключены (control/wiring)')
+    return limits
+
+
 def remember(max_positions, risk_limit_pct, day_limit_pct):
     """Запоминает пределы, которые удалось прочитать."""
     global _last_good

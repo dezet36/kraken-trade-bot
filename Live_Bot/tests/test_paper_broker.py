@@ -58,11 +58,11 @@ def broker_env(tmp_path, monkeypatch):
     for _name in ('FIBO', 'SMC', 'LEVELS', 'RSIBB'):
         monkeypatch.setenv(f'PAPER_START_BALANCE_{_name}', '10000')
     monkeypatch.setenv('PAPER_FUNDING', 'false')
-    for module in ('infra.config', 'paper_broker', 'control.dashboard', 'shadow', 'execution.setup_journal'):
+    for module in ('infra.config', 'execution.paper_broker', 'control.dashboard', 'execution.shadow', 'execution.setup_journal'):
         forget(module, None)
 
     config = __import__('importlib').import_module('infra.config')
-    import paper_broker
+    paper_broker = __import__('importlib').import_module('execution.paper_broker')
 
     # Издержки по умолчанию выключаем: их считает отдельный тест, а в
     # остальных они только зашумляют ожидаемые числа.
@@ -112,7 +112,7 @@ def candles(start_ts, bars):
 
 def feed(broker, client, pair, bars, start_ts=None, now=None):
     """Подаёт свечи так, чтобы все они считались закрытыми."""
-    import paper_broker as pb
+    pb = __import__('importlib').import_module('execution.paper_broker')
     start = start_ts if start_ts is not None else 1_700_000_000_000
     client.candles[pair] = candles(start, bars)
     end = start + len(bars) * BAR_MS + BAR_MS
@@ -505,7 +505,7 @@ class TestDirectionCap:
         """Отказ кэпа не пропадает: сетап досматривается тенью (shadow.py) до исхода."""
         broker, _client, pb, _cfg = broker_env
         pb._now_ms = lambda: 1_700_000_000_000
-        import shadow
+        shadow = __import__('importlib').import_module('execution.shadow')
         broker.open('SMC', signal(pair='BTCUSDT', strategy='SMC', cap=1))
         for _ in range(3):                         # тот же сетап три цикла подряд
             broker.open('SMC', signal(pair='SOLUSDT', strategy='SMC', cap=1))
@@ -1298,9 +1298,9 @@ class TestFundingAtDecisionReachesTheJournal:
         assert pb.read_journal()[0]['funding_bp'] == ''
 
     def test_all_journals_name_it_the_same(self):
-        import paper_broker
+        paper_broker = __import__('importlib').import_module('execution.paper_broker')
         setup_journal = __import__('importlib').import_module('execution.setup_journal')
-        import trade_journal
+        trade_journal = __import__('importlib').import_module('execution.trade_journal')
         assert 'funding_bp' in paper_broker.COLUMNS
         assert 'funding_bp' in trade_journal.COLUMNS
         assert 'funding_bp' in setup_journal.CONTEXT_KEYS
@@ -1309,7 +1309,7 @@ class TestFundingAtDecisionReachesTheJournal:
         assert setup_journal._context_columns({'funding_bp': None})['funding_bp'] == ''
 
     def test_live_journal_takes_it_from_the_signal(self):
-        import trade_journal
+        trade_journal = __import__('importlib').import_module('execution.trade_journal')
         assert trade_journal._funding_bp({'smc': {'funding_bp': 1.0}}) == 1.0
         assert trade_journal._funding_bp({'scan': {'funding_bp': -2.0}}) == -2.0
         assert trade_journal._funding_bp({'smc': {}, 'scan': {}}) == ''

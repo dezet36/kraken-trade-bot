@@ -32,10 +32,10 @@ def env(tmp_path, monkeypatch):
     follow_up = __import__('importlib').import_module('execution.follow_up')
     llm_journal = __import__('importlib').import_module('strategies.llm.llm_journal')
     llm_outcomes = __import__('importlib').import_module('strategies.llm.llm_outcomes')
-    import paper_broker
+    paper_broker = __import__('importlib').import_module('execution.paper_broker')
     refused = __import__('importlib').import_module('execution.refused')
     setup_journal = __import__('importlib').import_module('execution.setup_journal')
-    import shadow
+    shadow = __import__('importlib').import_module('execution.shadow')
     strategy_llm = __import__('importlib').import_module('strategies.llm.adapter')
 
     monkeypatch.setattr(config, 'TRADING_MODE', 'PAPER')
@@ -87,7 +87,7 @@ def trade(**kw):
 
 
 def write_trades(rows):
-    import paper_broker
+    paper_broker = __import__('importlib').import_module('execution.paper_broker')
     with open(paper_broker.JOURNAL_JSON, 'a', encoding='utf-8') as fh:
         for r in rows:
             fh.write(json.dumps(r, ensure_ascii=False) + '\n')
@@ -175,7 +175,7 @@ class TestOrdersThatDidNotFill:
 
 class TestShadows:
     def test_finished_and_running_shadows_but_not_the_one_opened_later(self, env):
-        import shadow
+        shadow = __import__('importlib').import_module('execution.shadow')
         write_csv(shadow.CSV_PATH, shadow.COLUMNS, [
             {'strategy': 'SMC', 'pair': 'LTCUSDT', 'direction': 'LONG', 'gate': 'направленный кэп',
              'first_at': iso(T0), 'refusals': 219, 'entry': 80.0, 'stop': 78.0,

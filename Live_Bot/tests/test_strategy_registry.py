@@ -41,7 +41,7 @@ def test_profile_is_a_dict_of_known_keys(code):
 
 
 def test_common_modules_take_the_list_from_the_registry():
-    import paper_broker
+    paper_broker = __import__('importlib').import_module('execution.paper_broker')
     settings_store = __import__('importlib').import_module('accounts.settings_store')
     tg_format = __import__('importlib').import_module('control.tg_format')
     assert tuple(paper_broker.STRATEGIES) == registry.codes()

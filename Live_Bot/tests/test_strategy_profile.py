@@ -96,7 +96,7 @@ class TestACommonParameterCannotLockOneStrategy:
         # которому брокер потом проверяет план: на минимальном стопе доля
         # ровно равна пределу и проходит (<=), смещение лимита у ИИ — 0.
         import llm_context
-        risk_gate = __import__('importlib').import_module('accounts.risk_gate')
+        risk_gate = __import__('importlib').import_module('execution.risk_gate')
         floor = llm_context.min_stop_pct()
         assert floor == pytest.approx(sp._config().ENTRY_COST_ROUND_TRIP / (sp.cost_limit_pct('LLM') / 100) * 100)
         pricey, _, _ = risk_gate.cost_too_high(100.0, floor, sp._config().ENTRY_COST_ROUND_TRIP, sp.cost_limit_pct('LLM'))

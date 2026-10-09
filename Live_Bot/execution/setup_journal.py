@@ -279,7 +279,7 @@ def _trades(strategy):
     if not config.PAPER_MODE:
         return []
     from execution import follow_up
-    import paper_broker
+    from execution import paper_broker
     after = {str(f.get('trade_id')): f for f in _csv_rows(follow_up.CSV_PATH)
              if f.get('strategy') == strategy}
     out = []
@@ -369,7 +369,7 @@ def _dropped(strategy):
 
 def _shadow_rows(strategy):
     """Сетапы, отклонённые пределом брокера. «Открыт позже» — строкой сделки."""
-    import shadow
+    from execution import shadow
     rows = _csv_rows(shadow.CSV_PATH)
     try:
         rows += shadow.running_rows()

@@ -27,8 +27,8 @@ from _modules import forget, remember  # noqa: E402
 def broker(tmp_path, monkeypatch):
     """Прежние модули возвращаются на место — см. фикстур в test_candle_gap."""
     monkeypatch.setenv('BOT_DATA_DIR', str(tmp_path))
-    saved = {m: forget(m, None) for m in ('infra.config', 'paper_broker')}
-    import paper_broker
+    saved = {m: forget(m, None) for m in ('infra.config', 'execution.paper_broker')}
+    paper_broker = __import__('importlib').import_module('execution.paper_broker')
     yield paper_broker
     for name, module in saved.items():
         if module is None:

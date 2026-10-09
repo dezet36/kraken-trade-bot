@@ -38,8 +38,8 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
 from infra import config  # noqa: E402
-from accounts import risk_gate  # noqa: E402
-from paper_broker import PaperBroker                     # noqa: E402
+from execution import risk_gate  # noqa: E402
+from execution.paper_broker import PaperBroker                     # noqa: E402
 
 
 class TestTheExitRateFollowsHowWeLeft:
@@ -72,7 +72,7 @@ class TestTheExitRateFollowsHowWeLeft:
         fees_sl = core.close_numbers(pos, 95.0, 'SL', False, 0, maker, taker)[2]
         assert fees_tp == 2.0 * 110.0 * maker, 'выход по цели снова считается тейкером'
         assert fees_sl == 2.0 * 95.0 * taker
-        src = open(os.path.join(ROOT, 'paper_broker.py'), encoding='utf-8').read()
+        src = open(os.path.join(ROOT, 'execution/paper_broker.py'), encoding='utf-8').read()
         spot = src.index('def _close(')
         body = src[spot:src.index('\n    def ', spot + 10)]
         assert 'core.close_numbers(' in body
@@ -84,7 +84,7 @@ class TestTheExitRateFollowsHowWeLeft:
                'fractions': [0.5, 0.5], 'realized_pnl': 0.0, 'fees_paid': 0.0, 'tp_hit': 0}
         core.take_partial(pos, 0, 105.0, config.PAPER_FEE_MAKER)
         assert pos['fees_paid'] == 1.0 * 105.0 * config.PAPER_FEE_MAKER
-        src = open(os.path.join(ROOT, 'paper_broker.py'), encoding='utf-8').read()
+        src = open(os.path.join(ROOT, 'execution/paper_broker.py'), encoding='utf-8').read()
         spot = src.index('def _process_position')
         body = src[spot:src.index('\n    def ', spot + 10)]
         assert 'PAPER_FEE_MAKER' in body and 'PAPER_FEE_TAKER' not in body
@@ -158,14 +158,14 @@ class TestBothPathsUseTheOneImplementation:
 
     def test_the_paper_path_calls_the_gate(self):
         assert 'risk_gate.cost_too_high(' in self._entry_block(
-            'paper_broker.py', 'sl_dist = abs(limit_price - stop)')
+            'execution/paper_broker.py', 'sl_dist = abs(limit_price - stop)')
 
     def test_the_live_path_calls_the_gate(self):
         assert 'risk_gate.cost_too_high(' in self._entry_block(
-            'trade_manager.py', 'sig_sl_dist = abs(sizing_entry')
+            'execution/trade_manager.py', 'sig_sl_dist = abs(sizing_entry')
 
     def test_neither_grew_its_own_copy(self):
-        for name in ('paper_broker.py', 'trade_manager.py'):
+        for name in ('execution/paper_broker.py', 'execution/trade_manager.py'):
             src = open(os.path.join(ROOT, name), encoding='utf-8').read()
             code = re.sub(r'"""[\s\S]*?"""', '', src)
             code = '\n'.join(l for l in code.splitlines()
@@ -181,16 +181,16 @@ class TestTheNumberReachesTheJournal:
     """
 
     def test_the_column_exists(self):
-        import paper_broker
+        paper_broker = __import__('importlib').import_module('execution.paper_broker')
         assert 'cost_share_pct' in paper_broker.COLUMNS
 
     def test_it_stands_next_to_the_costs(self):
-        import paper_broker
+        paper_broker = __import__('importlib').import_module('execution.paper_broker')
         c = paper_broker.COLUMNS
         assert abs(c.index('cost_share_pct') - c.index('fees_usd')) <= 2
 
     def test_the_order_carries_it_to_the_position(self):
-        src = open(os.path.join(ROOT, 'paper_broker.py'), encoding='utf-8').read()
+        src = open(os.path.join(ROOT, 'execution/paper_broker.py'), encoding='utf-8').read()
         assert "'cost_share_pct': round(cost_share, 3)" in src
         assert "'cost_share_pct': order.get('cost_share_pct'" in src
         assert "'cost_share_pct': pos.get('cost_share_pct'" in src
@@ -209,7 +209,7 @@ class TestTheNumberReachesTheJournal:
         значения остались под своими именами.
         """
         csv_journal = __import__('importlib').import_module('infra.csv_journal')
-        import paper_broker
+        paper_broker = __import__('importlib').import_module('execution.paper_broker')
 
         path = str(tmp_path / 'trades.csv')
         old_columns = [c for c in paper_broker.COLUMNS if c != 'cost_share_pct']

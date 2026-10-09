@@ -27,10 +27,10 @@ def dash(tmp_path, monkeypatch):
     # падали на пустой статистике — при том, что код был исправен. Тест,
     # зависящий от настройки рабочей машины, проверяет не то, что нужно.
     monkeypatch.setenv('TRADING_MODE', 'DEMO')
-    for module in ('infra.config', 'trade_journal', 'control.dashboard'):
+    for module in ('infra.config', 'execution.trade_journal', 'control.dashboard'):
         forget(module, None)
 
-    import trade_journal
+    trade_journal = __import__('importlib').import_module('execution.trade_journal')
     dash_module = __import__('importlib').import_module('control.dashboard')
 
     monkeypatch.setattr(dash_module, '_broker', None, raising=False)
@@ -189,10 +189,10 @@ def paper_dash(tmp_path, monkeypatch):
     """Дашборд в фантомном режиме, читающий изолированный каталог."""
     monkeypatch.setenv('BOT_DATA_DIR', str(tmp_path))
     monkeypatch.setenv('TRADING_MODE', 'PAPER')
-    for module in ('infra.config', 'paper_broker', 'control.dashboard'):
+    for module in ('infra.config', 'execution.paper_broker', 'control.dashboard'):
         forget(module, None)
 
-    import paper_broker
+    paper_broker = __import__('importlib').import_module('execution.paper_broker')
     dash_module = __import__('importlib').import_module('control.dashboard')
 
     monkeypatch.setattr(dash_module, 'PAPER_JOURNAL', str(tmp_path / 'paper_trades.csv'))
@@ -201,7 +201,7 @@ def paper_dash(tmp_path, monkeypatch):
 
 
 def write_paper(dash, rows):
-    import paper_broker
+    paper_broker = __import__('importlib').import_module('execution.paper_broker')
     with open(dash.PAPER_JOURNAL, 'w', newline='', encoding='utf-8') as fh:
         writer = csv.DictWriter(fh, fieldnames=paper_broker.COLUMNS)
         writer.writeheader()

@@ -421,7 +421,7 @@ def decide(rules, book, strategy, setup, now):
     Решение счёта по сетапу: (заявка, None) или (None, причина отказа).
     Заявка — план входа на деньгах счёта; в книгу её кладёт register.
     """
-    from accounts import risk_gate
+    from execution import risk_gate
     from strategies import strategy_profile
     from execution.exit_plan import cooldown_hours, tp_plan, wants_breakeven
     c = cfg()

@@ -19,7 +19,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
 from strategies import glossary  # noqa: E402
-from paper_broker import PaperBroker  # noqa: E402
+from execution.paper_broker import PaperBroker  # noqa: E402
 
 
 def _signal(**smc):
@@ -138,7 +138,7 @@ def test_both_chart_surfaces_share_one_geometry():
     """
     setup_geometry = __import__('importlib').import_module('strategies.setup_geometry')
 
-    broker = os.path.join(ROOT, 'paper_broker.py')
+    broker = os.path.join(ROOT, 'execution/paper_broker.py')
     with open(broker, encoding='utf-8') as handle:
         assert 'setup_geometry.build(strategy, signal)' in handle.read()
 

@@ -151,7 +151,7 @@ class TestContract:
 
 class TestRegistration:
     def test_strategy_known_everywhere(self):
-        import paper_broker
+        paper_broker = __import__('importlib').import_module('execution.paper_broker')
         settings_store = __import__('importlib').import_module('accounts.settings_store')
         assert 'RSIBB' in settings_store.STRATEGIES
         assert 'RSIBB' in paper_broker.STRATEGIES

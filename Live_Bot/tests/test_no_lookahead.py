@@ -49,8 +49,8 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setenv('TRADING_MODE', 'PAPER')
     monkeypatch.setenv('PAPER_START_BALANCE', '10000')
     monkeypatch.setenv('PAPER_FUNDING', '0')
-    saved = {m: forget(m, None) for m in ('infra.config', 'paper_broker')}
-    import paper_broker
+    saved = {m: forget(m, None) for m in ('infra.config', 'execution.paper_broker')}
+    paper_broker = __import__('importlib').import_module('execution.paper_broker')
     yield paper_broker
     for name, module in saved.items():
         if module is None:

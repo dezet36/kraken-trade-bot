@@ -226,7 +226,7 @@ def check_risk():
 
     Теперь каждая судится в своих рамках, и числа не складываются.
     """
-    from accounts import risk_gate
+    from execution import risk_gate
     rows = _strategy_risks()
 
     broken = [n for n, _s, r in rows if r is None]
@@ -269,7 +269,7 @@ def check_limits():
     портфельных предела стояли выключенными, а панель показывала их значения
     так, будто они работают.
     """
-    from accounts import risk_gate
+    from execution import risk_gate
     from accounts import settings_store as settings
     try:
         from strategies import strategy_profile

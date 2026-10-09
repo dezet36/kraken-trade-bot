@@ -838,7 +838,7 @@ def _exit_reason_text(reason, targets_n):
 def _strategy_today(strategy):
     """Итог стратегии за текущие сутки UTC по журналу: (деньги, сделок)."""
     try:
-        import paper_broker
+        from execution import paper_broker
         today = datetime.now(timezone.utc).strftime('%Y-%m-%d')
         rows = [r for r in paper_broker.read_journal()
                 if r.get('strategy') == strategy and str(r.get('close_time', ''))[:10] == today]

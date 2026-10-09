@@ -51,8 +51,8 @@ def broker(tmp_path, monkeypatch):
     падает с ImportError. Поэтому запоминаем и кладём обратно.
     """
     monkeypatch.setenv('BOT_DATA_DIR', str(tmp_path))
-    saved = {m: forget(m, None) for m in ('infra.config', 'paper_broker')}
-    import paper_broker
+    saved = {m: forget(m, None) for m in ('infra.config', 'execution.paper_broker')}
+    paper_broker = __import__('importlib').import_module('execution.paper_broker')
     yield paper_broker
     for name, module in saved.items():
         if module is None:

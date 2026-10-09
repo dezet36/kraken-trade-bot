@@ -34,7 +34,7 @@ from execution import follow_up  # noqa: E402
 from execution import refused  # noqa: E402
 from _modules import forget, remember  # noqa: E402
 
-SRC = open(os.path.join(ROOT, 'paper_broker.py'), encoding='utf-8').read()
+SRC = open(os.path.join(ROOT, 'execution/paper_broker.py'), encoding='utf-8').read()
 
 
 def _method(name):
@@ -45,12 +45,12 @@ def _method(name):
 class TestTheJournalKnowsWhenNotJustHowFar:
 
     def test_the_columns_exist(self):
-        import paper_broker
+        paper_broker = __import__('importlib').import_module('execution.paper_broker')
         for name in ('mfe_min', 'mae_min'):
             assert name in paper_broker.COLUMNS, name
 
     def test_they_stand_next_to_the_distances(self):
-        import paper_broker
+        paper_broker = __import__('importlib').import_module('execution.paper_broker')
         c = paper_broker.COLUMNS
         assert abs(c.index('mfe_min') - c.index('mfe_r')) <= 2
 
@@ -88,16 +88,16 @@ class TestTheJournalKnowsWhenNotJustHowFar:
 class TestTheEntryContextIsRecorded:
 
     def test_the_columns_exist(self):
-        import paper_broker
+        paper_broker = __import__('importlib').import_module('execution.paper_broker')
         for name in ('atr_pct', 'hour_utc'):
             assert name in paper_broker.COLUMNS, name
 
     def _broker(self, tmp_path, monkeypatch):
         monkeypatch.setenv('BOT_DATA_DIR', str(tmp_path))
         monkeypatch.setenv('PAPER_FUNDING', 'false')
-        for name in ('infra.config', 'paper_broker'):
+        for name in ('infra.config', 'execution.paper_broker'):
             forget(name, None)
-        import paper_broker
+        paper_broker = __import__('importlib').import_module('execution.paper_broker')
         return paper_broker.PaperBroker(client=None, strategies=('FIBO',))
 
     def test_volatility_needs_history_before_it_speaks(self, tmp_path, monkeypatch):

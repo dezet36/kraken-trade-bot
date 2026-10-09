@@ -144,8 +144,8 @@ def schedule():
 
 
 # Модули, которые эталон загружает заново под свой каталог данных и свои часы.
-LOADED = ('infra.config', 'accounts.settings_store', 'paper_broker', 'control.dashboard', 'shadow', 'execution.setup_journal',
-          'execution.refused', 'execution.follow_up', 'trade_journal')
+LOADED = ('infra.config', 'accounts.settings_store', 'execution.paper_broker', 'control.dashboard', 'execution.shadow', 'execution.setup_journal',
+          'execution.refused', 'execution.follow_up', 'execution.trade_journal')
 
 
 @pytest.fixture()
@@ -170,7 +170,7 @@ def run(tmp_path, monkeypatch):
         monkeypatch.setenv(f'PAPER_START_BALANCE_{name}', '10000')
     for module in LOADED:
         forget(module, None)
-    import paper_broker as pb
+    pb = __import__('importlib').import_module('execution.paper_broker')
     settings_store = __import__('importlib').import_module('accounts.settings_store')
     settings_store.SETTINGS_FILE = str(tmp_path / 'runtime_settings.json')
     settings_store._cache = None

@@ -157,7 +157,7 @@ class TestDispatcher:
 
 class TestRegistration:
     def test_known_everywhere(self):
-        import paper_broker
+        paper_broker = __import__('importlib').import_module('execution.paper_broker')
         settings_store = __import__('importlib').import_module('accounts.settings_store')
         config = __import__('importlib').import_module('infra.config')
         tg_format = __import__('importlib').import_module('control.tg_format')
