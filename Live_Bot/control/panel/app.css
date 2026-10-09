@@ -439,8 +439,60 @@ details.log[open] summary { margin-bottom: 10px; }
 
 .subhead { font-size: 13px; font-weight: 600; color: var(--text-3); margin: 18px 0 8px; }
 
+/* ── Переключатель (iOS) ────────────────────────────────────────────── */
+.switch { position: relative; display: inline-block; width: 51px; height: 31px; flex: none; }
+.switch input { position: absolute; opacity: 0; width: 100%; height: 100%; margin: 0; cursor: pointer; z-index: 1; }
+.switch span { position: absolute; inset: 0; border-radius: 999px; background: var(--fill); transition: background .2s; }
+.switch span::after { content: ''; position: absolute; top: 2px; left: 2px; width: 27px; height: 27px; border-radius: 50%;
+  background: #fff; box-shadow: 0 3px 8px rgba(0, 0, 0, .15), 0 1px 1px rgba(0, 0, 0, .16); transition: transform .2s; }
+.switch input:checked + span { background: var(--live); }
+.switch input:checked + span::after { transform: translateX(20px); }
+.switch input:disabled + span { opacity: .5; }
+.switch input:focus-visible + span { outline: 3px solid var(--accent-fill); outline-offset: 2px; }
+
+/* ── Строка настройки: подпись и пояснение слева, поле справа ───────── */
+.setting { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 16px; align-items: center; padding: 13px 0; border-top: 1px solid var(--sep); }
+.setting:first-child { border-top: 0; padding-top: 2px; }
+.setting-name { font-weight: 500; }
+.setting-note { grid-column: 1 / -1; font-size: 12px; color: var(--text-3); line-height: 1.45; }
+.setting .input { width: 128px; text-align: right; }
+.setting .unit-wrap { display: inline-flex; align-items: center; gap: 6px; }
+.setting .unit-wrap span { color: var(--text-3); font-size: 13px; min-width: 12px; }
+.sticky-actions { position: sticky; bottom: 0; z-index: 3; margin-top: 18px; padding: 12px 16px; border-radius: var(--radius-lg);
+  background: var(--sidebar); backdrop-filter: saturate(180%) blur(20px); -webkit-backdrop-filter: saturate(180%) blur(20px);
+  box-shadow: var(--shadow-2); display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+
+/* ── Ошибки ─────────────────────────────────────────────────────────── */
+details.err { border-top: 1px solid var(--sep); }
+details.err:first-of-type { border-top: 0; }
+details.err summary { list-style: none; display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; gap: 12px; align-items: center;
+  padding: 12px 4px; cursor: pointer; }
+details.err summary::-webkit-details-marker { display: none; }
+details.err summary:hover { background: var(--fill-2); border-radius: 10px; }
+.err-sig { font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+details.err[open] .err-sig { white-space: normal; }
+.err-count { font-weight: 600; font-variant-numeric: tabular-nums; }
+.err-when { font-size: 12px; color: var(--text-3); white-space: nowrap; }
+.err-body { padding: 0 4px 14px; font-size: 13px; color: var(--text-2); }
+.err-body pre, .logview { font: 12px/1.55 ui-monospace, "SF Mono", "Cascadia Mono", Consolas, monospace; white-space: pre-wrap; word-break: break-word; }
+.err-body pre { background: var(--fill-2); border-radius: 10px; padding: 10px 12px; max-height: 280px; overflow: auto; margin: 8px 0 0; }
+
+/* ── Журнал ─────────────────────────────────────────────────────────── */
+.logview { background: var(--fill-2); border-radius: var(--radius-md); padding: 14px 16px; height: min(70vh, 720px); overflow: auto; margin: 0; }
+.logview .l-err { color: var(--down); } .logview .l-win { color: var(--up); } .logview .l-act { color: var(--accent); }
+
+/* ── Источник данных ────────────────────────────────────────────────── */
+.src { padding: 14px 0; border-top: 1px solid var(--sep); }
+.src:first-child { border-top: 0; padding-top: 0; }
+.src-head { display: flex; align-items: center; gap: 10px; }
+.src-head b { font-weight: 600; }
+.src-head .pill { margin-left: auto; }
+.src-line { font-size: 12px; color: var(--text-3); margin-top: 4px; word-break: break-word; }
+.src-line code, .mono { font: 12px ui-monospace, "SF Mono", "Cascadia Mono", Consolas, monospace; color: var(--text-2); }
+
 @media (max-width: 860px) {
   .form { grid-template-columns: minmax(0, 1fr); }
+  .setting .input { width: 104px; }
 }
 
 @media (prefers-reduced-motion: reduce) {

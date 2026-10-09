@@ -39,6 +39,13 @@ export async function postJSON(url, body) {
    раздел перерисовывается и берёт значение из кэша. */
 const cache = new Map();
 
+/** Пометить устаревшим (после сохранения): следующий cachedJSON спросит
+    сервер, а до ответа раздел покажет прежнее, без мигания пустым местом. */
+export function invalidate(prefix) {
+  for (const [key, entry] of cache) if (key.startsWith(prefix)) entry.at = 0;
+  emit();
+}
+
 export function cachedJSON(url, ttl = 60000) {
   const entry = cache.get(url) || { at: 0, value: undefined, error: null, loading: false };
   if (!entry.loading && Date.now() - entry.at > ttl) {

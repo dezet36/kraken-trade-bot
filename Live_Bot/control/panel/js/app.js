@@ -9,7 +9,7 @@ import * as strategies from './pages/strategies.js';
 import * as trades from './pages/trades.js';
 import * as accounts from './pages/accounts.js';
 import * as ai from './pages/ai.js';
-import { make } from './pages/soon.js';
+import * as system from './pages/system.js';
 
 const ROUTES = [
   { id: 'home', title: 'Главная', icon: 'home', page: home },
@@ -17,8 +17,7 @@ const ROUTES = [
   { id: 'trades', title: 'Сделки', icon: 'trades', page: trades },
   { id: 'accounts', title: 'Счета', icon: 'accounts', page: accounts },
   { id: 'ai', title: 'ИИ', icon: 'ai', page: ai },
-  { id: 'system', title: 'Система', icon: 'system',
-    page: make('Система', 'Подключения, настройки, диагностика и обновление.', 'connect') },
+  { id: 'system', title: 'Система', icon: 'system', page: system },
 ];
 
 const main = document.getElementById('main');
@@ -101,7 +100,22 @@ function setupTheme() {
 }
 
 window.addEventListener('hashchange', () => { renderNav(getStore()); renderPage(); });
-subscribe((store) => { renderNav(store); renderStatus(store); renderPage(); });
+/* Пока человек печатает в поле раздела, перерисовка по опросу ждёт: иначе
+   поле пересоздаётся и фокус с набранным пропадает. Догоняем по уходу фокуса. */
+let deferred = false;
+const typing = () => {
+  const a = document.activeElement;
+  return a && main.contains(a) && /^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName);
+};
+main.addEventListener('focusout', () => setTimeout(() => {
+  if (deferred && !typing()) { deferred = false; renderPage(); }
+}));
+subscribe((store) => {
+  renderNav(store);
+  renderStatus(store);
+  if (typing()) { deferred = true; return; }
+  renderPage();
+});
 setupTheme();
 renderNav(getStore());
 renderPage();
