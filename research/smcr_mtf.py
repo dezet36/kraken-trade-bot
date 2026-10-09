@@ -47,7 +47,7 @@ def _ms(series):
 
 
 def _frame(df, dur, structure, gaps, pools=None, sweeps=None):
-    from smc import liquidity
+    from strategies.smc import liquidity
     hi, lo = df['high'].to_numpy(float), df['low'].to_numpy(float)
     f = {'ts': _ms(df['timestamp']), 'dur': dur, 'high': hi, 'low': lo, 'close': df['close'].to_numpy(float),
          'ev_idx': np.array([e['index'] for e in structure['events']], dtype=int),
@@ -70,7 +70,7 @@ def _frame(df, dur, structure, gaps, pools=None, sweeps=None):
 
 
 def _setups(combo, L, E, ctx, h1_stamps, ts1, period, pair):
-    from smc import liquidity
+    from strategies.smc import liquidity
     _, _, confirm_h, _, _ = COMBOS[combo]
     rows = []
     for sw in L['sweeps']:
@@ -132,7 +132,7 @@ def _job(args):
     import logger
     logger.log = lambda *a, **k: None
     import backtest_smc as bt
-    from smc import imbalance, liquidity, signal as smc_signal, structure as structure_mod
+    from strategies.smc import imbalance, liquidity, signal as smc_signal, structure as structure_mod
     bt.CACHE_DIR = os.path.join(HERE, CACHES[period])
     data = bt.load_pair(pair)
     if data is None:

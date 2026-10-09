@@ -57,7 +57,7 @@ import scan_report as report
 # биржи напрямую (реорганизация, этап 4).
 from analysis.market import fetch_ohlcv
 from logger import log
-from rsibb import core, params
+from strategies.rsibb import core, params
 
 NAME = 'RSIBB'
 
@@ -280,7 +280,7 @@ def build_signal(candidate):
 def profile():
     # Модуль параметров — заново при каждом вызове: тесты перезагружают его, и
     # схваченный при импорте адаптера был бы чужим (как и в strategy_profile).
-    from rsibb import params as p
+    from strategies.rsibb import params as p
     bar = _BAR_HOURS.get(str(p.TIMEFRAME), 1.0)
     return {'expiry_hours': p.EXPIRY_BARS * bar, 'cooldown_hours': p.COOLDOWN_HOURS,
             'cost_limit_pct': p.MAX_ENTRY_COST_SHARE_PCT, 'max_hold_hours': p.MAX_HOLD_BARS * bar,

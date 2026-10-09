@@ -85,7 +85,7 @@ def market(bars=180, approach=0.4, volume_on_reclaim=500.0):
 
 def _direct(df):
     """То, что мерит замер: core.evaluate на последней закрытой свече."""
-    from levels import core
+    from strategies.levels import core
 
     high = df['high'].to_numpy(float)
     low = df['low'].to_numpy(float)

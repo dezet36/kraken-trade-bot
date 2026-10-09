@@ -115,7 +115,7 @@ def test_sweep_price_is_read_from_the_field_the_core_actually_fills():
     же и придумал. Поэтому здесь пиннится ИСХОДНИК ядра: пока в нём есть
     'level', стратегия обязана читать именно его.
     """
-    core = os.path.join(ROOT, 'smc', 'liquidity.py')
+    core = os.path.join(ROOT, 'strategies', 'smc', 'liquidity.py')
     with open(core, encoding='utf-8') as handle:
         text = handle.read()
     assert "'level': level," in text, 'ядро больше не кладёт level — проверить связь'
@@ -185,7 +185,7 @@ def test_core_carries_the_structure_event_into_the_setup():
     Проверяется по исходнику: собрать полноценный контекст SMC в тесте дорого,
     а сломать связь можно одной правкой возвращаемого кортежа.
     """
-    path = os.path.join(ROOT, 'smc', 'signal.py')
+    path = os.path.join(ROOT, 'strategies', 'smc', 'signal.py')
     with open(path, encoding='utf-8') as handle:
         text = handle.read()
     assert "'structure': structure_break," in text

@@ -25,9 +25,9 @@ ALL = ('FIBO', 'SMC', 'LEVELS', 'RSIBB', 'LLM')
 class TestEveryValueComesFromTheStrategy:
 
     def test_expiry(self):
-        from levels import params as lv
-        from rsibb import params as rb
-        from smc import params as smc
+        from strategies.levels import params as lv
+        from strategies.rsibb import params as rb
+        from strategies.smc import params as smc
         assert sp.expiry_hours('LEVELS') == pytest.approx(lv.EXPIRY_HOURS)
         assert sp.expiry_hours('RSIBB') == pytest.approx(rb.EXPIRY_BARS * sp._bar_hours(rb.TIMEFRAME))
         assert sp.expiry_hours('SMC') == pytest.approx(smc.PENDING_ORDER_MAX_HOURS)
@@ -35,9 +35,9 @@ class TestEveryValueComesFromTheStrategy:
         assert sp.expiry_hours('FIBO') == pytest.approx(sp._config().PENDING_ORDER_MAX_HOURS)
 
     def test_cooldown(self):
-        from levels import params as lv
-        from rsibb import params as rb
-        from smc import params as smc
+        from strategies.levels import params as lv
+        from strategies.rsibb import params as rb
+        from strategies.smc import params as smc
         assert sp.cooldown_hours('LEVELS') == pytest.approx(lv.COOLDOWN_HOURS)
         assert sp.cooldown_hours('RSIBB') == pytest.approx(rb.COOLDOWN_HOURS)
         assert sp.cooldown_hours('SMC') == pytest.approx(smc.COOLDOWN_HOURS)
@@ -45,9 +45,9 @@ class TestEveryValueComesFromTheStrategy:
         assert sp.cooldown_hours('FIBO') == pytest.approx(sp._config().COOLDOWN_HOURS)
 
     def test_cost_limit(self):
-        from levels import params as lv
-        from rsibb import params as rb
-        from smc import params as smc
+        from strategies.levels import params as lv
+        from strategies.rsibb import params as rb
+        from strategies.smc import params as smc
         assert sp.cost_limit_pct('LEVELS') == pytest.approx(lv.MAX_ENTRY_COST_SHARE_PCT)
         assert sp.cost_limit_pct('RSIBB') == pytest.approx(rb.MAX_ENTRY_COST_SHARE_PCT)
         assert sp.cost_limit_pct('SMC') == pytest.approx(smc.MAX_ENTRY_COST_SHARE_PCT)
@@ -55,9 +55,9 @@ class TestEveryValueComesFromTheStrategy:
         assert sp.cost_limit_pct('FIBO') == pytest.approx(sp._config().MAX_ENTRY_COST_SHARE_PCT)
 
     def test_max_hold(self):
-        from levels import params as lv
-        from rsibb import params as rb
-        from smc import params as smc
+        from strategies.levels import params as lv
+        from strategies.rsibb import params as rb
+        from strategies.smc import params as smc
         assert sp.max_hold_hours('LEVELS') == pytest.approx(lv.MAX_HOLD_HOURS)
         assert sp.max_hold_hours('RSIBB') == pytest.approx(rb.MAX_HOLD_BARS * sp._bar_hours(rb.TIMEFRAME))
         assert sp.max_hold_hours('SMC') == pytest.approx(smc.MAX_POSITION_HOLD_HOURS)
@@ -111,9 +111,9 @@ class TestALimitThroughTheMarketIsEachStrategysOwn:
     """
 
     def test_each_strategy_reads_its_own_value(self):
-        from levels import params as lv
-        from rsibb import params as rb
-        from smc import params as smc
+        from strategies.levels import params as lv
+        from strategies.rsibb import params as rb
+        from strategies.smc import params as smc
         assert sp.fills_through_market('LEVELS') is bool(lv.FILL_THROUGH_MARKET)
         assert sp.fills_through_market('RSIBB') is bool(rb.FILL_THROUGH_MARKET)
         assert sp.fills_through_market('SMC') is bool(smc.FILL_THROUGH_MARKET)
@@ -138,7 +138,7 @@ class TestALimitThroughTheMarketIsEachStrategysOwn:
     def test_one_switch_moves_only_its_owner(self, monkeypatch, owner, module, key):
         import importlib
         before = {n: sp.fills_through_market(n) for n in ALL}
-        target = importlib.import_module(f'{module}.params') if module else sp._config()
+        target = importlib.import_module(f'strategies.{module}.params') if module else sp._config()
         monkeypatch.setattr(target, key, not before[owner])
         after = {n: sp.fills_through_market(n) for n in ALL}
         assert after[owner] is (not before[owner])
@@ -150,7 +150,7 @@ class TestALimitThroughTheMarketIsEachStrategysOwn:
 class TestBrokenStrategyParamsFallBackToTheCommonValue:
 
     def test_missing_attribute(self, monkeypatch):
-        from smc import params as smc
+        from strategies.smc import params as smc
         monkeypatch.delattr(smc, 'COOLDOWN_HOURS')
         assert sp.cooldown_hours('SMC') == pytest.approx(sp._config().COOLDOWN_HOURS)
 
@@ -192,8 +192,8 @@ class TestTheMinStopKnobIsHonest:
             assert sp.describe(name)['min_stop_knob'] is (name in sp.MIN_STOP_KNOB_READERS)
 
     def test_levels_and_rsibb_report_their_own_parameter(self):
-        from levels import params as lv
-        from rsibb import params as rb
+        from strategies.levels import params as lv
+        from strategies.rsibb import params as rb
         assert sp.min_stop_pct('LEVELS') == pytest.approx(lv.MIN_STOP_PCT)
         assert sp.min_stop_pct('RSIBB') == pytest.approx(rb.MIN_STOP_PCT)
 
@@ -207,5 +207,5 @@ class TestTheMinStopKnobIsHonest:
         assert sp.min_stop_pct('FIBO') == pytest.approx(1.23)
         assert sp.min_stop_pct('SMC') == pytest.approx(1.23)
         # а чужие от ручки не зависят
-        from levels import params as lv
+        from strategies.levels import params as lv
         assert sp.min_stop_pct('LEVELS') == pytest.approx(lv.MIN_STOP_PCT)

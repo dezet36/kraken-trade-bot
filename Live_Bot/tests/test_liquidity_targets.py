@@ -19,7 +19,7 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from smc import liquidity, params, signal   # noqa: E402
+from strategies.smc import liquidity, params, signal   # noqa: E402
 
 BULLISH = 'BULLISH'
 BEARISH = 'BEARISH'

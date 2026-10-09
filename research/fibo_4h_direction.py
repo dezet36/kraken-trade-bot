@@ -38,7 +38,7 @@ from common import ci                                 # noqa: E402
 from fibo_crowd import funding_at                     # noqa: E402
 from fibo_geometry import CELLS, load_cell            # noqa: E402
 from fibo_htf_split import BASE, N4                   # noqa: E402
-from smcs import core as smcs_core                    # noqa: E402
+from strategies.smcs import core as smcs_core                    # noqa: E402
 
 RULES = [
     ('база: ФИБО обе стороны (как сканер)', lambda o, x: True),

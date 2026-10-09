@@ -177,7 +177,7 @@ def _restore_smc_decisions():
     прятал алфавитный порядок файлов).
     """
     try:
-        from smc import params
+        from strategies.smc import params
     except Exception:                               # noqa: BLE001
         yield
         return

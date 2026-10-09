@@ -46,7 +46,7 @@ OUT = os.path.join(HERE, 'results')
 
 
 def permissive_decision():
-    from smc import params as smc_params
+    from strategies.smc import params as smc_params
     d = SimpleNamespace(**{name: getattr(smc_params, name) for name in smc_params.DECISION})
     d.MIN_SL_PCT = 0.002
     d.MIN_RR = 1.5
@@ -79,7 +79,7 @@ def _job(args):
     import logger
     logger.log = lambda *a, **k: None
     import backtest_smc as bt
-    from smc import signal as smc_signal
+    from strategies.smc import signal as smc_signal
     bt.CACHE_DIR = os.path.join(HERE, cache)
     data = bt.load_pair(pair)
     if data is None:

@@ -85,7 +85,7 @@ def score(pair, context=None, now_ms=None):
 
 
 def _fresh_break(context):
-    from smc import structure as structure_mod
+    from strategies.smc import structure as structure_mod
     df = context.frames.get('poi')
     if df is None or not len(df):
         return ''

@@ -16,7 +16,7 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from smc import fib, imbalance, liquidity, signal, structure, swings  # noqa: E402
+from strategies.smc import fib, imbalance, liquidity, signal, structure, swings  # noqa: E402
 
 T0 = pd.Timestamp('2026-01-01', tz='UTC')
 
@@ -379,7 +379,7 @@ class TestLiquidity:
     def test_context_feeds_daily_candles_to_liquidity(self):
         """MarketContext отдаёт пулам дневные свечи окна направления (bias = 1д)."""
         import inspect
-        from smc import signal
+        from strategies.smc import signal
         src = inspect.getsource(signal.MarketContext.__init__)
         assert "find_liquidity_pools(df_poi, self.structure, daily=daily)" in src
 

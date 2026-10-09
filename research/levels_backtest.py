@@ -41,7 +41,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, 'Live_Bot'))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from levels import core, params as LP  # noqa: E402
+from strategies.levels import core, params as LP  # noqa: E402
 from smc_engine import Order, compute_stats, run_portfolio  # noqa: E402
 from smc_market_regime import (BEAR_CACHE, BEAR_PAIRS, BULL_CACHE,  # noqa: E402
                                BULL_PAIRS, REGIMES, ci, load_period)

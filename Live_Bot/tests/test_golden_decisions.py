@@ -75,7 +75,7 @@ def levels_every_hour(df):
     """Уровни на КАЖДОМ часе: читатель теста изоляции идёт шагом 17 баров и на
     этих рынках не застаёт ни одного сетапа."""
     import numpy as np
-    from levels import core
+    from strategies.levels import core
     high, low, close, volume = (df[c].to_numpy(dtype=float) for c in ('high', 'low', 'close', 'volume'))
     lv = core.build_levels(high, low)
     a = core.atr(high, low, close)
@@ -90,7 +90,7 @@ def levels_every_hour(df):
 
 def rsibb_every_hour(df):
     import numpy as np
-    from rsibb import core
+    from strategies.rsibb import core
     ind = core.indicators(*(df[c].to_numpy(dtype=float) for c in ('open', 'high', 'low', 'close')))
     out = []
     for i in range(150, len(df)):

@@ -25,7 +25,7 @@ import logger  # noqa: E402
 logger.log = lambda *a, **k: None               # строка на каждый шаг прогона — лишняя
 import strategy_smcs  # noqa: E402
 from accounts import books, replay  # noqa: E402
-from smcs import core, params  # noqa: E402
+from strategies.smcs import core, params  # noqa: E402
 
 PAIRS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'XRPUSDT', 'BNBUSDT', 'DOGEUSDT', 'ADAUSDT',
          'AVAXUSDT', 'LINKUSDT', 'LTCUSDT', 'ZECUSDT', 'SUIUSDT', 'ARBUSDT', 'DOTUSDT',

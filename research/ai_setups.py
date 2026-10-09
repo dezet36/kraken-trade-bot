@@ -40,7 +40,7 @@ logger.log = lambda *a, **k: None
 
 import ai_doctrine as D                               # noqa: E402
 import backtest_smc as bt                             # noqa: E402
-from smc import params as smc_params                  # noqa: E402
+from strategies.smc import params as smc_params                  # noqa: E402
 from smc_engine import _prepare, simulate_order       # noqa: E402
 
 H = 3_600_000

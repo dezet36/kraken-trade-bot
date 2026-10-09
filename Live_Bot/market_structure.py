@@ -22,8 +22,8 @@ strategy_smc держит лишь псевдонимы для старого к
 
 from exchange import fetch_ohlcv
 from logger import log
-from smc import params
-from smc import signal as smc_signal
+from strategies.smc import params
+from strategies.smc import signal as smc_signal
 
 # pair -> (последний timestamp закрытой свечи рабочего ТФ, контекст)
 _cache = {}

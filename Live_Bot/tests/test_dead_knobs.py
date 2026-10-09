@@ -34,7 +34,7 @@ import sys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
-from rsibb import core, params                             # noqa: E402
+from strategies.rsibb import core, params                             # noqa: E402
 
 
 def _thin_setup(half=0.25, entry=100.0):
@@ -107,7 +107,7 @@ class TestTheInertnessIsNamed:
 
 class TestTheCommentStoppedPromising:
 
-    SRC = open(os.path.join(ROOT, 'rsibb', 'core.py'), encoding='utf-8').read()
+    SRC = open(os.path.join(ROOT, 'strategies', 'rsibb', 'core.py'), encoding='utf-8').read()
 
     def test_the_condition_is_written_down(self):
         assert 'MIN_RR >= 1.0' in self.SRC or 'MIN_RR = 1.0' in self.SRC

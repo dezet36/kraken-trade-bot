@@ -158,9 +158,9 @@ class TestTheCostLimitComesFromTheStrategy:
 
     def test_each_strategy_has_its_own_limit_fibo_the_common_one(self, broker):
         import config
-        from levels import params as levels_params
-        from smc import params as smc_params
-        from rsibb import params as rsibb_params
+        from strategies.levels import params as levels_params
+        from strategies.smc import params as smc_params
+        from strategies.rsibb import params as rsibb_params
         assert broker.PaperBroker._cost_limit('LEVELS') == pytest.approx(levels_params.MAX_ENTRY_COST_SHARE_PCT)
         assert broker.PaperBroker._cost_limit('SMC') == pytest.approx(smc_params.MAX_ENTRY_COST_SHARE_PCT)
         assert broker.PaperBroker._cost_limit('RSIBB') == pytest.approx(rsibb_params.MAX_ENTRY_COST_SHARE_PCT)
@@ -197,11 +197,11 @@ class TestExpiryComesFromTheStrategy:
     def test_each_strategy_gets_its_own(self, broker):
         import config
         import strategy_profile
-        from smc import params as smc_params
+        from strategies.smc import params as smc_params
         assert broker.PaperBroker._expiry_hours('SMC') == pytest.approx(
             smc_params.PENDING_ORDER_MAX_HOURS)
-        from levels import params as levels_params
-        from rsibb import params as rsibb_params
+        from strategies.levels import params as levels_params
+        from strategies.rsibb import params as rsibb_params
 
         assert broker.PaperBroker._expiry_hours('LEVELS') == pytest.approx(
             levels_params.EXPIRY_HOURS)

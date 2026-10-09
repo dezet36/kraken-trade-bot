@@ -15,7 +15,7 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import strategy_smc  # noqa: E402
-from smc import params  # noqa: E402
+from strategies.smc import params  # noqa: E402
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from test_strategy_smc_adapter import make_setup  # noqa: E402

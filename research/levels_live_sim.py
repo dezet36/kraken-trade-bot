@@ -35,7 +35,7 @@ ROOT = os.path.dirname(HERE)
 sys.path.insert(0, os.path.join(ROOT, 'Live_Bot'))
 sys.path.insert(0, HERE)
 
-from levels import core, params as LP  # noqa: E402
+from strategies.levels import core, params as LP  # noqa: E402
 from smc_engine import Order, compute_stats, run_portfolio  # noqa: E402
 
 # Риск стенда — как у счёта стратегии на тесте (1%, CLAUDE.md «Риск»); в

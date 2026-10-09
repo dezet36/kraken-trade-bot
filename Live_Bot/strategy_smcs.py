@@ -25,7 +25,7 @@ import scan_report as report
 # биржи напрямую (реорганизация, этап 4).
 from analysis.market import fetch_ohlcv
 from logger import log
-from smcs import core, params
+from strategies.smcs import core, params
 
 NAME = 'SMCS'
 BAR_MIN = 240
@@ -231,7 +231,7 @@ def build_signal(candidate):
 def profile():
     # Модуль параметров — заново при каждом вызове: тесты перезагружают его, и
     # схваченный при импорте адаптера был бы чужим (как и в strategy_profile).
-    from smcs import params as p
+    from strategies.smcs import params as p
     return {'expiry_hours': p.PENDING_ORDER_MAX_HOURS, 'cooldown_hours': p.COOLDOWN_HOURS,
             'cost_limit_pct': p.MAX_ENTRY_COST_SHARE_PCT, 'max_hold_hours': p.MAX_POSITION_HOLD_HOURS,
             'drops_at_target': p.CANCEL_PENDING_AT_TARGET,

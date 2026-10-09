@@ -17,8 +17,8 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from smc import params  # noqa: E402
-from smc import regime  # noqa: E402
+from strategies.smc import params  # noqa: E402
+from strategies.smc import regime  # noqa: E402
 
 
 def straight(n, step=1.0, start=100.0):

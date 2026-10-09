@@ -244,7 +244,7 @@ class TestGuideNumbersMatchTheCode:
 
     def test_numbers(self):
         from test_strategy_guide import assert_quoted, guide_block
-        from fib12 import params
+        from strategies.fib12 import params
         block = guide_block('FIB12')
         assert_quoted(block, params.SWING_K, 'размер свинга')
         assert_quoted(block, params.STOP_BUFFER_ATR, 'буфер стопа')

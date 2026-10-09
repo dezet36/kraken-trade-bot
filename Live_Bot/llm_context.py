@@ -47,7 +47,7 @@ import pandas as pd
 import config
 import market_regime
 import positioning
-from liquidity import core as liq
+from strategies.liquidity import core as liq
 
 # Сколько уровней максимум уходит в модель. Больше — не лучше: список на сорок
 # позиций модель разбирает хуже, чем на десять, а грамматика вырастает линейно.
@@ -636,7 +636,7 @@ def _when(df, at):
     """Время бара решения и торговая сессия — из правил smc, не свои."""
     try:
         ts = df['timestamp'].iloc[at]
-        from smc import sessions
+        from strategies.smc import sessions
         zone = sessions.killzone_of(ts) or 'вне сессий'
         import pandas as pd
         stamp = pd.Timestamp(ts)

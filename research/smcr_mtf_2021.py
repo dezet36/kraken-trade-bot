@@ -42,7 +42,7 @@ def load(pair):
 
 def setups(pair):
     import backtest_smc as bt
-    from smc import imbalance, liquidity, signal as smc_signal, structure as structure_mod
+    from strategies.smc import imbalance, liquidity, signal as smc_signal, structure as structure_mod
     got = load(pair)
     if got is None:
         return [], None, None

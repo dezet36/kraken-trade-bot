@@ -21,7 +21,7 @@ import scan_report as report
 # Данные — через дверь анализа (analysis/market.py), не со сборщиков и не с
 # биржи напрямую (реорганизация, этап 4).
 from analysis.market import fetch_ohlcv
-from levels import core, params
+from strategies.levels import core, params
 from logger import log
 
 NAME = 'LEVELS'
@@ -224,7 +224,7 @@ def build_signal(candidate):
 def profile():
     # Модуль параметров — заново при каждом вызове: тесты перезагружают его, и
     # схваченный при импорте адаптера был бы чужим (как и в strategy_profile).
-    from levels import params as p
+    from strategies.levels import params as p
     return {'expiry_hours': p.EXPIRY_HOURS, 'cooldown_hours': p.COOLDOWN_HOURS,
             'cost_limit_pct': p.MAX_ENTRY_COST_SHARE_PCT, 'max_hold_hours': p.MAX_HOLD_HOURS,
             'fills_through_market': p.FILL_THROUGH_MARKET, 'min_stop_pct': p.MIN_STOP_PCT,

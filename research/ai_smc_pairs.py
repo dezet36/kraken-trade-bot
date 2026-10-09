@@ -27,7 +27,7 @@ logger.log = lambda *a, **k: None
 import ai_doctrine as D                               # noqa: E402
 import backtest_smc as bt                             # noqa: E402
 from common import ci                                 # noqa: E402
-from smc import params as smc_params                  # noqa: E402
+from strategies.smc import params as smc_params                  # noqa: E402
 from smc_engine import compute_stats, run_portfolio   # noqa: E402
 
 LIVE = dict(occupy_while_pending=True, cooldown_from_placement=True)

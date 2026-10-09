@@ -72,7 +72,7 @@ def _fp(obj):
 # ── Что видит каждый потребитель ─────────────────────────────────────────────
 
 def smc_decisions(df):
-    from smc import signal as smc_signal
+    from strategies.smc import signal as smc_signal
     ctx = smc_signal.build_context(frames_of(df.copy()), pair='TEST')
     out = []
     for i in range(800, len(df), 7):
@@ -90,7 +90,7 @@ def smc_decisions(df):
 def llm_rules_decisions(df):
     """ИИ в режиме «правила»: то же ядро, но СВОИ правила решений (llm_rules)."""
     import llm_rules
-    from smc import signal as smc_signal
+    from strategies.smc import signal as smc_signal
     ctx = smc_signal.build_context(frames_of(df.copy()), pair='TEST')
     out = []
     for i in range(800, len(df), 7):
@@ -108,7 +108,7 @@ def llm_rules_decisions(df):
 def llm_structure(df):
     """Разметка структуры для модели — по тому же общему контексту."""
     import llm_market
-    from smc import signal as smc_signal
+    from strategies.smc import signal as smc_signal
     ctx = smc_signal.build_context(frames_of(df.copy()), pair='TEST')
     price = float(df['close'].iloc[-1])
     return _fp(llm_market._smc_from_context(ctx, price))
@@ -122,7 +122,7 @@ def llm_levels(df):
 
 
 def levels_decisions(df):
-    from levels import core
+    from strategies.levels import core
     high, low, close = (df[c].to_numpy(dtype=float) for c in ('high', 'low', 'close'))
     volume = df['volume'].to_numpy(dtype=float)
     lv = core.build_levels(high, low)
@@ -138,7 +138,7 @@ def levels_decisions(df):
 
 
 def rsibb_decisions(df):
-    from rsibb import core
+    from strategies.rsibb import core
     ind = core.indicators(*(df[c].to_numpy(dtype=float) for c in ('open', 'high', 'low', 'close')))
     out = []
     for i in range(150, len(df), 17):
@@ -156,7 +156,7 @@ def rsibb_decisions(df):
 def smcs_decisions(df):
     """SMC-структура 4ч: сетап на последнем баре, как его видит адаптер,
     с числами из СВОЕГО params."""
-    from smcs import core, params
+    from strategies.smcs import core, params
     h4 = frames_of(df.copy())['htf']
     o, h, l, c = (h4[col].astype(float).tolist() for col in ('open', 'high', 'low', 'close'))
     out = []
@@ -173,7 +173,7 @@ def smcs_decisions(df):
 def fib12_decisions(df):
     """Фибо 12ч: сетап на последнем баре, как его видит адаптер, с числами из
     СВОЕГО params (на старшем ТФ синтетического рынка)."""
-    from fib12 import core, params
+    from strategies.fib12 import core, params
     h4 = frames_of(df.copy())['htf']
     o, h, l, c = (h4[col].astype(float).tolist() for col in ('open', 'high', 'low', 'close'))
     out = []
@@ -221,7 +221,7 @@ def baseline(df):
 class TestDecisionParamsAreIsolated:
 
     def test_smc_decisions_do_not_reach_anyone_else(self, df, baseline, monkeypatch):
-        from smc import params
+        from strategies.smc import params
         for name, value in {
             'MIN_RR': 1.0, 'MAX_RR': 3.0, 'TP_MODE': 'liquidity', 'MIN_SL_PCT': 0.02,
             'SL_MODE': 'aggressive', 'POI_TYPES_ENABLED': (), 'REQUIRE_KILLZONE': False,
@@ -260,7 +260,7 @@ class TestDecisionParamsAreIsolated:
                 assert fn(df) == baseline[name], f'{name} изменился от правки правил ИИ'
 
     def test_levels_decisions_do_not_reach_anyone_else(self, df, baseline, monkeypatch):
-        from levels import params
+        from strategies.levels import params
         for name, value in {
             'TRIGGER_ATR': 5.0, 'MIN_GAP_ATR': 0.0, 'PIERCE_ATR': 1.0, 'RECLAIM_BARS': 20,
             'VOLUME_RATIO': 0.1, 'MIN_STOP_PCT': 5.0, 'MIN_TARGET_R': 0.1, 'MAX_SAME_DIRECTION': 7,
@@ -274,7 +274,7 @@ class TestDecisionParamsAreIsolated:
                 assert fn(df) == baseline[name], f'{name} изменился от правки решений уровней'
 
     def test_rsibb_decisions_do_not_reach_anyone_else(self, df, baseline, monkeypatch):
-        from rsibb import params
+        from strategies.rsibb import params
         for name, value in {
             'RSI_LOW': 90.0, 'RSI_HIGH': 10.0, 'RSI_MODE': 'level', 'ADX_MAX': 5.0,
             'ENTRY_MODE': 'reclaim', 'TARGET_FRAC': 0.2, 'EXPIRY_BARS': 1,
@@ -288,7 +288,7 @@ class TestDecisionParamsAreIsolated:
                 assert fn(df) == baseline[name], f'{name} изменился от правки решений Боллинджера'
 
     def test_smcs_decisions_do_not_reach_anyone_else(self, df, baseline, monkeypatch):
-        from smcs import params
+        from strategies.smcs import params
         for name, value in {
             'SWING_K': 2, 'STOP_BUFFER_ATR': 0.5, 'TARGET_R': 3.0, 'BOS_ONLY': False,
             'MAX_POSITION_HOLD_HOURS': 1.0, 'PENDING_ORDER_MAX_HOURS': 9.0,
@@ -306,7 +306,7 @@ class TestDecisionParamsAreIsolated:
             assert _fp(strategy_profile.describe(other)) == _fp(before[other])
 
     def test_fib12_decisions_do_not_reach_anyone_else(self, df, baseline, monkeypatch):
-        from fib12 import params
+        from strategies.fib12 import params
         for name, value in {
             'SWING_K': 2, 'RETRACE': 0.5, 'STOP_LEVEL': 1.0, 'STOP_BUFFER_ATR': 0.5,
             'TARGET_EXT': 0.272, 'MAX_POSITION_HOLD_HOURS': 1.0, 'PENDING_ORDER_MAX_HOURS': 9.0,
@@ -381,7 +381,7 @@ class TestTheSharedLayerIsNotWrittenByStrategies:
         assert strategy_smc.smc_params.SWING_N_STRUCT == before
 
     def test_every_smc_param_is_declared_on_one_side(self):
-        from smc import params
+        from strategies.smc import params
         names = {n for n in dir(params) if n.isupper() and not n.startswith('_')} - {'STRUCTURAL', 'DECISION'}
         assert not names - params.STRUCTURAL - params.DECISION, 'параметр без стороны'
         assert not params.STRUCTURAL & params.DECISION
@@ -392,7 +392,7 @@ class TestTheSharedLayerIsNotWrittenByStrategies:
         Контроль, что отпечатки не пусты: правка ОПРЕДЕЛЕНИЯ (часть I)
         меняет и решения SMC, и разметку для модели — это одно и то же место.
         """
-        from smc import params
+        from strategies.smc import params
         monkeypatch.setattr(params, 'SWING_N_STRUCT', 5)
         monkeypatch.setattr(params, 'FVG_MIN_SIZE_PCT', 0.5)
         assert llm_structure(df) != baseline['LLM-структура']
@@ -409,10 +409,11 @@ STRATEGY_MODULES = {
     'LLM': ('strategy_llm.py', 'llm_market.py', 'llm_context.py', 'llm_decide.py',
             'llm_record.py', 'llm_urgency.py', 'llm_prompt.py', 'llm_grammar.py', 'llm_rules.py'),
 }
-SHARED = ('market_structure.py', 'smc/signal.py', 'smc/structure.py', 'smc/swings.py',
-          'smc/liquidity.py', 'smc/imbalance.py', 'smc/poi.py', 'smc/fib.py',
-          'smc/sessions.py', 'levels/core.py', 'rsibb/core.py', 'liquidity/core.py',
-          'smcs/core.py',
+SHARED = ('market_structure.py', 'strategies/smc/signal.py', 'strategies/smc/structure.py',
+          'strategies/smc/swings.py', 'strategies/smc/liquidity.py', 'strategies/smc/imbalance.py',
+          'strategies/smc/poi.py', 'strategies/smc/fib.py', 'strategies/smc/sessions.py',
+          'strategies/levels/core.py', 'strategies/rsibb/core.py', 'strategies/liquidity/core.py',
+          'strategies/smcs/core.py',
           'exchange.py', 'market_regime.py', 'strategy_profile.py')
 ADAPTERS = re.compile(r'^\s*(import|from)\s+(strategy_smcs|strategy_smc|strategy_levels|strategy_rsibb|strategy_llm)\b', re.M)
 
@@ -438,6 +439,6 @@ class TestNoStrategyImportsAnother:
         src = _src(path)
         hits = {m.group(2) for m in ADAPTERS.finditer(src)}
         assert not hits, f'общий слой {path} импортирует стратегию: {sorted(hits)}'
-        if path.startswith(('smc/', 'levels/', 'rsibb/', 'liquidity/', 'smcs/')):
+        if path.startswith('strategies/'):
             assert not re.search(r'^\s*(import|from)\s+(config|settings_store)\b', src, re.M), (
                 f'{path}: ядро читает config/настройки — оно должно считать по числам своего params')

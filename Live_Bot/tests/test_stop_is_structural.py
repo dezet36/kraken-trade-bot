@@ -51,7 +51,7 @@ class TestSmc:
     def _context(self):
         sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
         from test_strategy_isolation_behaviour import market, frames_of
-        from smc import signal as smc_signal
+        from strategies.smc import signal as smc_signal
         df = market(2000)
         return df, smc_signal.build_context(frames_of(df.copy()), pair='TEST')
 
@@ -63,7 +63,7 @@ class TestSmc:
         pytest.skip('на этом ряду SMC не нашла сетапа')
 
     def test_the_stop_sits_beyond_the_zone_edge(self):
-        from smc import params
+        from strategies.smc import params
         df, ctx = self._context()
         i, setup = self._first_setup(ctx, len(df))
         t = setup['params']
@@ -80,7 +80,7 @@ class TestSmc:
             assert t['stop_loss'] >= expect - 1e-9
 
     def test_a_tight_zone_is_refused_with_a_named_reason(self, monkeypatch):
-        from smc import params
+        from strategies.smc import params
         df, ctx = self._context()
         i, setup = self._first_setup(ctx, len(df))
         t = setup['params']
@@ -108,7 +108,7 @@ class TestLevels:
         return series(rows)
 
     def test_the_stop_is_beyond_the_pierce_extreme_plus_pad(self, monkeypatch):
-        from levels import core, params
+        from strategies.levels import core, params
         monkeypatch.setattr(params, 'MIN_STOP_PCT', 0.0)
         high, low, close, volume = self._scene()
         setup, reason = core.evaluate(high, low, close, volume, 77)
@@ -118,7 +118,7 @@ class TestLevels:
         assert setup['sl_distance'] == pytest.approx(expect)
 
     def test_a_shallow_pierce_is_refused_not_stretched(self, monkeypatch):
-        from levels import core, params
+        from strategies.levels import core, params
         monkeypatch.setattr(params, 'MIN_STOP_PCT', 0.0)
         high, low, close, volume = self._scene()
         setup, _ = core.evaluate(high, low, close, volume, 77)

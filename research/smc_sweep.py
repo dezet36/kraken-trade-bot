@@ -25,7 +25,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, 'Live_Bot'))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from smc import params as P, signal as smc_signal  # noqa: E402
+from strategies.smc import params as P, signal as smc_signal  # noqa: E402
 from smc_engine import INITIAL_BALANCE, Order, compute_stats, run_portfolio  # noqa: E402
 from backtest_smc import (COOLDOWN_HOURS, MAX_POSITIONS, RISK_PCT,  # noqa: E402
                           load_pair)

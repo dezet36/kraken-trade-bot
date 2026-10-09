@@ -50,7 +50,7 @@ def _job(args):
     import logger
     logger.log = lambda *a, **k: None
     import backtest_smc as bt
-    from smc import signal as smc_signal
+    from strategies.smc import signal as smc_signal
     bt.CACHE_DIR = os.path.join(HERE, CACHES[period])
     df_1h = bt.load_cached(pair, '1h')
     if df_1h is None or not os.path.exists(os.path.join(bt.CACHE_DIR, f'{pair}_5m.pkl')):

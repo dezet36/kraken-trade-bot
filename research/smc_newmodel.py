@@ -86,9 +86,9 @@ def _job(args):
     import logger
     logger.log = lambda *a, **k: None
     import backtest_smc as bt
-    from smc import imbalance, liquidity
-    from smc import signal as smc_signal
-    from smc import structure as structure_mod
+    from strategies.smc import imbalance, liquidity
+    from strategies.smc import signal as smc_signal
+    from strategies.smc import structure as structure_mod
     bt.CACHE_DIR = os.path.join(HERE, cache)
     data = bt.load_pair(pair)
     if data is None:

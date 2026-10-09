@@ -105,7 +105,7 @@ class TestContract:
 
     def test_signal_carries_every_required_field(self):
         import strategy_rsibb
-        from rsibb import core
+        from strategies.rsibb import core
 
         size = 80
         rng = np.random.default_rng(11)

@@ -72,5 +72,5 @@ def test_orders_before_a_moment_do_not_depend_on_what_comes_after():
 
 
 def test_the_window_is_the_one_the_bot_sees():
-    from levels import params
+    from strategies.levels import params
     assert lb.live_window() == params.LOOKBACK + 4

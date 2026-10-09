@@ -166,7 +166,7 @@ def load_period(cache_dir, pairs, label, regime_bars=None):
     for module in ('backtest_smc', 'smc_sweep'):
         sys.modules.pop(module, None)
     import backtest_smc as bt
-    from smc import signal as smc_signal
+    from strategies.smc import signal as smc_signal
 
     print(f'[{label}] загрузка...', flush=True)
     data, contexts = {}, {}
@@ -199,7 +199,7 @@ def load_period(cache_dir, pairs, label, regime_bars=None):
 
 def run(period):
     """Прогон портфеля при текущих параметрах. Отдаёт сделки с режимом входа."""
-    from smc import params as P
+    from strategies.smc import params as P
     from smc_sweep import build_orders
     from smc_engine import compute_stats, run_portfolio
 

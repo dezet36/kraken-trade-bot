@@ -45,8 +45,6 @@ LAYER = {
     'strategy': 'strategies', 'pair_scanner': 'strategies', 'strategy_profile': 'strategies',
     'strategy_smc': 'strategies', 'strategy_smcs': 'strategies', 'strategy_fib12': 'strategies',
     'strategy_levels': 'strategies', 'strategy_rsibb': 'strategies', 'strategy_llm': 'strategies',
-    'smc': 'strategies', 'smcs': 'strategies', 'fib12': 'strategies', 'levels': 'strategies',
-    'rsibb': 'strategies', 'liquidity': 'strategies',
     'llm_notebook': 'strategies', 'llm_rules': 'strategies', 'llm_decide': 'strategies',
     'llm_prompt': 'strategies', 'llm_grammar': 'strategies', 'llm_journal': 'strategies',
     'llm_outcomes': 'strategies', 'llm_urgency': 'strategies',
@@ -82,16 +80,17 @@ KNOWN = {
     # (часть I) и решения SMC (часть II) живут в одном классе MarketContext.
     # Ядро делится на «структуру → анализ» и «решения → стратегия» при переносе
     # файлов (этап 10), разметка режима планов — там же.
-    ('llm_context', 'liquidity'): 'этап 10: разметка ИИ читает пакет стратегии',
+    # С переноса пакетов стратегий в strategies/ (этап 10, часть 1) — одной
+    # записью на модуль: разметка ИИ читает пакеты liquidity и smc.
+    ('llm_context', 'strategies'): 'этап 10: структура smc (часть I) и liquidity — в анализ',
     ('llm_context', 'llm_decide'): 'этап 10',
     ('llm_context', 'llm_outcomes'): 'этап 10',
-    ('llm_context', 'smc'): 'этап 10: структура smc (часть I) — в анализ',
     ('llm_context', 'strategy_profile'): 'этап 10',
-    ('llm_market', 'smc'): 'этап 10: структура smc (часть I) — в анализ',
+    ('llm_market', 'strategies'): 'этап 10: структура smc (часть I) — в анализ',
     ('llm_notebook', 'telegram_notify'): 'этап 5: стратегия отдаёт сетап, сообщает исполнение',
     ('llm_server', 'llm_grammar'): 'этап 10: сервис модели не знает про промт',
     ('llm_server', 'llm_prompt'): 'этап 10',
-    ('market_structure', 'smc'): 'этап 10: структура smc (часть I) — в анализ',
+    ('market_structure', 'strategies'): 'этап 10: структура smc (часть I) — в анализ',
     # Исполнители сами проверяют пределы портфеля и издержки по правилам счёта
     # (risk_gate, settings_store). Этап 5 переносит эти проверки в решение
     # счёта, исполнение получает готовое «можно и сколько».

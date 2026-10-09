@@ -19,7 +19,7 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from rsibb import core, params  # noqa: E402
+from strategies.rsibb import core, params  # noqa: E402
 
 
 def series(n=400, seed=3):

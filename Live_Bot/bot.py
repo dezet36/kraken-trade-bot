@@ -812,7 +812,7 @@ def main():
     log(f"Мин. объём:    ${config.MIN_VOLUME_24H_USD/1e6:.0f}M / 24ч")
 
     if config.STRATEGY == 'SMC':
-        from smc import params as smc_params
+        from strategies.smc import params as smc_params
         log(f"Таймфреймы:    bias {smc_params.TF_BIAS} -> "
             f"HTF {smc_params.TF_HTF} -> зоны {smc_params.TF_POI}")
         log(f"Типы зон:      {', '.join(smc_params.POI_TYPES_ENABLED) or 'все'}")

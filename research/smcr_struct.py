@@ -41,7 +41,7 @@ def apply_patch(variant):
     global _patched
     if _patched == variant:
         return
-    from smc import liquidity, poi, signal
+    from strategies.smc import liquidity, poi, signal
     import importlib
     importlib.reload(liquidity)
     importlib.reload(poi)
@@ -113,7 +113,7 @@ def apply_patch(variant):
     if variant in ('B_htf', 'B_any'):
         # R6 (второй круг): направление старшего ТФ — только 4 ч или «любой ТФ,
         # при споре — день» вместо обязательного согласия дня и 4 ч.
-        from smc import params as P
+        from strategies.smc import params as P
         P.BIAS_MODE = 'htf_only' if variant == 'B_htf' else 'any'
     if variant in ('S4', 'ALL'):
         def untapped_pools_strict(pools, sweeps, index, side=None):
@@ -147,7 +147,7 @@ def _job(args):
     import backtest_smc as bt
     import smc_lab
     apply_patch(variant)
-    from smc import signal as smc_signal
+    from strategies.smc import signal as smc_signal
     bt.CACHE_DIR = os.path.join(HERE, CACHES[period])
     # Как bt.load_pair, но без 5-минутных свечей — стенду структуры они не нужны.
     df_1h = bt.load_cached(pair, '1h')

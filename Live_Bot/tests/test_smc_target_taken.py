@@ -21,7 +21,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 def _context():
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     from test_strategy_isolation_behaviour import market, frames_of
-    from smc import signal as smc_signal
+    from strategies.smc import signal as smc_signal
     df = market(2000)
     return df, smc_signal.build_context(frames_of(df.copy()), pair='TEST')
 
@@ -44,7 +44,7 @@ def _beyond_target(ctx, i, setup):
 class TestTheSkipRuleIsOffAndWorksIfSwitchedOn:
 
     def test_it_is_off(self):
-        from smc import params
+        from strategies.smc import params
         assert params.SKIP_TARGET_TAKEN is False, 'по бэктесту правило вредно — см. smc/params'
 
     def test_a_setup_beyond_its_target_is_still_offered(self):
@@ -54,7 +54,7 @@ class TestTheSkipRuleIsOffAndWorksIfSwitchedOn:
         assert ctx.evaluate(i)[0] is not None
 
     def test_switched_on_it_refuses_with_a_named_reason(self, monkeypatch):
-        from smc import params
+        from strategies.smc import params
         df, ctx = _context()
         i, setup = _first_setup(ctx, len(df))
         _beyond_target(ctx, i, setup)
@@ -72,6 +72,6 @@ class TestSmcOrdersWaitPastTheTarget:
             assert strategy_profile.drops_at_target(other) is True, other
 
     def test_it_is_a_decision_of_smc_not_structure(self):
-        from smc import params
+        from strategies.smc import params
         for name in ('SKIP_TARGET_TAKEN', 'CANCEL_PENDING_AT_TARGET'):
             assert name in params.DECISION and name not in params.STRUCTURAL

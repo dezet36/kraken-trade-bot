@@ -202,7 +202,7 @@ class TestGuideNumbersMatchTheCode:
 
     def test_numbers(self):
         from test_strategy_guide import assert_quoted, guide_block
-        from smcs import params
+        from strategies.smcs import params
         block = guide_block('SMCS')
         assert_quoted(block, params.SWING_K, 'размер свинга')
         assert_quoted(block, params.STOP_BUFFER_ATR, 'буфер стопа')

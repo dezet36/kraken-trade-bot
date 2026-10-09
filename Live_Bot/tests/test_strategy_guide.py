@@ -125,7 +125,7 @@ class TestNumbersMatchTheCode:
     def test_bollinger_numbers(self):
         import sys
         sys.path.insert(0, BOT)
-        from rsibb import params
+        from strategies.rsibb import params
 
         block = guide_block('RSIBB')
         assert_quoted(block, params.BB_MULT, 'множитель полос')
@@ -139,7 +139,7 @@ class TestNumbersMatchTheCode:
     def test_levels_numbers(self):
         import sys
         sys.path.insert(0, BOT)
-        from levels import params
+        from strategies.levels import params
 
         block = guide_block('LEVELS')
         assert_quoted(block, params.MIN_TOUCHES, 'касаний для уровня')
@@ -165,7 +165,7 @@ class TestNumbersMatchTheCode:
     def test_smc_numbers(self):
         import sys
         sys.path.insert(0, BOT)
-        from smc import params
+        from strategies.smc import params
 
         block = guide_block('SMC')
         assert_quoted(block, params.MIN_CONFLUENCE_SCORE, 'вес подтверждений')

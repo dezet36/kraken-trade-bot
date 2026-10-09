@@ -39,7 +39,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, 'Live_Bot'))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from smc import structure as S                     # noqa: E402
+from strategies.smc import structure as S                     # noqa: E402
 
 H = 3_600_000
 M5 = 300_000

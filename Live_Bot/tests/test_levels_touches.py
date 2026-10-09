@@ -44,7 +44,7 @@ def _series_with_level():
 
 
 def test_core_records_touch_points():
-    from levels import core
+    from strategies.levels import core
 
     high, low, close = _series_with_level()
     levels = core.build_levels(high, low, tolerance_pct=0.5, min_touches=2)
@@ -64,7 +64,7 @@ def test_first_index_is_earliest_not_latest():
     Перепутать легко: рядом лежит known_at, и это МАКСИМУМ по членам. Если
     взять его, окно графика начнётся почти у входа и смысл потеряется.
     """
-    from levels import core
+    from strategies.levels import core
 
     high, low, close = _series_with_level()
     levels = core.build_levels(high, low, tolerance_pct=0.5, min_touches=2)

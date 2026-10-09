@@ -20,7 +20,7 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from levels import core, params  # noqa: E402
+from strategies.levels import core, params  # noqa: E402
 
 
 def series(rows):

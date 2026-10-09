@@ -85,7 +85,7 @@ class TestSwitch:
 
     def test_the_copy_covers_every_smc_decision_name(self):
         """Копия полная: ни одно правило решения не берётся молча у SMC."""
-        from smc import params
+        from strategies.smc import params
         assert set(vars(llm_rules.DECISION)) == set(params.DECISION)
 
 

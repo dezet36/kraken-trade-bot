@@ -26,7 +26,7 @@ import scan_report as report
 # Данные — через дверь анализа (analysis/market.py), не со сборщиков и не с
 # биржи напрямую (реорганизация, этап 4).
 from analysis.market import fetch_ohlcv
-from fib12 import core, params
+from strategies.fib12 import core, params
 from logger import log
 
 NAME = 'FIB12'
@@ -218,7 +218,7 @@ def build_signal(candidate):
 def profile():
     # Модуль параметров — заново при каждом вызове: тесты перезагружают его, и
     # схваченный при импорте адаптера был бы чужим (как и в strategy_profile).
-    from fib12 import params as p
+    from strategies.fib12 import params as p
     return {'expiry_hours': p.PENDING_ORDER_MAX_HOURS, 'cooldown_hours': p.COOLDOWN_HOURS,
             'cost_limit_pct': p.MAX_ENTRY_COST_SHARE_PCT, 'max_hold_hours': p.MAX_POSITION_HOLD_HOURS,
             'drops_at_target': p.CANCEL_PENDING_AT_TARGET,

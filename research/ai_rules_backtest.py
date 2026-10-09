@@ -45,7 +45,7 @@ import risk_gate                                      # noqa: E402
 import smc_engine                                     # noqa: E402
 from ai_filter_study import FOMC                      # noqa: E402
 from common import ci                                 # noqa: E402
-from smc import signal as smc_signal                  # noqa: E402
+from strategies.smc import signal as smc_signal                  # noqa: E402
 from smc_engine import Order, compute_stats, run_portfolio  # noqa: E402
 
 R = llm_rules.DECISION

@@ -133,7 +133,7 @@ class TestEveryStrategyKeepsItsOwnSettings:
         Своя копия читателя — это начало нового расхождения. Именно так две
         стратегии оказались хрупкими, а третья нет.
         """
-        for path in ('levels/params.py', 'rsibb/params.py', 'smc/params.py'):
+        for path in ('strategies/levels/params.py', 'strategies/rsibb/params.py', 'strategies/smc/params.py'):
             text = open(os.path.join(ROOT, path), encoding='utf-8').read()
             assert 'params_env.reader(' in text, path
             assert 'def _f(' not in text, f'{path} завёл свой читатель заново'
@@ -148,7 +148,7 @@ class TestTheBotSurvivesTheTypo:
         """
         env.setenv('RSIBB_COOLDOWN_HOURS', '0,5')
         for name in [k for k in list(sys.modules)
-                     if k.split('.')[0] in ('rsibb', 'levels', 'smc')]:
+                     if k.split('.')[0] == 'strategies' and k.split('.')[1:2] in (['rsibb'], ['levels'], ['smc'])]:
             del sys.modules[name]
-        import rsibb.params as rp
+        import strategies.rsibb.params as rp
         assert rp.COOLDOWN_HOURS == 0.5

@@ -16,7 +16,7 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from fib12 import core, params  # noqa: E402
+from strategies.fib12 import core, params  # noqa: E402
 
 GOLDEN = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data', 'fib12_golden.json')
 

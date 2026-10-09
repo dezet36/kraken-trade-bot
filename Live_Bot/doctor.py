@@ -306,8 +306,8 @@ def check_strategy_knobs():
     показывает, что класс дефектов не единичный.
     """
     try:
-        from rsibb import core as rsibb_core
-        from rsibb import params as rsibb_params
+        from strategies.rsibb import core as rsibb_core
+        from strategies.rsibb import params as rsibb_params
     except Exception as exc:                       # noqa: BLE001
         return _result(WARN, 'Настройки стратегий не проверены', str(exc), '')
 

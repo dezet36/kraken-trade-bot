@@ -23,13 +23,13 @@
 import scan_report as report
 from logger import log
 from strategies import settings
-from smc import params as smc_params
+from strategies.smc import params as smc_params
 # Псевдоним обязателен: ниже определена функция market_regime(), и без
 # него она перекрыла бы модуль. Ошибка была бы молчаливой — вызов
 # обёрнут в try, и режим просто перестал бы определяться.
 import market_regime as regime_state
-from smc import regime as regime_mod
-from smc import signal as smc_signal
+from strategies.smc import regime as regime_mod
+from strategies.smc import signal as smc_signal
 
 # Причина отказа по последней проверенной паре. Ядро возвращает её вторым
 # значением, а адаптер до сих пор только писал в лог и терял — теперь она
@@ -401,7 +401,7 @@ def build_signal(candidate):
 def profile():
     # Модуль параметров — заново при каждом вызове: тесты перезагружают его, и
     # схваченный при импорте адаптера был бы чужим (как и в strategy_profile).
-    from smc import params as p
+    from strategies.smc import params as p
     return {'expiry_hours': p.PENDING_ORDER_MAX_HOURS, 'cooldown_hours': p.COOLDOWN_HOURS,
             'cost_limit_pct': p.MAX_ENTRY_COST_SHARE_PCT, 'max_hold_hours': p.MAX_POSITION_HOLD_HOURS,
             'drops_at_target': p.CANCEL_PENDING_AT_TARGET, 'fills_through_market': p.FILL_THROUGH_MARKET,

@@ -55,11 +55,11 @@ class TestDefaults:
     def test_direction_cap_is_what_each_strategy_was_measured_with(self):
         """Те же числа, что стратегии клали в сигнал до этапа 2."""
         import config
-        from fib12 import params as fib12
-        from levels import params as levels
-        from rsibb import params as rsibb
-        from smc import params as smc
-        from smcs import params as smcs
+        from strategies.fib12 import params as fib12
+        from strategies.levels import params as levels
+        from strategies.rsibb import params as rsibb
+        from strategies.smc import params as smc
+        from strategies.smcs import params as smcs
         measured = {'FIBO': config.MAX_SAME_DIRECTION, 'SMC': smc.MAX_SAME_DIRECTION,
                     'LEVELS': levels.MAX_SAME_DIRECTION, 'RSIBB': rsibb.MAX_SAME_DIRECTION,
                     'SMCS': smcs.MAX_SAME_DIRECTION, 'FIB12': fib12.MAX_SAME_DIRECTION}

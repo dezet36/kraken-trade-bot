@@ -250,7 +250,7 @@ class TestBook:
 class TestSmcFacts:
 
     def _context(self):
-        from smc import signal as smc_signal
+        from strategies.smc import signal as smc_signal
         df = make_df(wavy(400))
         return smc_signal.build_context({'poi': df}, pair='BTCUSDT')
 
@@ -689,7 +689,7 @@ class TestBenchmark:
 class TestPoisAndHtf:
 
     def _context(self):
-        from smc import signal as smc_signal
+        from strategies.smc import signal as smc_signal
         poi = make_df(wavy(400))
         htf = make_df(wavy(200, period=6), spread=None)
         htf['timestamp'] = pd.to_datetime(
@@ -717,7 +717,7 @@ class TestPoisAndHtf:
             pois = [{'type': t, 'direction': 'BEARISH', 'top': 113.84, 'bottom': 113.33,
                      'index': 40, 'confirmed_at': 45}
                     for t in ('ORDER_BLOCK', 'MITIGATION', 'MITIGATION')]
-        import smc.poi as poi_mod
+        import strategies.smc.poi as poi_mod
         out = llm_market.poi_facts(Ctx(), 112.0, 59)
         if out is None:
             pytest.skip('зона отсеяна правилами активности на синтетике')
