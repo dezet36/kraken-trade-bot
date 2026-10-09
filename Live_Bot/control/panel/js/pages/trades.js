@@ -6,11 +6,11 @@
 
 import { h, row, pill, empty, icon, strategyBadge, strategyColor, strategyTitle, segmented } from '../ui.js';
 import { money, signedMoney, signedR, signedPct, pct, num, price, tone, ago, dateTime, day, hours,
-  isNum, toDate } from '../format.js';
-import { candleChart } from '../charts.js';
-import { strategyOrder, closedTrades, positionTrack, positionKey } from '../model.js';
+  isNum, toDate, plural } from '../format.js';
+import { candleChart, lineChart, bars, calendar } from '../charts.js';
+import { strategyOrder, closedTrades, positionTrack, positionKey, totalSeries, strategySeries } from '../model.js';
 import { cachedJSON } from '../api.js';
-import { tradeRow } from './strategies.js';
+import { tradeRow, sliceTable } from './strategies.js';
 
 export const title = 'Сделки';
 
@@ -30,7 +30,7 @@ export function render(store, args) {
   if (tab === 'h') return closedDetail(data, decodeURIComponent(key || ''));
   if (tab === 'p') return openDetail(data, decodeURIComponent(key || ''));
   if (tab === 'o') return orderDetail(data, decodeURIComponent(key || ''));
-  return lists(data, ['open', 'orders', 'history'].includes(tab) ? tab : 'open', (key || '').toUpperCase());
+  return lists(data, ['open', 'orders', 'history', 'analytics'].includes(tab) ? tab : 'open', (key || '').toUpperCase());
 }
 
 /* ══ Списки ═════════════════════════════════════════════════════════ */
@@ -56,6 +56,8 @@ function lists(data, tab, filter) {
   } else if (tab === 'orders') {
     body = orders.length ? h('div', { class: 'card' }, h('div', { class: 'list' }, orders.map(orderRow)))
       : h('div', { class: 'card' }, empty('Заявок нет', 'Лимитная заявка появляется, когда сетап найден, а цена ещё не дошла до входа'));
+  } else if (tab === 'analytics') {
+    body = analytics(data, filter, closed);
   } else {
     body = h('div', null,
       h('div', { class: 'toolbar', style: { marginBottom: '14px' } },
@@ -79,8 +81,109 @@ function lists(data, tab, filter) {
         { value: 'open', label: `Открытые · ${open.length}` },
         { value: 'orders', label: `Заявки · ${orders.length}` },
         { value: 'history', label: 'История' },
+        { value: 'analytics', label: 'Аналитика' },
       ], tab, go, 'Вид')),
     h('div', { class: 'fade-in' }, body));
+}
+
+/* ══ Аналитика ══════════════════════════════════════════════════════ */
+function groupBy(trades, keyOf) {
+  const m = new Map();
+  for (const t of trades) {
+    const k = keyOf(t);
+    const g = m.get(k) || { name: k, trades: 0, wins: 0, total_r: 0 };
+    g.trades += 1;
+    g.wins += (t.pnl || 0) > 0 ? 1 : 0;
+    g.total_r += t.pnl_r || 0;
+    m.set(k, g);
+  }
+  return [...m.values()].map(g => ({ ...g, win_rate: g.trades ? g.wins / g.trades : null, total_r: Math.round(g.total_r * 100) / 100 }));
+}
+
+function dailyOf(trades, days = 84) {
+  const from = new Date();
+  from.setHours(0, 0, 0, 0);
+  from.setDate(from.getDate() - (days - 1));
+  const buckets = new Map();
+  for (let i = 0; i < days; i++) {
+    const d = new Date(from);
+    d.setDate(from.getDate() + i);
+    buckets.set(d.toDateString(), { t: d.getTime(), v: 0 });
+  }
+  for (const t of trades) {
+    const d = toDate(t.closed);
+    const b = d && buckets.get(d.toDateString());
+    if (b) b.v += t.pnl || 0;
+  }
+  return [...buckets.values()];
+}
+
+const R_BINS = [-Infinity, -1.5, -1, -0.5, 0, 0.5, 1, 1.5, 2, 3, Infinity];
+function rLabel(lo, hi) {
+  const f = v => num(v, 1);
+  if (lo === -Infinity) return `< ${f(hi)}R`;
+  if (hi === Infinity) return `≥ ${f(lo)}R`;
+  return `${f(lo)}…${f(hi)}R`;
+}
+
+/** Просадка от пика в %: насколько капитал ниже своего максимума к моменту. */
+function underwater(points) {
+  let peak = -Infinity;
+  return points.map(p => {
+    peak = Math.max(peak, p.v);
+    return { t: p.t, v: peak > 0 ? (p.v / peak - 1) * 100 : 0 };
+  });
+}
+
+function analytics(data, filter, closed) {
+  const all = closedTrades(data, filter || null, null);
+  const bins = R_BINS.slice(0, -1).map((lo, i) => {
+    const hi = R_BINS[i + 1];
+    const n = closed.filter(t => isNum(t.pnl_r) && t.pnl_r >= lo && t.pnl_r < hi).length;
+    return { label: rLabel(lo, hi), v: n, tip: `${n} ${plural(n, 'сделка', 'сделки', 'сделок')}`, color: hi <= 0 ? 'var(--down)' : 'var(--up)' };
+  });
+  const dd = underwater(filter ? strategySeries(data, filter) : totalSeries(data));
+  const maxDd = Math.min(0, ...dd.map(p => p.v));
+  const pairs = groupBy(closed, t => t.pair).sort((a, b) => b.total_r - a.total_r);
+  const shadow = (data.shadow && data.shadow.closed) || {};
+  const shadowRows = Object.entries(shadow).filter(([s]) => !filter || s === filter)
+    .flatMap(([s, gates]) => Object.entries(gates).map(([gate, g]) => ({ s, gate, ...g })));
+  const days = dailyOf(all, 140);
+  const exits = groupBy(closed, t => t.reason_ru || t.reason || '—').sort((a, b) => b.trades - a.trades);
+  return h('div', { class: 'grid', style: { gap: '18px' } },
+    h('div', { class: 'toolbar' }, segmented(PERIODS, period, (v) => { period = v; rerender(); }, 'Период'),
+      h('span', { class: 'muted', style: { fontSize: '13px' } },
+        `${closed.length} ${plural(closed.length, 'сделка', 'сделки', 'сделок')} за период${filter ? ' · ' + strategyTitle(filter) : ''}`)),
+    h('div', { class: 'grid grid-2' },
+      h('div', { class: 'card' },
+        h('div', { class: 'card-title' }, 'Результат по дням, 20 недель'),
+        calendar(days, v => signedMoney(v, 0)),
+        h('div', { class: 'muted', style: { fontSize: '12px', marginTop: '10px' } },
+          `Зелёный — день в плюсе, красный — в минусе; чем ярче, тем больше. Итого ${signedMoney(days.reduce((a, d) => a + d.v, 0), 0)}.`)),
+      h('div', { class: 'card' },
+        h('div', { class: 'card-title' }, 'Распределение результата, R'),
+        bars(bins, { height: 200, format: v => String(Math.round(v)), label: 'Распределение результата' }),
+        h('div', { class: 'muted', style: { fontSize: '12px', marginTop: '8px' } }, 'Сколько сделок закрылось с каким результатом в долях риска.'))),
+    h('div', { class: 'card' },
+      h('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' } },
+        h('div', { class: 'card-title' }, 'Под водой: насколько капитал ниже своего пика'),
+        h('div', { class: 'row-value down' }, `макс. ${signedPct(maxDd, 1)}`)),
+      lineChart(dd, { height: 180, step: true, color: 'var(--down)', format: v => signedPct(v, 2), axisFormat: v => signedPct(v, 0), label: 'Просадка от пика' })),
+    h('div', { class: 'grid grid-2' },
+      sliceTable('Чем закончились', exits) || h('div', { class: 'card' }, empty('Сделок нет', '')),
+      sliceTable('Лучшие и худшие пары', pairs.length > 12 ? pairs.slice(0, 6).concat(pairs.slice(-6)) : pairs)
+        || h('div', { class: 'card' }, empty('Сделок нет', ''))),
+    h('div', { class: 'card' },
+      h('div', { class: 'card-title' }, 'Не открыто из-за пределов — и чем бы кончилось'),
+      shadowRows.length ? h('div', { class: 'table-wrap' }, h('table', { class: 'table' },
+        h('thead', null, h('tr', null, ['Стратегия', 'Причина', 'Отказов', 'Вошли бы', 'В плюс', 'В минус', 'Итог', 'Не дошли'].map(t => h('th', null, t)))),
+        h('tbody', null, shadowRows.map(r => h('tr', null,
+          h('td', null, strategyTitle(r.s)), h('td', null, r.gate), h('td', null, num(r.n)), h('td', null, num(r.entered)),
+          h('td', { class: 'up' }, num(r.wins)), h('td', { class: 'down' }, num(r.losses)),
+          h('td', { class: tone(r.sum_r) }, signedR(r.sum_r, 2)), h('td', null, num(r.missed)))))))
+        : empty('Отказов из-за пределов нет', ''),
+      h('div', { class: 'muted', style: { fontSize: '12px', marginTop: '10px' } },
+        `Тень исполнения: сетап, отсеянный пределом, ведётся «как если бы» — минус в итоге значит, что предел сберёг деньги. Сейчас в тени ${num(((data.shadow || {}).active || []).length)}.`)));
 }
 
 function kpi(label, value, hint, cls = '') {

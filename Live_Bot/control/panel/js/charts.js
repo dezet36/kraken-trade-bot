@@ -256,10 +256,10 @@ export function bars(items, opts = {}) {
       const x = i * slot + (slot - bw) / 2;
       const top = Y(Math.max(0, d.v)), bot = Y(Math.min(0, d.v));
       const rect = svg('rect', { x, y: top, width: bw, height: Math.max(1, bot - top), rx: Math.min(4, bw / 3),
-        fill: d.v >= 0 ? 'var(--up)' : 'var(--down)', opacity: .85 });
+        fill: d.color || (d.v >= 0 ? 'var(--up)' : 'var(--down)'), opacity: .85 });
       rect.addEventListener('pointerenter', () => {
         rect.setAttribute('opacity', 1);
-        tip.replaceChildren(h('b', null, format(d.v)), h('div', { class: 'muted' }, d.label || day(d.t)));
+        tip.replaceChildren(h('b', null, d.tip || format(d.v)), h('div', { class: 'muted' }, d.label || day(d.t)));
         tip.hidden = false;
         const box = s.getBoundingClientRect();
         tip.style.left = Math.min(Math.max((x + bw / 2) / W * box.width, 60), box.width - 60) + 'px';
@@ -482,4 +482,43 @@ export function candleChart(candles, opts = {}) {
     hit.addEventListener('pointerleave', () => { cross.setAttribute('visibility', 'hidden'); tip.hidden = true; });
     return [s, tip];
   });
+}
+
+/**
+ * Календарь результата по дням (тепловая карта): столбец — неделя с
+ * понедельника, цвет — знак и величина результата дня.
+ * days — [{t: полночь дня, мс, v: результат}] подряд по дням.
+ */
+export function calendar(days, format = String) {
+  const el = h('div', { class: 'cal' });
+  if (!days.length) return el;
+  const max = Math.max(1e-9, ...days.map(d => Math.abs(d.v)));
+  const first = new Date(days[0].t);
+  const pad = (first.getDay() + 6) % 7;                 // понедельник — 0
+  const cells = Array(pad).fill(null).concat(days);
+  const weeks = [];
+  for (let i = 0; i < cells.length; i += 7) weeks.push(cells.slice(i, i + 7));
+  const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
+  const head = h('div', { class: 'cal-months' }, h('span'));
+  let lastMonth = -1;
+  weeks.forEach(w => {
+    const d = w.find(Boolean);
+    const m = d ? new Date(d.t).getMonth() : lastMonth;
+    head.append(h('span', null, m !== lastMonth ? MONTHS[m] : ''));
+    lastMonth = m;
+  });
+  const grid = h('div', { class: 'cal-grid', style: { gridTemplateColumns: `22px repeat(${weeks.length}, 18px)` } });
+  ['Пн', '', 'Ср', '', 'Пт', '', 'Вс'].forEach((name, r) => {
+    grid.append(h('span', { class: 'cal-wd' }, name));
+    weeks.forEach(w => {
+      const d = w[r];
+      if (!d) { grid.append(h('span', { class: 'cal-cell empty' })); return; }
+      const k = Math.abs(d.v) / max;
+      const bg = !d.v ? 'var(--fill)' : `color-mix(in srgb, ${d.v > 0 ? 'var(--up)' : 'var(--down)'} ${Math.round(25 + k * 75)}%, transparent)`;
+      grid.append(h('span', { class: 'cal-cell', style: { background: bg }, title: `${day(d.t)}: ${d.v ? format(d.v) : 'сделок нет'}` }));
+    });
+  });
+  el.append(head, grid);
+  head.style.gridTemplateColumns = `22px repeat(${weeks.length}, 18px)`;
+  return el;
 }

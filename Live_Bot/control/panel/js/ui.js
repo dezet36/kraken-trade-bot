@@ -179,6 +179,26 @@ export function toast(text, tone = '') {
   setTimeout(() => el.remove(), 4000);
 }
 
+/** Текст с выделениями <code> и <b> — разбором в узлы, без HTML: прочие
+    теги остаются текстом. Пробелы и переносы исходника сжимаются. */
+export function rich(text) {
+  const out = h('span');
+  let code = false, bold = false;
+  for (const part of String(text || '').replace(/\s+/g, ' ').trim().split(/(<\/?code>|<\/?b>)/)) {
+    if (part === '<code>') code = true;
+    else if (part === '</code>') code = false;
+    else if (part === '<b>') bold = true;
+    else if (part === '</b>') bold = false;
+    else if (part) {
+      let node = document.createTextNode(part);
+      if (code) node = h('span', { class: 'mono-inline' }, node);
+      if (bold) node = h('b', null, node);
+      out.append(node);
+    }
+  }
+  return out;
+}
+
 /** Поле формы: подпись, элемент, подсказка. */
 export function field(label, control, hint = null) {
   return h('label', { class: 'field' }, h('span', { class: 'field-label' }, label), control,

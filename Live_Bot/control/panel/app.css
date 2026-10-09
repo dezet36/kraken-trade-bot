@@ -244,6 +244,13 @@ a.pitem:hover .pitem-pair { color: var(--accent); }
 .chart-tip b { font-size: 14px; font-variant-numeric: tabular-nums; }
 .chart-empty { display: grid; place-items: center; color: var(--text-3); font-size: 14px; }
 .legend { display: flex; flex-wrap: wrap; gap: 8px 16px; font-size: 13px; }
+.cal-months, .cal-grid { display: grid; gap: 4px; justify-content: start; }
+.cal-grid { grid-auto-rows: 18px; }
+.cal-months { font-size: 11px; color: var(--text-4); margin-bottom: 4px; white-space: nowrap; }
+.cal-wd { font-size: 10px; color: var(--text-4); line-height: 1; align-self: center; }
+.cal { overflow-x: auto; padding-bottom: 2px; }
+.cal-cell { width: 18px; height: 18px; border-radius: 4px; }
+.cal-cell.empty { background: transparent; }
 .legend span { display: inline-flex; align-items: center; gap: 6px; }
 
 /* Кольцо распределения */
@@ -354,6 +361,11 @@ a.list-item:hover { background: var(--fill-2); text-decoration: none; }
 .kpi small { display: block; font-size: 12px; color: var(--text-3); margin-top: 2px; }
 
 .tags { display: flex; flex-wrap: wrap; gap: 6px; }
+.mono-inline { font: 600 13px ui-monospace, "SF Mono", "Cascadia Mono", Consolas, monospace; background: var(--fill-2); padding: 1px 5px; border-radius: 5px; }
+.guide-steps { display: flex; flex-direction: column; gap: 14px; margin-top: 18px; }
+.guide-step { display: grid; grid-template-columns: 28px minmax(0, 1fr); gap: 12px; }
+.guide-n { width: 28px; height: 28px; border-radius: 50%; background: var(--accent-fill); color: var(--accent); display: grid; place-items: center; font-weight: 700; font-size: 13px; }
+.guide-t { font-weight: 600; margin-bottom: 3px; }
 .why { font-size: 14px; color: var(--text-2); line-height: 1.5; }
 
 @media (max-width: 860px) {

@@ -3,7 +3,8 @@
    ничего не пересчитывает, только показывает. */
 
 import { h, section, row, stat, delta, pill, empty, icon, strategyBadge, strategyColor,
-  strategyTitle, segmented } from '../ui.js';
+  strategyTitle, segmented, button, openSheet, rich } from '../ui.js';
+import { GUIDE } from '../guide.js';
 import { money, moneyShort, signedMoney, signedPct, signedR, pct, num, tone, ago, dateTime,
   hours, plural, isNum } from '../format.js';
 import { lineChart, multiLine } from '../charts.js';
@@ -98,7 +99,8 @@ function detail(data, code) {
     h('div', { class: 'page-head' },
       h('div', null,
         h('div', { class: 'title-row' }, strategyBadge(code), h('h1', { class: 'page-title' }, strategyTitle(code)),
-          pill(enabled ? 'торгует' : 'выключена', enabled ? 'up' : '')),
+          pill(enabled ? 'торгует' : 'выключена', enabled ? 'up' : ''),
+          GUIDE[code] ? button('Как торгует', () => guideSheet(code), 'gray', true) : null),
         h('div', { class: 'page-sub' }, `Тестовый счёт ${money(s.start_balance, 0)} · риск ${pct(settings.risk_pct ?? 1, 1)} на сделку`
           + (settings.sides && settings.sides !== 'both' ? ` · только ${settings.sides === 'long' ? 'лонги' : 'шорты'}` : ''))),
       periodSeg()),
@@ -109,6 +111,18 @@ function detail(data, code) {
     rep ? breakdowns(rep) : null,
     h('div', { class: 'grid grid-2 section' }, scanCard(data, code), accountCard(acc, s)),
     recentTrades(data, code));
+}
+
+/** Лист «Как торгует»: таймфрейм, шаги, вывод замеров (js/guide.js). */
+function guideSheet(code) {
+  const g = GUIDE[code];
+  openSheet(strategyTitle(code), () => h('div', null,
+    h('div', { class: 'tags', style: { marginBottom: '12px' } }, pill(g.tf), g.trial ? pill('кандидат', 'warn') : null),
+    h('div', { class: 'why', style: { fontSize: '15px' } }, rich(g.lead)),
+    h('div', { class: 'guide-steps' }, (g.steps || []).map(([t, text], i) => h('div', { class: 'guide-step' },
+      h('span', { class: 'guide-n' }, String(i + 1)),
+      h('div', null, h('div', { class: 'guide-t' }, t), h('div', { class: 'why' }, rich(text)))))),
+    g.fact ? h('div', { class: 'notice info', style: { marginTop: '16px' } }, h('div', { class: 'why' }, rich(g.fact))) : null));
 }
 
 function equityCard(data, code, s) {
@@ -180,7 +194,7 @@ function notTradedCard(nt) {
   return card;
 }
 
-function sliceTable(titleText, rows) {
+export function sliceTable(titleText, rows) {
   if (!rows || !rows.length) return null;
   const maxAbs = Math.max(0.01, ...rows.map(r => Math.abs(r.total_r || 0)));
   return h('div', { class: 'card' },
