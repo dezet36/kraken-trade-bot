@@ -23,6 +23,7 @@ import sys
 
 import numpy as np
 import pytest
+from _modules import forget, remember  # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
@@ -143,8 +144,8 @@ def schedule():
 
 
 # Модули, которые эталон загружает заново под свой каталог данных и свои часы.
-LOADED = ('config', 'accounts.settings_store', 'paper_broker', 'control.dashboard', 'shadow', 'setup_journal',
-          'refused', 'follow_up', 'trade_journal')
+LOADED = ('config', 'accounts.settings_store', 'paper_broker', 'control.dashboard', 'shadow', 'execution.setup_journal',
+          'execution.refused', 'execution.follow_up', 'trade_journal')
 
 
 @pytest.fixture()
@@ -158,7 +159,7 @@ def own_modules():
     """
     yield
     for module in LOADED:
-        sys.modules.pop(module, None)
+        forget(module, None)
 
 
 def run(tmp_path, monkeypatch):
@@ -168,7 +169,7 @@ def run(tmp_path, monkeypatch):
     for name in STRATEGIES:
         monkeypatch.setenv(f'PAPER_START_BALANCE_{name}', '10000')
     for module in LOADED:
-        sys.modules.pop(module, None)
+        forget(module, None)
     import paper_broker as pb
     settings_store = __import__('importlib').import_module('accounts.settings_store')
     settings_store.SETTINGS_FILE = str(tmp_path / 'runtime_settings.json')

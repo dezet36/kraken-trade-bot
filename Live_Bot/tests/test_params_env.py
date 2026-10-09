@@ -24,6 +24,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
 import params_env                                           # noqa: E402
+from _modules import forget, remember  # noqa: E402
 
 
 @pytest.fixture()
@@ -149,6 +150,6 @@ class TestTheBotSurvivesTheTypo:
         env.setenv('RSIBB_COOLDOWN_HOURS', '0,5')
         for name in [k for k in list(sys.modules)
                      if k.split('.')[0] == 'strategies' and k.split('.')[1:2] in (['rsibb'], ['levels'], ['smc'])]:
-            del sys.modules[name]
+            forget(name)
         import strategies.rsibb.params as rp
         assert rp.COOLDOWN_HOURS == 0.5

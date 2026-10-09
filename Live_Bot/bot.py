@@ -317,7 +317,7 @@ def _paper_cycle():
     # в контекст заявки (market_regime.last_btc_regime), сам к бирже не ходит.
     # Раз в сутки UTC; запрос тот же, что у SMC, и берётся из кэша свечей.
     try:
-        import market_regime
+        from analysis import market_regime
         from data.exchange import fetch_ohlcv
         market_regime.btc_regime(
             lambda tf, limit, sym: fetch_ohlcv(tf, limit=limit, symbol=sym, client=client))
@@ -547,7 +547,7 @@ def trading_cycle():
     # к ним отношения не имеет. Пар под наблюдением единицы — те, где сделка
     # закрылась меньше 12 часов назад.
     try:
-        import follow_up
+        from execution import follow_up
         seen = follow_up.advance_live()
         if seen:
             log(f"Наблюдений после выхода досмотрено: {seen}")

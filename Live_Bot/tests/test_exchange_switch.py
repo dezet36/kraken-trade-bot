@@ -19,6 +19,7 @@ import os
 import sys
 
 import pytest
+from _modules import forget, remember  # noqa: E402
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -65,7 +66,7 @@ BINGX_IDS = ['BTC-USDT', 'ETH-USDT']          # SHIB1000 у него нет
 def ex(monkeypatch, tmp_path):
     monkeypatch.setenv('BOT_DATA_DIR', str(tmp_path))
     for module in ('config', 'accounts.settings_store', 'data.exchange'):
-        sys.modules.pop(module, None)
+        forget(module, None)
     # import_module, а не «from data import exchange»: тот взял бы прежний
     # модуль из атрибута пакета data, хотя из sys.modules его выгрузили.
     import importlib
@@ -151,7 +152,7 @@ class TestCapabilities:
         Источник, которого у биржи нет, — это её свойство, а не сбой. Сборщик
         обязан молчать: иначе на BingX он писал бы три отказа каждый час.
         """
-        sys.modules.pop('data.positioning', None)
+        forget('data.positioning', None)
         import importlib
         positioning = importlib.import_module('data.positioning')
 

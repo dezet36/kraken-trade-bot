@@ -111,7 +111,7 @@ class TestItPlaysOutLikeTheBroker:
         shadow.watch('FIBO', signal(targets=(104.0, 108.0), fractions=(0.5, 0.5), breakeven=True),
                      'предел портфеля', now_ms=START)
         run([(0.5, 101.0, 99.9, 100.5), (2, 104.5, 101.0, 104.0), (3, 104.0, 99.5, 100.0)])
-        import exit_plan
+        exit_plan = __import__('importlib').import_module('execution.exit_plan')
         be = exit_plan.breakeven_price(100.0, True)       # вход плюс издержки круга, как у брокера
         row = closed_rows()[0]
         assert row['outcome'] == 'частично' and row['targets_hit'] == '1'

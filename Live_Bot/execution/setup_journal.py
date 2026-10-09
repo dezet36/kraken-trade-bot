@@ -278,7 +278,7 @@ def _trades(strategy):
     """Закрытые сделки — и что было с ценой после выхода (follow_up)."""
     if not config.PAPER_MODE:
         return []
-    import follow_up
+    from execution import follow_up
     import paper_broker
     after = {str(f.get('trade_id')): f for f in _csv_rows(follow_up.CSV_PATH)
              if f.get('strategy') == strategy}
@@ -522,7 +522,7 @@ def _llm_plans(orders, text=True):
     тени): по ним план узнаётся как «ставший заявкой».
     """
     from strategies.llm import llm_outcomes
-    import refused
+    from execution import refused
 
     observed = [r for r in _csv_rows(llm_outcomes.CSV_PATH) if r.get('side')]
     try:

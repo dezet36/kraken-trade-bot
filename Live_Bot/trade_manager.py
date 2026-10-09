@@ -1,9 +1,9 @@
 import config
 from accounts import live_costs
-import market_regime
+from analysis import market_regime
 from control import telegram_notify as tg
 import trade_journal as journal
-from exit_plan import direction_cap, tp_plan, tps_completed, wants_breakeven
+from execution.exit_plan import direction_cap, tp_plan, tps_completed, wants_breakeven
 from logger import log, log_trade
 from data.exchange import get_exchange, reset_exchange
 from datetime import datetime
@@ -48,7 +48,7 @@ def _refuse(signal, gate, detail='', cost_share=''):
     вспомогательный, и его беды — не наши.
     """
     try:
-        import refused
+        from execution import refused
         refused.record(signal.get('strategy', ''), signal, gate, detail, cost_share)
     except Exception:                              # noqa: BLE001
         pass
@@ -1413,7 +1413,7 @@ class LiveTradeManager:
         # стоп на входе терял комиссии круга. Момент переноса — пробой уровня
         # B, цена к этому времени далеко от входа, и стоп в плюсе законен для
         # биржи (он по-прежнему ниже рынка у лонга и выше у шорта).
-        from exit_plan import breakeven_price
+        from execution.exit_plan import breakeven_price
         be_sl = breakeven_price(entry, is_long)
         if self._set_position_stop(trading_pair, round(be_sl, 8)):
             log(f"🔄 Стоп перенесён в безубыток @ ${be_sl:.6f}")
@@ -1677,7 +1677,7 @@ class LiveTradeManager:
         # журналу задать нельзя: выход спас или обрезал. На бумаге такое
         # наблюдение ведётся с 30 августа 2026, бой получил его тогда же.
         try:
-            import follow_up
+            from execution import follow_up
             follow_up.watch_live(position, trading_pair, exit_price, reason,
                                  (position.get('_journal') or {}).get('trade_id', ''),
                                  self.get_pair_strategy(trading_pair))

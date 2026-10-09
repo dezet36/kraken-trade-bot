@@ -17,7 +17,7 @@ import math
 import time
 from collections import Counter
 
-import setup_journal as sj
+from execution import setup_journal as sj
 
 # Этапы журнала, ставшие ЗАЯВКОЙ (до входа дошло или могло дойти).
 ORDER_STAGES = (sj.TRADE, sj.OPEN, sj.PENDING, sj.DROPPED)

@@ -137,7 +137,7 @@ class TestDecision:
         assert signal['params']['max_same_direction'] == account.max_same_direction('LLM')
 
     def test_executors_read_the_account_numbers(self):
-        from exit_plan import direction_cap
+        from execution.exit_plan import direction_cap
         signal, _ = account.decide('SMC', a_signal(), 10_000)
         assert direction_cap(signal['params']) == account.max_same_direction('SMC')
 

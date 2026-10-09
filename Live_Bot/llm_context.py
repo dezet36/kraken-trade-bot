@@ -45,7 +45,7 @@ import numpy as np
 import pandas as pd
 
 import config
-import market_regime
+from analysis import market_regime
 from data import positioning
 from strategies.liquidity import core as liq
 

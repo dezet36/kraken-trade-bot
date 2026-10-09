@@ -7,7 +7,7 @@ Set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID in .env to enable.
 import os
 import requests
 import config
-from exit_plan import tp_plan
+from execution.exit_plan import tp_plan
 from logger import log
 from datetime import datetime, timedelta, timezone
 

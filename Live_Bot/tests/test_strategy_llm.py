@@ -365,7 +365,7 @@ class TestRefusalsAreRecorded:
                                              'gate': 'мало конфлюенса',
                                              'detail': '2 из 5', 'why': ''})
 
-        import refused
+        refused = __import__('importlib').import_module('execution.refused')
         monkeypatch.setattr(refused, 'record',
                             lambda *a, **k: written.append(a))
 
@@ -590,7 +590,7 @@ class TestTheVerdictComesBackNextCycle:
                                 'ok': False, 'gate': 'мало конфлюенса',
                                 'detail': '2 из 5'})
 
-        import refused
+        refused = __import__('importlib').import_module('execution.refused')
         monkeypatch.setattr(refused, 'record',
                             lambda *args, **kwargs: written.append(args))
 
@@ -612,7 +612,7 @@ class TestTheVerdictComesBackNextCycle:
         monkeypatch.setattr(strategy_llm.llm_decide, 'decide',
                             lambda *args, **kwargs: approving_verdict())
 
-        import refused
+        refused = __import__('importlib').import_module('execution.refused')
         monkeypatch.setattr(refused, 'record',
                             lambda *args, **kwargs: written.append(args))
 
@@ -795,7 +795,7 @@ class TestAnArmedTriggerWaitsForTheBar:
 
     def test_it_expires_and_is_refused_by_name(self, monkeypatch):
         written = []
-        import refused
+        refused = __import__('importlib').import_module('execution.refused')
         monkeypatch.setattr(refused, 'record', lambda *a, **k: written.append(a))
         self._arm(monkeypatch)
         strategy_llm._armed['BTCUSDT']['armed_at'] -= 13 * 3600
@@ -898,7 +898,7 @@ class TestAPlanOvertakenByTheMarketIsNotArmed:
 
     def test_a_target_already_reached_is_refused(self, monkeypatch):
         written = []
-        import refused
+        refused = __import__('importlib').import_module('execution.refused')
         monkeypatch.setattr(refused, 'record', lambda *a, **k: written.append(a))
         monkeypatch.setattr(strategy_llm.llm_local, 'available', lambda: True)
         monkeypatch.setattr(strategy_llm.llm_decide, 'decide',
@@ -915,7 +915,7 @@ class TestAPlanOvertakenByTheMarketIsNotArmed:
 
     def test_a_stop_already_broken_is_refused(self, monkeypatch):
         written = []
-        import refused
+        refused = __import__('importlib').import_module('execution.refused')
         monkeypatch.setattr(refused, 'record', lambda *a, **k: written.append(a))
         monkeypatch.setattr(strategy_llm.llm_local, 'available', lambda: True)
         monkeypatch.setattr(strategy_llm.llm_decide, 'decide', lambda *a, **k: approving_verdict())
@@ -1197,7 +1197,7 @@ class TestAnEntryPastThePrice:
     @staticmethod
     def _refusals(monkeypatch):
         written = []
-        import refused
+        refused = __import__('importlib').import_module('execution.refused')
         monkeypatch.setattr(refused, 'record', lambda *a, **k: written.append(a))
         return written
 

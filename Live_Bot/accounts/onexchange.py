@@ -335,7 +335,7 @@ def _opened(code, rules, venue, book, pair, order, price, amount, now):
 
 def _sync_position(code, rules, venue, book, pair, pos, bars, held, now):
     from strategies import strategy_profile
-    from exit_plan import tps_completed
+    from execution.exit_plan import tps_completed
     long_ = pos['direction'] == 'LONG'
     head = f"{pair} {pos['direction']}"
     ex = held.get(pair)

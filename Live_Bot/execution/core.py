@@ -22,7 +22,7 @@
 tests/golden/broker_replay.json совпадает до копейки.
 """
 
-from exit_plan import breakeven_price
+from execution.exit_plan import breakeven_price
 
 FUNDING_INTERVAL_MS = 8 * 60 * 60 * 1000
 

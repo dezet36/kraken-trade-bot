@@ -30,8 +30,9 @@ import sys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
-import follow_up                                          # noqa: E402
-import refused                                            # noqa: E402
+from execution import follow_up  # noqa: E402
+from execution import refused  # noqa: E402
+from _modules import forget, remember  # noqa: E402
 
 SRC = open(os.path.join(ROOT, 'paper_broker.py'), encoding='utf-8').read()
 
@@ -95,7 +96,7 @@ class TestTheEntryContextIsRecorded:
         monkeypatch.setenv('BOT_DATA_DIR', str(tmp_path))
         monkeypatch.setenv('PAPER_FUNDING', 'false')
         for name in ('config', 'paper_broker'):
-            sys.modules.pop(name, None)
+            forget(name, None)
         import paper_broker
         return paper_broker.PaperBroker(client=None, strategies=('FIBO',))
 

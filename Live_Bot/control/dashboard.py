@@ -803,7 +803,7 @@ def build_payload():
         payload['shadow'] = {'active': [], 'closed': {}}
     # Журнал сетапов: сколько их на каждом этапе по стратегиям (setup_journal).
     try:
-        import setup_journal
+        from execution import setup_journal
         payload['setup_journal'] = setup_journal.summary(_journal_strategies(), _broker)
     except Exception:                                  # noqa: BLE001
         payload['setup_journal'] = {}
@@ -1466,7 +1466,7 @@ def _llm_outcomes_summary(days=7):
     except Exception:                                  # noqa: BLE001
         pass
     try:
-        import refused
+        from execution import refused
         with open(refused.CSV_PATH, encoding='utf-8', newline='') as fh:
             for r in csv.DictReader(fh):
                 if r.get('strategy') != 'LLM' or (r.get('at') or '') < since:
@@ -1531,7 +1531,7 @@ def _journal_export(strategy):
     (байты, имя файла) журнала сетапов одной стратегии — собирается на лету
     из первоисточников (setup_journal). ValueError — такой стратегии нет.
     """
-    import setup_journal
+    from execution import setup_journal
     known = _journal_strategies()
     if strategy not in known:
         raise ValueError(f'нет стратегии «{strategy}»; есть: {", ".join(known)}')
@@ -1555,7 +1555,7 @@ def _period(value):
 
 
 def _strategy_rows(strategy):
-    import setup_journal
+    from execution import setup_journal
     return setup_journal.build(strategy, _broker, text=False)
 
 
@@ -1567,7 +1567,7 @@ def _strategy_report(strategy, days):
     ValueError — такой стратегии нет.
     """
     import time as _time
-    import setup_journal
+    from execution import setup_journal
     from accounts import stats
     known = _journal_strategies()
     if strategy not in known:

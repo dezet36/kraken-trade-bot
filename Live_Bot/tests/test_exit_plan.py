@@ -17,7 +17,7 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from exit_plan import (direction_cap, tp_plan, tps_completed,   # noqa: E402
+from execution.exit_plan import (direction_cap, tp_plan, tps_completed,   # noqa: E402
                        wants_breakeven)
 
 

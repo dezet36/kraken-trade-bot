@@ -28,6 +28,7 @@ import os
 import sys
 
 import pytest
+from _modules import forget, remember  # noqa: E402
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -36,7 +37,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 def broker(tmp_path, monkeypatch):
     monkeypatch.setenv('BOT_DATA_DIR', str(tmp_path))
     for module in ('config', 'paper_broker'):
-        sys.modules.pop(module, None)
+        forget(module, None)
     import paper_broker
     return paper_broker
 

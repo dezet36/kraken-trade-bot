@@ -21,6 +21,7 @@ import os
 import sys
 
 import pytest
+from _modules import forget, remember  # noqa: E402
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -48,16 +49,14 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setenv('TRADING_MODE', 'PAPER')
     monkeypatch.setenv('PAPER_START_BALANCE', '10000')
     monkeypatch.setenv('PAPER_FUNDING', '0')
-    saved = {m: sys.modules.pop(m, None) for m in ('config', 'paper_broker')}
+    saved = {m: forget(m, None) for m in ('config', 'paper_broker')}
     import paper_broker
     yield paper_broker
     for name, module in saved.items():
         if module is None:
-            sys.modules.pop(name, None)
+            forget(name, None)
         else:
-            sys.modules[name] = module
-
-
+            remember(name, module)
 def signal(entry=100.0, stop=90.0, tp1=130.0, pair='BTCUSDT'):
     return {
         'trading_pair': pair,

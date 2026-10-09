@@ -44,7 +44,7 @@ from datetime import datetime, timezone
 import config
 import csv_journal
 from strategies import glossary
-from exit_plan import cooldown_hours, direction_cap, tp_plan, wants_breakeven
+from execution.exit_plan import cooldown_hours, direction_cap, tp_plan, wants_breakeven
 from accounts import settings_store as settings
 from strategies import setup_geometry
 from logger import log
@@ -70,7 +70,7 @@ def _refuse(strategy, signal, gate, detail='', cost_share=''):
     не мог свалить торговлю: модуль вспомогательный, и его беды — не наши.
     """
     try:
-        import refused
+        from execution import refused
         refused.record(strategy, signal, gate, detail, cost_share)
     except Exception:                              # noqa: BLE001
         pass
@@ -1064,7 +1064,7 @@ class PaperBroker:
         # Режим рынка по BTC на момент заявки — для журнала сетапов. Считает
         # цикл бота (market_regime.btc_regime); здесь только чтение, без сети.
         try:
-            import market_regime
+            from analysis import market_regime
             ctx['regime'], ctx['regime_er'] = market_regime.last_btc_regime()
         except Exception:                              # noqa: BLE001
             ctx['regime'], ctx['regime_er'] = '', None
@@ -1260,7 +1260,7 @@ class PaperBroker:
             # запрос к бирже за теми же данными.
             watches = self.state.get('follow') or []
             if watches:
-                import follow_up
+                from execution import follow_up
                 finished.extend(follow_up.advance(watches, pair, ts, high, low, close))
             try:
                 from strategies.llm import llm_outcomes
@@ -1317,7 +1317,7 @@ class PaperBroker:
         # наблюдение висело бы в состоянии вечно. Записываем что успели.
         watches = self.state.get('follow') or []
         if watches:
-            import follow_up
+            from execution import follow_up
             cutoff = _now_ms() - int(follow_up.HORIZONS[-1] * 4 * 3_600_000)
             stale = [w for w in watches
                      if w['closed_ts'] < cutoff and w not in finished]
@@ -1325,7 +1325,7 @@ class PaperBroker:
                 finished.extend(stale)
 
         if finished:
-            import follow_up
+            from execution import follow_up
             follow_up.write([follow_up.row(w) for w in finished])
             done = {id(w) for w in finished}
             self.state['follow'] = [w for w in (self.state.get('follow') or [])
@@ -1410,7 +1410,7 @@ class PaperBroker:
         order = self.state['pending'][strategy].pop(pair, None) or {}
         log(f"   👻 [{strategy}] {pair}: ордер снят — {reason}")
         try:
-            import setup_journal
+            from execution import setup_journal
             setup_journal.record_dropped(strategy, pair, order, reason,
                                          ts if ts is not None else _now_ms())
         except Exception:                              # noqa: BLE001
@@ -1578,7 +1578,7 @@ class PaperBroker:
         # перезапуск и пишется в отдельный файл, когда досмотрено: журнал
         # сделок остаётся файлом, который только дописывают.
         try:
-            import follow_up
+            from execution import follow_up
             pos_copy = dict(pos)
             pos_copy['closed_at'] = row.get('close_time', '')
             self.state.setdefault('follow', []).append(
@@ -1709,7 +1709,7 @@ class PaperBroker:
         self._save_state()
         log(f"🖐 [{strategy}] {pair}: ордер снят оператором")
         try:
-            import setup_journal
+            from execution import setup_journal
             setup_journal.record_dropped(strategy, pair, order, 'снят оператором', _now_ms())
         except Exception:                              # noqa: BLE001
             pass

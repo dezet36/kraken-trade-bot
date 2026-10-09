@@ -24,6 +24,7 @@ import os
 import sys
 
 import pytest
+from _modules import forget, remember  # noqa: E402
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -50,16 +51,14 @@ def broker(tmp_path, monkeypatch):
     падает с ImportError. Поэтому запоминаем и кладём обратно.
     """
     monkeypatch.setenv('BOT_DATA_DIR', str(tmp_path))
-    saved = {m: sys.modules.pop(m, None) for m in ('config', 'paper_broker')}
+    saved = {m: forget(m, None) for m in ('config', 'paper_broker')}
     import paper_broker
     yield paper_broker
     for name, module in saved.items():
         if module is None:
-            sys.modules.pop(name, None)
+            forget(name, None)
         else:
-            sys.modules[name] = module
-
-
+            remember(name, module)
 class FakeExchange:
     """
     Биржа, отдающая не больше `page` свечей за запрос — как настоящая.

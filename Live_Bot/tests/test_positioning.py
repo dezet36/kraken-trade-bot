@@ -17,6 +17,7 @@ import os
 import sys
 
 import pytest
+from _modules import forget, remember  # noqa: E402
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -25,7 +26,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 def store(tmp_path, monkeypatch):
     monkeypatch.setenv('BOT_DATA_DIR', str(tmp_path))
     for module in ('config', 'data.positioning'):
-        sys.modules.pop(module, None)
+        forget(module, None)
     # import_module: «from data import positioning» взял бы прежний модуль из
     # атрибута пакета data, хотя из sys.modules его выгрузили.
     import importlib

@@ -17,6 +17,7 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from control import telegram_notify as tg  # noqa: E402
+from _modules import forget, remember  # noqa: E402
 
 BAR_MS = 5 * 60 * 1000
 T0 = 1_700_000_000_000
@@ -120,8 +121,8 @@ class TestTargetsBreakevenAndExit:
 def broker_env(monkeypatch):
     monkeypatch.setenv('TRADING_MODE', 'PAPER')
     monkeypatch.setenv('PAPER_FUNDING', 'false')
-    for module in ('config', 'paper_broker', 'control.dashboard', 'shadow', 'setup_journal'):
-        sys.modules.pop(module, None)
+    for module in ('config', 'paper_broker', 'control.dashboard', 'shadow', 'execution.setup_journal'):
+        forget(module, None)
     import config
     import paper_broker
     for key, value in (('PAPER_FEE_MAKER', 0.0), ('PAPER_FEE_TAKER', 0.0), ('PAPER_SLIPPAGE_PCT', 0.0),

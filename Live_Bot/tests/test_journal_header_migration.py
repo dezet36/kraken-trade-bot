@@ -20,22 +20,21 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import csv_journal
+from _modules import forget, remember  # noqa: E402
 
 
 @pytest.fixture()
 def broker(tmp_path, monkeypatch):
     """Прежние модули возвращаются на место — см. фикстур в test_candle_gap."""
     monkeypatch.setenv('BOT_DATA_DIR', str(tmp_path))
-    saved = {m: sys.modules.pop(m, None) for m in ('config', 'paper_broker')}
+    saved = {m: forget(m, None) for m in ('config', 'paper_broker')}
     import paper_broker
     yield paper_broker
     for name, module in saved.items():
         if module is None:
-            sys.modules.pop(name, None)
+            forget(name, None)
         else:
-            sys.modules[name] = module
-
-
+            remember(name, module)
 def write_old_file(path, columns, rows):
     with open(path, 'w', encoding='utf-8', newline='') as fh:
         writer = csv.DictWriter(fh, fieldnames=columns, extrasaction='ignore')

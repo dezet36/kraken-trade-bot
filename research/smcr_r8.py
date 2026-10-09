@@ -32,7 +32,7 @@ def btc_daily():
 
 
 def regime_at(daily, t_ms, cache={}):
-    import market_regime as M
+    from analysis import market_regime as M
     day = pd.Timestamp(t_ms, unit='ms', tz='UTC').floor('D')
     if day in cache:
         return cache[day]
@@ -52,7 +52,7 @@ def fmt(r):
 
 
 def main():
-    import market_regime as M
+    from analysis import market_regime as M
     f = pd.read_pickle(os.path.join(OUT, 'live_orders_r2.pkl'))
     daily = btc_daily()
     f['regime'] = [regime_at(daily, int(t)) for t in f['t']]

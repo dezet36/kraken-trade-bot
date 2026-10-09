@@ -39,5 +39,5 @@
 уменьшения размера.
 """
 
-from market_regime import (RANGE, TREND_DOWN, TREND_UP,  # noqa: F401
+from analysis.market_regime import (RANGE, TREND_DOWN, TREND_UP,  # noqa: F401
                            UNKNOWN, classify, describe, efficiency_ratio)

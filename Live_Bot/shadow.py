@@ -166,7 +166,7 @@ def _key(strategy, pair, direction, entry, stop):
 def watch(strategy, signal, gate, detail='', now_ms=None):
     """Заводит тень отвергнутого сетапа или прибавляет счётчик уже заведённой. Молча."""
     try:
-        import exit_plan
+        from execution import exit_plan
         from accounts import risk_gate
         from strategies import strategy_profile
         params = (signal or {}).get('params') or {}
@@ -339,7 +339,7 @@ def _step(s, high, low, close, hours, open_price=None):
         s['left'] -= s['fractions'][i]
         s['hit'] = i + 1
         if s['hit'] == 1 and s['breakeven']:
-            import exit_plan
+            from execution import exit_plan
             s['stop'] = exit_plan.breakeven_price(entry, is_long)
 
     if s['hit'] == len(s['targets']) or s['left'] <= 1e-9:

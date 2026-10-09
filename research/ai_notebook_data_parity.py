@@ -68,7 +68,7 @@ def history(pairs, start, cache):
 def main(folder):
     sys.path.insert(0, LIVE)
     os.environ.setdefault('BOT_DATA_DIR', os.path.join(folder, '_bot_data'))
-    import flow_features
+    from analysis import flow_features
     from strategies.llm import llm_notebook as N
 
     live = live_rows(folder)

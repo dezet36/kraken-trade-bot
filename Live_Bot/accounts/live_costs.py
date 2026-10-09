@@ -36,7 +36,7 @@ positions_state.json не хранит ни realized_pnl, ни tp_hit, и пос
 """
 
 import config
-from exit_plan import tp_plan
+from execution.exit_plan import tp_plan
 from logger import log
 
 # Столько исполнений тянем с биржи за раз. Одна сделка — это вход, до четырёх

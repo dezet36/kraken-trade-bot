@@ -17,6 +17,7 @@ import os
 import sys
 
 import pytest
+from _modules import forget, remember  # noqa: E402
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -25,7 +26,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 def store(tmp_path, monkeypatch):
     monkeypatch.setenv('BOT_DATA_DIR', str(tmp_path))
     for module in ('config', 'accounts.settings_store'):
-        sys.modules.pop(module, None)
+        forget(module, None)
     settings_store = __import__('importlib').import_module('accounts.settings_store')
     settings_store.SETTINGS_FILE = str(tmp_path / 'runtime_settings.json')
     settings_store._cache = None
@@ -46,7 +47,7 @@ class TestDefault:
         monkeypatch.setenv('BOT_DATA_DIR', str(tmp_path))
         monkeypatch.setenv('SLOTS_PER_STRATEGY', '4')
         for module in ('config', 'accounts.settings_store'):
-            sys.modules.pop(module, None)
+            forget(module, None)
         fresh = __import__('importlib').import_module('accounts.settings_store')
         fresh.SETTINGS_FILE = str(tmp_path / 'other.json')
         fresh._cache = None

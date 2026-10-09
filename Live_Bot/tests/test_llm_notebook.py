@@ -22,8 +22,9 @@ sys.path.insert(0, HERE)
 RESEARCH = os.path.join(os.path.dirname(HERE), 'research')
 
 import config  # noqa: E402
-import flow_features  # noqa: E402
+from analysis import flow_features  # noqa: E402
 from strategies.llm import llm_notebook  # noqa: E402
+from _modules import forget, remember  # noqa: E402
 
 H = 3_600_000
 T0 = pd.Timestamp('2026-06-01', tz='UTC')
@@ -443,8 +444,8 @@ class TestPositionHold:
         monkeypatch.setenv('BOT_DATA_DIR', str(tmp_path))
         monkeypatch.setenv('TRADING_MODE', 'PAPER')
         monkeypatch.setenv('PAPER_FUNDING', 'false')
-        for module in ('config', 'paper_broker', 'control.dashboard', 'shadow', 'setup_journal'):
-            sys.modules.pop(module, None)
+        for module in ('config', 'paper_broker', 'control.dashboard', 'shadow', 'execution.setup_journal'):
+            forget(module, None)
         import config as cfg
         import paper_broker
         for name, value in (('PAPER_FEE_MAKER', 0.0), ('PAPER_FEE_TAKER', 0.0), ('PAPER_SLIPPAGE_PCT', 0.0),
@@ -464,7 +465,7 @@ class TestPositionHold:
         client = Client()
         yield paper_broker.PaperBroker(client, strategies=('FIBO',)), client, paper_broker
         for module in ('config', 'paper_broker'):
-            sys.modules.pop(module, None)
+            forget(module, None)
 
     @staticmethod
     def _signal(hold=None):
@@ -518,8 +519,8 @@ class TestNotebookSignalThroughTheBroker:
         monkeypatch.setenv('TRADING_MODE', 'PAPER')
         monkeypatch.setenv('PAPER_FUNDING', 'false')
         monkeypatch.setattr(llm_notebook.config, 'LLM_MODE', 'notebook', raising=False)
-        for module in ('config', 'paper_broker', 'control.dashboard', 'shadow', 'setup_journal'):
-            sys.modules.pop(module, None)
+        for module in ('config', 'paper_broker', 'control.dashboard', 'shadow', 'execution.setup_journal'):
+            forget(module, None)
         import config as cfg
         import paper_broker
         for name, value in (('PAPER_FEE_MAKER', 0.0), ('PAPER_FEE_TAKER', 0.0), ('PAPER_SLIPPAGE_PCT', 0.0003),
@@ -544,7 +545,7 @@ class TestNotebookSignalThroughTheBroker:
         client = Client()
         yield paper_broker.PaperBroker(client, strategies=('LLM',)), client, paper_broker
         for module in ('config', 'paper_broker'):
-            sys.modules.pop(module, None)
+            forget(module, None)
 
     @staticmethod
     def _signal(key, price):

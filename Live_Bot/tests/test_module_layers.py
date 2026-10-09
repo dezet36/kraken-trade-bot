@@ -37,14 +37,13 @@ LAYER = {
     'llm_worker': 'infra',
     # данные
     # анализ
-    'market_structure': 'analysis', 'market_regime': 'analysis', 'flow_features': 'analysis',
-    'llm_market': 'analysis', 'llm_context': 'analysis',
+    'market_structure': 'analysis', 'llm_market': 'analysis', 'llm_context': 'analysis',
     # стратегии
     # ИИ, ФИБО и общие модули стратегий — в strategies/ (этап 10, часть 6)
     # исполнение и учёт
-    'paper_broker': 'execution', 'trade_manager': 'execution', 'exit_plan': 'execution',
-    'follow_up': 'execution', 'trade_journal': 'execution', 'setup_journal': 'execution',
-    'refused': 'execution', 'shadow': 'execution',
+    # exit_plan, follow_up, setup_journal, refused — в execution/ (этап 10, часть 7)
+    'paper_broker': 'execution', 'trade_manager': 'execution', 'trade_journal': 'execution',
+    'shadow': 'execution',
     # счета
     # интерфейсы — в control/ (этап 10, часть 5)
     # дирижёр цикла

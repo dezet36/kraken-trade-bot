@@ -254,7 +254,7 @@ def _save_state(state):
 
 def market(frames):
     """{пара: (таблица, признаки)} с широтой разгрузки — как в историческом прогоне."""
-    import flow_features
+    from analysis import flow_features
     btc = frames.get('BTCUSDT')
     data = {p: (df, flow_features.features(df, btc)) for p, df in frames.items() if df is not None and len(df)}
     cascade = PATTERNS['P1']['conditions'][:2]

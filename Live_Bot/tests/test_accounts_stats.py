@@ -15,7 +15,7 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import setup_journal as sj  # noqa: E402
+from execution import setup_journal as sj  # noqa: E402
 from accounts import stats  # noqa: E402
 
 NOW = 1_800_000_000

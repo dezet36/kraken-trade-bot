@@ -16,6 +16,7 @@ import time
 from types import SimpleNamespace
 
 import pytest
+from _modules import forget, remember  # noqa: E402
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -58,8 +59,8 @@ def env(monkeypatch):
     monkeypatch.setenv('PAPER_FUNDING', 'false')
     for name in ('FIBO', 'SMC', 'LEVELS', 'RSIBB', 'LLM'):
         monkeypatch.setenv(f'PAPER_START_BALANCE_{name}', '10000')
-    for module in ('config', 'paper_broker', 'control.dashboard', 'shadow', 'setup_journal', 'control.telegram_bot'):
-        sys.modules.pop(module, None)
+    for module in ('config', 'paper_broker', 'control.dashboard', 'shadow', 'execution.setup_journal', 'control.telegram_bot'):
+        forget(module, None)
     import config
     import paper_broker
     telegram_bot = __import__('importlib').import_module('control.telegram_bot')

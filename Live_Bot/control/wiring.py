@@ -10,7 +10,7 @@
 
 import importlib
 
-PORTS = {'telegram': 'control.telegram_notify', 'shadow': 'shadow', 'refused': 'refused'}
+PORTS = {'telegram': 'control.telegram_notify', 'shadow': 'shadow', 'refused': 'execution.refused'}
 
 
 def _receiver(module_name):

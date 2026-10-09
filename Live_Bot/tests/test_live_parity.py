@@ -20,8 +20,8 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import follow_up
-import refused
+from execution import follow_up
+from execution import refused
 
 
 class TestBothPathsAreNamedTheSame:

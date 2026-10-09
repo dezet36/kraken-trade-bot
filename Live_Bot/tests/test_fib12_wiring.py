@@ -23,6 +23,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from test_paper_broker import broker_env  # noqa: E402,F401  (фикстура)
+from _modules import forget, remember  # noqa: E402
 
 GOLDEN = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data', 'fib12_golden.json')
 
@@ -31,7 +32,7 @@ GOLDEN = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data', 'fib12
 def bot(monkeypatch, tmp_path):
     monkeypatch.setenv('BOT_DATA_DIR', str(tmp_path))
     for module in ('config', 'accounts.settings_store'):
-        sys.modules.pop(module, None)
+        forget(module, None)
     import bot as module
     settings_store = __import__('importlib').import_module('accounts.settings_store')
     settings_store.SETTINGS_FILE = str(tmp_path / 'runtime_settings.json')

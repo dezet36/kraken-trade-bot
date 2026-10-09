@@ -13,6 +13,7 @@ import os
 import sys
 
 import pytest
+from _modules import forget, remember  # noqa: E402
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -57,8 +58,8 @@ def broker_env(tmp_path, monkeypatch):
     for _name in ('FIBO', 'SMC', 'LEVELS', 'RSIBB'):
         monkeypatch.setenv(f'PAPER_START_BALANCE_{_name}', '10000')
     monkeypatch.setenv('PAPER_FUNDING', 'false')
-    for module in ('config', 'paper_broker', 'control.dashboard', 'shadow', 'setup_journal'):
-        sys.modules.pop(module, None)
+    for module in ('config', 'paper_broker', 'control.dashboard', 'shadow', 'execution.setup_journal'):
+        forget(module, None)
 
     import config
     import paper_broker
@@ -467,7 +468,7 @@ class TestExitPlan:
         # НЕ на цену входа: стоп ровно на входе терял комиссии круга и
         # записывался как «ноль». Он стоит выше входа на издержки и буфер.
         import config
-        import exit_plan
+        exit_plan = __import__('importlib').import_module('execution.exit_plan')
         expected = 100.0 * (1 + config.BREAKEVEN_OFFSET_PCT / 100)
         assert position['stop_loss'] == pytest.approx(expected)
         assert position['stop_loss'] > 100.0
@@ -1028,7 +1029,7 @@ class TestSetupJournalRecords:
     @staticmethod
     def dropped_rows():
         import csv
-        import setup_journal
+        setup_journal = __import__('importlib').import_module('execution.setup_journal')
         with open(setup_journal.DROPPED_CSV, encoding='utf-8', newline='') as fh:
             return list(csv.DictReader(fh))
 
@@ -1070,7 +1071,7 @@ class TestSetupJournalRecords:
         assert [r['reason'] for r in self.dropped_rows()] == ['снят оператором']
 
     def test_a_filled_order_is_not_journaled_as_dropped(self, broker_env):
-        import setup_journal
+        setup_journal = __import__('importlib').import_module('execution.setup_journal')
         broker, client, pb, _cfg = broker_env
         pb._now_ms = lambda: 1_700_000_000_000
         broker.open('FIBO', signal(entry=100.0))
@@ -1092,7 +1093,7 @@ class TestSetupJournalRecords:
         assert rows[0]['tp_min'] == '10;20' and rows[0]['exit_reason'] == 'TP2'
 
     def test_the_market_regime_goes_into_the_order(self, broker_env, monkeypatch):
-        import market_regime
+        market_regime = __import__('importlib').import_module('analysis.market_regime')
         broker, _client, pb, _cfg = broker_env
         monkeypatch.setattr(market_regime, 'last_btc_regime', lambda now=None: ('боковик', 0.21))
         pb._now_ms = lambda: 1_700_000_000_000
@@ -1101,7 +1102,7 @@ class TestSetupJournalRecords:
         assert (ctx['regime'], ctx['regime_er']) == ('боковик', 0.21)
 
     def test_no_regime_is_a_dash_not_a_failure(self, broker_env, monkeypatch):
-        import market_regime
+        market_regime = __import__('importlib').import_module('analysis.market_regime')
         broker, _client, pb, _cfg = broker_env
         monkeypatch.setattr(market_regime, '_btc_cache', {})
         pb._now_ms = lambda: 1_700_000_000_000
@@ -1298,7 +1299,7 @@ class TestFundingAtDecisionReachesTheJournal:
 
     def test_all_journals_name_it_the_same(self):
         import paper_broker
-        import setup_journal
+        setup_journal = __import__('importlib').import_module('execution.setup_journal')
         import trade_journal
         assert 'funding_bp' in paper_broker.COLUMNS
         assert 'funding_bp' in trade_journal.COLUMNS

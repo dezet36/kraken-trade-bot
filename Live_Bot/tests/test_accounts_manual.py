@@ -414,7 +414,7 @@ class TestWiring:
         одно свободное место. Возвращает заявки теста и ответы счетам."""
         import bot
         from data import liquidations
-        import market_regime
+        market_regime = __import__('importlib').import_module('analysis.market_regime')
         from data import trades_ws
         from strategies import registry
 

@@ -29,12 +29,12 @@ T0 = 1_790_000_000          # 2026-09-21, секунды
 def env(tmp_path, monkeypatch):
     """Все источники журнала — во временную папку; фантомный режим."""
     import config
-    import follow_up
+    follow_up = __import__('importlib').import_module('execution.follow_up')
     llm_journal = __import__('importlib').import_module('strategies.llm.llm_journal')
     llm_outcomes = __import__('importlib').import_module('strategies.llm.llm_outcomes')
     import paper_broker
-    import refused
-    import setup_journal
+    refused = __import__('importlib').import_module('execution.refused')
+    setup_journal = __import__('importlib').import_module('execution.setup_journal')
     import shadow
     strategy_llm = __import__('importlib').import_module('strategies.llm.adapter')
 
@@ -108,7 +108,7 @@ def write_outcomes(rows):
 
 
 def write_refused(rows):
-    import refused
+    refused = __import__('importlib').import_module('execution.refused')
     write_csv(refused.CSV_PATH, refused.COLUMNS, rows)
 
 
@@ -116,7 +116,7 @@ def write_refused(rows):
 
 class TestTradesComeWithWhatHappenedAfter:
     def test_a_trade_row_carries_the_plan_the_path_and_the_follow_up(self, env):
-        import follow_up
+        follow_up = __import__('importlib').import_module('execution.follow_up')
         write_trades([trade()])
         write_csv(follow_up.CSV_PATH, follow_up.COLUMNS,
                   [{'trade_id': 7, 'strategy': 'FIBO', 'pair': 'BTCUSDT',
@@ -340,7 +340,7 @@ class TestPlanOutcome:
         ({'entry_touched': 1, 'entry_hours': 1}, 'ни цели, ни стопа'),
     ])
     def test_the_first_level_after_the_entry_decides(self, obs, expected):
-        import setup_journal
+        setup_journal = __import__('importlib').import_module('execution.setup_journal')
         assert setup_journal._plan_outcome({k: str(v) for k, v in obs.items()}) == expected
 
 
@@ -393,7 +393,7 @@ class TestRegimeForTheJournal:
                              'close': closes})
 
     def test_counted_once_a_day(self, monkeypatch):
-        import market_regime
+        market_regime = __import__('importlib').import_module('analysis.market_regime')
         monkeypatch.setattr(market_regime, '_btc_cache', {})
         calls = []
 
@@ -410,7 +410,7 @@ class TestRegimeForTheJournal:
         assert market_regime.last_btc_regime(now=day.replace(day=26)) == ('', None)
 
     def test_a_failed_fetch_is_a_dash_and_is_retried(self, monkeypatch):
-        import market_regime
+        market_regime = __import__('importlib').import_module('analysis.market_regime')
         monkeypatch.setattr(market_regime, '_btc_cache', {})
         day = datetime(2026, 9, 25, tzinfo=timezone.utc)
         assert market_regime.btc_regime(lambda *a: None, now=day) == ('', None)

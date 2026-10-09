@@ -232,7 +232,7 @@ def watch_live(position, pair, exit_price, reason, trade_id, strategy):
 
 def _live_targets(params):
     """Цели позиции в том же виде, в каком их отдаёт план выхода."""
-    from exit_plan import tp_plan
+    from execution.exit_plan import tp_plan
     return tp_plan(params)
 
 

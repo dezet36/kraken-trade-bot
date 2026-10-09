@@ -12,6 +12,7 @@ import os
 import sys
 
 import pytest
+from _modules import forget, remember  # noqa: E402
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -27,7 +28,7 @@ def dash(tmp_path, monkeypatch):
     # зависящий от настройки рабочей машины, проверяет не то, что нужно.
     monkeypatch.setenv('TRADING_MODE', 'DEMO')
     for module in ('config', 'trade_journal', 'control.dashboard'):
-        sys.modules.pop(module, None)
+        forget(module, None)
 
     import trade_journal
     dash_module = __import__('importlib').import_module('control.dashboard')
@@ -189,7 +190,7 @@ def paper_dash(tmp_path, monkeypatch):
     monkeypatch.setenv('BOT_DATA_DIR', str(tmp_path))
     monkeypatch.setenv('TRADING_MODE', 'PAPER')
     for module in ('config', 'paper_broker', 'control.dashboard'):
-        sys.modules.pop(module, None)
+        forget(module, None)
 
     import paper_broker
     dash_module = __import__('importlib').import_module('control.dashboard')

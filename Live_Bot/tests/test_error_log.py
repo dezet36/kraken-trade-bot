@@ -10,6 +10,7 @@ import os
 import sys
 
 import pytest
+from _modules import forget, remember  # noqa: E402
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -18,7 +19,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 def errors(tmp_path, monkeypatch):
     monkeypatch.setenv('BOT_DATA_DIR', str(tmp_path))
     for module in ('error_log', 'logger'):
-        sys.modules.pop(module, None)
+        forget(module, None)
     import error_log
     error_log.ERRORS_FILE = str(tmp_path / 'errors.json')
     error_log._groups = {}

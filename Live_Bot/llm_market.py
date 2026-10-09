@@ -639,7 +639,7 @@ def regime_fact(df, index=None):
     Это ФАКТ, а не запрет: боковик не означает «не торгуй», он означает
     «цель дальше края диапазона маловероятна». Решает по-прежнему модель.
     """
-    import market_regime
+    from analysis import market_regime
     if df is None or 'close' not in getattr(df, 'columns', ()):
         return None
     closes = df['close'].values if index is None else df['close'].values[:index + 1]

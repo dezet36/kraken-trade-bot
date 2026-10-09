@@ -27,7 +27,7 @@ from strategies.smc import params as smc_params
 # Псевдоним обязателен: ниже определена функция market_regime(), и без
 # него она перекрыла бы модуль. Ошибка была бы молчаливой — вызов
 # обёрнут в try, и режим просто перестал бы определяться.
-import market_regime as regime_state
+from analysis import market_regime as regime_state
 from strategies.smc import regime as regime_mod
 from strategies.smc import signal as smc_signal
 
