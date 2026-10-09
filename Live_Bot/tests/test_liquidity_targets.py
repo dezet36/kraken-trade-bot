@@ -19,7 +19,8 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from strategies.smc import liquidity, params, signal   # noqa: E402
+from strategies.smc import params, signal   # noqa: E402
+from analysis.smc import liquidity
 
 BULLISH = 'BULLISH'
 BEARISH = 'BEARISH'
@@ -37,7 +38,9 @@ class Ctx:
         self.pools = list(pools)
         self.sweeps = list(sweeps)
 
-    targets = signal.MarketContext._liquidity_targets
+    def targets(self, *args, **kwargs):
+        # Правила решений — SMC: у общего контекста своих нет (с 09.10.2026).
+        return signal.MarketContext._liquidity_targets(self, *args, d=params, **kwargs)
 
 
 @pytest.fixture(autouse=True)

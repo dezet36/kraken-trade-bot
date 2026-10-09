@@ -174,7 +174,7 @@ def _load_pair(period, pair):
 def ref_levels_window():
     """Уровни прошлого дня/недели/месяца на окне живого бота (304 закрытых часа)
     против той же метки по полной истории."""
-    from strategies.smc import liquidity
+    from analysis.smc import liquidity
     out = []
     for pair in POOL10:
         data = _load_pair('mid2', pair)
@@ -199,7 +199,7 @@ def ref_levels_window():
 
 
 def swings_ties():
-    from strategies.smc import swings
+    from analysis.smc import swings
     rows = []
     for pair in POOL10:
         data = _load_pair('mid2', pair)
@@ -224,7 +224,7 @@ def swings_ties():
 
 
 def trend_flips():
-    from strategies.smc import structure as S
+    from analysis.smc import structure as S
     rows = []
     for pair in POOL10:
         data = _load_pair('mid2', pair)
@@ -246,7 +246,7 @@ def trend_flips():
 
 
 def ob_position():
-    from strategies.smc import poi, structure as S
+    from analysis.smc import poi, structure as S
     rows = []
     for pair in POOL10:
         df = _load_pair('mid2', pair)['1h']
@@ -285,7 +285,7 @@ def _atr(df, n=14):
 def fvg_magnet(horizon=24):
     """Возвращается ли цена к имбалансу чаще, чем к зоне того же размера на том же
     расстоянии в случайный час той же пары."""
-    from strategies.smc import imbalance
+    from analysis.smc import imbalance
     rng = np.random.default_rng(1)
     rows = []
     for period in ('bear', 'mid2', 'fresh'):
@@ -338,7 +338,7 @@ def fvg_magnet(horizon=24):
 def liquidity_magnet(horizon=24):
     """Доходит ли цена до неснятого свинг-хая/лоя (пула) чаще, чем до уровня на том же
     расстоянии в ATR в случайный час той же пары."""
-    from strategies.smc import swings
+    from analysis.smc import swings
     rng = np.random.default_rng(2)
     rows = []
     for period in ('bear', 'mid2', 'fresh'):

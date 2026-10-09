@@ -74,4 +74,5 @@ class TestSmcOrdersWaitPastTheTarget:
     def test_it_is_a_decision_of_smc_not_structure(self):
         from strategies.smc import params
         for name in ('SKIP_TARGET_TAKEN', 'CANCEL_PENDING_AT_TARGET'):
-            assert name in params.DECISION and name not in params.STRUCTURAL
+            assert name in params.DECISION
+            assert name not in __import__('analysis.smc.params', fromlist=['x']).STRUCTURAL

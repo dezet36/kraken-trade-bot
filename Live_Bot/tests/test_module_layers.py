@@ -37,7 +37,8 @@ LAYER = {
     'llm_server': 'infra',
     # данные
     # анализ
-    'market_structure': 'analysis', 'llm_market': 'analysis', 'llm_context': 'analysis',
+    # market_structure, llm_market — в analysis/ (этап 10, часть 10)
+    'llm_context': 'analysis',
     # стратегии
     # ИИ, ФИБО и общие модули стратегий — в strategies/ (этап 10, часть 6)
     # исполнение и учёт
@@ -62,9 +63,7 @@ KNOWN = {
     # С переноса пакетов стратегий в strategies/ (этап 10, часть 1) — одной
     # записью на модуль: разметка ИИ читает пакеты liquidity и smc.
     ('llm_context', 'strategies'): 'этап 10: структура smc (часть I) и liquidity — в анализ',
-    ('llm_market', 'strategies'): 'этап 10: структура smc (часть I) — в анализ',
     ('llm_server', 'strategies'): 'этап 10: сервис модели не знает про промт и грамматику',
-    ('market_structure', 'strategies'): 'этап 10: структура smc (часть I) — в анализ',
     # Исполнители (брокер, боевой исполнитель, тень, журнал сделок) с этапа 10,
     # часть 9, не импортируют счета и интерфейсы: арифметика пределов и
     # издержек — execution/risk_gate и live_costs, сами пределы — крючок

@@ -94,7 +94,7 @@ class TestLiveMatchesBacktest:
                               'close': 'last', 'volume': 'sum'})
                         .dropna().reset_index())
 
-            import market_structure
+            market_structure = __import__('importlib').import_module('analysis.market_structure')
             monkeypatch.setattr(market_structure, 'fetch_ohlcv', fake_fetch)
             market_structure.clear()
 
@@ -102,7 +102,7 @@ class TestLiveMatchesBacktest:
             live = None
             if live_ctx is not None:
                 last = len(live_ctx.frames['poi']) - 1
-                live = brief(live_ctx.evaluate(last)[0])
+                live = brief(live_ctx.evaluate(last, decision=smc_signal.params)[0])
 
             backtest = brief(ctx_full.evaluate(i)[0])
             if live != backtest:

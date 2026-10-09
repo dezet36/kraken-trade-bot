@@ -38,7 +38,8 @@ def _job(args):
     from infra import logger
     logger.log = lambda *a, **k: None
     import backtest_smc as bt
-    from strategies.smc import liquidity, signal as smc_signal
+    from strategies.smc import signal as smc_signal
+    from analysis.smc import liquidity
     bt.CACHE_DIR = os.path.join(HERE, CACHES[period])
     df_1h = bt.load_cached(pair, '1h')
     if df_1h is None or not os.path.exists(os.path.join(bt.CACHE_DIR, f'{pair}_5m.pkl')):

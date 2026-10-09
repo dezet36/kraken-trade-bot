@@ -192,7 +192,7 @@ class TestScanCarriesTheCandlesForTheChart:
 
     def test_candidate_has_df_1h_from_the_shared_cache(self, monkeypatch):
         from strategies.smc import adapter as strategy_smc
-        import market_structure
+        market_structure = __import__('importlib').import_module('analysis.market_structure')
         import pandas as pd
 
         class Ctx:

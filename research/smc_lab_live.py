@@ -58,7 +58,7 @@ def _job(args):
     logger.log = lambda *a, **k: None
     import backtest_smc as bt
     import smc_lab
-    from strategies.smc import params as P
+    from analysis.smc import params as P          # глубина окон — параметры структуры
     from strategies.smc import signal as smc_signal
     bt.CACHE_DIR = os.path.join(HERE, cache)
     data = bt.load_pair(pair)

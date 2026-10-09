@@ -21,7 +21,7 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import llm_context
-import llm_market
+from analysis import llm_market
 
 
 def make_df(closes, spread=None, volume=None):
@@ -268,7 +268,7 @@ class TestSmcFacts:
         json.dumps(out)
 
     def test_no_context_is_not_measured(self, monkeypatch):
-        import market_structure
+        market_structure = __import__('importlib').import_module('analysis.market_structure')
         monkeypatch.setattr(market_structure, 'get', lambda *a, **k: None)
         assert llm_market.smc_facts('BTCUSDT', 100.0) is None
 
@@ -279,7 +279,7 @@ class TestSnapshot:
 
     def test_one_broken_piece_does_not_take_the_others(self, monkeypatch):
         """Упавший стакан — прочерк в стакане, а не пустой снимок."""
-        import market_structure
+        market_structure = __import__('importlib').import_module('analysis.market_structure')
         monkeypatch.setattr(market_structure, 'get', lambda *a, **k: None)
         monkeypatch.setattr(llm_market.positioning, 'series', lambda *a, **k: [])
 
@@ -305,7 +305,7 @@ class TestSnapshot:
             seen['upto'] = upto
             return []
         monkeypatch.setattr(llm_market.positioning, 'series', series)
-        import market_structure
+        market_structure = __import__('importlib').import_module('analysis.market_structure')
         monkeypatch.setattr(market_structure, 'get', lambda *a, **k: None)
 
         df = make_df(wavy(300))
@@ -717,7 +717,7 @@ class TestPoisAndHtf:
             pois = [{'type': t, 'direction': 'BEARISH', 'top': 113.84, 'bottom': 113.33,
                      'index': 40, 'confirmed_at': 45}
                     for t in ('ORDER_BLOCK', 'MITIGATION', 'MITIGATION')]
-        import strategies.smc.poi as poi_mod
+        import analysis.smc.poi as poi_mod
         out = llm_market.poi_facts(Ctx(), 112.0, 59)
         if out is None:
             pytest.skip('зона отсеяна правилами активности на синтетике')

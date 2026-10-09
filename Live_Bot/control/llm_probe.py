@@ -69,7 +69,7 @@ def main(pairs):
     import llm_context
     from strategies.llm import llm_decide
     from infra import llm_local
-    import llm_market
+    from analysis import llm_market
 
     if not llm_local.available():
         print('Модель недоступна. Задайте LLM_MODEL_PATH на существующий файл.')

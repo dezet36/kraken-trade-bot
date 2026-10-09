@@ -122,7 +122,7 @@ def llm_rules_decisions(df):
 
 def llm_structure(df):
     """Разметка структуры для модели — по тому же общему контексту."""
-    import llm_market
+    llm_market = __import__('importlib').import_module('analysis.llm_market')
     from strategies.smc import signal as smc_signal
     ctx = smc_signal.build_context(frames_of(df.copy()), pair='TEST')
     price = float(df['close'].iloc[-1])
@@ -378,9 +378,11 @@ class TestTheSharedLayerIsNotWrittenByStrategies:
         # Исходное значение — под monkeypatch ДО записи: после проверки вернётся оно.
         monkeypatch.setattr(params, 'MIN_SL_PCT', params.MIN_SL_PCT)
         monkeypatch.setattr(strategy_smc.settings, 'min_stop_pct', lambda s: 4.2)
-        before = _fp(params.structural_snapshot())
+        # Структура рынка с 09.10.2026 — общий слой analysis/smc/params.
+        from analysis.smc import params as structure
+        before = _fp(structure.structural_snapshot())
         strategy_smc._apply_settings()
-        assert _fp(params.structural_snapshot()) == before, 'настройка оператора записана в структуру рынка'
+        assert _fp(structure.structural_snapshot()) == before, 'настройка оператора записана в структуру рынка'
         assert params.MIN_SL_PCT == 4.2
         assert set(strategy_smc._OPERATOR_SETTINGS) <= params.DECISION
         # Риска среди настроек стратегии нет с 08.10.2026: деньги решает счёт.
@@ -388,25 +390,33 @@ class TestTheSharedLayerIsNotWrittenByStrategies:
 
     def test_a_setting_aimed_at_the_structure_is_refused(self, monkeypatch):
         from strategies.smc import adapter as strategy_smc
+        from analysis.smc import params as structure
         monkeypatch.setitem(strategy_smc._OPERATOR_SETTINGS, 'SWING_N_STRUCT', lambda: 5)
-        before = strategy_smc.smc_params.SWING_N_STRUCT
+        before = structure.SWING_N_STRUCT
         with pytest.raises(RuntimeError):
             strategy_smc._apply_settings()
-        assert strategy_smc.smc_params.SWING_N_STRUCT == before
+        assert structure.SWING_N_STRUCT == before
+        assert not hasattr(strategy_smc.smc_params, 'SWING_N_STRUCT'), 'структура попала в решения SMC'
 
     def test_every_smc_param_is_declared_on_one_side(self):
-        from strategies.smc import params
-        names = {n for n in dir(params) if n.isupper() and not n.startswith('_')} - {'STRUCTURAL', 'DECISION'}
-        assert not names - params.STRUCTURAL - params.DECISION, 'параметр без стороны'
-        assert not params.STRUCTURAL & params.DECISION
-        assert not (params.STRUCTURAL | params.DECISION) - names
+        """С 09.10.2026 стороны — разные модули: структура рынка в общем слое
+        (analysis/smc/params, STRUCTURAL), решения SMC — в стратегии
+        (strategies/smc/params, DECISION). В каждом — ровно свои имена."""
+        from analysis.smc import params as structure
+        from strategies.smc import params as decisions
+
+        def names(module, own):
+            return {n for n in dir(module) if n.isupper() and not n.startswith('_')} - {own}
+        assert names(structure, 'STRUCTURAL') == set(structure.STRUCTURAL), 'структура без объявления'
+        assert names(decisions, 'DECISION') == set(decisions.DECISION), 'решение без объявления'
+        assert not structure.STRUCTURAL & decisions.DECISION
 
     def test_the_structure_really_is_shared(self, df, baseline, monkeypatch):
         """
         Контроль, что отпечатки не пусты: правка ОПРЕДЕЛЕНИЯ (часть I)
         меняет и решения SMC, и разметку для модели — это одно и то же место.
         """
-        from strategies.smc import params
+        from analysis.smc import params
         monkeypatch.setattr(params, 'SWING_N_STRUCT', 5)
         monkeypatch.setattr(params, 'FVG_MIN_SIZE_PCT', 0.5)
         assert llm_structure(df) != baseline['LLM-структура']
@@ -420,15 +430,15 @@ STRATEGY_MODULES = {
     'LEVELS': ('strategies/levels/adapter.py',),
     'RSIBB': ('strategies/rsibb/adapter.py',),
     'SMCS': ('strategies/smcs/adapter.py',),
-    'LLM': ('strategies/llm/adapter.py', 'llm_market.py', 'llm_context.py',
+    'LLM': ('strategies/llm/adapter.py', 'analysis/llm_market.py', 'llm_context.py',
             'strategies/llm/llm_decide.py', 'strategies/llm/llm_record.py',
             'strategies/llm/llm_urgency.py', 'strategies/llm/llm_prompt.py',
             'strategies/llm/llm_grammar.py', 'strategies/llm/llm_rules.py'),
 }
-SHARED = ('market_structure.py', 'strategies/smc/signal.py', 'strategies/smc/structure.py',
-          'strategies/smc/swings.py', 'strategies/smc/liquidity.py', 'strategies/smc/imbalance.py',
-          'strategies/smc/poi.py', 'strategies/smc/fib.py', 'strategies/smc/sessions.py',
-          'strategies/levels/core.py', 'strategies/rsibb/core.py', 'strategies/liquidity/core.py',
+SHARED = ('analysis/market_structure.py', 'analysis/smc/context.py', 'analysis/smc/structure.py',
+          'analysis/smc/swings.py', 'analysis/smc/liquidity.py', 'analysis/smc/imbalance.py',
+          'analysis/smc/poi.py', 'analysis/smc/fib.py', 'analysis/smc/sessions.py',
+          'strategies/levels/core.py', 'strategies/rsibb/core.py', 'analysis/liquidity/core.py',
           'strategies/smcs/core.py',
           'data/exchange.py', 'analysis/market_regime.py', 'strategies/strategy_profile.py')
 # Импорт адаптера — из пакета (from strategies.smc import adapter, from

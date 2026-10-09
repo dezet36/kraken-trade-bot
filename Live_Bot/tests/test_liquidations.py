@@ -15,7 +15,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from data import liquidations
 import llm_context
-import llm_market
+from analysis import llm_market
 
 
 @pytest.fixture(autouse=True)

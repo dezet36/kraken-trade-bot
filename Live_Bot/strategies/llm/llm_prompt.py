@@ -291,9 +291,9 @@ def definitions():
     сколько свечей? покрытие чего? какие часы у сессий?» Модель без этого
     додумывает, а додуманное невозможно проверить.
     """
-    from strategies.liquidity import params as liq_params
-    from strategies.smc import params as smc_params
-    import llm_market
+    from analysis.liquidity import params as liq_params
+    from analysis.smc import params as smc_params      # структура рынка (сессии, допуск равных)
+    from analysis import llm_market
     import llm_context
     zones = ', '.join(f'{name} {a:02d}–{b:02d}' for name, (a, b) in smc_params.KILLZONES.items())
     return (f"ATR — за {liq_params.ATR_PERIOD} часовых свечей, в % цены. "

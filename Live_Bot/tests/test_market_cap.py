@@ -227,7 +227,7 @@ class TestTheSnapshotSeesTheCurrentHour:
         ряде: первый разбор после выкатки 21.09.2026 его не получил.
         """
         import time
-        import llm_market
+        llm_market = __import__('importlib').import_module('analysis.llm_market')
         now = int(time.time() * 1000)
         candle_open = now - now % 3_600_000
         _seed([(now - 60_000, 6.4, 59.4, 2.86e12)])          # точка минуту назад
@@ -235,7 +235,7 @@ class TestTheSnapshotSeesTheCurrentHour:
         assert llm_market._macro_facts(candle_open)['usdt_d'] == pytest.approx(6.4)
 
     def test_a_past_candle_does_not_see_the_future(self):
-        import llm_market
+        llm_market = __import__('importlib').import_module('analysis.llm_market')
         _seed([(10 * DAY + 5 * 3_600_000, 6.4, 59.4, 2.86e12)])   # точка в 05:00
         assert llm_market._macro_facts(10 * DAY + 3 * 3_600_000) is None   # разбор свечи 03:00
         assert llm_market._macro_facts(10 * DAY + 4 * 3_600_000) is not None   # свеча 04:00 закрывается в 05:00

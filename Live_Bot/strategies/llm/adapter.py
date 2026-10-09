@@ -53,7 +53,7 @@ from infra import config
 from strategies.llm import llm_decide
 from strategies.llm import llm_journal
 from infra import llm_local
-import llm_market
+from analysis import llm_market
 from infra.logger import log
 
 NAME = 'LLM'
@@ -241,7 +241,7 @@ def _remember(pair, now=None):
 
 def _cached_context(pair):
     try:
-        import market_structure
+        from analysis import market_structure
         return market_structure.cached(pair)
     except Exception:                              # noqa: BLE001
         return None

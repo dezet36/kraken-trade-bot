@@ -34,7 +34,7 @@ class TestTheSharedLayerFindsIt:
         return df, smc_signal.build_context(frames_of(df.copy()), pair='TEST')
 
     def test_bullish_structure_breaks_at_the_last_higher_low(self):
-        from strategies.smc import structure as st
+        from analysis.smc import structure as st
         df, ctx = self._ctx()
         idx = len(df) - 1
         state = st.state_at(ctx.structure, idx)
@@ -51,7 +51,7 @@ class TestTheSharedLayerFindsIt:
             assert found['price'] > price
 
     def test_it_is_a_confirmed_swing_not_a_fresh_extreme(self):
-        from strategies.smc import structure as st
+        from analysis.smc import structure as st
         df, ctx = self._ctx()
         idx = len(df) - 1
         found = st.invalidation_level(ctx.structure, idx)
@@ -59,7 +59,7 @@ class TestTheSharedLayerFindsIt:
         assert point['confirmed_at'] <= idx
 
     def test_direction_can_be_asked_explicitly(self):
-        from strategies.smc import structure as st
+        from analysis.smc import structure as st
         df, ctx = self._ctx()
         idx = len(df) - 1
         up = st.invalidation_level(ctx.structure, idx, 'BULLISH')

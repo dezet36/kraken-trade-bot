@@ -65,7 +65,7 @@ class TestAnalyzeMarket:
         class Ctx:
             frames = {'poi': pd.DataFrame({'close': [1.0, 2.0]})}
 
-            def evaluate(self, index, balance=None):
+            def evaluate(self, index, balance=None, decision=None):
                 return setup, None
         return Ctx()
 
@@ -167,7 +167,8 @@ class TestPool:
 
     def test_new_names_are_decisions_not_structure(self):
         for name in ('TRADE_POOL', 'FUNDING_AGAINST_CROWD', 'FUNDING_MAX_BP'):
-            assert name in params.DECISION and name not in params.STRUCTURAL
+            assert name in params.DECISION
+            assert name not in __import__('analysis.smc.params', fromlist=['x']).STRUCTURAL
 
     def test_ai_rules_copy_is_its_own(self):
         """

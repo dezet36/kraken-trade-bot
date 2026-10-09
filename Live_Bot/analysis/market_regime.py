@@ -158,7 +158,7 @@ def btc_regime(fetch, now=None):
     if day in _btc_cache:
         return _btc_cache[day]
     try:
-        import market_structure
+        from analysis import market_structure
         df = market_structure.drop_forming_candle(fetch('1d', ER_WINDOW + MIN_HISTORY + 30, SYMBOL))
         if df is None or len(df) < ER_WINDOW + 2:
             return '', None

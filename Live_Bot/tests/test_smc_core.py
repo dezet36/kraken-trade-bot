@@ -16,7 +16,8 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from strategies.smc import fib, imbalance, liquidity, signal, structure, swings  # noqa: E402
+from strategies.smc import signal  # noqa: E402
+from analysis.smc import fib, imbalance, liquidity, structure, swings
 
 T0 = pd.Timestamp('2026-01-01', tz='UTC')
 

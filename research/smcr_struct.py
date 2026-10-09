@@ -41,7 +41,8 @@ def apply_patch(variant):
     global _patched
     if _patched == variant:
         return
-    from strategies.smc import liquidity, poi, signal
+    from strategies.smc import signal
+    from analysis.smc import liquidity, poi
     import importlib
     importlib.reload(liquidity)
     importlib.reload(poi)
@@ -113,7 +114,7 @@ def apply_patch(variant):
     if variant in ('B_htf', 'B_any'):
         # R6 (второй круг): направление старшего ТФ — только 4 ч или «любой ТФ,
         # при споре — день» вместо обязательного согласия дня и 4 ч.
-        from strategies.smc import params as P
+        from analysis.smc import params as P
         P.BIAS_MODE = 'htf_only' if variant == 'B_htf' else 'any'
     if variant in ('S4', 'ALL'):
         def untapped_pools_strict(pools, sweeps, index, side=None):

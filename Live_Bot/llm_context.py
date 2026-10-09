@@ -47,7 +47,7 @@ import pandas as pd
 from infra import config
 from analysis import market_regime
 from data import positioning
-from strategies.liquidity import core as liq
+from analysis.liquidity import core as liq
 
 # Сколько уровней максимум уходит в модель. Больше — не лучше: список на сорок
 # позиций модель разбирает хуже, чем на десять, а грамматика вырастает линейно.
@@ -384,7 +384,7 @@ def levels(df, at=None, extra=None, extra_market=None):
     for number, level in enumerate(near, start=1):
         level['id'] = f'L{number}'
         if tape:
-            import llm_market
+            from analysis import llm_market
             level['delta'] = llm_market.delta_at_level(tape, level['price'], touch_pct)
         level['dist_pct'] = round((level['price'] - price_now) / price_now * 100, 2)
         if median_v > 0:
@@ -636,7 +636,7 @@ def _when(df, at):
     """Время бара решения и торговая сессия — из правил smc, не свои."""
     try:
         ts = df['timestamp'].iloc[at]
-        from strategies.smc import sessions
+        from analysis.smc import sessions
         zone = sessions.killzone_of(ts) or 'вне сессий'
         import pandas as pd
         stamp = pd.Timestamp(ts)

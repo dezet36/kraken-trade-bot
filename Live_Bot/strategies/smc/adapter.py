@@ -115,7 +115,7 @@ def market_regime(client=None):
 # Свечи → закрытые свечи → MarketContext строит market_structure: его читают и
 # SMC, и ИИ, и панель. Здесь остались псевдонимы для старого кода и тестов;
 # правка адаптера SMC не может изменить то, что видит модель.
-import market_structure as _context
+from analysis import market_structure as _context
 # Данные — через дверь анализа (analysis/market.py), не со сборщиков и не с
 # биржи напрямую (реорганизация, этап 4).
 from analysis.market import fetch_ohlcv
@@ -289,7 +289,8 @@ def analyze_market(pair, client=None):
         return None
 
     last_index = len(context.frames['poi']) - 1
-    setup, reason = context.evaluate(last_index)
+    # Контекст — общий слой (своих правил у него нет): решаем правилами SMC.
+    setup, reason = context.evaluate(last_index, decision=smc_params)
     _last_reason[pair] = reason
 
     if setup is None:

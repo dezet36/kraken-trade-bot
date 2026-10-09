@@ -282,7 +282,7 @@ def scan(pairs, gate, client=None, now_ms=None, context_of=None, funding_of=None
         funding_of = funding_rate
     from strategies import scan_report as report
     if context_of is None:
-        import market_structure
+        from analysis import market_structure
 
         def context_of(pair):
             return market_structure.get(pair, client=client)

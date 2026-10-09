@@ -412,7 +412,7 @@ def smc_facts(pair, price, client=None, context=None):
     имеют права менять то, что видит модель.
     """
     if context is None:
-        import market_structure
+        from analysis import market_structure
         context = market_structure.get(pair, client=client)
     if context is None:
         return None
@@ -422,10 +422,10 @@ def smc_facts(pair, price, client=None, context=None):
 def _smc_from_context(context, price):
     """Тело smc_facts, отделённое, чтобы контекст брался один раз на снимок."""
 
-    from strategies.smc import fib as smc_fib
-    from strategies.smc import imbalance
-    from strategies.smc import liquidity as smc_liquidity
-    from strategies.smc import structure as structure_mod
+    from analysis.smc import fib as smc_fib
+    from analysis.smc import imbalance
+    from analysis.smc import liquidity as smc_liquidity
+    from analysis.smc import structure as structure_mod
 
     df = context.frames.get('poi')
     if df is None or not len(df):
@@ -580,7 +580,7 @@ def poi_facts(context, price, index, limit=4):
     не пробитые насквозь и не перетестированные — те же правила, по которым
     их берёт SMC, второго определения зоны здесь нет.
     """
-    from strategies.smc import poi as poi_mod
+    from analysis.smc import poi as poi_mod
 
     df = context.frames.get('poi')
     if df is None or not len(df) or not context.pois:
@@ -684,7 +684,7 @@ def structure_break(context, index=None):
     краем имбаланса, в треть дневного размаха. Считается общим слоем один
     раз и одинаково для всех читателей.
     """
-    from strategies.smc import structure as structure_mod
+    from analysis.smc import structure as structure_mod
     out = {}
     for key, name in (('poi', '1ч'), ('htf', '4ч')):
         df = context.frames.get(key)
@@ -719,8 +719,8 @@ def htf_zones(context, timestamp, price, limit=4):
     закрытым свечам 4ч, индекс выровнен по закрытию, как в htf_facts.
     """
     import pandas as pd
-    from strategies.smc import imbalance, poi as poi_mod
-    from strategies.smc.signal import align_index
+    from analysis.smc import imbalance, poi as poi_mod
+    from analysis.smc.context import align_index
 
     df = context.frames.get('htf')
     struct = getattr(context, 'htf_structure', None)
@@ -768,8 +768,8 @@ def htf_facts(context, timestamp):
     сегодняшнего дня ещё не закрыта, и читать её значило бы читать будущее.
     """
     import pandas as pd
-    from strategies.smc import structure as structure_mod
-    from strategies.smc.signal import align_index
+    from analysis.smc import structure as structure_mod
+    from analysis.smc.context import align_index
 
     decision = pd.Timestamp(timestamp)
     decision = (decision.tz_localize('UTC') if decision.tzinfo is None
@@ -1290,7 +1290,7 @@ def activity(df, index):
 
 def fvg_list(context, price, index, limit=4):
     """До двух незакрытых имбалансов над ценой и до двух под ней."""
-    from strategies.smc import imbalance
+    from analysis.smc import imbalance
     df = context.frames.get('poi')
     if df is None or not len(df):
         return None
@@ -1439,7 +1439,7 @@ def snapshot(pair, df, at=None, client=None, benchmark=None):
 
     context = None
     try:
-        import market_structure
+        from analysis import market_structure
         context = market_structure.get(pair, client=client)
     except Exception as exc:                           # noqa: BLE001
         log(f'   разметка: контекст SMC не собран — {exc}')

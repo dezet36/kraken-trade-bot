@@ -26,9 +26,18 @@ sys.path.insert(0, os.path.join(ROOT, 'Live_Bot'))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from strategies.smc import params as P, signal as smc_signal  # noqa: E402
+from analysis.smc import params as S  # noqa: E402
+
 from smc_engine import INITIAL_BALANCE, Order, compute_stats, run_portfolio  # noqa: E402
 from backtest_smc import (COOLDOWN_HOURS, MAX_POSITIONS, RISK_PCT,  # noqa: E402
                           load_pair)
+
+
+def _home(key):
+    """Где живёт параметр: структура рынка — analysis/smc/params (с 09.10.2026),
+    решения — strategies/smc/params."""
+    return S if key in S.STRUCTURAL else P
+
 
 BASE_PAIRS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'XRPUSDT', 'LINKUSDT', 'AVAXUSDT']
 
@@ -89,9 +98,9 @@ def build_orders(ctx, pair, df):
 def evaluate_config(name, overrides, contexts, data, defaults):
     """Применяет набор параметров, прогоняет портфель, возвращает статистику."""
     for key, value in defaults.items():
-        setattr(P, key, value)
+        setattr(_home(key), key, value)
     for key, value in overrides.items():
-        setattr(P, key, value)
+        setattr(_home(key), key, value)
 
     orders = []
     for pair, ctx in contexts.items():
@@ -170,7 +179,7 @@ def main():
             {'bias': frames['1d'], 'htf': frames['4h'], 'poi': frames['1h']}, pair=pair)
         print(f'   {pair}: POI={len(contexts[pair].pois)}, свипов={len(contexts[pair].sweeps)}')
 
-    defaults = {key: deepcopy(getattr(P, key)) for key in TRACKED}
+    defaults = {key: deepcopy(getattr(_home(key), key)) for key in TRACKED}
 
     results = []
     for name, overrides in CONFIGS:
