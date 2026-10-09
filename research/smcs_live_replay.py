@@ -7,6 +7,13 @@
 бот не берёт COTI/BICO (фильтр объёма liquid_pairs) и вторую позицию на
 паре (как sim.one_at_a_time стенда).
 
+С 09.10.2026 (реорганизация, этап 9) рядом с прежней моделью исхода — исход
+ТЕМ ЖЕ КОДОМ, что торгует: сигнал строит адаптер бота
+(strategy_smcs._to_bot_signal, цена — открытие первой 5м после закрытия
+бара), решение счёта и жизнь сделки — accounts/replay (ядро исполнения,
+комиссии и проскальзывание бумаги, срок удержания и кулдаун стратегии),
+шаг цикла 5 минут. Колонка R_bot — это и есть итог бота на этих свечах.
+
     python research/smcs_live_replay.py [начало, по умолчанию 2026-10-02 04:00]
 """
 import os, sys, time
@@ -14,6 +21,10 @@ import requests
 import pandas as pd
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'Live_Bot'))
+import logger  # noqa: E402
+logger.log = lambda *a, **k: None               # строка на каждый шаг прогона — лишняя
+import strategy_smcs  # noqa: E402
+from accounts import books, replay  # noqa: E402
 from smcs import core, params  # noqa: E402
 
 PAIRS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'XRPUSDT', 'BNBUSDT', 'DOGEUSDT', 'ADAUSDT',
@@ -54,11 +65,14 @@ def kline(sym, interval, start_ms, end_ms):
 
 
 signals = []
+bot_setups, bot_candles = [], {}
 for p in PAIRS:
     d4 = kline(p, '240', int((START - pd.Timedelta(hours=4 * 520)).timestamp() * 1000),
                int(NOW.timestamp() * 1000))
     d4 = d4[d4.time + pd.Timedelta(hours=4) <= NOW].reset_index(drop=True)   # только закрытые
     m5 = kline(p, '5', int(START.timestamp() * 1000), int(NOW.timestamp() * 1000))
+    bot_candles[p] = m5[['ts', 'o', 'h', 'l', 'c', 'v']].astype(float).values.tolist()
+    bot_candles[p] = [[int(r[0])] + r[1:] for r in bot_candles[p]]
     for i in range(len(d4)):
         if d4.time[i] < START:
             continue
@@ -74,6 +88,10 @@ for p in PAIRS:
         if after.empty:
             continue
         entry = after.o[0]
+        # Сигнал бота: тот же адаптер, цена рынка — открытие первой 5м.
+        window = pd.DataFrame({'timestamp': w.time, 'open': w.o, 'high': w.h, 'low': w.l, 'close': w.c})
+        sig = strategy_smcs._to_bot_signal(s, p, window.reset_index(drop=True), float(entry))
+        bot_setups.append((int(close_t.timestamp() * 1000) + 60_000, 'SMCS', books.setup_copy(sig)))
         dd = s['dir']
         risk_ref = (s['ref'] - s['stop']) * dd
         out, exit_px, exit_t = 'OPEN', after.c.iloc[-1], None
@@ -92,8 +110,35 @@ for p in PAIRS:
     time.sleep(0.2)
 
 df = pd.DataFrame(signals).sort_values(['bar_close', 'pair'])
+
+# Исход тем же кодом, что торгует (accounts/replay): шаг цикла бота — 5 минут.
+bot = replay.run(bot_setups, bot_candles, step_ms=5 * 60_000,
+                 until=int(NOW.timestamp() * 1000))
+r_bot = {}
+for t in bot['trades']:
+    opened = pd.Timestamp(t['opened_at'])
+    r_bot[(t['pair'], opened)] = (t['pnl_r'], t['exit_reason'])
+book = bot['books'].get('SMCS') or {}
+
+
+def bot_result(row):
+    """Сделка бота по этому слому: открыта в течение часа после закрытия бара."""
+    close_t = pd.Timestamp(f"{NOW.year}-{row.bar_close}", tz='UTC')
+    for (pair, opened), (r, why) in r_bot.items():
+        if pair == row.pair and close_t <= opened <= close_t + pd.Timedelta(hours=1):
+            return pd.Series({'R_bot': r, 'out_bot': why})
+    pos = (book.get('positions') or {}).get(row.pair)
+    if pos and close_t <= pd.Timestamp(pos['opened_at']) <= close_t + pd.Timedelta(hours=1):
+        return pd.Series({'R_bot': None, 'out_bot': 'OPEN'})
+    return pd.Series({'R_bot': None, 'out_bot': 'не взят'})
+
+
+df = pd.concat([df.reset_index(drop=True), df.apply(bot_result, axis=1).reset_index(drop=True)], axis=1)
 pd.set_option('display.width', 200)
 print(df.to_string(index=False))
+print('\nбот (accounts/replay): закрыто', len(bot['trades']), 'sumR',
+      round(sum(t['pnl_r'] for t in bot['trades']), 2), 'открыто', len(book.get('positions') or {}),
+      'отказы', (book.get('counts') or {}).get('refused'))
 closed = df[df.out != 'OPEN']
 print('\nclosed', len(closed), 'sumR', round(closed.R.sum(), 2), 'open', (df.out == 'OPEN').sum(),
       'open markR', round(df[df.out == 'OPEN'].R.sum(), 2))
