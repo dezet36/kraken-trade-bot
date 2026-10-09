@@ -414,7 +414,7 @@ class LiveTradeManager:
         if self.last_trade_time[trading_pair] is None:
             return True
         hours_since_last = (datetime.now() - self.last_trade_time[trading_pair]).total_seconds() / 3600
-        import strategy_profile
+        from strategies import strategy_profile
         return hours_since_last >= strategy_profile.cooldown_hours(self._cooldown_owner(trading_pair))
 
     # ── Снимок реального состояния на бирже (источник истины) ────────────────
@@ -636,7 +636,7 @@ class LiveTradeManager:
         from datetime import timedelta
         try:
             pending = self._load_pending_orders()
-            import strategy_profile
+            from strategies import strategy_profile
             max_valid = datetime.now() + timedelta(hours=strategy_profile.expiry_hours(signal.get('strategy')))
             pending[pair] = {
                 'order_id':           order_id,
@@ -865,7 +865,7 @@ class LiveTradeManager:
                 # 1. Проверяем срок действия
                 max_valid = datetime.fromisoformat(po['max_valid_until'])
                 if now > max_valid:
-                    import strategy_profile
+                    from strategies import strategy_profile
                     log(f"   {pair}: pending истёк (>{strategy_profile.expiry_hours((po.get('signal') or {}).get('strategy') or self.get_pair_strategy(pair)):.0f}ч) — отменяем")
                     self._cancel_pending_order(pair, order_id)
                     continue
@@ -1019,7 +1019,7 @@ class LiveTradeManager:
                 signal['atr_pct'] = None               # без обстановки, но со сделкой
 
         if not self.check_cooldown(trading_pair):
-            import strategy_profile
+            from strategies import strategy_profile
             hours_left = strategy_profile.cooldown_hours(self._cooldown_owner(trading_pair)) - (
                 datetime.now() - self.last_trade_time[trading_pair]
             ).total_seconds() / 3600
@@ -1075,7 +1075,7 @@ class LiveTradeManager:
         # и стоп окажется дальше, чем считала стратегия. Размер поэтому берём
         # от цены заполнения: пока считали от расчётной, настройка «риск 0.5%»
         # рисковала 0.5625% — смещение 0.1% при стопе 0.8% даёт 12.5% сверху.
-        import strategy_profile
+        from strategies import strategy_profile
         _entry_offset = strategy_profile.limit_offset_pct(signal.get('strategy'))
         sizing_entry = (signal['params']['entry'] * (1 + _entry_offset)
                         if setup['type'] == 'LONG'
@@ -1531,7 +1531,7 @@ class LiveTradeManager:
 
         # ── Тайм-стоп (v3): позиция старше лимита -> рыночное закрытие ────────
         # (широкий стоп v2 без лимита может держать пару заблокированной месяцами)
-        import strategy_profile
+        from strategies import strategy_profile
         max_hold = strategy_profile.max_hold_hours(self.pair_strategy.get(trading_pair))
         if max_hold:
             age_h = (datetime.now() - position['entry_time']).total_seconds() / 3600

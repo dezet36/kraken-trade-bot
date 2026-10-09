@@ -18,7 +18,7 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-import llm_grammar as gr
+from strategies.llm import llm_grammar as gr
 from gbnf_check import Grammar
 
 RNG = random.Random(20260919)

@@ -146,7 +146,7 @@ class TestPendingInvalidationIsDeclaredByTheStrategy:
         имени стратегии; теперь — сама ФИБО, тем же выражением."""
         import config
         import pandas as pd
-        import strategy
+        strategy = __import__('importlib').import_module('strategies.fibo.strategy')
         path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data', 'golden_market_1h.json')
         with open(path, encoding='utf-8') as fh:
             g = json.load(fh)['ETHUSDT']

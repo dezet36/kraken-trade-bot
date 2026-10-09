@@ -100,7 +100,7 @@ class TestAdapter:
         # Денег в сетапе нет; предел в одну сторону — с каким стратегия
         # измерена: его по умолчанию берёт счёт (strategy_profile).
         from strategies import contract
-        import strategy_profile
+        strategy_profile = __import__('importlib').import_module('strategies.strategy_profile')
         assert contract.money_in(sig) == []
         assert strategy_profile.max_same_direction('SMCS') == 8
         assert p['be_level'] is None and p['breakeven_after_tp'] is False
@@ -167,7 +167,7 @@ class TestRegistration:
         assert '  SMCS: {' in text
 
     def test_execution_is_what_was_measured(self):
-        import strategy_profile as sp
+        sp = __import__('importlib').import_module('strategies.strategy_profile')
         assert sp.fills_through_market('SMCS') is True
         assert sp.drops_at_target('SMCS') is False
         assert sp.max_hold_hours('SMCS') == 720

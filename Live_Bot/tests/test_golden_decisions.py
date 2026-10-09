@@ -49,7 +49,7 @@ def fibo_decisions(df):
     """Старая ФИБО: analyze_market на скользящем окне часа. Решение
     сканера по тренду 4ч и толпе — отдельно (не меняется при переносе файлов
     отдельно от этого), здесь — геометрия сетапа."""
-    import strategy
+    strategy = __import__('importlib').import_module('strategies.fibo.strategy')
     # Ручка «минимальный стоп» — настройка стратегии (strategies/settings.py,
     # с этапа 2; до него — settings_store). Денег стратегия не знает.
     knobs = strategy.settings

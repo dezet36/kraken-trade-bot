@@ -213,7 +213,7 @@ class TestTheMarkupShowsItHonestly:
 
     def test_the_block_is_in_the_market_text_and_the_prompt_defines_it(self):
         import llm_context
-        import llm_prompt
+        llm_prompt = __import__('importlib').import_module('strategies.llm.llm_prompt')
         text = chr(10).join(llm_context.market_lines({'macro': None}, 100.0))
         assert 'РЫНОК В ЦЕЛОМ' in text
         assert 'USDT.D' in llm_prompt.definitions()

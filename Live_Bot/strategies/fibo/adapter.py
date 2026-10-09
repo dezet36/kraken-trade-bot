@@ -2,8 +2,8 @@
 Адаптер старой ФИБО (импульс часа + откат по Фибоначчи) под единый набор
 функций реестра стратегий (strategies/registry.py).
 
-Сама стратегия пока живёт там же, где жила: сканер — pair_scanner.py, сетап —
-strategy.py, параметры — config.py (раздел «Стратегия Фибо-лимит» и соседние).
+Сама стратегия: сканер — strategies/pair_scanner.py, сетап —
+strategies/fibo/strategy.py, параметры — config.py (раздел «Стратегия Фибо-лимит» и соседние).
 Здесь — только то, что раньше было разбросано ветками по общим модулям: цикл
 бота (сканирование, блок-лист часов), сборка сигнала (bot._build_signal),
 величины исполнения (strategy_profile), разметка графика (setup_geometry).
@@ -25,13 +25,13 @@ def scan(pairs, gate, client=None):
     if hour in config.BLOCK_ENTRY_HOURS_UTC:
         log(f"   FIBO: {hour:02d}:xx UTC в блок-листе, пропускаем")
         return []
-    import pair_scanner
+    from strategies import pair_scanner
     return pair_scanner.scan_for_setups(pairs, gate, client=client)
 
 
 def build_signal(candidate):
     """Сигнал по кандидату сканера: сетап считает strategy.analyze_market."""
-    from strategy import analyze_market
+    from strategies.fibo.strategy import analyze_market
     pair = candidate['pair']
     signal = analyze_market(candidate['df_1h'], None, pair)
     if not signal:

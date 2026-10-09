@@ -39,7 +39,7 @@ docs/Разбор_промта_ИИ_2026-09-20.md.
 дважды, расходится.
 """
 
-import llm_decide
+from strategies.llm import llm_decide
 
 
 SYSTEM = """Ты — аналитик торговой системы своего владельца: квант и специалист по
@@ -342,7 +342,7 @@ def field_limits():
     пока грамматика не отрубит. Правило, записанное дважды, расходится,
     поэтому числа берутся оттуда, где они действуют.
     """
-    import llm_grammar
+    from strategies.llm import llm_grammar
     return (f"режим до {llm_grammar.REGIME_CHARS} знаков, "
             f"каждое из шести полей разбора до {llm_grammar.ANALYSIS_CHARS}, "
             f"условие входа до {llm_grammar.TRIGGER_CHARS}, "
@@ -386,7 +386,7 @@ CRITIC = """Ты — независимый проверяющий торгов�
 
 def build_critic(context_text, plan_text):
     """Вопрос проверяющему: роль, данные, план аналитика."""
-    import llm_grammar
+    from strategies.llm import llm_grammar
     system = (CRITIC.replace('{issues}', str(llm_grammar.CRITIC_ISSUES_CHARS))
               .replace('{worst}', str(llm_grammar.CRITIC_WORST_CHARS)))
     return (f"{system}\n{'-' * 40}\n{context_text}\n{'-' * 40}\n"
@@ -395,7 +395,7 @@ def build_critic(context_text, plan_text):
 
 def llm_decide_min_rr():
     """Порог R:R — тот же, что проверяет код (llm_decide.MIN_RR)."""
-    import llm_decide
+    from strategies.llm import llm_decide
     return float(llm_decide.MIN_RR)
 
 
@@ -403,7 +403,7 @@ def build(context_text):
     """Полный текст вопроса: задача, пределы, данные."""
     import config
     ttl = int(getattr(config, 'LLM_TRIGGER_TTL_H', 12) or 12)
-    import llm_grammar
+    from strategies.llm import llm_grammar
     system = (SYSTEM.replace('{limits}', field_limits()).replace('{ttl}', str(ttl))
               .replace('{definitions}', definitions())
               .replace('{analysis}', str(llm_grammar.ANALYSIS_CHARS))

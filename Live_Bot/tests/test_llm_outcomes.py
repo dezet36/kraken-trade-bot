@@ -16,7 +16,7 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import llm_outcomes
+from strategies.llm import llm_outcomes
 
 H = 3_600_000
 
@@ -207,7 +207,7 @@ class TestTheDeeperOutcomeFields:
         assert row['cond_hours'] == '' and row['trigger_when'] == 'now'
 
     def test_the_condition_is_evaluated_on_hourly_bars(self, monkeypatch):
-        import strategy_llm
+        strategy_llm = __import__('importlib').import_module('strategies.llm.adapter')
         start = 1_700_000_000_000 - (1_700_000_000_000 % H)
         seen = []
         monkeypatch.setattr(strategy_llm, 'condition_met',

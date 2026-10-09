@@ -50,8 +50,8 @@ import threading
 import time
 
 import config
-import llm_decide
-import llm_journal
+from strategies.llm import llm_decide
+from strategies.llm import llm_journal
 import llm_local
 import llm_market
 from logger import log
@@ -165,7 +165,7 @@ def _decide_one(pair, df, market):
         # Что модель видела — признаки и разметка, тем же ключом (pair, at),
         # что и строка журнала. Снимок после записи из вердикта снимается.
         try:
-            import llm_record
+            from strategies.llm import llm_record
             llm_record.record(pair, df, verdict, stats, at=at or '')
         except Exception as exc:                   # noqa: BLE001
             log(f'   {NAME} {pair}: признаки разбора не записаны — {exc}')
@@ -228,11 +228,11 @@ def _remember(pair, now=None):
     minutes = int(config.__dict__.get('LLM_REASK_AFTER_MIN', 0) or 0)
     now = now if now is not None else time.time()
     _asked[pair] = now
-    import llm_urgency
+    from strategies.llm import llm_urgency
     _asked_sig[pair] = llm_urgency.signature(_reasons.get(pair, ()))
     # Метки живут дольше окна повтора: по ним _stale решает, что пару
     # давно не разбирали. Выбрасываем только совсем старые.
-    import llm_urgency
+    from strategies.llm import llm_urgency
     keep_sec = max(minutes * 60, llm_urgency.STALE_HOURS * 3600 * 2)
     for key, at in list(_asked.items()):
         if now - at >= keep_sec:
@@ -268,7 +268,7 @@ def _queue(pairs, context_of=_cached_context, skip=()):
     # СОБЫТИЯ ВПЕРЁД. Свежий слом, всплеск ликвидаций, цена у уровня, скачок
     # ОИ — такая пара идёт впереди круга, и окно повтора для неё вдвое
     # короче. Считается кодом из кэша SMC и файлов, без запросов к бирже.
-    import llm_urgency
+    from strategies.llm import llm_urgency
     ranked = llm_urgency.rank(ring, context_of)
     out, idle, same = [], [], []
     for pair, points, why in ranked:
@@ -307,7 +307,7 @@ def _queue(pairs, context_of=_cached_context, skip=()):
 
 def _stale(pair, now=None):
     """Пару давно (или никогда) не разбирали — плановый проход без повода."""
-    import llm_urgency
+    from strategies.llm import llm_urgency
     now = now if now is not None else time.time()
     at = _asked.get(pair)
     return at is None or (now - at) >= llm_urgency.STALE_HOURS * 3600
@@ -369,7 +369,7 @@ def current_setups(broker=None, now=None):
     out['open'] = [o for o in snap.get('open') or [] if o.get('strategy') == NAME]
     # Режим тетради: сетапов-планов в нём нет, а «почему ИИ молчит» — это статус закономерностей часа.
     try:
-        import llm_notebook
+        from strategies.llm import llm_notebook
         if llm_notebook.enabled():
             out['notebook'] = llm_notebook.status_now()
     except Exception as exc:                       # noqa: BLE001
@@ -889,13 +889,13 @@ def scan_for_setups(pairs, gate, client=None, candles=None,
     # РЕЖИМ ПРАВИЛ: сетап по своей копии проверенных правил отбора, модель
     # входа не выбирает (llm_rules, config.LLM_MODE). Модель при этом не нужна
     # вовсе — стратегия торгует и когда она занята или недоступна.
-    import llm_rules
+    from strategies.llm import llm_rules
     if llm_rules.enabled():
         return llm_rules.scan(pairs, gate, client=client)
 
     # РЕЖИМ ТЕТРАДИ: модель торгует сама по закономерностям, найденным и
     # проверенным на истории (llm_notebook, config.LLM_MODE=notebook).
-    import llm_notebook
+    from strategies.llm import llm_notebook
     if llm_notebook.enabled():
         return llm_notebook.scan(pairs, gate, client=client)
 
@@ -1003,7 +1003,7 @@ def _alert_broken(pair, verdict, now=None):
 def _observe(pair, df, verdict):
     """Заводит наблюдение за исходом: куда пошла цена после вердикта."""
     try:
-        import llm_outcomes
+        from strategies.llm import llm_outcomes
         from datetime import datetime, timezone
         price = float(df['close'].iloc[-1])
         ts = int(df['timestamp'].iloc[-1].timestamp() * 1000)
@@ -1140,10 +1140,10 @@ def build_signal(candidate):
 def _rules():
     """Правила ИИ, если он в режиме «правила» (LLM_MODE=rules); в режиме тетради
     — её исполнение (те же имена); иначе None."""
-    import llm_rules
+    from strategies.llm import llm_rules
     if llm_rules.enabled():
         return llm_rules.DECISION
-    import llm_notebook
+    from strategies.llm import llm_notebook
     return llm_notebook.EXECUTION if llm_notebook.enabled() else None
 
 

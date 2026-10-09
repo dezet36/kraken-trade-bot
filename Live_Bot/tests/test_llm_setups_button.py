@@ -12,7 +12,7 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import strategy_llm          # noqa: E402
+from strategies.llm import adapter as strategy_llm  # noqa: E402
 from control import telegram_notify as tg  # noqa: E402
 
 
@@ -124,7 +124,7 @@ class TestNotebookMode:
         assert text.index('В позиции') < text.index('Тетрадь сейчас')
 
     def test_current_setups_carry_the_status_in_notebook_mode(self, monkeypatch):
-        import llm_notebook
+        llm_notebook = __import__('importlib').import_module('strategies.llm.llm_notebook')
         monkeypatch.setattr(llm_notebook, 'enabled', lambda: True)
         monkeypatch.setattr(llm_notebook, 'status_now', lambda: self.STATUS)
         assert strategy_llm.current_setups(None)['notebook'] == self.STATUS

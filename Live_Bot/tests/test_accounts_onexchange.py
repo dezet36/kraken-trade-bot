@@ -178,7 +178,7 @@ def a_setup(pair='BTCUSDT', side='LONG', entry=100.0, stop=98.0, targets=(106.0,
 
 @pytest.fixture(autouse=True)
 def profile(monkeypatch):
-    import strategy_profile
+    strategy_profile = __import__('importlib').import_module('strategies.strategy_profile')
     values = {'limit_offset_pct': 0.0, 'cost_limit_pct': 0.0, 'expiry_hours': 24.0, 'cooldown_hours': 12.0,
               'max_hold_hours': 0.0, 'drops_at_target': True, 'fills_through_market': False}
     for key, value in values.items():
@@ -318,7 +318,7 @@ class TestLifecycle:
         assert row['exit_reason'] == 'TP1' and row['pnl_r'] > 2.9 and book(code)['quality']['wins'] == 1
 
     def test_expired_order_is_cancelled(self, venue, sent, monkeypatch):
-        import strategy_profile
+        strategy_profile = __import__('importlib').import_module('strategies.strategy_profile')
         monkeypatch.setattr(strategy_profile, 'expiry_hours', lambda s: 1.0)
         code = account()
         onexchange.offer('SMCS', a_setup(), now_ms=T0)
@@ -334,7 +334,7 @@ class TestLifecycle:
         assert book(code)['counts']['dropped'] == {'сетап разрушен': 1}
 
     def test_part_filled_before_the_cancel_is_a_position(self, venue, monkeypatch):
-        import strategy_profile
+        strategy_profile = __import__('importlib').import_module('strategies.strategy_profile')
         monkeypatch.setattr(strategy_profile, 'expiry_hours', lambda s: 1.0)
         code = account()
         onexchange.offer('SMCS', a_setup(), now_ms=T0)
@@ -345,7 +345,7 @@ class TestLifecycle:
         assert not b['pending'] and b['positions'][0]['size'] == 10.0
 
     def test_hold_limit_closes_on_the_exchange(self, venue, sent, monkeypatch):
-        import strategy_profile
+        strategy_profile = __import__('importlib').import_module('strategies.strategy_profile')
         monkeypatch.setattr(strategy_profile, 'max_hold_hours', lambda s: 1.0)
         code = account()
         opened(venue, code)

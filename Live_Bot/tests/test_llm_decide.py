@@ -20,7 +20,7 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import config
-import llm_decide as dec
+from strategies.llm import llm_decide as dec
 
 
 # Уровни подобраны так, чтобы РАЗУМНЫЙ сетап проходил все пороги. Первая
@@ -419,7 +419,7 @@ class TestTheTriggerIsExecutable:
         assert out['trigger'] == 'лимит на уровень'
 
     def test_the_grammar_only_allows_known_conditions(self):
-        import llm_grammar
+        llm_grammar = __import__('importlib').import_module('strategies.llm.llm_grammar')
         text = llm_grammar.build([lv['id'] for lv in LEVELS])
         assert 'close_above' in text and 'close_below' in text and 'now' in text
         assert 'touch' not in text
@@ -578,7 +578,7 @@ class TestDistancesAreInTheGrammar:
     """
 
     def test_a_stop_closer_than_the_minimum_is_not_offered(self):
-        import llm_grammar
+        llm_grammar = __import__('importlib').import_module('strategies.llm.llm_grammar')
         ids = ['L1', 'L2', 'L3', 'L4']
         prices = [110.0, 103.0, 100.0, 99.5]          # L4 в 0.5% под L3
         text = llm_grammar.build(ids, prices=prices, min_stop_pct=1.5, min_rr=2.0)
@@ -588,7 +588,7 @@ class TestDistancesAreInTheGrammar:
         assert not any(l.startswith('long-l3-') for l in text.splitlines())
 
     def test_a_target_closer_than_rr_times_minimum_is_not_offered(self):
-        import llm_grammar
+        llm_grammar = __import__('importlib').import_module('strategies.llm.llm_grammar')
         ids = ['L1', 'L2', 'L3', 'L4']
         prices = [115.0, 104.0, 100.0, 97.0]          # стоп L4 3%: цель нужна ≥ 6%
         text = llm_grammar.build(ids, prices=prices, min_stop_pct=1.5, min_rr=2.0)
@@ -598,7 +598,7 @@ class TestDistancesAreInTheGrammar:
         assert 'L2' not in line and 'L1 (115)' in line, 'цель пишется номером с ценой'
 
     def test_without_prices_nothing_is_restricted(self):
-        import llm_grammar
+        llm_grammar = __import__('importlib').import_module('strategies.llm.llm_grammar')
         a = llm_grammar.build(['L1', 'L2', 'L3'])
         b = llm_grammar.build(['L1', 'L2', 'L3'], prices=[100, 99, 98], min_stop_pct=0)
         # Без цен уровни пишутся голым номером, с ценами — «L1 (100)»;
@@ -637,7 +637,7 @@ class TestBiasIsAlwaysThere:
         assert dec.parse(answer(bias='sideways'), LEVELS)['bias'] == ''
 
     def test_the_grammar_demands_bias_in_both_answers(self):
-        import llm_grammar
+        llm_grammar = __import__('importlib').import_module('strategies.llm.llm_grammar')
         for text in (llm_grammar.build(['L1', 'L2', 'L3']), llm_grammar.build([])):
             assert 'bias' in text and 'flat' in text
 
@@ -787,7 +787,7 @@ class TestThinkingBeforeTheAnswer:
 
 class TestTheGrammarAdmitsAThought:
     def test_the_think_block_is_optional_and_bounded(self):
-        import llm_grammar as g
+        g = __import__('importlib').import_module('strategies.llm.llm_grammar')
         text = g.build(['L1', 'L2', 'L3', 'L4', 'L5', 'L6'], prices=[120, 112, 106, 100, 95, 90],
                        min_stop_pct=1.5, min_rr=2.0, think_chars=4000)
         head = text.splitlines()[:5]
@@ -795,7 +795,7 @@ class TestTheGrammarAdmitsAThought:
         assert 'tchar{0,4000}' in head[1] and head[4].startswith('answer   ::= enter | skip')
 
     def test_zero_budget_means_no_block(self):
-        import llm_grammar as g
+        g = __import__('importlib').import_module('strategies.llm.llm_grammar')
         text = g.build(['L1', 'L2', 'L3', 'L4', 'L5', 'L6'], prices=[120, 112, 106, 100, 95, 90],
                        min_stop_pct=1.5, min_rr=2.0, think_chars=0)
         assert text.startswith('root     ::= enter | skip')
@@ -1088,7 +1088,7 @@ class TestAPlanTheCodeWouldRefuseCannotBeWritten:
     IDS = [lv['id'] for lv in LEVELS]
 
     def _rules(self, market, levels=LEVELS):
-        import llm_grammar
+        llm_grammar = __import__('importlib').import_module('strategies.llm.llm_grammar')
         grammar = llm_grammar.build([lv['id'] for lv in levels],
                                     prices=[lv['price'] for lv in levels], min_rr=2.0,
                                     stop_buffer_pct=dec.stop_hunt_pct(),
@@ -1184,7 +1184,7 @@ class TestAPlanTheCodeWouldRefuseCannotBeWritten:
 
     def test_the_revision_is_asked_without_a_thought(self, monkeypatch):
         """Переделка без мысли: с ней вопрос ~10.4 тыс. не оставлял места плану (п. 46)."""
-        import llm_grammar
+        llm_grammar = __import__('importlib').import_module('strategies.llm.llm_grammar')
         monkeypatch.setattr(config, 'LLM_THINK_CHARS', 2400)
         monkeypatch.setattr(config, 'LLM_REVISIONS', True)
         grammars = []
@@ -1415,7 +1415,7 @@ class TestRevisionsAreSwitchedOff:
 
     def test_the_mark_reaches_the_journal(self, tmp_path, monkeypatch):
         import csv
-        import llm_journal
+        llm_journal = __import__('importlib').import_module('strategies.llm.llm_journal')
         monkeypatch.setattr(llm_journal, 'CSV_PATH', str(tmp_path / 'llm_calls.csv'))
         out, _ = self._decide([answer(stop='L2')])
         llm_journal.record('BTCUSDT', '', out, {})

@@ -176,7 +176,7 @@ class TestPool:
         держит только изоляцию: копия — отдельный объект, пул SMC ей не нужен,
         и модуль ИИ не импортирует адаптер SMC.
         """
-        import llm_rules
+        llm_rules = __import__('importlib').import_module('strategies.llm.llm_rules')
         assert llm_rules.DECISION is not params
         assert llm_rules.DECISION.TRADE_POOL == ()
         src = open(llm_rules.__file__, encoding='utf-8').read()
@@ -184,7 +184,7 @@ class TestPool:
 
     def test_smc_threshold_change_does_not_reach_the_ai_copy(self, monkeypatch):
         """Правка порога SMC не меняет правило толпы у ИИ (CLAUDE.md, «Изоляция стратегий»)."""
-        import llm_rules
+        llm_rules = __import__('importlib').import_module('strategies.llm.llm_rules')
         before = (llm_rules.DECISION.FUNDING_AGAINST_CROWD, llm_rules.DECISION.FUNDING_MAX_BP)
         monkeypatch.setattr(params, 'FUNDING_MAX_BP', 5.0)
         monkeypatch.setattr(params, 'FUNDING_AGAINST_CROWD', not params.FUNDING_AGAINST_CROWD)

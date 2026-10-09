@@ -412,7 +412,7 @@ class TestTheModelIsActuallyAsked:
     """
 
     def test_the_prompt_carries_the_task_and_the_data(self):
-        import llm_prompt
+        llm_prompt = __import__('importlib').import_module('strategies.llm.llm_prompt')
 
         text = llm_prompt.build('ДАННЫЕ СЕТАПА ЗДЕСЬ')
         assert 'ДАННЫЕ СЕТАПА ЗДЕСЬ' in text
@@ -423,8 +423,8 @@ class TestTheModelIsActuallyAsked:
         Предел, переписанный в промт руками, разойдётся с проверкой. В этом
         проекте так уже вышло с дневным стоп-краном.
         """
-        import llm_decide
-        import llm_prompt
+        llm_decide = __import__('importlib').import_module('strategies.llm.llm_decide')
+        llm_prompt = __import__('importlib').import_module('strategies.llm.llm_prompt')
 
         text = llm_prompt.limits()
         assert str(llm_decide.MIN_CONFLUENCE) in text
@@ -436,7 +436,7 @@ class TestTheModelIsActuallyAsked:
         import numpy as np
         import pandas as pd
 
-        import llm_decide
+        llm_decide = __import__('importlib').import_module('strategies.llm.llm_decide')
 
         seen = {}
 
@@ -532,7 +532,7 @@ def _observed(at, pct=-1.2, side='SHORT'):
 
 class TestPastVerdictsCarryTheirOutcome:
     def test_the_outcome_line_follows_the_verdict(self, monkeypatch):
-        import llm_outcomes
+        llm_outcomes = __import__('importlib').import_module('strategies.llm.llm_outcomes')
         monkeypatch.setattr(llm_outcomes, 'recent', lambda pair, limit=2: [
             _observed('2026-09-20T10:11:00+00:00')])
         history = [{'pair': 'BNBUSDT', 'at': '2026-09-20T10:11:47+00:00', 'decision': 'enter',
@@ -548,7 +548,7 @@ class TestPastVerdictsCarryTheirOutcome:
         Наблюдение заводит цикл, забирая вердикт, — через 3 минуты в медиане и
         до 19. По совпадению минуты исход находился у 12 разборов из 161.
         """
-        import llm_outcomes
+        llm_outcomes = __import__('importlib').import_module('strategies.llm.llm_outcomes')
         monkeypatch.setattr(llm_outcomes, 'recent', lambda pair, limit=2: [
             _observed('2026-09-20T10:26:05+00:00', pct=2.5),
             _observed('2026-09-20T08:14:30+00:00', pct=-0.7)])
@@ -561,7 +561,7 @@ class TestPastVerdictsCarryTheirOutcome:
         assert 'с тех пор +2.5%' in first and 'с тех пор -0.7%' in second
 
     def test_an_observation_long_after_is_not_this_analysis(self, monkeypatch):
-        import llm_outcomes
+        llm_outcomes = __import__('importlib').import_module('strategies.llm.llm_outcomes')
         monkeypatch.setattr(llm_outcomes, 'recent', lambda pair, limit=2: [
             _observed('2026-09-20T11:05:00+00:00')])
         history = [{'pair': 'BNBUSDT', 'at': '2026-09-20T10:11:47+00:00', 'decision': 'skip',
@@ -573,7 +573,7 @@ class TestPastVerdictsCarryTheirOutcome:
         «Нет законного плана» выносит код до вопроса — модель этой пары не
         видела. Такие строки не занимают два места прошлых разборов.
         """
-        import llm_outcomes
+        llm_outcomes = __import__('importlib').import_module('strategies.llm.llm_outcomes')
         monkeypatch.setattr(llm_outcomes, 'recent', lambda pair, limit=2: [])
         history = [
             {'pair': 'ARBUSDT', 'at': '2026-09-25T11:07:00+00:00', 'decision': 'skip',
@@ -592,7 +592,7 @@ class TestPastVerdictsCarryTheirOutcome:
         assert '08:07 UTC: отказ — два фактора из пяти' in joined
 
     def test_only_code_refusals_mean_no_block(self, monkeypatch):
-        import llm_outcomes
+        llm_outcomes = __import__('importlib').import_module('strategies.llm.llm_outcomes')
         monkeypatch.setattr(llm_outcomes, 'recent', lambda pair, limit=2: [])
         history = [{'pair': 'ARBUSDT', 'at': '2026-09-25T11:07:00+00:00', 'decision': 'skip',
                     'gate': 'нет законного стопа', 'detail': 'стоп некуда'}]

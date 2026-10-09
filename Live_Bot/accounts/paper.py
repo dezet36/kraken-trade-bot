@@ -428,7 +428,7 @@ def max_same_direction(strategy):
     value = load().get(strategy, {}).get('max_same_direction')
     if value is not None:
         return int(value)
-    import strategy_profile
+    from strategies import strategy_profile
     return strategy_profile.max_same_direction(strategy)
 
 

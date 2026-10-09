@@ -55,7 +55,7 @@ class TestTheWorkerSurvivesItsModel:
         assert llm_worker.alive(), 'ошибка модели — не падение процесса'
 
     def test_the_bot_side_names_are_broken_gates(self):
-        import llm_decide
+        llm_decide = __import__('importlib').import_module('strategies.llm.llm_decide')
         assert 'модель упала' in llm_decide.BROKEN_GATES
         assert 'модель зависла' in llm_decide.BROKEN_GATES
 

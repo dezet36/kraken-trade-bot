@@ -119,7 +119,7 @@ def watch(pair, verdict, price, ts, at=''):
     решения, а неисправности, и по ним нечего проверять.
     """
     try:
-        import llm_decide
+        from strategies.llm import llm_decide
         if verdict.get('gate') in llm_decide.BROKEN_GATES:
             return
         # У отказа кода числа плана лежат в verdict['plan'] (llm_decide.check):
@@ -264,7 +264,7 @@ def _advance_plan(w, ts, high, low, close, hours):
 def _try_condition(w, hours):
     """Наступило ли условие модели по накопленным часовым свечам."""
     try:
-        import strategy_llm
+        from strategies.llm import adapter as strategy_llm
         bars = [(b['ts'] + _MS_HOUR, b['o'], b['h'], b['l'], b['c'], b['v']) for b in w['hour_bars']]
         if not bars or w.get('trigger_level') is None:
             return

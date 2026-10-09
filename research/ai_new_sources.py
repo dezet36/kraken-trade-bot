@@ -208,7 +208,7 @@ def coverage():
     periods = {k: L.SPLITS[k] for k in ('y2021', 'train', 'valid')}
     sys.path.insert(0, os.path.join(os.path.dirname(HERE), 'Live_Bot'))
     os.environ.setdefault('BOT_DATA_DIR', os.path.join(HERE, 'results'))
-    import llm_notebook as N
+    from strategies.llm import llm_notebook as N
     lines = ['Покрытие новых источников (доля часов периода): спот / Coinbase; DVOL — общий']
     for p in N.UNIVERSE:
         cells = []
@@ -236,7 +236,7 @@ def main():
     if cmd == 'fetch':
         sys.path.insert(0, os.path.join(os.path.dirname(HERE), 'Live_Bot'))
         os.environ.setdefault('BOT_DATA_DIR', os.path.join(HERE, 'results'))
-        import llm_notebook as N
+        from strategies.llm import llm_notebook as N
         pairs = sys.argv[2:] or list(N.UNIVERSE)
         print(fetch_dvol(), flush=True)
         with ThreadPoolExecutor(max_workers=4) as pool:

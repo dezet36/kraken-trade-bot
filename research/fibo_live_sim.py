@@ -57,8 +57,8 @@ import pandas as pd  # noqa: E402
 import backtest_smc as bt  # noqa: E402
 import config  # noqa: E402
 from accounts import risk_gate  # noqa: E402
-import strategy  # noqa: E402
-import strategy_profile  # noqa: E402
+from strategies.fibo import strategy  # noqa: E402
+from strategies import strategy_profile  # noqa: E402
 from smc_engine import Order, compute_stats, run_portfolio  # noqa: E402
 
 STEP = np.timedelta64(5, 'm')
@@ -124,7 +124,7 @@ def orders_for_pair(args):
     bot._build_signal, analyze_market и разрешённые стороны. Сканер получает
     подставленные свечи вместо запроса к бирже — и только.
     """
-    import pair_scanner
+    from strategies import pair_scanner
     from accounts import settings_store
     cache, pair = args
     bt.CACHE_DIR = os.path.join(HERE, cache)

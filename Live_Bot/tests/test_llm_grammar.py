@@ -17,7 +17,7 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import llm_grammar as gr
+from strategies.llm import llm_grammar as gr
 
 
 class TestOnlyTheGivenLevelsAreAllowed:
@@ -206,7 +206,7 @@ class TestTheLongestAnswerStillFits:
     CHARS_PER_TOKEN = 2.5
 
     def worst_answer_tokens(self):
-        import llm_grammar as gr
+        gr = __import__('importlib').import_module('strategies.llm.llm_grammar')
         chars = (gr.REGIME_CHARS + gr.ANALYSIS_CHARS + gr.TRIGGER_CHARS
                  + gr.WHY_CHARS + gr.RISK_CHARS + gr.ALT_CHARS)
         # Плюс сама разметка JSON: имена полей, скобки, идентификаторы целей.
@@ -227,7 +227,7 @@ class TestTheLongestAnswerStillFits:
         стоило двух минут счёта. Каждое поле, кроме разбора, отвечает на один
         вопрос — предложения-двух ему хватает.
         """
-        import llm_grammar as gr
+        gr = __import__('importlib').import_module('strategies.llm.llm_grammar')
         for name in ('REGIME_CHARS', 'TRIGGER_CHARS', 'WHY_CHARS',
                      'RISK_CHARS', 'ALT_CHARS'):
             assert getattr(gr, name) <= 400, name

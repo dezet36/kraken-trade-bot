@@ -95,7 +95,7 @@ def cooldown_hours(strategy):
     Фибоначчи. Пока это решалось здесь, Боллинджер жил по 12 ч из config при
     своих 2 ч в params.
     """
-    import strategy_profile
+    from strategies import strategy_profile
     return strategy_profile.cooldown_hours(strategy)
 
 

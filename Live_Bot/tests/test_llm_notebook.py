@@ -23,7 +23,7 @@ RESEARCH = os.path.join(os.path.dirname(HERE), 'research')
 
 import config  # noqa: E402
 import flow_features  # noqa: E402
-import llm_notebook  # noqa: E402
+from strategies.llm import llm_notebook  # noqa: E402
 
 H = 3_600_000
 T0 = pd.Timestamp('2026-06-01', tz='UTC')
@@ -419,7 +419,7 @@ class TestModelBesideTheCycle:
 
 class TestExecutionProfile:
     def test_notebook_mode_profile(self, notebook_mode):
-        import strategy_profile as sp
+        sp = __import__('importlib').import_module('strategies.strategy_profile')
         e = llm_notebook.EXECUTION
         assert sp.expiry_hours('LLM') == e.PENDING_ORDER_MAX_HOURS
         assert sp.cooldown_hours('LLM') == e.COOLDOWN_HOURS
@@ -428,7 +428,7 @@ class TestExecutionProfile:
         assert sp.fills_through_market('LLM') is True
 
     def test_routing(self, notebook_mode, monkeypatch):
-        import strategy_llm
+        strategy_llm = __import__('importlib').import_module('strategies.llm.adapter')
         monkeypatch.setattr(llm_notebook, 'scan', lambda pairs, gate, client=None, balance=None: ['из тетради'])
         monkeypatch.setattr(strategy_llm.llm_local, 'available',
                             lambda: (_ for _ in ()).throw(AssertionError('режим планов не нужен')))

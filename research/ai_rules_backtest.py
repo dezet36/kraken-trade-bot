@@ -40,7 +40,7 @@ logger.log = lambda *a, **k: None
 import ai_doctrine as D                               # noqa: E402
 import backtest_smc as bt                             # noqa: E402
 import config                                         # noqa: E402
-import llm_rules                                      # noqa: E402
+from strategies.llm import llm_rules  # noqa: E402
 from accounts import risk_gate  # noqa: E402
 import smc_engine                                     # noqa: E402
 from ai_filter_study import FOMC                      # noqa: E402

@@ -29,8 +29,8 @@ import urllib.error
 import urllib.request
 
 import config
-import llm_grammar
-import llm_prompt
+from strategies.llm import llm_grammar
+from strategies.llm import llm_prompt
 from logger import log
 
 # Сколько ждём ответа: как у рабочего процесса — разбор с мыслью до 45 минут.

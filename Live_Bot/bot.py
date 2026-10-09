@@ -14,13 +14,13 @@ from data import positioning
 from data import market_cap
 from data import market_mood
 from strategies.levels import adapter as strategy_levels
-import strategy_llm
+from strategies.llm import adapter as strategy_llm
 from strategies.rsibb import adapter as strategy_rsibb
 from strategies.smc import adapter as strategy_smc
 from strategies.smcs import adapter as strategy_smcs
 from strategies.fib12 import adapter as strategy_fib12
-from strategy import analyze_market
-from pair_scanner import get_liquid_pairs, scan_for_setups
+from strategies.fibo.strategy import analyze_market
+from strategies.pair_scanner import get_liquid_pairs, scan_for_setups
 from paper_broker import PaperBroker, STRATEGIES as PAPER_STRATEGIES
 # Деньги и допуск стратегий — у их тестовых счетов (реорганизация, этап 2).
 from accounts import paper as account
@@ -83,7 +83,7 @@ def _recorded_pairs(base):
     """
     extra = []
     try:
-        import llm_notebook
+        from strategies.llm import llm_notebook
         if llm_notebook.enabled():
             extra = list(llm_notebook.UNIVERSE)
     except Exception:                                  # noqa: BLE001
@@ -760,7 +760,7 @@ def _start_paper():
     log(f"   Фандинг: {'учитывается' if config.PAPER_FUNDING else 'выключен'}")
     # Величины исполнения — у каждой стратегии свои (strategy_profile): в
     # журнале видно, чем живёт заявка, сколько пауза и где предел издержек.
-    import strategy_profile
+    from strategies import strategy_profile
     for name in broker.strategies:
         d = strategy_profile.describe(name)
         log(f"   {name}: заявка {d['expiry_hours']:.0f} ч | кулдаун {d['cooldown_hours']:.0f} ч | "

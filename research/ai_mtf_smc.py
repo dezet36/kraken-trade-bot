@@ -37,7 +37,7 @@ logger.log = lambda *a, **k: None
 
 import ai_doctrine as D                               # noqa: E402
 import backtest_smc as bt                             # noqa: E402
-import llm_rules                                      # noqa: E402
+from strategies.llm import llm_rules  # noqa: E402
 from common import ci                                 # noqa: E402
 from strategies.smc import signal as smc_signal                  # noqa: E402
 from smc_engine import Order, compute_stats, run_portfolio  # noqa: E402

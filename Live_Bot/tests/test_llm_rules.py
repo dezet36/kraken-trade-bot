@@ -12,7 +12,7 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import config  # noqa: E402
-import llm_rules  # noqa: E402
+from strategies.llm import llm_rules  # noqa: E402
 
 H = 3_600_000
 
@@ -117,7 +117,7 @@ class TestScan:
         # Денег в сетапе нет: риск и предел в одну сторону решает счёт; его
         # предел по умолчанию — из СВОИХ правил ИИ (strategy_profile).
         from strategies import contract
-        import strategy_profile
+        strategy_profile = __import__('importlib').import_module('strategies.strategy_profile')
         assert contract.money_in(signal) == []
         assert strategy_profile.max_same_direction('LLM') == llm_rules.DECISION.MAX_SAME_DIRECTION
         assert signal['llm']['mode'] == 'rules' and 'ордер-блок' in signal['llm']['why']
@@ -198,7 +198,7 @@ class TestSelectionOnTopOfTheCore:
 
 class TestExecutionComesFromOwnRules:
     def test_rules_mode_profile(self, rules_mode):
-        import strategy_profile as sp
+        sp = __import__('importlib').import_module('strategies.strategy_profile')
         r = llm_rules.DECISION
         assert sp.expiry_hours('LLM') == r.PENDING_ORDER_MAX_HOURS
         assert sp.cooldown_hours('LLM') == r.COOLDOWN_HOURS
@@ -209,7 +209,7 @@ class TestExecutionComesFromOwnRules:
         assert sp.min_stop_pct('LLM') == pytest.approx(r.MIN_SL_PCT * 100)
 
     def test_plans_mode_profile_untouched(self, monkeypatch):
-        import strategy_profile as sp
+        sp = __import__('importlib').import_module('strategies.strategy_profile')
         monkeypatch.setattr(config, 'LLM_MODE', 'plans', raising=False)
         monkeypatch.setattr(config, 'LLM_TRIGGER_TTL_H', 12, raising=False)
         monkeypatch.setattr(config, 'LLM_COOLDOWN_HOURS', 4.0, raising=False)
@@ -218,7 +218,7 @@ class TestExecutionComesFromOwnRules:
 
 class TestStrategyRouting:
     def test_rules_mode_does_not_ask_the_model(self, rules_mode, monkeypatch):
-        import strategy_llm
+        strategy_llm = __import__('importlib').import_module('strategies.llm.adapter')
         monkeypatch.setattr(llm_rules, 'scan', lambda pairs, gate, client=None, balance=None: ['из правил'])
         monkeypatch.setattr(strategy_llm.llm_local, 'available',
                             lambda: (_ for _ in ()).throw(AssertionError('модель не нужна')))

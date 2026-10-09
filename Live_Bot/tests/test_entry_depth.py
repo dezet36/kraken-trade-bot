@@ -45,7 +45,7 @@ def test_entry_price_follows_depth(depth, expected, monkeypatch):
     легко, и тогда тест перестанет ловить сдвиг входа.
     """
     import config
-    import strategy
+    strategy = __import__('importlib').import_module('strategies.fibo.strategy')
 
     monkeypatch.setattr(config, 'ENTRY_RETRACE', depth)
     setup = {'type': 'LONG', 'start_price': 100.0, 'end_price': 110.0,
@@ -79,7 +79,7 @@ def test_rr_matches_arithmetic(depth, rr, monkeypatch):
     геометрию когда-нибудь тронут, тест скажет об этом раньше замера.
     """
     import config
-    import strategy
+    strategy = __import__('importlib').import_module('strategies.fibo.strategy')
 
     monkeypatch.setattr(config, 'ENTRY_RETRACE', depth)
     # Ручка «минимальный стоп» — у самой стратегии (strategies/settings.py).

@@ -20,7 +20,7 @@ from datetime import datetime, timezone
 
 import pandas as pd
 
-import scan_report as report
+from strategies import scan_report as report
 # Данные — через дверь анализа (analysis/market.py), не со сборщиков и не с
 # биржи напрямую (реорганизация, этап 4).
 from analysis.market import fetch_ohlcv

@@ -45,7 +45,7 @@ logger.log = lambda *a, **k: None
 import ai_setups as S                                 # noqa: E402
 import backtest_smc as bt                             # noqa: E402
 import smc_engine                                     # noqa: E402
-import strategy_profile                               # noqa: E402
+from strategies import strategy_profile  # noqa: E402
 from common import ci                                 # noqa: E402
 from smc_engine import compute_stats, run_portfolio   # noqa: E402
 

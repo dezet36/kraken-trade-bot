@@ -422,7 +422,7 @@ def decide(rules, book, strategy, setup, now):
     Заявка — план входа на деньгах счёта; в книгу её кладёт register.
     """
     from accounts import risk_gate
-    import strategy_profile
+    from strategies import strategy_profile
     from exit_plan import cooldown_hours, tp_plan, wants_breakeven
     c = cfg()
     book['counts']['offered'] += 1
@@ -510,7 +510,7 @@ def register(book, order, now):
 def through_market(strategy, setup, order):
     """Цена рынка, если лимит уже за рынком и стратегия исполняет такой лимит
     сразу (strategy_profile.fills_through_market) — как у бумажного брокера."""
-    import strategy_profile
+    from strategies import strategy_profile
     if not strategy_profile.fills_through_market(strategy) or core.stop_entry(order):
         return None
     try:

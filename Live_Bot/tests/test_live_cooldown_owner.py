@@ -20,7 +20,7 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import trade_manager  # noqa: E402
-import strategy_profile  # noqa: E402
+from strategies import strategy_profile  # noqa: E402
 
 
 def make(tmp_path):

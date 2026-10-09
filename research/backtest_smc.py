@@ -179,7 +179,7 @@ def fibo_orders(pair, data, reasons=None):
     research/fibo_live_sim.py (боевой сканер на каждом 5-минутном шаге).
     """
     import config
-    import strategy
+    from strategies.fibo import strategy
 
     df_1h = data['1h']
     df_4h = data['4h']

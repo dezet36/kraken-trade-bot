@@ -33,9 +33,9 @@ if __package__ in (None, ''):
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import config
-import scan_report
+from strategies import scan_report
 from accounts import settings_store
-import strategy_profile
+from strategies import strategy_profile
 from logger import log
 
 
@@ -1305,8 +1305,8 @@ def llm_payload(limit=40):
     страница не отличает их друг от друга. На машине разработки модели нет
     законно, и страница обязана сказать именно это, а не показать пустоту.
     """
-    import llm_decide
-    import llm_journal
+    from strategies.llm import llm_decide
+    from strategies.llm import llm_journal
     import llm_local
 
     path = getattr(config, 'LLM_MODEL_PATH', '') or ''
@@ -1328,7 +1328,7 @@ def llm_payload(limit=40):
     # минутами: без этой строки страница между разборами неотличима от
     # страницы, на которой модель молчит, потому что сломалась.
     try:
-        import strategy_llm
+        from strategies.llm import adapter as strategy_llm
         busy = strategy_llm.busy()
     except Exception:                              # noqa: BLE001
         busy = None
@@ -1348,7 +1348,7 @@ def llm_payload(limit=40):
 
     armed = []
     try:
-        import strategy_llm
+        from strategies.llm import adapter as strategy_llm
         armed = strategy_llm.armed()
     except Exception:                                  # noqa: BLE001
         pass
@@ -1357,7 +1357,7 @@ def llm_payload(limit=40):
     # условия, заявки, ждущие цену, позиции.
     setups = {'armed': [], 'pending': [], 'open': []}
     try:
-        import strategy_llm
+        from strategies.llm import adapter as strategy_llm
         setups = strategy_llm.current_setups(_broker)
     except Exception:                                  # noqa: BLE001
         pass
@@ -1366,7 +1366,7 @@ def llm_payload(limit=40):
     # сейчас. Разборы (calls) и исходы планов на странице — прежнего режима «планы».
     notebook = None
     try:
-        import llm_notebook
+        from strategies.llm import llm_notebook
         if llm_notebook.enabled():
             notebook = llm_notebook.page_payload()
     except Exception:                                  # noqa: BLE001
@@ -1459,7 +1459,7 @@ def _llm_outcomes_summary(days=7):
            'overtaken': 0, 'expired': 0, 'past_entry': 0, 'observed': 0, 'tp_first': 0,
            'sl_first': 0, 'neither': 0, 'refused_tp': 0, 'refused_sl': 0}
     try:
-        import llm_journal
+        from strategies.llm import llm_journal
         for row in llm_journal.last(400, mode=config.TRADING_MODE):
             if (row.get('at') or '') >= since and row.get('decision') == 'enter' and not row.get('gate'):
                 out['accepted'] += 1
@@ -1483,7 +1483,7 @@ def _llm_outcomes_summary(days=7):
     except Exception:                                  # noqa: BLE001
         pass
     try:
-        import llm_outcomes
+        from strategies.llm import llm_outcomes
         with open(llm_outcomes.CSV_PATH, encoding='utf-8', newline='') as fh:
             for r in csv.DictReader(fh):
                 if (r.get('at') or '') < since or not r.get('side'):

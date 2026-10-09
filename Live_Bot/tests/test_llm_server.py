@@ -102,8 +102,8 @@ def test_the_thought_is_its_own_phase_with_a_token_limit(server, monkeypatch):
     в токенах и стоп-словом «</think>»; ответ — вторая фаза по грамматике,
     подсказка продолжена мыслью. Журнал видит один текст, как раньше.
     """
-    import llm_grammar
-    import llm_prompt
+    llm_grammar = __import__('importlib').import_module('strategies.llm.llm_grammar')
+    llm_prompt = __import__('importlib').import_module('strategies.llm.llm_prompt')
     monkeypatch.setattr(config, 'LLM_THINK_TOKENS', 700)
     grammar = llm_grammar.with_thinking('root     ::= "{" "}"', 1800)
     answer, stats = llm_server.ask('ВОПРОС', grammar=grammar, max_tokens=900)
@@ -127,7 +127,7 @@ def test_the_thought_is_its_own_phase_with_a_token_limit(server, monkeypatch):
 
 def test_a_thought_cut_by_the_limit_still_gets_an_answer(server, monkeypatch):
     """Мысль не закрылась сама — закрываем здесь; JSON обязан прийти."""
-    import llm_grammar
+    llm_grammar = __import__('importlib').import_module('strategies.llm.llm_grammar')
     monkeypatch.setattr(config, 'LLM_THINK_TOKENS', 700)
     FakeLlamaServer.thought = 'x' * 700
     FakeLlamaServer.thought_closes = False
@@ -174,7 +174,7 @@ def test_a_slow_server_is_named_hung(server):
 
 
 def test_the_prefix_is_warmed_before_the_question(server):
-    import llm_prompt
+    llm_prompt = __import__('importlib').import_module('strategies.llm.llm_prompt')
     full = 'СИСТЕМА ' * 40 + llm_server.PREFIX_SEP + 'Пара: XRPUSDT'
     llm_server.ask(full, max_tokens=5)
     warm, question = FakeLlamaServer.seen[-2], FakeLlamaServer.seen[-1]

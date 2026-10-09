@@ -4,11 +4,11 @@ In DEMO mode volume filter is skipped (exchange returns 0 volume).
 """
 
 import config
-import scan_report as report
+from strategies import scan_report as report
 # Данные — через дверь анализа (analysis/market.py), не со сборщиков и не с
 # биржи напрямую (реорганизация, этап 4).
 from analysis.market import fetch_ohlcv
-from strategy import find_recent_impulse, get_zones, get_htf_trend, calculate_trade_params
+from strategies.fibo.strategy import find_recent_impulse, get_zones, get_htf_trend, calculate_trade_params
 from logger import log
 
 

@@ -20,7 +20,7 @@
 контексту и переводит их в сигнал брокера.
 """
 
-import scan_report as report
+from strategies import scan_report as report
 from logger import log
 from strategies import settings
 from strategies.smc import params as smc_params
@@ -410,7 +410,7 @@ def profile():
 
 
 def geometry(signal, g):
-    import glossary
+    from strategies import glossary
     smc = signal.get('smc') or {}
     g.band(smc.get('poi_bottom'), smc.get('poi_top'),
            glossary.poi_type(smc.get('poi_type')), main=True)

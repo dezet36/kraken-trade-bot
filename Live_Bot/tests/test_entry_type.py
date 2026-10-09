@@ -196,7 +196,7 @@ class TestTheCostLimitComesFromTheStrategy:
 class TestExpiryComesFromTheStrategy:
     def test_each_strategy_gets_its_own(self, broker):
         import config
-        import strategy_profile
+        strategy_profile = __import__('importlib').import_module('strategies.strategy_profile')
         from strategies.smc import params as smc_params
         assert broker.PaperBroker._expiry_hours('SMC') == pytest.approx(
             smc_params.PENDING_ORDER_MAX_HOURS)
@@ -231,7 +231,7 @@ class TestSignalsDeclareTheirType:
         """
         import re
         bot = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        for name in ('strategy.py', 'strategies/smc/adapter.py', 'strategies/levels/adapter.py',
+        for name in ('strategies/fibo/strategy.py', 'strategies/smc/adapter.py', 'strategies/levels/adapter.py',
                      'strategies/rsibb/adapter.py'):
             text = open(os.path.join(bot, name), encoding='utf-8').read()
             assert re.search(r"'entry_type':", text), f'{name}: нет entry_type'

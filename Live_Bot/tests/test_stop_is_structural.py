@@ -22,7 +22,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 class TestFibo:
     def _params(self, monkeypatch, min_stop):
-        import strategy
+        strategy = __import__('importlib').import_module('strategies.fibo.strategy')
         # Патчим модуль настроек, который держит САМА стратегия: другие наборы
         # перезагружают settings_store, и свежий import был бы чужим объектом.
         config = strategy.config

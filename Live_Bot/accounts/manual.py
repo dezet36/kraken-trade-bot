@@ -148,7 +148,7 @@ def _close(code, rules, book, pair, pos, ts, price, reason, slip, quiet=False):
     head = f"{pair} {pos['direction']}"
     result = books.result_lines(book, pos, exit_price, net, after)
     if reason == 'TIME':
-        import strategy_profile
+        from strategies import strategy_profile
         hold = pos.get('max_hold_hours') or strategy_profile.max_hold_hours(pos['strategy'])
         books.instruct(code, rules, book, 'close', f'Закрыть по рынку · {head}',
                        [f"Срок удержания{' ' + format(float(hold), 'g') + ' ч' if hold else ''} вышел — "
@@ -162,7 +162,7 @@ def _close(code, rules, book, pair, pos, ts, price, reason, slip, quiet=False):
 
 def _step(code, rules, book, pair, bar, funding_rate):
     """Одна закрытая 5-минутная свеча для заявки и позиции счёта по паре."""
-    import strategy_profile
+    from strategies import strategy_profile
     cfg = books.cfg()
     ts, open_, high, low, close = bar[0], bar[1], bar[2], bar[3], bar[4]
 

@@ -372,7 +372,7 @@ class TestPaperDashboard:
 
 def test_ai_page_carries_the_notebook_in_notebook_mode(dash, monkeypatch):
     """«Разбор ИИ»: в режиме тетради — её обзоры и решения; разборы прежнего режима «планы» — ниже."""
-    import llm_notebook
+    llm_notebook = __import__('importlib').import_module('strategies.llm.llm_notebook')
     monkeypatch.setattr(llm_notebook, 'enabled', lambda: True)
     monkeypatch.setattr(llm_notebook, 'page_payload',
                         lambda: {'status': {}, 'decisions': [], 'reviews': [], 'patterns': ['Сжатие шортистов (лонг, 48 ч)']})

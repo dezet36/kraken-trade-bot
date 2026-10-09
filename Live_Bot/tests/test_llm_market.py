@@ -443,8 +443,8 @@ class TestMarkup:
         вопрос 25.09.2026 — 23 497 знаков = 9 414 токенов.
         """
         import config
-        import llm_outcomes
-        import llm_prompt
+        llm_outcomes = __import__('importlib').import_module('strategies.llm.llm_outcomes')
+        llm_prompt = __import__('importlib').import_module('strategies.llm.llm_prompt')
         why = ('Вход на L6 (скопление максимумов, касаний 2, объём ×7.5). Стоп за L5 '
                '(скопление минимумов, касаний 3). Цель L9 — верх имбаланса 4ч, первая '
                'по ходу, пул стопов вторым')[:160]

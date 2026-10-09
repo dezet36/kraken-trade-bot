@@ -109,7 +109,7 @@ def _save():
 
 def _cooldown_hours(strategy):
     try:
-        import strategy_profile
+        from strategies import strategy_profile
         return float(strategy_profile.cooldown_hours(strategy) or 0)
     except Exception:                                  # noqa: BLE001
         return 0.0
@@ -123,7 +123,7 @@ def _hold(strategy, pair, until_ms):
 
 def _drops_at_target(strategy):
     try:
-        import strategy_profile
+        from strategies import strategy_profile
         return bool(strategy_profile.drops_at_target(strategy))
     except Exception:                                  # noqa: BLE001
         return True
@@ -168,7 +168,7 @@ def watch(strategy, signal, gate, detail='', now_ms=None):
     try:
         import exit_plan
         from accounts import risk_gate
-        import strategy_profile
+        from strategies import strategy_profile
         params = (signal or {}).get('params') or {}
         direction = ((signal or {}).get('setup') or {}).get('type', '')
         pair = _norm((signal or {}).get('trading_pair', ''))

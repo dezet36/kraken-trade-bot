@@ -30,13 +30,13 @@ def env(tmp_path, monkeypatch):
     """Все источники журнала — во временную папку; фантомный режим."""
     import config
     import follow_up
-    import llm_journal
-    import llm_outcomes
+    llm_journal = __import__('importlib').import_module('strategies.llm.llm_journal')
+    llm_outcomes = __import__('importlib').import_module('strategies.llm.llm_outcomes')
     import paper_broker
     import refused
     import setup_journal
     import shadow
-    import strategy_llm
+    strategy_llm = __import__('importlib').import_module('strategies.llm.adapter')
 
     monkeypatch.setattr(config, 'TRADING_MODE', 'PAPER')
     monkeypatch.setattr(config, 'PAPER_MODE', True)
@@ -103,7 +103,7 @@ def outcome(pair='SUIUSDT', at=T0, gate='', side='LONG', entry=1.0, stop=0.95, t
 
 
 def write_outcomes(rows):
-    import llm_outcomes
+    llm_outcomes = __import__('importlib').import_module('strategies.llm.llm_outcomes')
     write_csv(llm_outcomes.CSV_PATH, llm_outcomes.COLUMNS, rows)
 
 
@@ -230,7 +230,7 @@ class TestTheLiveBook:
 
 class TestLlmPlans:
     def test_a_plan_refused_by_code_is_joined_with_its_analysis(self, env):
-        import llm_journal
+        llm_journal = __import__('importlib').import_module('strategies.llm.llm_journal')
         write_outcomes([outcome(gate='план против структуры', entry=1.0, stop=0.95, tp1=1.1,
                                 entry_touched=1, entry_hours=2.0, hit_sl=1, sl_hours=5.0)])
         write_csv(llm_journal.CSV_PATH, llm_journal.COLUMNS, [
@@ -313,7 +313,7 @@ class TestLlmPlans:
         assert (r['stage'], r['gate'], r['detail']) == ('план принят, заявки нет', 'пара занята', 'держит SMC')
 
     def test_a_running_observation_is_in_the_journal_too(self, env):
-        import llm_outcomes
+        llm_outcomes = __import__('importlib').import_module('strategies.llm.llm_outcomes')
         llm_outcomes.watch('WLDUSDT', {'ok': False, 'gate': 'мало конфлюенса',
                                        'plan': {'side': 'SHORT', 'entry': 2.0, 'stop': 2.1,
                                                 'targets': [1.8]}},

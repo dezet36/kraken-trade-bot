@@ -61,7 +61,7 @@ def evaluate():
     import ai_setups as S
     import backtest_smc as bt
     import smc_engine
-    import strategy_profile
+    from strategies import strategy_profile
     from common import ci
     from fibo_crowd import funding_at
     base = dict(risk_pct=bt.RISK_PCT, max_positions=99, cooldown_hours=strategy_profile.cooldown_hours('FIBO'),

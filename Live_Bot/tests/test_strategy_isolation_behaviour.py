@@ -104,7 +104,7 @@ def smc_decisions(df):
 
 def llm_rules_decisions(df):
     """ИИ в режиме «правила»: то же ядро, но СВОИ правила решений (llm_rules)."""
-    import llm_rules
+    llm_rules = __import__('importlib').import_module('strategies.llm.llm_rules')
     from strategies.smc import signal as smc_signal
     ctx = smc_signal.build_context(frames_of(df.copy()), pair='TEST')
     out = []
@@ -204,7 +204,7 @@ def fib12_decisions(df):
 
 
 def profiles():
-    import strategy_profile
+    strategy_profile = __import__('importlib').import_module('strategies.strategy_profile')
     return _fp({n: strategy_profile.describe(n) for n in ('SMC', 'LEVELS', 'RSIBB', 'LLM', 'SMCS', 'FIB12')})
 
 
@@ -251,7 +251,7 @@ class TestDecisionParamsAreIsolated:
             if name != 'SMC':
                 assert fn(df) == baseline[name], f'{name} изменился от правки решений SMC'
         # Свои величины исполнения у SMC сдвинулись, чужие — нет.
-        import strategy_profile
+        strategy_profile = __import__('importlib').import_module('strategies.strategy_profile')
         assert strategy_profile.cooldown_hours('SMC') == 99.0
         assert strategy_profile.fills_through_market('SMC') is True
         for other in ('LEVELS', 'RSIBB', 'LLM', 'SMCS'):
@@ -262,7 +262,7 @@ class TestDecisionParamsAreIsolated:
         Своя копия правил отбора у ИИ (llm_rules.DECISION): её правка меняет
         сетапы ИИ и не трогает SMC, хотя ядро и структура у них общие.
         """
-        import llm_rules
+        llm_rules = __import__('importlib').import_module('strategies.llm.llm_rules')
         for name, value in {
             'MIN_RR': 1.0, 'TP_MODE': 'liquidity', 'MIN_SL_PCT': 0.02, 'SL_MODE': 'aggressive',
             'MIN_CONFLUENCE_SCORE': 0.5, 'REQUIRE_PREMIUM_DISCOUNT': False, 'POI_ENTRY_DEPTH': 0.5,
@@ -313,7 +313,7 @@ class TestDecisionParamsAreIsolated:
         for name, fn in READERS.items():
             if name != 'SMCS':
                 assert fn(df) == baseline[name], f'{name} изменился от правки решений SMCS'
-        import strategy_profile
+        strategy_profile = __import__('importlib').import_module('strategies.strategy_profile')
         assert strategy_profile.cooldown_hours('SMCS') == 99.0
         before = json.loads(baseline['профили'])
         for other in ('SMC', 'LEVELS', 'RSIBB', 'LLM'):
@@ -331,14 +331,14 @@ class TestDecisionParamsAreIsolated:
         for name, fn in READERS.items():
             if name != 'FIB12':
                 assert fn(df) == baseline[name], f'{name} изменился от правки решений FIB12'
-        import strategy_profile
+        strategy_profile = __import__('importlib').import_module('strategies.strategy_profile')
         assert strategy_profile.cooldown_hours('FIB12') == 99.0
         before = json.loads(baseline['профили'])
         for other in ('SMC', 'LEVELS', 'RSIBB', 'LLM', 'SMCS'):
             assert _fp(strategy_profile.describe(other)) == _fp(before[other])
 
     def test_llm_settings_do_not_reach_anyone_else(self, df, baseline, monkeypatch):
-        import strategy_profile
+        strategy_profile = __import__('importlib').import_module('strategies.strategy_profile')
         cfg = strategy_profile._config()
         for name, value in {
             'LLM_COOLDOWN_HOURS': 99.0, 'LLM_MAX_ENTRY_COST_SHARE_PCT': 50.0,
@@ -353,7 +353,7 @@ class TestDecisionParamsAreIsolated:
             assert _fp(strategy_profile.describe(other)) == _fp(before[other])
 
     def test_common_config_values_reach_only_fibo(self, df, baseline, monkeypatch):
-        import strategy_profile
+        strategy_profile = __import__('importlib').import_module('strategies.strategy_profile')
         cfg = strategy_profile._config()
         for name, value in {
             'MAX_ENTRY_COST_SHARE_PCT': 0.01, 'COOLDOWN_HOURS': 0.01,
@@ -420,19 +420,21 @@ STRATEGY_MODULES = {
     'LEVELS': ('strategies/levels/adapter.py',),
     'RSIBB': ('strategies/rsibb/adapter.py',),
     'SMCS': ('strategies/smcs/adapter.py',),
-    'LLM': ('strategy_llm.py', 'llm_market.py', 'llm_context.py', 'llm_decide.py',
-            'llm_record.py', 'llm_urgency.py', 'llm_prompt.py', 'llm_grammar.py', 'llm_rules.py'),
+    'LLM': ('strategies/llm/adapter.py', 'llm_market.py', 'llm_context.py',
+            'strategies/llm/llm_decide.py', 'strategies/llm/llm_record.py',
+            'strategies/llm/llm_urgency.py', 'strategies/llm/llm_prompt.py',
+            'strategies/llm/llm_grammar.py', 'strategies/llm/llm_rules.py'),
 }
 SHARED = ('market_structure.py', 'strategies/smc/signal.py', 'strategies/smc/structure.py',
           'strategies/smc/swings.py', 'strategies/smc/liquidity.py', 'strategies/smc/imbalance.py',
           'strategies/smc/poi.py', 'strategies/smc/fib.py', 'strategies/smc/sessions.py',
           'strategies/levels/core.py', 'strategies/rsibb/core.py', 'strategies/liquidity/core.py',
           'strategies/smcs/core.py',
-          'data/exchange.py', 'market_regime.py', 'strategy_profile.py')
-# Импорт адаптера: прежние имена (strategy_llm) и пакеты (from strategies.smc import
-# adapter, from strategies.smc.adapter import ...) — с 09.10.2026, этап 10.
-ADAPTERS = re.compile(r'^\s*(?:import|from)\s+(?:(strategy_llm)\b|strategies\.(smcs|smc|levels|rsibb)'
-                      r'(?:\.adapter\b|\s+import\s+adapter\b))', re.M)
+          'data/exchange.py', 'market_regime.py', 'strategies/strategy_profile.py')
+# Импорт адаптера — из пакета (from strategies.smc import adapter, from
+# strategies.smc.adapter import ...) — с 09.10.2026, этап 10; адаптер ИИ — тоже.
+ADAPTERS = re.compile(r'^\s*(?:import|from)\s+strategies\.(smcs|smc|levels|rsibb|llm|fibo|fib12)'
+                      r'(?:\.adapter\b|\s+import\s+adapter\b)', re.M)
 
 
 def _src(path):
@@ -444,17 +446,17 @@ class TestNoStrategyImportsAnother:
 
     @pytest.mark.parametrize('owner', sorted(STRATEGY_MODULES))
     def test_strategy_modules(self, owner):
-        own = {'strategy_llm' if owner == 'LLM' else owner.lower()}
+        own = {owner.lower()}
         for path in STRATEGY_MODULES[owner]:
             assert os.path.exists(os.path.join(ROOT, path)), path
-            hits = {m.group(1) or m.group(2) for m in ADAPTERS.finditer(_src(path))} - own
+            hits = {m.group(1) for m in ADAPTERS.finditer(_src(path))} - own
             assert not hits, f'{path} импортирует чужую стратегию: {sorted(hits)}'
 
     @pytest.mark.parametrize('path', SHARED)
     def test_shared_layer_knows_no_strategy(self, path):
         src = _src(path)
-        hits = {m.group(2) for m in ADAPTERS.finditer(src)}
+        hits = {m.group(1) for m in ADAPTERS.finditer(src)}
         assert not hits, f'общий слой {path} импортирует стратегию: {sorted(hits)}'
-        if path.startswith('strategies/'):
+        if path.startswith('strategies/') and path.count('/') >= 2:      # ядро пакета стратегии
             assert not re.search(r'^\s*(import|from)\s+(config|settings_store)\b', src, re.M), (
                 f'{path}: ядро читает config/настройки — оно должно считать по числам своего params')

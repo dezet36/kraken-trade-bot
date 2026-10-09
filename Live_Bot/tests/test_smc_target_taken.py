@@ -66,7 +66,7 @@ class TestTheSkipRuleIsOffAndWorksIfSwitchedOn:
 class TestSmcOrdersWaitPastTheTarget:
 
     def test_smc_does_not_drop_others_do(self):
-        import strategy_profile
+        strategy_profile = __import__('importlib').import_module('strategies.strategy_profile')
         assert strategy_profile.drops_at_target('SMC') is False
         for other in ('FIBO', 'LEVELS', 'RSIBB', 'LLM'):
             assert strategy_profile.drops_at_target(other) is True, other

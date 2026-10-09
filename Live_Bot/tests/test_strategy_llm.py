@@ -21,7 +21,7 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import strategy_llm
+from strategies.llm import adapter as strategy_llm
 
 PAIRS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT']
 
@@ -445,7 +445,7 @@ class TestThePairIsNotReExaminedEveryCycle:
         strategy_llm.scan_for_setups(['BTCUSDT'], gate=None,
                                      candles=lambda pair: [0] * 500)
         strategy_llm.join(15)
-        import llm_urgency
+        llm_urgency = __import__('importlib').import_module('strategies.llm.llm_urgency')
         minutes = strategy_llm.config.LLM_REASK_AFTER_MIN
         # Окно повтора прошло, но повода нет — пара ждёт события…
         for key in list(strategy_llm._asked):
@@ -464,7 +464,7 @@ class TestThePairIsNotReExaminedEveryCycle:
 
     def test_a_reason_reopens_the_pair_after_the_window(self, monkeypatch):
         """Событие (цена у уровня, слом, ликвидации) — и пара идёт снова."""
-        import llm_urgency
+        llm_urgency = __import__('importlib').import_module('strategies.llm.llm_urgency')
         asked = []
         monkeypatch.setattr(strategy_llm.llm_local, 'available', lambda: True)
         monkeypatch.setattr(strategy_llm.llm_decide, 'decide', refusing_decide(asked))
@@ -485,7 +485,7 @@ class TestThePairIsNotReExaminedEveryCycle:
         21.09.2026 ETH разобрали пять раз за 2.5 часа у одного уровня с
         одним и тем же отказом. Тот же повод после отказа — ждём нового.
         """
-        import llm_urgency
+        llm_urgency = __import__('importlib').import_module('strategies.llm.llm_urgency')
         asked = []
         monkeypatch.setattr(strategy_llm.llm_local, 'available', lambda: True)
         monkeypatch.setattr(strategy_llm.llm_decide, 'decide', refusing_decide(asked))
@@ -520,7 +520,7 @@ class TestThePairIsNotReExaminedEveryCycle:
 
     def test_a_refused_pair_comes_back_on_the_scheduled_pass(self, monkeypatch):
         """Отсеянной навсегда пара стать не может: через STALE_HOURS — плановый проход."""
-        import llm_urgency
+        llm_urgency = __import__('importlib').import_module('strategies.llm.llm_urgency')
         asked = []
         monkeypatch.setattr(strategy_llm.llm_local, 'available', lambda: True)
         monkeypatch.setattr(strategy_llm.llm_decide, 'decide', refusing_decide(asked))
@@ -637,7 +637,7 @@ class TestEveryAnswerIsWrittenDown:
     """
 
     def test_a_refusal_is_recorded_too(self, monkeypatch):
-        import llm_journal
+        llm_journal = __import__('importlib').import_module('strategies.llm.llm_journal')
 
         monkeypatch.setattr(strategy_llm.llm_local, 'available', lambda: True)
         monkeypatch.setattr(strategy_llm.llm_decide, 'decide',
@@ -658,7 +658,7 @@ class TestEveryAnswerIsWrittenDown:
         assert rows[0]['analysis'] == 'уровень держал цену'
 
     def test_the_price_of_the_call_is_recorded(self, monkeypatch):
-        import llm_journal
+        llm_journal = __import__('importlib').import_module('strategies.llm.llm_journal')
 
         monkeypatch.setattr(strategy_llm.llm_local, 'available', lambda: True)
         monkeypatch.setattr(strategy_llm.llm_local, 'last_stats',
@@ -683,7 +683,7 @@ class TestEveryAnswerIsWrittenDown:
         доставались токены ПРОШЛОГО вызова: 37 строк из 63 врали о размере
         вопроса, по которому меряется окно контекста.
         """
-        import llm_journal
+        llm_journal = __import__('importlib').import_module('strategies.llm.llm_journal')
 
         monkeypatch.setattr(strategy_llm.llm_local, 'available', lambda: True)
         monkeypatch.setattr(strategy_llm.llm_local, 'last_stats',
@@ -723,7 +723,7 @@ class TestABrokenAnswerIsNotTakenForAJudgement:
         assert len(asked) == 2, 'поломку запомнили как ответ модели'
 
     def test_the_list_of_broken_names_lives_in_one_place(self):
-        import llm_decide
+        llm_decide = __import__('importlib').import_module('strategies.llm.llm_decide')
         assert 'ответ обрезан' in llm_decide.BROKEN_GATES
         assert 'мало конфлюенса' not in llm_decide.BROKEN_GATES
 

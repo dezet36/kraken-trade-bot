@@ -481,7 +481,7 @@ def _plan_outcome(o):
 
 def _llm_calls():
     """Разборы с текстом (llm_calls.csv): пара -> [(время, строка)]."""
-    import llm_journal
+    from strategies.llm import llm_journal
     by_pair = {}
     for r in _csv_rows(llm_journal.CSV_PATH):
         at = _epoch(r.get('at'))
@@ -521,7 +521,7 @@ def _llm_plans(orders, text=True):
     orders — уже собранные строки ИИ с '_placed' и '_entry' (сделки, заявки,
     тени): по ним план узнаётся как «ставший заявкой».
     """
-    import llm_outcomes
+    from strategies.llm import llm_outcomes
     import refused
 
     observed = [r for r in _csv_rows(llm_outcomes.CSV_PATH) if r.get('side')]
@@ -547,7 +547,7 @@ def _llm_plans(orders, text=True):
 
     armed = {}
     try:
-        import strategy_llm
+        from strategies.llm import adapter as strategy_llm
         for a in strategy_llm.current_setups().get('armed') or []:
             armed[a['pair']] = a
     except Exception:                                  # noqa: BLE001

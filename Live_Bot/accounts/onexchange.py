@@ -250,7 +250,7 @@ def _sync(code, rules, venue, bars, now):
 
 
 def _sync_order(code, rules, venue, book, pair, order, bars, now):
-    import strategy_profile
+    from strategies import strategy_profile
     status = venue.order(pair, order['order_id'])
     if status is None:
         return                                     # биржа не ответила — в следующий цикл
@@ -334,7 +334,7 @@ def _opened(code, rules, venue, book, pair, order, price, amount, now):
 
 
 def _sync_position(code, rules, venue, book, pair, pos, bars, held, now):
-    import strategy_profile
+    from strategies import strategy_profile
     from exit_plan import tps_completed
     long_ = pos['direction'] == 'LONG'
     head = f"{pair} {pos['direction']}"

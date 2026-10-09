@@ -51,7 +51,7 @@ def payments(pair, since='2021-01-01'):
 
 def main():
     os.environ.setdefault('BOT_DATA_DIR', os.path.join(HERE, 'results'))
-    import llm_notebook as N
+    from strategies.llm import llm_notebook as N
     inst = {x['symbol']: x for x in
             get('https://api.bybit.com/v5/market/instruments-info?category=linear&limit=1000')['result']['list']}
     lines = ['Интервал выплат фандинга у 42 монет тетради: сейчас (ч) и доля выплат с интервалом ≤ 4 ч по периодам',

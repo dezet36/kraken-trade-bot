@@ -272,7 +272,7 @@ def check_limits():
     from accounts import risk_gate
     from accounts import settings_store as settings
     try:
-        import strategy_profile
+        from strategies import strategy_profile
         # Предел расхода на вход — у каждой стратегии свой (strategy_profile);
         # выключен он, если выключен хотя бы у одной.
         cost_limit = min(strategy_profile.cost_limit_pct(name)

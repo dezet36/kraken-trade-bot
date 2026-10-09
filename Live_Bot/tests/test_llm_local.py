@@ -67,7 +67,7 @@ class TestWithoutAModelTheBotStillWorks:
         import numpy as np
         import pandas as pd
 
-        import llm_decide
+        llm_decide = __import__('importlib').import_module('strategies.llm.llm_decide')
 
         monkeypatch.setattr(llm_local.config, 'LLM_MODEL_PATH', '')
         idx = np.arange(400)

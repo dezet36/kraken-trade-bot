@@ -43,10 +43,10 @@ from datetime import datetime, timezone
 
 import config
 import csv_journal
-import glossary
+from strategies import glossary
 from exit_plan import cooldown_hours, direction_cap, tp_plan, wants_breakeven
 from accounts import settings_store as settings
-import setup_geometry
+from strategies import setup_geometry
 from logger import log
 
 from strategies import registry as _registry
@@ -811,7 +811,7 @@ class PaperBroker:
         # 0.5625%: смещение 0.1% при стопе 0.8% — это 12.5% сверху. Ошибка
         # уезжала и в отчётность — стоп-лосс выходил −1.09R вместо −1.0R,
         # потому что делили на риск, которого не было.
-        import strategy_profile
+        from strategies import strategy_profile
         offset = strategy_profile.limit_offset_pct(strategy)
         limit_price = core.limit_price(entry, is_long, offset)
 
@@ -958,7 +958,7 @@ class PaperBroker:
         только что считала. Брокер за ней в сеть не ходит: нет цены — нет и
         правила, заявка ставится как раньше.
         """
-        import strategy_profile
+        from strategies import strategy_profile
         if not strategy_profile.fills_through_market(strategy):
             return None
         if str(order.get('entry_type', '')).upper() in ('MARKET', 'STOP'):
@@ -1108,7 +1108,7 @@ class PaperBroker:
         # Наблюдения за вердиктами модели — тот же приём: свечи нужны и там,
         # где нет ни ордера, ни позиции.
         try:
-            import llm_outcomes
+            from strategies.llm import llm_outcomes
             for pair, since in llm_outcomes.pairs().items():
                 pairs[pair] = min(pairs.get(pair, since), since)
             llm_outcomes.expire(_now_ms())
@@ -1263,7 +1263,7 @@ class PaperBroker:
                 import follow_up
                 finished.extend(follow_up.advance(watches, pair, ts, high, low, close))
             try:
-                import llm_outcomes
+                from strategies.llm import llm_outcomes
                 llm_outcomes.advance(pair, ts, high, low, close)
             except Exception as exc:                   # noqa: BLE001
                 log(f'⚠️ наблюдения за вердиктами {pair}: {exc}')
@@ -1336,7 +1336,7 @@ class PaperBroker:
     @staticmethod
     def _cost_limit(strategy):
         """Предел доли издержек в риске — свой у стратегии, общий — запасной (strategy_profile)."""
-        import strategy_profile
+        from strategies import strategy_profile
         return strategy_profile.cost_limit_pct(strategy)
 
     @staticmethod
@@ -1347,7 +1347,7 @@ class PaperBroker:
         обслуживало всех неверно (уровни жили по сроку Фибоначчи, ИИ — тоже,
         и заявка AAVE налилась через 18 часов в чужой план).
         """
-        import strategy_profile
+        from strategies import strategy_profile
         return strategy_profile.expiry_hours(strategy)
 
     def _process_pending(self, strategy, pair, order, ts, high, low,
@@ -1377,7 +1377,7 @@ class PaperBroker:
         ЦЕЛЬ БЕЗ ВХОДА — снимать ли, решает стратегия (strategy_profile): у SMC
         заявка ждёт свой срок, как в её бэктесте (замер 25.09.2026).
         """
-        import strategy_profile
+        from strategies import strategy_profile
         what, detail = core.simulate_pending(
             order, ts, high, low, open_price,
             drops_at_target=strategy_profile.drops_at_target(strategy))
@@ -1512,7 +1512,7 @@ class PaperBroker:
         Ядро отдаёт события по ходу — уведомление видит позицию ровно в том
         состоянии, в каком она была в этот момент.
         """
-        import strategy_profile
+        from strategies import strategy_profile
         max_hold = pos.get('max_hold_hours') or strategy_profile.max_hold_hours(strategy)
         for what, detail in core.simulate_position(pos, ts, high, low, close, max_hold,
                                                     config.PAPER_FEE_MAKER):

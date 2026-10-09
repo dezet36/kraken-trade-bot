@@ -37,6 +37,11 @@ from types import SimpleNamespace
 import numpy as np
 import pandas as pd
 
+if __package__ in (None, ''):
+    # Запуск файлом (python Live_Bot/strategies/llm/llm_notebook.py export): модули бота — двумя уровнями выше.
+    import sys
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+
 import config
 from logger import log
 
@@ -322,15 +327,17 @@ def ask_model(question, timeout=600):
     return out.get('content') or ''
 
 
-EXPORT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'docs', 'Промт_ИИ_тетрадь.txt')
+# корень проекта — на три уровня выше strategies/llm/ (этап 10)
+EXPORT = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(
+    os.path.abspath(__file__))))), 'docs', 'Промт_ИИ_тетрадь.txt')
 
 
 def export_text():
     """Промт тетради целиком — для docs/Промт_ИИ_тетрадь.txt (правило: промт меняется только с экспортом)."""
     return (
-        'Промт ИИ в режиме тетради (LLM_MODE=notebook) — экспорт из Live_Bot/llm_notebook.py.\n'
+        'Промт ИИ в режиме тетради (LLM_MODE=notebook) — экспорт из Live_Bot/strategies/llm/llm_notebook.py.\n'
         'Промт меняется только вместе с этим файлом: совпадение держит tests/test_llm_notebook.py.\n'
-        'Пересобрать: python Live_Bot/llm_notebook.py export\n\n'
+        'Пересобрать (из Live_Bot): python -m strategies.llm.llm_notebook export\n\n'
         'Модель без мысли (<think></think> в подсказке). Решение о сделках: n_predict 160,\n'
         'temperature 0.2; обзор рынка: n_predict 600, temperature 0.3.\n\n'
         '=== СИСТЕМА: ТЕТРАДЬ (NOTEBOOK) ===\n'

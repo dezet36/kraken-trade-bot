@@ -71,8 +71,8 @@ class TestDefaults:
         """ИИ: тетрадь — по числу мест, правила — своя копия правил SMC, планы
         модели — общее значение (до этапа 2 предела в их сигнале не было)."""
         import config
-        import llm_notebook
-        import llm_rules
+        llm_notebook = __import__('importlib').import_module('strategies.llm.llm_notebook')
+        llm_rules = __import__('importlib').import_module('strategies.llm.llm_rules')
         for module in (config, llm_rules.config, llm_notebook.config):
             monkeypatch.setattr(module, 'LLM_MODE', mode, raising=False)
         want = {'notebook': llm_notebook.SLOTS,
@@ -124,7 +124,7 @@ class TestDecision:
         assert 'risk_scale' not in strategy_smc._to_bot_signal(make_setup(), 'BTCUSDT')['params']
 
     def test_owner_cap_overrides_the_measured_one(self):
-        import strategy_profile
+        strategy_profile = __import__('importlib').import_module('strategies.strategy_profile')
         account.save({'SMCS': {'max_same_direction': 2}})
         assert account.decide('SMCS', a_signal(), 10_000)[0]['params']['max_same_direction'] == 2
         account.save({'SMCS': {'max_same_direction': None}})

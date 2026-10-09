@@ -29,7 +29,7 @@ import json
 
 import config
 import llm_context
-import llm_grammar
+from strategies.llm import llm_grammar
 from logger import log
 
 # Порог совпадения факторов. С 25.09.2026 три из пяти, было четыре: число
@@ -163,7 +163,7 @@ def reprice_at_market(verdict, price):
     floor = verdict.get('min_stop_pct') or llm_context.min_stop_pct()
     if floor and stop_pct < floor:
         return None, f'{lead}; стоп от цены {stop_pct:.2f}% при минимуме {floor:.2f}%'
-    import strategy_profile
+    from strategies import strategy_profile
     round_trip = 2 * config.PAPER_FEE_TAKER
     share = price / distance * round_trip * 100
     limit = strategy_profile.cost_limit_pct('LLM')
@@ -234,7 +234,7 @@ def empirical_p(since=None, min_n=None):
 
 
 def llm_outcomes_path():
-    import llm_outcomes
+    from strategies.llm import llm_outcomes
     return llm_outcomes.CSV_PATH
 
 
@@ -1172,7 +1172,7 @@ def decide(pair, df, ask, news=None, at=None, max_tokens=None, market=None,
     # Разметка без задачи — таблица без вопроса. Первый прогон по живому рынку
     # отдавал модели только context['text'], и она отвечала «no news, no
     # comment»: её просто не спросили.
-    import llm_prompt
+    from strategies.llm import llm_prompt
     try:
         answer = ask(llm_prompt.build(context['text']), grammar, max_tokens)
     except Exception as exc:                           # noqa: BLE001
@@ -1332,8 +1332,8 @@ def review(verdict, context_text, ask):
     возражениями. Поломка критика входа не отменяет и не подтверждает —
     она записывается как поломка, а решение остаётся за проверками кода.
     """
-    import llm_grammar
-    import llm_prompt
+    from strategies.llm import llm_grammar
+    from strategies.llm import llm_prompt
     try:
         answer = ask(llm_prompt.build_critic(context_text, plan_text(verdict)),
                      llm_grammar.critic(), None)

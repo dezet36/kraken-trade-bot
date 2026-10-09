@@ -152,7 +152,7 @@ def generate_trade_chart(signal: dict, df_1h, timeframe: str = '1h') -> str:
         # Считает общий модуль — тот же, что и для графика в панели. Стратегию
         # он определяет сам по полям сигнала; здесь её имя не хранится.
         try:
-            import setup_geometry
+            from strategies import setup_geometry
             geo = setup_geometry.build(_strategy_of(signal), signal) or {}
         except Exception as exc:                       # noqa: BLE001
             log(f"chart_generator: разметка не собралась — {exc}")

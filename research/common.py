@@ -96,7 +96,7 @@ def diff_ci(a, b, alpha=0.05):
 # Боевой код пишет строку на КАЖДУЮ просмотренную свечу — «нет сигнала, цена
 # вне окна входа». В работе это полезно, в замере это двести тысяч записей на
 # пару, и прогон упирается именно в них, а не в счёт.
-STRATEGY_MODULES = ('strategy', 'strategies.smc.adapter', 'strategies.levels.adapter',
+STRATEGY_MODULES = ('strategies.fibo.strategy', 'strategies.smc.adapter', 'strategies.levels.adapter',
                     'strategies.rsibb.adapter')
 
 

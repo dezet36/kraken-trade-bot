@@ -366,7 +366,7 @@ class BotController:
         except Exception:                              # noqa: BLE001
             pass
         try:
-            import strategy_llm
+            from strategies.llm import adapter as strategy_llm
             d['ai'] = strategy_llm.current_setups(tm)
             d['model'] = strategy_llm.busy()
         except Exception:                              # noqa: BLE001
@@ -590,7 +590,7 @@ class BotController:
             text = self._legacy_stats_text()
         elif head == 'ai':
             try:
-                import strategy_llm
+                from strategies.llm import adapter as strategy_llm
                 from control import telegram_notify as tg
                 text = tg.llm_setups_text(strategy_llm.current_setups(self.trade_manager))
             except Exception as e:                     # noqa: BLE001

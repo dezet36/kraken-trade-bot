@@ -162,7 +162,7 @@ class TestEnvPrefixesDoNotCollide:
 
     def test_every_package_has_a_prefix(self):
         for package in PACKAGES:
-            path = os.path.join(BOT, package, 'params.py')
+            path = os.path.join(BOT, 'strategies', package, 'params.py')
             if not os.path.exists(path):
                 continue
             assert self.prefix_of(path), (
@@ -172,7 +172,7 @@ class TestEnvPrefixesDoNotCollide:
     def test_prefixes_are_unique_across_packages(self):
         owner = {}
         for package in PACKAGES:
-            path = os.path.join(BOT, package, 'params.py')
+            path = os.path.join(BOT, 'strategies', package, 'params.py')
             if not os.path.exists(path):
                 continue
             for prefix in self.prefix_of(path):

@@ -105,7 +105,7 @@ def min_stop_pct(atr_pct=None):
     Предел — СВОЙ у ИИ (strategy_profile), тот же, по которому брокер потом
     проверяет план: минимум в разметке и проверка при входе — одно число.
     """
-    import strategy_profile
+    from strategies import strategy_profile
     limit = strategy_profile.cost_limit_pct('LLM') or 0
     floor = 0.0 if limit <= 0 else config.ENTRY_COST_ROUND_TRIP / (limit / 100) * 100
     if atr_pct:
@@ -438,7 +438,7 @@ def _candle_lines(df, at, n=CANDLES_SHOWN):
 
 def _stop_buffer(atr_pct):
     """Отступ стопа за уровень — тот же, что применяет llm_decide."""
-    import llm_decide
+    from strategies.llm import llm_decide
     return llm_decide.stop_hunt_pct(atr_pct)
 
 
@@ -565,7 +565,7 @@ def build(pair, df, at=None, news=None, market=None, history=None):
     stop_ok = {'LONG': [], 'SHORT': []}
     entry_ok = {'LONG': [], 'SHORT': []}
     try:
-        import llm_decide
+        from strategies.llm import llm_decide
         stop_ok = llm_decide.legal_stop_ids(found, market, price_now, atr_pct)
         entry_ok = llm_decide.legal_entry_ids(found, market)
     except Exception:                                  # noqa: BLE001
@@ -658,7 +658,7 @@ def _scoreboard_lines():
     не заменит: правило можно не применить к себе, а счёт — это факт о себе.
     """
     try:
-        import llm_outcomes
+        from strategies.llm import llm_outcomes
         sb = llm_outcomes.scoreboard()
     except Exception:                              # noqa: BLE001
         sb = None
@@ -699,7 +699,7 @@ def _history_lines(pair, history):
     настоящий прошлый разбор модели часто вытеснялся строкой «отказ — нет
     законного плана», которого она не писала.
     """
-    import llm_decide
+    from strategies.llm import llm_decide
     skip = set(llm_decide.NO_MODEL_GATES) | set(llm_decide.BROKEN_GATES)
     rows = [r for r in (history or [])
             if r.get('pair') == pair and (r.get('gate') or '') not in skip][:2]
@@ -710,7 +710,7 @@ def _history_lines(pair, history):
     # признать, что рынок её опроверг.
     outcomes = []
     try:
-        import llm_outcomes
+        from strategies.llm import llm_outcomes
         outcomes = llm_outcomes.recent(pair, limit=6)
     except Exception:                              # noqa: BLE001
         outcomes = []

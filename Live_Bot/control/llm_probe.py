@@ -67,7 +67,7 @@ def main(pairs):
     import config
     from data import exchange
     import llm_context
-    import llm_decide
+    from strategies.llm import llm_decide
     import llm_local
     import llm_market
 

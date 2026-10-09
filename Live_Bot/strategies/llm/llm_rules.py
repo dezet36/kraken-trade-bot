@@ -280,7 +280,7 @@ def scan(pairs, gate, client=None, now_ms=None, context_of=None, funding_of=None
     """
     if funding_of is None:
         funding_of = funding_rate
-    import scan_report as report
+    from strategies import scan_report as report
     if context_of is None:
         import market_structure
 

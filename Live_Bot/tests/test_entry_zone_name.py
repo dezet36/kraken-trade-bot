@@ -31,7 +31,7 @@ import sys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
-import strategy                                            # noqa: E402
+from strategies.fibo import strategy  # noqa: E402
 
 
 def _zones(kind):
@@ -110,7 +110,7 @@ class TestTheNameFollowsThePrice:
 
 class TestTheSignalStoppedDeclaringIt:
 
-    SRC = open(os.path.join(ROOT, 'strategy.py'), encoding='utf-8').read()
+    SRC = open(os.path.join(ROOT, 'strategies', 'fibo', 'strategy.py'), encoding='utf-8').read()
 
     @staticmethod
     def _code_only():
@@ -122,7 +122,7 @@ class TestTheSignalStoppedDeclaringIt:
         он объясняет, что именно было не так.
         """
         import re
-        src = open(os.path.join(ROOT, 'strategy.py'), encoding='utf-8').read()
+        src = open(os.path.join(ROOT, 'strategies', 'fibo', 'strategy.py'), encoding='utf-8').read()
         src = re.sub(r'"""[\s\S]*?"""', '', src)
         return '\n'.join(l for l in src.splitlines()
                          if not l.strip().startswith('#'))

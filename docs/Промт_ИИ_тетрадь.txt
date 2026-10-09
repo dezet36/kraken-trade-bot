@@ -1,6 +1,6 @@
-Промт ИИ в режиме тетради (LLM_MODE=notebook) — экспорт из Live_Bot/llm_notebook.py.
+Промт ИИ в режиме тетради (LLM_MODE=notebook) — экспорт из Live_Bot/strategies/llm/llm_notebook.py.
 Промт меняется только вместе с этим файлом: совпадение держит tests/test_llm_notebook.py.
-Пересобрать: python Live_Bot/llm_notebook.py export
+Пересобрать (из Live_Bot): python -m strategies.llm.llm_notebook export
 
 Модель без мысли (<think></think> в подсказке). Решение о сделках: n_predict 160,
 temperature 0.2; обзор рынка: n_predict 600, temperature 0.3.

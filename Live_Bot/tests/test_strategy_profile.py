@@ -12,7 +12,7 @@ strategy_profile — единственное место, где решаетс�
 
 import pytest
 
-import strategy_profile as sp
+from strategies import strategy_profile as sp
 
 # config берём через sp._config() в каждой проверке: другие наборы
 # перезагружают его между проверками, и модуль, схваченный при импорте,

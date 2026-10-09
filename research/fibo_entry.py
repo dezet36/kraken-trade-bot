@@ -102,7 +102,7 @@ def collect_setups(pair, data):
     потом, по варианту.
     """
     import config
-    import strategy
+    from strategies.fibo import strategy
 
     df_1h = data['1h']
     lookback = config.LOOKBACK_CANDLES

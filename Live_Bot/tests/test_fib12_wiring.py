@@ -112,7 +112,7 @@ class TestAdapter:
         # Денег в сетапе нет; предел в одну сторону — с каким стратегия
         # измерена: его по умолчанию берёт счёт (strategy_profile).
         from strategies import contract
-        import strategy_profile
+        strategy_profile = __import__('importlib').import_module('strategies.strategy_profile')
         assert contract.money_in(sig) == []
         assert strategy_profile.max_same_direction('FIB12') == 0
         assert p['be_level'] is None and p['breakeven_after_tp'] is False
@@ -174,7 +174,7 @@ class TestRegistration:
         assert '  FIB12: {' in text
 
     def test_execution_is_what_was_measured(self):
-        import strategy_profile as sp
+        sp = __import__('importlib').import_module('strategies.strategy_profile')
         assert sp.fills_through_market('FIB12') is True
         assert sp.drops_at_target('FIB12') is False
         assert sp.max_hold_hours('FIB12') == 720

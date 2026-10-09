@@ -100,7 +100,7 @@ def test_fibo_still_rebuilds_from_candles():
     analyze_market — и обязана вернуть None, когда сетапа там нет.
     """
     import bot
-    import strategy
+    strategy = __import__('importlib').import_module('strategies.fibo.strategy')
 
     calls = []
 
@@ -108,7 +108,7 @@ def test_fibo_still_rebuilds_from_candles():
         calls.append(pair)
         return None
 
-    # Сетап ФИБО считает strategy.analyze_market; адаптер (strategies/fibo.py)
+    # Сетап ФИБО считает strategy.analyze_market; адаптер (strategies/fibo/adapter.py)
     # берёт её в момент вызова.
     saved = strategy.analyze_market
     strategy.analyze_market = fake_analyze

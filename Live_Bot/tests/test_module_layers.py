@@ -40,14 +40,7 @@ LAYER = {
     'market_structure': 'analysis', 'market_regime': 'analysis', 'flow_features': 'analysis',
     'llm_market': 'analysis', 'llm_context': 'analysis',
     # стратегии
-    'strategy': 'strategies', 'pair_scanner': 'strategies', 'strategy_profile': 'strategies',
-    'strategy_llm': 'strategies',
-    'llm_notebook': 'strategies', 'llm_rules': 'strategies', 'llm_decide': 'strategies',
-    'llm_prompt': 'strategies', 'llm_grammar': 'strategies', 'llm_journal': 'strategies',
-    'llm_outcomes': 'strategies', 'llm_urgency': 'strategies',
-    'llm_record': 'strategies', 'setup_geometry': 'strategies', 'scan_report': 'strategies',
-    # словарь названий стратегий для человека — язык стратегий (разметка, брокер, Telegram)
-    'glossary': 'strategies',
+    # ИИ, ФИБО и общие модули стратегий — в strategies/ (этап 10, часть 6)
     # исполнение и учёт
     'paper_broker': 'execution', 'trade_manager': 'execution', 'exit_plan': 'execution',
     'follow_up': 'execution', 'trade_journal': 'execution', 'setup_journal': 'execution',
@@ -71,12 +64,8 @@ KNOWN = {
     # С переноса пакетов стратегий в strategies/ (этап 10, часть 1) — одной
     # записью на модуль: разметка ИИ читает пакеты liquidity и smc.
     ('llm_context', 'strategies'): 'этап 10: структура smc (часть I) и liquidity — в анализ',
-    ('llm_context', 'llm_decide'): 'этап 10',
-    ('llm_context', 'llm_outcomes'): 'этап 10',
-    ('llm_context', 'strategy_profile'): 'этап 10',
     ('llm_market', 'strategies'): 'этап 10: структура smc (часть I) — в анализ',
-    ('llm_server', 'llm_grammar'): 'этап 10: сервис модели не знает про промт',
-    ('llm_server', 'llm_prompt'): 'этап 10',
+    ('llm_server', 'strategies'): 'этап 10: сервис модели не знает про промт и грамматику',
     ('market_structure', 'strategies'): 'этап 10: структура smc (часть I) — в анализ',
     # Исполнители сами проверяют пределы портфеля и издержки по правилам счёта
     # (risk_gate, settings_store). Этап 5 переносит эти проверки в решение

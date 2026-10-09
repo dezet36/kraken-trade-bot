@@ -68,7 +68,7 @@ def a_setup(pair='BTCUSDT', side='LONG', entry=100.0, stop=98.0, targets=(106.0,
 @pytest.fixture(autouse=True)
 def profile(monkeypatch):
     """Величины исполнения стратегии — простые и известные."""
-    import strategy_profile
+    strategy_profile = __import__('importlib').import_module('strategies.strategy_profile')
     values = {'limit_offset_pct': 0.0, 'cost_limit_pct': 0.0, 'expiry_hours': 24.0,
               'cooldown_hours': 12.0, 'max_hold_hours': 0.0, 'drops_at_target': True,
               'fills_through_market': False}
@@ -175,14 +175,14 @@ class TestOffer:
         assert why.startswith('правила пропа') and 'макс. просадка 0.9%' in why
 
     def test_cost_limit_of_the_strategy(self, monkeypatch):
-        import strategy_profile
+        strategy_profile = __import__('importlib').import_module('strategies.strategy_profile')
         monkeypatch.setattr(strategy_profile, 'cost_limit_pct', lambda s: 1.0)
         prop()
         why = manual.offer('SMCS', a_setup(stop=99.9), now_ms=T0)[0][1]
         assert why.startswith('предел издержек')
 
     def test_limit_already_through_the_market_is_entered_at_market(self, sent, monkeypatch):
-        import strategy_profile
+        strategy_profile = __import__('importlib').import_module('strategies.strategy_profile')
         monkeypatch.setattr(strategy_profile, 'fills_through_market', lambda s: True)
         code = prop()
         setup = a_setup()
@@ -235,7 +235,7 @@ class TestLifecycle:
         assert book(code)['balance'] > 10_000
 
     def test_order_that_did_not_fill_in_time_is_cancelled(self, sent, monkeypatch):
-        import strategy_profile
+        strategy_profile = __import__('importlib').import_module('strategies.strategy_profile')
         monkeypatch.setattr(strategy_profile, 'expiry_hours', lambda s: 1.0)
         code = prop()
         manual.offer('SMCS', a_setup(), now_ms=T0)
@@ -246,7 +246,7 @@ class TestLifecycle:
         assert book(code)['counts']['dropped'] == {'срок заявки вышел': 1}
 
     def test_hold_limit_is_a_close_instruction(self, sent, monkeypatch):
-        import strategy_profile
+        strategy_profile = __import__('importlib').import_module('strategies.strategy_profile')
         monkeypatch.setattr(strategy_profile, 'max_hold_hours', lambda s: 1.0)
         prop()
         manual.offer('SMCS', a_setup(), now_ms=T0)

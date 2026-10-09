@@ -18,7 +18,7 @@ import sys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
-import glossary  # noqa: E402
+from strategies import glossary  # noqa: E402
 from paper_broker import PaperBroker  # noqa: E402
 
 
@@ -136,7 +136,7 @@ def test_both_chart_surfaces_share_one_geometry():
     графиках одной сделки оказались бы разные зоны. В этом проекте такое уже
     случалось у стратегии уровней и стоило месяца недостоверных наблюдений.
     """
-    import setup_geometry
+    setup_geometry = __import__('importlib').import_module('strategies.setup_geometry')
 
     broker = os.path.join(ROOT, 'paper_broker.py')
     with open(broker, encoding='utf-8') as handle:
@@ -173,7 +173,7 @@ def test_telegram_chart_recognises_every_strategy():
 
 def setup_geometry_bands_empty():
     """Пустое имя стратегии даёт пустую разметку, а не падение."""
-    import setup_geometry
+    setup_geometry = __import__('importlib').import_module('strategies.setup_geometry')
     geo = setup_geometry.build('', {'setup': {}})
     return not geo['bands'] and not geo['lines']
 
