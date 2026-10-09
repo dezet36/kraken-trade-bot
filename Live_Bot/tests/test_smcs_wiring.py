@@ -36,7 +36,7 @@ def bot(monkeypatch, tmp_path):
     settings_store.SETTINGS_FILE = str(tmp_path / 'runtime_settings.json')
     settings_store._cache = None
     settings_store._mtime = None
-    for name in ('bot', 'settings_store', 'strategy_smcs'):
+    for name in ('bot', 'settings_store', 'strategies.smcs.adapter'):
         loaded = sys.modules.get(name)
         if loaded is not None and hasattr(loaded, 'settings'):
             loaded.settings = settings_store
@@ -65,7 +65,7 @@ def a_bos(pair='ETHUSDT'):
 
 @pytest.fixture()
 def adapter(bot, monkeypatch):
-    import strategy_smcs
+    from strategies.smcs import adapter as strategy_smcs
     state = {}
 
     def fake_fetch(timeframe, limit=500, symbol=None, client=None, since=None):

@@ -21,7 +21,7 @@ import pandas as pd
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from strategies.smc import signal as smc_signal   # noqa: E402
-import strategy_smc                     # noqa: E402
+from strategies.smc import adapter as strategy_smc  # noqa: E402
 
 
 def market(bars=700, seed=11):

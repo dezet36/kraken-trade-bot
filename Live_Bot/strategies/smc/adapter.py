@@ -265,7 +265,8 @@ def _shadow_crowd_refusal(setup, pair, reason):
     мешает.
     """
     try:
-        import shadow
+        # Тень пишет исполнение; стратегия шлёт в порт (strategies/outbox).
+        from strategies.outbox import shadow
         signal = _to_bot_signal(setup, pair)
         shadow.watch('SMC', signal, 'толпа за сделку', reason)
     except Exception as exc:                                  # noqa: BLE001

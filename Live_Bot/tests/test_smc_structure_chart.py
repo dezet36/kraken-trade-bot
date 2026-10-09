@@ -121,7 +121,7 @@ def test_sweep_price_is_read_from_the_field_the_core_actually_fills():
     assert "'level': level," in text, 'ядро больше не кладёт level — проверить связь'
     assert "'extreme': float(extreme)," in text
 
-    adapter = os.path.join(ROOT, 'strategy_smc.py')
+    adapter = os.path.join(ROOT, 'strategies', 'smc', 'adapter.py')
     with open(adapter, encoding='utf-8') as handle:
         text = handle.read()
     assert "'sweep_price': (setup.get('sweep') or {}).get('level')" in text

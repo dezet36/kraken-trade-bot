@@ -35,7 +35,7 @@ REQUIRED_TRIGGER = ('zone',)
 
 def _levels_signal(tmp_path, monkeypatch):
     monkeypatch.setenv('BOT_DATA_DIR', str(tmp_path))
-    import strategy_levels
+    from strategies.levels import adapter as strategy_levels
 
     stamps = pd.date_range('2026-08-01', periods=60, freq='h', tz='UTC')
     df = pd.DataFrame({'timestamp': stamps, 'close': np.full(60, 100.0)})

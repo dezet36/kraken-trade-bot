@@ -51,13 +51,13 @@ class Strategy:
 REGISTRY = (
     Strategy('FIBO', 'Фибоначчи', 'Фибо', 'strategies.fibo', ('zone_a', 'zone_b'),
              '#2a78d6', '#3987e5', detect_rank=9),
-    Strategy('SMC', 'Smart Money', 'SMC', 'strategy_smc', ('smc',), '#eb6834', '#d95926'),
-    Strategy('LEVELS', 'Уровни', 'Уровни', 'strategy_levels', ('levels',), '#17a398', '#2bbfb2'),
-    Strategy('RSIBB', 'Боллинджер', 'Боллинджер', 'strategy_rsibb', ('rsibb',), '#664089', '#4c36be'),
+    Strategy('SMC', 'Smart Money', 'SMC', 'strategies.smc.adapter', ('smc',), '#eb6834', '#d95926'),
+    Strategy('LEVELS', 'Уровни', 'Уровни', 'strategies.levels.adapter', ('levels',), '#17a398', '#2bbfb2'),
+    Strategy('RSIBB', 'Боллинджер', 'Боллинджер', 'strategies.rsibb.adapter', ('rsibb',), '#664089', '#4c36be'),
     Strategy('LLM', 'ИИ', 'ИИ', 'strategy_llm', ('llm',), '#c48a12', '#e5a93a', in_live_cycle=False,
              detect_rank=0),
-    Strategy('SMCS', 'SMC-структура 4ч', 'SMC 4ч', 'strategy_smcs', ('smcs',), '#56606b', '#a7b1bc'),
-    Strategy('FIB12', 'Фибо 12ч', 'Фибо 12ч', 'strategy_fib12', ('fib12',), '#a3367a', '#e07ab5'),
+    Strategy('SMCS', 'SMC-структура 4ч', 'SMC 4ч', 'strategies.smcs.adapter', ('smcs',), '#56606b', '#a7b1bc'),
+    Strategy('FIB12', 'Фибо 12ч', 'Фибо 12ч', 'strategies.fib12.adapter', ('fib12',), '#a3367a', '#e07ab5'),
 )
 
 _BY_CODE = {s.code: s for s in REGISTRY}

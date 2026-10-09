@@ -15,7 +15,7 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import strategy_smc  # noqa: E402
+from strategies.smc import adapter as strategy_smc  # noqa: E402
 
 T0 = pd.Timestamp('2026-01-01', tz='UTC')
 
@@ -191,7 +191,7 @@ class TestScanCarriesTheCandlesForTheChart:
     """
 
     def test_candidate_has_df_1h_from_the_shared_cache(self, monkeypatch):
-        import strategy_smc
+        from strategies.smc import adapter as strategy_smc
         import market_structure
         import pandas as pd
 

@@ -119,7 +119,7 @@ class TestDecision:
         assert signal['params']['risk_amount'] == pytest.approx(10_000 * account.risk_pct('SMC') / 100)
 
     def test_smc_signal_carries_no_multiplier(self):
-        import strategy_smc
+        from strategies.smc import adapter as strategy_smc
         from test_strategy_smc_adapter import make_setup
         assert 'risk_scale' not in strategy_smc._to_bot_signal(make_setup(), 'BTCUSDT')['params']
 

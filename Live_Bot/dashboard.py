@@ -1093,7 +1093,7 @@ def _regime():
     висла бы на таймауте.
     """
     try:
-        import strategy_smc
+        from strategies.smc import adapter as strategy_smc
         # С 08.10.2026 режим на риск не влияет (риск у всех один): плашки
         # «риск уменьшен» на панели больше не бывает.
         name, text = strategy_smc.regime_snapshot()

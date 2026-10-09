@@ -58,6 +58,12 @@ import tempfile  # noqa: E402
 
 os.environ.setdefault('BOT_DATA_DIR', tempfile.mkdtemp(prefix='kraken-test-data-'))
 
+# Проверки видят стратегии подключёнными, как в боте: сообщения стратегий идут
+# через порты strategies/outbox (control/wiring.py).
+from control import wiring  # noqa: E402
+
+wiring.install()
+
 
 def pytest_configure(config):
     """

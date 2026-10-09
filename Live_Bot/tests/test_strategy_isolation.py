@@ -41,39 +41,48 @@ RESEARCH = os.path.join(ROOT, 'research')
 # Пакеты стратегий: чистая логика, без биржи и без настроек.
 PACKAGES = ('smc', 'levels', 'liquidity', 'rsibb', 'smcs', 'fib12')
 
-# Адаптер -> пакет, который ему единственно разрешён.
-ADAPTERS = {
-    'strategy_smc.py': 'smc',
-    'strategy_levels.py': 'levels',
-    'strategy_rsibb.py': 'rsibb',
-    'strategy_smcs.py': 'smcs',
-    'strategy_fib12.py': 'fib12',
-}
+# Адаптер -> пакет, который ему единственно разрешён. С 09.10.2026 (этап 10)
+# адаптер лежит в своём пакете: strategies/<пакет>/adapter.py.
+ADAPTERS = {os.path.join('strategies', p, 'adapter.py'): p for p in ('smc', 'levels', 'rsibb', 'smcs', 'fib12')}
 
+
+
+def _top(name):
+    """Имя модуля для сверки: у пакетов стратегий — имя пакета
+    (strategies.levels.core → levels), у остальных — верхний уровень."""
+    parts = name.split('.')
+    if parts[0] == 'strategies' and len(parts) > 1 and parts[1] in PACKAGES:
+        return parts[1]
+    return parts[0]
 
 
 def modules_of(path):
-    """Имена модулей верхнего уровня, которые импортирует файл."""
+    """Модули, которые импортирует файл (пакеты стратегий — по имени пакета)."""
     with open(path, encoding='utf-8') as fh:
         tree = ast.parse(fh.read(), filename=path)
     found = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
-            found.update(alias.name.split('.')[0] for alias in node.names)
+            found.update(_top(alias.name) for alias in node.names)
         elif isinstance(node, ast.ImportFrom):
             if node.level:               # относительный импорт внутри пакета
                 continue
             if node.module:
-                found.add(node.module.split('.')[0])
+                found.add(_top(node.module))
+                # from strategies import levels — тоже импорт пакета стратегии
+                if node.module == 'strategies':
+                    found.update(a.name for a in node.names if a.name in PACKAGES)
     return found
 
 
 def files_of(package):
-    folder = os.path.join(BOT, package)
-    if not os.path.isdir(folder):
-        return []
+    """Файлы чистой логики пакета (strategies/<пакет>/, кроме адаптера —
+    место встречи с биржей проверяется отдельно). Пакета нет — ошибка, а не
+    пустой список: после переноса 08.10.2026 проверка молча стала пустой."""
+    folder = os.path.join(BOT, 'strategies', package)
+    assert os.path.isdir(folder), f'нет пакета стратегии {folder}'
     return [os.path.join(folder, name) for name in sorted(os.listdir(folder))
-            if name.endswith('.py')]
+            if name.endswith('.py') and name != 'adapter.py']
 
 
 class TestPackagesAreSelfContained:
@@ -112,8 +121,7 @@ class TestAdaptersStayInTheirLane:
     def test_adapter_imports_only_its_own_package(self):
         for name, own in ADAPTERS.items():
             path = os.path.join(BOT, name)
-            if not os.path.exists(path):
-                continue
+            assert os.path.exists(path), path
             foreign = modules_of(path) & (set(PACKAGES) - {own})
             assert not foreign, (
                 f'{name} импортирует {sorted(foreign)} вместо одного лишь '

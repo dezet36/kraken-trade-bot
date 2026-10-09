@@ -231,7 +231,7 @@ class TestSignalsDeclareTheirType:
         """
         import re
         bot = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        for name in ('strategy.py', 'strategy_smc.py', 'strategy_levels.py',
-                     'strategy_rsibb.py'):
+        for name in ('strategy.py', 'strategies/smc/adapter.py', 'strategies/levels/adapter.py',
+                     'strategies/rsibb/adapter.py'):
             text = open(os.path.join(bot, name), encoding='utf-8').read()
             assert re.search(r"'entry_type':", text), f'{name}: нет entry_type'

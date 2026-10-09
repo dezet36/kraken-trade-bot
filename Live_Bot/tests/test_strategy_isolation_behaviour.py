@@ -371,7 +371,7 @@ class TestDecisionParamsAreIsolated:
 class TestTheSharedLayerIsNotWrittenByStrategies:
 
     def test_operator_settings_land_only_in_smc_decisions(self, monkeypatch):
-        import strategy_smc
+        from strategies.smc import adapter as strategy_smc
         # Модули берём те, что держит САМ адаптер: другие наборы перезагружают
         # settings_store и smc.params, и свежий import был бы чужим объектом.
         params = strategy_smc.smc_params
@@ -387,7 +387,7 @@ class TestTheSharedLayerIsNotWrittenByStrategies:
         assert 'RISK_PER_TRADE_PCT' not in strategy_smc._OPERATOR_SETTINGS
 
     def test_a_setting_aimed_at_the_structure_is_refused(self, monkeypatch):
-        import strategy_smc
+        from strategies.smc import adapter as strategy_smc
         monkeypatch.setitem(strategy_smc._OPERATOR_SETTINGS, 'SWING_N_STRUCT', lambda: 5)
         before = strategy_smc.smc_params.SWING_N_STRUCT
         with pytest.raises(RuntimeError):
@@ -416,10 +416,10 @@ class TestTheSharedLayerIsNotWrittenByStrategies:
 # ── Граф импортов: стратегии не импортируют друг друга ───────────────────────
 
 STRATEGY_MODULES = {
-    'SMC': ('strategy_smc.py',),
-    'LEVELS': ('strategy_levels.py',),
-    'RSIBB': ('strategy_rsibb.py',),
-    'SMCS': ('strategy_smcs.py',),
+    'SMC': ('strategies/smc/adapter.py',),
+    'LEVELS': ('strategies/levels/adapter.py',),
+    'RSIBB': ('strategies/rsibb/adapter.py',),
+    'SMCS': ('strategies/smcs/adapter.py',),
     'LLM': ('strategy_llm.py', 'llm_market.py', 'llm_context.py', 'llm_decide.py',
             'llm_record.py', 'llm_urgency.py', 'llm_prompt.py', 'llm_grammar.py', 'llm_rules.py'),
 }
@@ -429,7 +429,10 @@ SHARED = ('market_structure.py', 'strategies/smc/signal.py', 'strategies/smc/str
           'strategies/levels/core.py', 'strategies/rsibb/core.py', 'strategies/liquidity/core.py',
           'strategies/smcs/core.py',
           'exchange.py', 'market_regime.py', 'strategy_profile.py')
-ADAPTERS = re.compile(r'^\s*(import|from)\s+(strategy_smcs|strategy_smc|strategy_levels|strategy_rsibb|strategy_llm)\b', re.M)
+# Импорт адаптера: прежние имена (strategy_llm) и пакеты (from strategies.smc import
+# adapter, from strategies.smc.adapter import ...) — с 09.10.2026, этап 10.
+ADAPTERS = re.compile(r'^\s*(?:import|from)\s+(?:(strategy_llm)\b|strategies\.(smcs|smc|levels|rsibb)'
+                      r'(?:\.adapter\b|\s+import\s+adapter\b))', re.M)
 
 
 def _src(path):
@@ -441,11 +444,10 @@ class TestNoStrategyImportsAnother:
 
     @pytest.mark.parametrize('owner', sorted(STRATEGY_MODULES))
     def test_strategy_modules(self, owner):
-        own = {f'strategy_{owner.lower()}'}
+        own = {'strategy_llm' if owner == 'LLM' else owner.lower()}
         for path in STRATEGY_MODULES[owner]:
-            if not os.path.exists(os.path.join(ROOT, path)):
-                continue
-            hits = {m.group(2) for m in ADAPTERS.finditer(_src(path))} - own
+            assert os.path.exists(os.path.join(ROOT, path)), path
+            hits = {m.group(1) or m.group(2) for m in ADAPTERS.finditer(_src(path))} - own
             assert not hits, f'{path} импортирует чужую стратегию: {sorted(hits)}'
 
     @pytest.mark.parametrize('path', SHARED)

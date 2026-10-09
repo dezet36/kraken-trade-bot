@@ -101,7 +101,7 @@ def _direct(df):
 def _live(df, monkeypatch, tmp_path):
     """То, что торгует бот: боевой analyze_market на тех же свечах."""
     monkeypatch.setenv('BOT_DATA_DIR', str(tmp_path))
-    import strategy_levels
+    from strategies.levels import adapter as strategy_levels
 
     # Живой путь сам отбрасывает незакрытую свечу, поэтому подаём на одну
     # больше — иначе сравнивались бы решения на РАЗНЫХ последних барах, и
@@ -159,7 +159,7 @@ def test_live_signal_carries_full_contract(monkeypatch, tmp_path):
     Именно здесь и рвалось: evaluate находил сетап, а дальше сигнал был
     неполон и падал на входе. Числа сходились, а сделки не было.
     """
-    import strategy_levels
+    from strategies.levels import adapter as strategy_levels
 
     df = market()
     assert _direct(df) is not None, 'сетапа нет — проверять нечего'

@@ -117,7 +117,7 @@ def test_live_signal_converts_indices_to_time(monkeypatch, tmp_path):
     таблица к тому времени другая, и отметка встанет не туда.
     """
     monkeypatch.setenv('BOT_DATA_DIR', str(tmp_path))
-    import strategy_levels
+    from strategies.levels import adapter as strategy_levels
 
     stamps = pd.date_range('2026-08-01', periods=60, freq='h', tz='UTC')
     df = pd.DataFrame({'timestamp': stamps, 'close': np.full(60, 100.0)})
@@ -142,7 +142,7 @@ def test_live_signal_converts_indices_to_time(monkeypatch, tmp_path):
 def test_live_signal_survives_bad_index(monkeypatch, tmp_path):
     """Индекс за пределами таблицы не должен ронять сигнал целиком."""
     monkeypatch.setenv('BOT_DATA_DIR', str(tmp_path))
-    import strategy_levels
+    from strategies.levels import adapter as strategy_levels
 
     stamps = pd.date_range('2026-08-01', periods=10, freq='h', tz='UTC')
     df = pd.DataFrame({'timestamp': stamps, 'close': np.full(10, 100.0)})

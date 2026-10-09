@@ -104,7 +104,7 @@ class TestContract:
     """Поля, которые читают шесть разных мест. Отсутствие любого — KeyError."""
 
     def test_signal_carries_every_required_field(self):
-        import strategy_rsibb
+        from strategies.rsibb import adapter as strategy_rsibb
         from strategies.rsibb import core
 
         size = 80

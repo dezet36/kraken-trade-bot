@@ -191,7 +191,7 @@ class TestСетап:
 
 class TestАдаптер:
     def test_signal_v_formate_bota(self, monkeypatch):
-        import strategy_levels
+        from strategies.levels import adapter as strategy_levels
 
         rows = flat(80, price=100.0, vol=1.0)
         rows[20] = touch(100.0, 2.0)

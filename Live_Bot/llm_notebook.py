@@ -484,7 +484,7 @@ def page_payload(decisions=10, reviews=3):
 def _notify_decision(items, picks, reason):
     """Сигналы — строкой на закономерность, по имени: «Отскок после ликвидаций (лонг, 24 ч): AVAX, ADA»."""
     try:
-        import telegram_notify
+        from strategies.outbox import telegram as telegram_notify
         coins = {}
         for p, k in items:
             coins.setdefault(k, []).append(p.replace('USDT', ''))
@@ -541,7 +541,7 @@ def _health_event(kind, ok, detail='', key=None):
     text = f"{HEALTH_WHAT[kind]}: {count} раза подряд" + (f" ({detail})" if detail else '')
     log(f'⚠️ {NAME}: {text}')
     try:
-        import telegram_notify
+        from strategies.outbox import telegram as telegram_notify
         telegram_notify.llm_notebook_health(text)
     except Exception as exc:                          # noqa: BLE001
         log(f'   {NAME}: сообщение о сбое не отправлено ({exc})')
@@ -797,7 +797,7 @@ def _run_review(question, slot, held):
         body = humanize(body)                          # человеку — имена закономерностей, не коды
         log(f'   {NAME}: обзор рынка — {body[:160]}')
         try:
-            import telegram_notify
+            from strategies.outbox import telegram as telegram_notify
             telegram_notify.llm_market_review(body)
         except Exception as exc:                      # noqa: BLE001
             log(f'   {NAME}: обзор не отправлен в Telegram ({exc})')

@@ -13,18 +13,22 @@ import error_log
 import positioning
 import market_cap
 import market_mood
-import strategy_levels
+from strategies.levels import adapter as strategy_levels
 import strategy_llm
-import strategy_rsibb
-import strategy_smc
-import strategy_smcs
-import strategy_fib12
+from strategies.rsibb import adapter as strategy_rsibb
+from strategies.smc import adapter as strategy_smc
+from strategies.smcs import adapter as strategy_smcs
+from strategies.fib12 import adapter as strategy_fib12
 from strategy import analyze_market
 from pair_scanner import get_liquid_pairs, scan_for_setups
 from paper_broker import PaperBroker, STRATEGIES as PAPER_STRATEGIES
 # Деньги и допуск стратегий — у их тестовых счетов (реорганизация, этап 2).
 from accounts import paper as account
 from accounts import trading as trading_accounts
+# Сообщения стратегий (уведомления, тень отказа, журнал отказов) — через порты
+# strategies/outbox; здесь они соединяются с модулями (этап 10).
+from control import wiring
+wiring.install()
 from trade_manager import LiveTradeManager
 from logger import log
 
