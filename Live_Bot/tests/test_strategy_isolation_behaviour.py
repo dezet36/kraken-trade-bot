@@ -69,6 +69,21 @@ def _fp(obj):
     return json.dumps(obj, sort_keys=True, default=str)
 
 
+def _r8(value):
+    """Числа — до 8 знаков на любой глубине (списки, словари). Полная запись
+    числа зависит от математики платформы в последнем знаке: на Linux и
+    Windows отпечаток уровней расходился в 121.5906064050567(6|7) — 09.10.2026."""
+    if isinstance(value, dict):
+        return {str(k): _r8(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_r8(v) for v in value]
+    if isinstance(value, (bool, str)) or value is None:
+        return value
+    if isinstance(value, (int, float, np.floating, np.integer)):
+        return round(float(value), 8)
+    return str(value)
+
+
 # ── Что видит каждый потребитель ─────────────────────────────────────────────
 
 def smc_decisions(df):
@@ -128,12 +143,11 @@ def levels_decisions(df):
     lv = core.build_levels(high, low)
     a = core.atr(high, low, close)
     out = [[round(float(x), 8) for x in (l if isinstance(l, (list, tuple)) else [l])] if not isinstance(l, dict)
-           else {k: (round(float(v), 8) if isinstance(v, (int, float, np.floating)) else str(v)) for k, v in l.items()}
+           else {k: _r8(v) for k, v in l.items()}
            for l in lv]
     for i in range(150, len(df), 17):
         setup, reason = core.evaluate(high, low, close, volume, i, levels=lv, atr_values=a)
-        out.append(reason if setup is None else {k: (round(float(v), 8) if isinstance(v, (int, float, np.floating)) else str(v))
-                                                 for k, v in setup.items()})
+        out.append(reason if setup is None else {k: _r8(v) for k, v in setup.items()})
     return _fp(out)
 
 

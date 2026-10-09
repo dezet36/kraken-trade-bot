@@ -216,8 +216,10 @@ class TestTheStartMessage:
 
     def test_paper_is_called_paper_and_the_switch_works(self, broker_env, outbox, monkeypatch):
         broker, _client, _pb = broker_env
-        import config
-        monkeypatch.setattr(config, 'TRADING_MODE', 'PAPER')
+        # config модуля уведомлений, а не свежий import: другие проверки
+        # перезагружают config. До 09.10.2026 подмена не доходила, а проверку
+        # молча держал TRADING_MODE=PAPER из .env машины разработчика.
+        monkeypatch.setattr(tg.config, 'TRADING_MODE', 'PAPER')
         tg.bot_started(broker.get_real_balance(), broker=broker)
         assert 'бумажный счёт' in outbox[-1][0] and 'LIVE' not in outbox[-1][0]
         monkeypatch.setattr(tg, '_allowed', lambda event: event != 'service')

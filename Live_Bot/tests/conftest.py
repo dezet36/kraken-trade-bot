@@ -32,6 +32,33 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
+# ПРОВЕРКИ НЕ ЧИТАЮТ .env РАЗРАБОТЧИКА. Когда в каталоге данных .env нет,
+# config ищет его по обычным правилам python-dotenv — и находил Live_Bot/.env
+# той машины, где идут проверки (у владельца: риск 0.5%, свой список пар).
+# Эталоны решений и брокера были записаны с этими значениями и на сервере, где
+# такого файла нет, расходились (нашлось 09.10.2026 на этапе 10). Явно
+# указанный файл (.env в каталоге данных) читается как прежде; поиск вверх по
+# папкам в проверках выключен. Подмена — до первого импорта config.
+import dotenv  # noqa: E402
+
+_load_dotenv = dotenv.load_dotenv
+
+
+def _explicit_dotenv_only(dotenv_path=None, *args, **kwargs):
+    return _load_dotenv(dotenv_path, *args, **kwargs) if dotenv_path else False
+
+
+dotenv.load_dotenv = _explicit_dotenv_only
+
+# И каталог данных — временный уже на СБОРЕ: config впервые импортируется,
+# когда проверки ещё собираются, и без BOT_DATA_DIR каталогом становился сам
+# Live_Bot — его .env читался явным путём и оставался в окружении процесса до
+# конца прогона (так эталон брокера в полном прогоне видел риск 0.5%).
+import tempfile  # noqa: E402
+
+os.environ.setdefault('BOT_DATA_DIR', tempfile.mkdtemp(prefix='kraken-test-data-'))
+
+
 def pytest_configure(config):
     """
     Журнал уводится во временную папку ДО СБОРА ТЕСТОВ.

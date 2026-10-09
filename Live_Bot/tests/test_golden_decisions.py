@@ -74,7 +74,6 @@ def fibo_decisions(df):
 def levels_every_hour(df):
     """Уровни на КАЖДОМ часе: читатель теста изоляции идёт шагом 17 баров и на
     этих рынках не застаёт ни одного сетапа."""
-    import numpy as np
     from strategies.levels import core
     high, low, close, volume = (df[c].to_numpy(dtype=float) for c in ('high', 'low', 'close', 'volume'))
     lv = core.build_levels(high, low)
@@ -83,8 +82,7 @@ def levels_every_hour(df):
     for i in range(150, len(df)):
         setup, reason = core.evaluate(high, low, close, volume, i, levels=lv, atr_values=a)
         if setup is not None:
-            out.append((i, {k: (round(float(v), 8) if isinstance(v, (int, float, np.floating)) else str(v))
-                            for k, v in setup.items()}))
+            out.append((i, {k: iso._r8(v) for k, v in setup.items()}))
     return iso._fp(out)
 
 
