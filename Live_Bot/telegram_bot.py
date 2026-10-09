@@ -291,6 +291,9 @@ class BotController:
             return self._toggle_strategy(rest[0])
         if head == 'ad' and len(rest) >= 2:
             return self._account_done(rest[0], rest[1])
+        if head == 'aa' and len(rest) >= 2:
+            toast = self._account_done(rest[0], rest[1])[0]
+            return (toast, *panel.account_view(self._collect(), rest[0]))
 
         d = self._collect()
         views = {
@@ -308,6 +311,9 @@ class BotController:
             's': lambda: panel.strategy_view(d, rest[0]),
             'sa': lambda: panel.close_all_confirm_view(d, rest[0], _stamp()),
             'nt': lambda: panel.notify_view(d),
+            'ac': lambda: panel.accounts_view(d),
+            'a': lambda: panel.account_view(d, rest[0]),
+            'ak': lambda: panel.account_panic_confirm_view(d, rest[0], _stamp()),
             'h': panel.help_view,
         }
         try:
@@ -346,6 +352,14 @@ class BotController:
             d['settings'] = settings_store.load()
         except Exception:                              # noqa: BLE001
             pass
+        # Торговые счета: правила и книга — как на сайте (accounts/trading).
+        try:
+            from accounts import live, trading
+            d['accounts'] = [{**live.public(code, rules), 'book': trading.report(code, rules)}
+                             for code, rules in sorted(live.load().items())]
+        except Exception as e:                         # noqa: BLE001
+            log(f"Telegram: торговые счета не прочитаны — {e}")
+            d['accounts'] = []
         try:
             from dashboard import _read_paper_trades
             d['trades'] = _read_paper_trades()
@@ -433,6 +447,14 @@ class BotController:
         elif action == 'a':
             ok, msg = tm.close_all(strategy)
             back = ('◀ Стратегия', f's:{strategy}')
+        elif action == 'k':
+            # Аварийная остановка торгового счёта (accounts/onexchange: panic).
+            from accounts import trading
+            try:
+                ok, msg = True, trading.act(strategy, 'panic')
+            except ValueError as exc:
+                ok, msg = False, str(exc)
+            back = ('◀ Счёт', f'a:{strategy}')
         elif action == 'f':
             settings_store.save({strategy: {'enabled': False}})
             ok, msg = True, (f'{strategy}: новые входы выключены. Позиции и заявки ведутся как '

@@ -218,10 +218,17 @@ def main_view(d):
                          f"{fmt.pct(s.get('return_pct'))} · {fmt.money(day)}")
     lines.append(f"<i>обновлено {_now(d).strftime('%H:%M')} UTC</i>")
 
+    accounts = d.get('accounts') or []
+    waiting = sum(len((a.get('book') or {}).get('waiting') or []) for a in accounts)
+    if accounts:
+        lines.insert(-1, '')
+        lines.insert(-1, f"💼 <b>Торговые счета</b> · {len(accounts)}"
+                     + (f" · ждут исполнения <b>{waiting}</b>" if waiting else ''))
     kb = keyboard([
         [(f'📈 Позиции · {len(open_)}', 'pl:0'), (f'⏳ Заявки · {len(pending)}', 'ol:0')],
         [(f'🧠 ИИ · {armed}', 'ai'), ('📊 Статистика', 'st:7')],
-        [('🎛 Стратегии', 'sl'), ('🔔 Уведомления', 'nt')],
+        [('🎛 Стратегии', 'sl'),
+         (f'💼 Счета' + (f' · ❗{waiting}' if waiting else ''), 'ac'), ('🔔 Уведомления', 'nt')],
         [('▶️ Снять паузу' if d.get('paused') else '⏸ Пауза входов', 'pz'), ('🔄 Обновить', 'm')],
     ])
     return '\n'.join(lines), kb
@@ -584,6 +591,101 @@ def notify_view(d):
 
 
 # ── Итог действия и справка ──────────────────────────────────────────────────
+
+# ── Торговые счета (этап 7–8) ────────────────────────────────────────────────
+# Проп по инструкциям и биржевые счета: что держат, сколько заработали, что
+# ждёт руки владельца. Данные — accounts/trading.report (как на сайте).
+
+def _account(d, code):
+    for a in d.get('accounts') or []:
+        if a.get('id') == code:
+            return a
+    return None
+
+
+def _account_state(a):
+    book = a.get('book') or {}
+    if not a.get('enabled'):
+        return '⏸ выключен'
+    if book.get('status') and book['status'] != 'active':
+        return ('🏆 ' if book['status'] == 'target' else '⛔ ') + fmt.esc(book.get('status_text', ''))
+    if a.get('kind') == 'exchange' and book.get('tradable') is False:
+        return '🔒 реальные деньги — после демо'
+    return '🟢 торгует'
+
+
+def accounts_view(d):
+    accounts = d.get('accounts') or []
+    if not accounts:
+        return ('💼 <b>Торговые счета</b>\n' + fmt.RULE + '\nСчетов пока нет. Завести счёт — на сайте, '
+                'страница «Счета»: биржа (Bybit, BingX) или проп по инструкциям.',
+                keyboard([_nav()]))
+    lines = ['💼 <b>Торговые счета</b>', fmt.RULE]
+    buttons = []
+    for a in accounts:
+        book = a.get('book') or {}
+        where = (f"{fmt.esc(str(a.get('exchange', '')).upper())} {'демо' if a.get('mode') == 'demo' else 'реал'}"
+                 if a.get('kind') == 'exchange' else 'проп')
+        money = (f" · {fmt.money(book.get('equity'), signed=False)} ({fmt.pct(book.get('return_pct'))})"
+                 if book.get('equity') is not None else '')
+        busy = len(book.get('positions') or []), len(book.get('pending') or [])
+        wait = len(book.get('waiting') or [])
+        lines.append(f"<b>{fmt.esc(a.get('name') or a.get('id'))}</b> · {where} · {_account_state(a)}{money}")
+        lines.append(f"   позиций {busy[0]} · заявок {busy[1]}" + (f" · ❗ждут {wait}" if wait else ''))
+        buttons.append([(('❗' if wait else '') + (a.get('name') or a['id'])[:28], f"a:{a['id']}")])
+    return '\n'.join(lines), keyboard(buttons + [_nav(refresh='ac')])
+
+
+def account_view(d, code):
+    a = _account(d, code)
+    if a is None:
+        return accounts_view(d)
+    book = a.get('book') or {}
+    lines = [f"💼 <b>{fmt.esc(a.get('name') or code)}</b> · {_account_state(a)}", fmt.RULE]
+    if book.get('equity') is not None:
+        lines.append(f"Капитал <b>{fmt.money(book.get('equity'), signed=False)}</b> · за этап {book.get('phase')} "
+                     f"{fmt.pct(book.get('return_pct'))} · сегодня {fmt.money(book.get('day_pnl'))}")
+    marks = []
+    if book.get('target_pct'):
+        marks.append(f"цель +{book['target_pct']:g}%: {round((book.get('target_progress') or 0) * 100)}%")
+    if book.get('drawdown_limit_pct'):
+        marks.append(f"просадка {fmt.num(book.get('drawdown_pct')):.2f}% из {book['drawdown_limit_pct']:g}%")
+    if book.get('daily_limit'):
+        marks.append(f"убыток за сутки {book.get('daily_used_pct') or 0}% предела")
+    if marks:
+        lines.append(' · '.join(marks))
+    for p in book.get('positions') or []:
+        lines.append(f"{fmt.side_icon(p.get('direction'))} {fmt.esc(fmt.coin(p.get('pair')))} · вход "
+                     f"{fmt.price(p.get('entry'))} · стоп {fmt.price(p.get('stop'))} · <b>{fmt.r(p.get('result_r'))}</b>")
+    for o in book.get('pending') or []:
+        lines.append(f"⏳ {fmt.esc(fmt.coin(o.get('pair')))} {o.get('direction')} · вход {fmt.price(o.get('entry'))}")
+    waiting = book.get('waiting') or []
+    rows = []
+    if waiting:
+        lines += ['', f"<b>Ждут исполнения · {len(waiting)}</b>"]
+        for it in waiting[:5]:
+            lines.append(f"{it.get('icon') or '📋'} <b>{fmt.esc(it.get('title', ''))}</b>")
+            lines += [f"   {fmt.esc(x)}" for x in (it.get('lines') or [])[:6]]
+            rows.append([(f"✅ Готово: {it.get('title', '')[:40]}", f"aa:{code}:{it['id']}")])
+    q = book.get('quality') or {}
+    if q.get('trades'):
+        lines.append(f"\nСделок за этап {q['trades']} · в плюс {round((q.get('win_rate') or 0) * 100)}% · "
+                     f"{fmt.r(q.get('total_r'))}")
+    if a.get('kind') == 'exchange' and a.get('enabled') and (book.get('positions') or book.get('pending')):
+        rows.append([('🛑 Закрыть всё и выключить', f'ak:{code}')])
+    return '\n'.join(lines), keyboard(rows + [_nav(back=('◀ Счета', 'ac'), refresh=f'a:{code}')])
+
+
+def account_panic_confirm_view(d, code, token):
+    a = _account(d, code)
+    if a is None:
+        return accounts_view(d)
+    text = '\n'.join([
+        f"🛑 <b>Аварийная остановка · {fmt.esc(a.get('name') or code)}?</b>", fmt.RULE,
+        'Все позиции счёта закрываются по рынку на бирже, его заявки снимаются, счёт выключается.',
+        'Позиции, открытые вами руками, не трогаются. Отменить будет нельзя.'])
+    return text, keyboard([[('✅ Да, остановить', f'y:k:{token}:{code}'), ('↩️ Нет', f'a:{code}')]])
+
 
 def result_view(ok, message, back):
     icon = '✅' if ok else '⚠️'

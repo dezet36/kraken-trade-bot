@@ -162,7 +162,7 @@
   .filters[hidden] { display: none; }
   .seg {
     display: inline-flex; padding: 2px; gap: 2px; background: var(--hairline-2);
-    border-radius: var(--r-sm);
+    border-radius: var(--r-sm); flex-wrap: wrap; max-width: 100%;
   }
   .seg button {
     font: inherit; font-size: 13px; font-weight: 500; color: var(--ink-2);
@@ -307,7 +307,7 @@
   .panel-head h2 { font-size: 15px; font-weight: 650; letter-spacing: -0.02em; margin: 0; }
   .panel-head .hint { font-size: 12.5px; color: var(--ink-3); }
   .panel-body { padding: 4px 20px 20px; }
-  .cols  { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); }
+  .cols  { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(min(340px, 100%), 1fr)); }
   /* РОВНО ЧЕТЫРЕ КАРТОЧКИ СТАВЯТСЯ 2×2. При minmax(340px) на обычном экране
      помещаются три, и четвёртая стратегия оставалась одна в ряду с пустотой
      в две трети ширины рядом — так это и выглядело на снимке панели.
@@ -315,7 +315,7 @@
   @media (min-width: 760px) {
     .cols:has(> :nth-child(4):last-child) { grid-template-columns: 1fr 1fr; }
   }
-  .cols2 { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); }
+  .cols2 { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(min(400px, 100%), 1fr)); }
 
   /* ── Полоса внимания ─────────────────────────────────────────────── */
   .att { display: flex; flex-direction: column; gap: 8px; margin-bottom: 20px; }
@@ -390,7 +390,7 @@
   .ai-setup .row { color: var(--ink-2); }
   .ai-setup .row b { color: var(--ink-1); font-weight: 600; }
   .ai-setup .why { grid-column: 1 / -1; color: var(--ink-3); font-style: italic; }
-  .ai-outcomes { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+  .ai-outcomes { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(150px, 100%), 1fr)); gap: 10px; }
   .ai-outcome { padding: 10px 12px; border: 1px solid var(--hairline); border-radius: var(--r-md); }
   .ai-outcome i { display: block; font-size: 11.5px; color: var(--ink-3); font-style: normal; }
   .ai-outcome b { font-size: 20px; font-weight: 650; color: var(--ink-1); }
@@ -526,7 +526,7 @@
                    cursor: pointer; }
 
   /* ── Ключи биржи ─────────────────────────────────────────────────── */
-  .keys-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  .keys-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(230px, 100%), 1fr));
                gap: 12px 18px; margin: 12px 0 14px; }
   .keys-grid label { display: flex; flex-direction: column; gap: 5px;
                      font-size: 12px; color: var(--ink-3); }
@@ -553,7 +553,7 @@
   /* Ширина — от ячейки, а не пиксели из JS: тогда карточка сжимается вместе
      с таблицей, а не удерживает её раздутой. */
   .tc-wrap { width: 100%; min-width: 0; }
-  .tc-box { display: grid; grid-template-columns: minmax(320px, 1.45fr) minmax(280px, 1fr);
+  .tc-box { display: grid; grid-template-columns: minmax(320px, 1.45fr) minmax(min(280px, 100%), 1fr);
             gap: 18px; padding: 16px 18px 18px; }
   /* Порог поднят с 1100 до 1300. Между этими ширинами карточка формально
      оставалась двухколоночной, но правая колонка сжималась до 340px — в неё
@@ -591,7 +591,7 @@
   /* 170px, а не 190: строка истории похудела, карточка получила меньше места,
      и группы «Уровни / Время / Деньги» схлопнулись в одну колонку — карточка
      вытянулась вниз на два экрана. */
-  .tc-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  .tc-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(170px, 100%), 1fr));
              gap: 4px 18px; align-items: start; }
   .tc-gt { font-size: 10.5px; letter-spacing: .04em; text-transform: uppercase;
            color: var(--ink-4); padding-bottom: 2px; }
@@ -753,7 +753,7 @@
   .kpi .n { font-size: 11px; color: var(--ink-4); font-variant-numeric: tabular-nums; }
 
   /* ── Карточки позиций ────────────────────────────────────────────── */
-  .poscols { display: grid; gap: 14px; grid-template-columns: repeat(auto-fill, minmax(400px, 1fr)); }
+  .poscols { display: grid; gap: 14px; grid-template-columns: repeat(auto-fill, minmax(min(400px, 100%), 1fr)); }
   .pos-card { background: var(--surface); border-radius: var(--r-lg);
               box-shadow: var(--shadow); padding: 16px 18px; }
   .pos-top { display: flex; align-items: center; gap: 9px; }
@@ -855,7 +855,7 @@
   #tip .t-nm { color: var(--ink-3); }
 
   /* ── Панель управления ───────────────────────────────────────────── */
-  .ctl { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(350px, 1fr)); }
+  .ctl { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(min(350px, 100%), 1fr)); }
   .ctl-head { display: flex; align-items: center; gap: 10px; padding: 16px 20px;
               border-bottom: 1px solid var(--hairline-2); }
   .ctl-head .key { width: 10px; height: 10px; border-radius: 3px; flex: none; }
@@ -882,6 +882,9 @@
               margin-top: -2px; line-height: 1.5; }
   .ctl-foot + .ctl-note { margin-top: 10px; }
   /* Страница «Счета» (этап 7). */
+  /* Подзаголовок в карточке настроек: чьё это поле — счёта или стратегии. */
+  .ctl-sub { font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase;
+             color: var(--ink-3); padding: 14px 20px 2px; border-top: 1px solid var(--hairline-2); }
   .acc-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
   .acc-chips span { padding: 2px 9px; border-radius: 10px; background: var(--hairline-2);
                     font-size: 12px; color: var(--ink-2); display: inline-flex; align-items: center; gap: 6px; }
@@ -898,7 +901,7 @@
   .acc-book { margin-top: 14px; display: flex; flex-direction: column; gap: 10px; }
   .acc-sub { font-size: 11.5px; font-weight: 600; color: var(--ink-3); text-transform: uppercase;
              letter-spacing: .05em; margin-top: 6px; }
-  .acc-meters { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px 18px; }
+  .acc-meters { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr)); gap: 10px 18px; }
   .acc-meter-l { display: flex; justify-content: space-between; gap: 8px; font-size: 12.5px;
                  color: var(--ink-2); margin-bottom: 4px; font-variant-numeric: tabular-nums; }
   .acc-track { height: 6px; border-radius: 3px; background: var(--hairline-2); overflow: hidden; }
@@ -934,7 +937,7 @@
                     font-variant-numeric: tabular-nums; color: var(--ink-3); }
   @media (max-width: 520px) { .st-funnel .lbl { width: 120px; } .st-funnel .num { width: 64px; } }
   .st-note { font-size: 12px; color: var(--ink-3); line-height: 1.5; margin-top: 8px; }
-  .st-cols { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(380px, 1fr)); }
+  .st-cols { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(min(380px, 100%), 1fr)); }
   /* Пять столбцов в половине ширины: отступы таблицы сравнения здесь шире,
      чем помещается, и итог с средним уезжали за край карточки. */
   .st-cols .cmp th, .st-cols .cmp td { padding: 7px 8px; }
@@ -2486,21 +2489,28 @@ function closedTable(rows) {
    Теперь принадлежность раздела видна до нажатия, а «Сводка» — единственное
    место, где направления встречаются, и встречаются намеренно: ответить
    «сколько всего» иначе было нельзя. */
+/* С 08.10.2026 меню — по модулям (этап 8 реорганизации): тест стратегий
+   (его итог — в заголовке группы), стратегии, торговые счета, приложение.
+   Деньги в заголовке «Биржа» были итогом ТЕСТА, а рядом встали настоящие
+   счета на бирже — подпись стала вводить в заблуждение. */
 const PAGES = [
-  { group: 'Биржа', dir: 'exchange' },
+  { group: 'Тест стратегий', dir: 'exchange' },
   { id: 'overview',  ic: '◎', title: 'Обзор',     dir: 'exchange' },
   { id: 'positions', ic: '▤', title: 'Позиции',   dir: 'exchange' },
   { id: 'history',   ic: '≡', title: 'История',   dir: 'exchange' },
   { id: 'analytics', ic: '◨', title: 'Аналитика', dir: 'exchange' },
+
+  { group: 'Стратегии' },
   /* Без dir: у страницы свои переключатели — стратегия и период. */
   { id: 'strategies', ic: '▦', title: 'Стратегии' },
-  /* Торговые счета (этап 7): биржи и проп по инструкциям — рядом с тестом. */
-  { id: 'accounts', ic: '⚖', title: 'Счета' },
   /* Без dir намеренно: фильтры периода и стратегии относятся к СДЕЛКАМ, а
      здесь сделок нет — на двадцать разборов приходится одна. Показанный тут
      переключатель «7 дней / Фибоначчи» обещал бы управление, которого нет. */
   { id: 'ai',        ic: '◈', title: 'Разбор ИИ' },
 
+  /* Торговые счета (этап 7): биржи и проп по инструкциям — рядом с тестом. */
+  { group: 'Торговые счета' },
+  { id: 'accounts', ic: '⚖', title: 'Счета' },
 
   { group: 'Приложение' },
   { id: 'connect',   ic: '⚭', title: 'Подключения' },
@@ -2562,7 +2572,9 @@ function buildNav() {
    перезагружают и присылают ссылкой, и возвращаться каждый раз на первую
    вкладку — мелкое, но ежедневное раздражение. */
 const SUBTABS = {
-  control: [['risk', 'Риск'], ['strategies', 'Стратегии'], ['app', 'Приложение']],
+  /* По хозяевам настроек: пределы теста целиком, стратегии со своими
+     тестовыми счетами, приложение. */
+  control: [['risk', 'Пределы теста'], ['strategies', 'Стратегии и их счета'], ['app', 'Приложение']],
   diag: [['errors', 'Ошибки'], ['log', 'Журнал']],
 };
 let sub = q.get('sub') || '';
@@ -4424,14 +4436,14 @@ let WRITABLE = false;
 let OWN = {};
 
 const FIELDS = [
-  { id: 'risk_pct', label: 'Риск на сделку', unit: '%', step: 0.05,
+  { id: 'risk_pct', owner: 'account', label: 'Риск на сделку', unit: '%', step: 0.05,
     note: 'Доля депозита, теряемая при срабатывании стопа.' },
-  { id: 'min_stop_pct', label: 'Минимальный стоп', unit: '%', step: 0.1,
+  { id: 'min_stop_pct', owner: 'strategy', label: 'Минимальный стоп', unit: '%', step: 0.1,
     note: 'Ближе этого расстояния стоп не ставится — защита от выноса шумом.' },
   // Ноль в числовом поле читается как «ноль позиций» — то есть ровно наоборот
   // тому, что он значит. Поэтому подпись меняется вместе со значением: это
   // единственное место, где оператор узнаёт смысл нуля.
-  { id: 'max_slots', label: 'Одновременных позиций', unit: '', step: 1,
+  { id: 'max_slots', owner: 'account', label: 'Одновременных позиций', unit: '', step: 1,
     note: v => Number(v) > 0
       ? `Больше ${Number(v)} позиций стратегия не откроет: следующий сетап
          будет отброшен, даже если он хорош.`
@@ -4439,7 +4451,7 @@ const FIELDS = [
          Одновременный риск при этом ничем не ограничен сверху — N позиций по
          своему риску держат N × риск процентов депозита, и в проливе они
          проигрывают вместе. Ограничить можно ниже, в пределах портфеля.` },
-  { id: 'deposit', label: 'Стартовый депозит', unit: '$', step: 100, note: '' },
+  { id: 'deposit', owner: 'account', label: 'Стартовый депозит', unit: '$', step: 100, note: '' },
 ];
 
 async function loadSettings() {
@@ -5146,7 +5158,7 @@ function renderControls() {
     const started = (live.trades || 0) > 0 || (live.open || 0) > 0
                  || (live.pending || 0) > 0;
 
-    const rows = FIELDS.filter(f => f.id !== 'deposit' || PAPER).map(f => {
+    const rowsOf = owner => FIELDS.filter(f => f.owner === owner && (f.id !== 'deposit' || PAPER)).map(f => {
       const lim = (LIMITS || {})[f.id] || [0, 1e9];
       // Ручку «минимальный стоп» читают только FIBO и SMC. Уровни и
       // Боллинджер считают по своему параметру, ИИ — по издержкам; для них
@@ -5234,8 +5246,11 @@ function renderControls() {
                 aria-pressed="${s.enabled}" aria-label="Включить ${esc(NAMES[key] || key)}"
                 ${WRITABLE ? '' : 'disabled'}></button>
       </div>
-      ${rows}
+      <div class="ctl-sub">Тестовый счёт стратегии · деньги и допуск</div>
+      ${rowsOf('account')}
       ${sideRow}
+      <div class="ctl-sub">Правила стратегии</div>
+      ${rowsOf('strategy')}
       ${criticRow}
     </div>`;
   }).join('');
