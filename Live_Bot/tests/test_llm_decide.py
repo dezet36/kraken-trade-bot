@@ -661,7 +661,7 @@ class TestDynamicBuffers:
         assert 'снимут' in dec.stop_in_liquidity('LONG', 97.0, market, atr_pct=3.0)
 
     def test_the_minimum_stop_follows_half_atr(self, monkeypatch):
-        import llm_context
+        llm_context = __import__('importlib').import_module('strategies.llm.llm_context')
         assert llm_context.min_stop_pct(None) == pytest.approx(1.5)
         assert llm_context.min_stop_pct(0.8) == pytest.approx(1.5)
         assert llm_context.min_stop_pct(4.0) == pytest.approx(2.0)
@@ -804,7 +804,7 @@ class TestTheGrammarAdmitsAThought:
 class TestLabelledLevelsAreParsedToIds:
     def test_ids_lose_the_price_and_prices_resolve(self):
         import json
-        import llm_context
+        llm_context = __import__('importlib').import_module('strategies.llm.llm_context')
         levels = [{'id': 'L1', 'price': 110.0}, {'id': 'L2', 'price': 100.0}, {'id': 'L3', 'price': 95.0}]
         answer = json.dumps({'regime': 'r', 'analysis': 'a', 'bias': 'up', 'd': 'enter', 'side': 'LONG',
                              'entry': 'L2 (100)', 'stop': 'L3 (95)', 'tp': ['L1 (110)'], 'inval': 'L3 (95)',
@@ -1049,7 +1049,7 @@ class TestTheModelIsToldWhereAStopMayGo:
             'open': close, 'high': close + 0.5, 'low': close - 0.5,
             'close': close, 'volume': np.ones(n) * 10,
         })
-        import llm_context
+        llm_context = __import__('importlib').import_module('strategies.llm.llm_context')
         real = llm_context.build
 
         def empty_stop_ok(*a, **k):
@@ -1159,7 +1159,7 @@ class TestAPlanTheCodeWouldRefuseCannotBeWritten:
         ZEC 25.09: обоснование о стопе L11, законный — один L12; переделка
         повторила L11, потому что не знала, почему нельзя. Теперь список в замечании.
         """
-        import llm_context
+        llm_context = __import__('importlib').import_module('strategies.llm.llm_context')
         real = llm_context.build
 
         def with_legal_stops(*a, **k):

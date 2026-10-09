@@ -20,7 +20,7 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import llm_context
+from strategies.llm import llm_context
 
 
 def make_df(closes, spread=None):
@@ -98,8 +98,8 @@ class TestItCannotSeeTheFuture:
             asked[source] = upto
             return None
 
-        monkeypatch.setattr(llm_context.positioning, 'latest', spy)
-        monkeypatch.setattr(llm_context.positioning, 'change_pct', spy_change)
+        monkeypatch.setattr(__import__('importlib').import_module('data.positioning'), 'latest', spy)
+        monkeypatch.setattr(__import__('importlib').import_module('data.positioning'), 'change_pct', spy_change)
 
         df = make_df(wavy(400))
         at = 300
@@ -224,9 +224,9 @@ class TestWhatTheModelActuallyReads:
         «Не знаем» и «ноль» — разные утверждения. Слив их в одну клетку,
         получаем вывод о расстановке участников, которой не измеряли.
         """
-        monkeypatch.setattr(llm_context.positioning, 'latest',
+        monkeypatch.setattr(__import__('importlib').import_module('data.positioning'), 'latest',
                             lambda *a, **k: None)
-        monkeypatch.setattr(llm_context.positioning, 'change_pct',
+        monkeypatch.setattr(__import__('importlib').import_module('data.positioning'), 'change_pct',
                             lambda *a, **k: None)
         out = llm_context.build('BTCUSDT', make_df(wavy(400)))
         assert '—' in out['text']

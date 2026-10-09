@@ -169,7 +169,7 @@ class TestItMatchesTheContextBuilder:
         import numpy as np
         import pandas as pd
 
-        import llm_context
+        llm_context = __import__('importlib').import_module('strategies.llm.llm_context')
 
         idx = np.arange(400)
         closes = 100 + 4 * np.sin(idx / 23 * 2 * np.pi) + idx * 0.004

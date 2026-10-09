@@ -72,7 +72,7 @@ class TestTheSharedLayerFindsIt:
 
 class TestTheModelCanNameIt:
     def test_the_break_level_becomes_a_level_candidate(self):
-        import llm_context
+        llm_context = __import__('importlib').import_module('strategies.llm.llm_context')
         market = {'structure_break': {'poi': {'tf': '1ч', 'price': 123.45,
                                               'label': 'HL', 'broken': False}}}
         extra = llm_context.extra_levels(market)

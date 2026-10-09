@@ -28,7 +28,7 @@
 import json
 
 from infra import config
-import llm_context
+from strategies.llm import llm_context
 from strategies.llm import llm_grammar
 from infra.logger import log
 
@@ -1114,6 +1114,17 @@ def revision_request(question, answer, gate, detail):
             f"уровень, возьми другой вход или другую цель. Если исправить "
             f"нечем — ответь отказом (d: skip) и назови причину. Формат "
             f"ответа тот же.")
+
+
+def ask_model(prompt, grammar=None, max_tokens=None):
+    """
+    Вопрос модели для decide(): llm_local.ask с первыми словами мысли из
+    своего промта (llm_prompt.THINK_SEED). Сервис модели промта не знает
+    (этап 10) — семя мысли передаёт стратегия.
+    """
+    from infra import llm_local
+    from strategies.llm import llm_prompt
+    return llm_local.ask(prompt, grammar, max_tokens, think_seed=llm_prompt.THINK_SEED)
 
 
 def decide(pair, df, ask, news=None, at=None, max_tokens=None, market=None,

@@ -130,7 +130,7 @@ def llm_structure(df):
 
 
 def llm_levels(df):
-    import llm_context
+    llm_context = __import__('importlib').import_module('strategies.llm.llm_context')
     found, _ = llm_context.levels(df)
     return _fp([(l.get('id'), round(float(l.get('price', 0)), 8), l.get('kind'), l.get('strength'))
                 if isinstance(l, dict) else str(l) for l in found])
@@ -430,7 +430,7 @@ STRATEGY_MODULES = {
     'LEVELS': ('strategies/levels/adapter.py',),
     'RSIBB': ('strategies/rsibb/adapter.py',),
     'SMCS': ('strategies/smcs/adapter.py',),
-    'LLM': ('strategies/llm/adapter.py', 'analysis/llm_market.py', 'llm_context.py',
+    'LLM': ('strategies/llm/adapter.py', 'analysis/llm_market.py', 'strategies/llm/llm_context.py',
             'strategies/llm/llm_decide.py', 'strategies/llm/llm_record.py',
             'strategies/llm/llm_urgency.py', 'strategies/llm/llm_prompt.py',
             'strategies/llm/llm_grammar.py', 'strategies/llm/llm_rules.py'),

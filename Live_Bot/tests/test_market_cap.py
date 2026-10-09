@@ -192,7 +192,7 @@ class TestFactsCarryChangesAndAge:
 
 class TestTheMarkupShowsItHonestly:
     def test_fresh_facts_become_three_lines(self):
-        import llm_context
+        llm_context = __import__('importlib').import_module('strategies.llm.llm_context')
         m = {'usdt_d': 4.82, 'btc_d': 58.1, 'usdt_d_24h': 0.31, 'usdt_d_7d': 0.9, 'btc_d_24h': 0.4,
              'usdt_d_streak_days': 3, 'total2_24h': -2.3, 'btc_24h': -0.8, 'up_24h': 31, 'counted_24h': 118,
              'age_min': 2, 'supply_age_min': 34, 'stale': False}
@@ -203,16 +203,16 @@ class TestTheMarkupShowsItHonestly:
         assert 'цены 2 мин назад' in text and 'предложение монет 0.6 ч назад' in text
 
     def test_stale_facts_are_a_dash_with_the_age(self):
-        import llm_context
+        llm_context = __import__('importlib').import_module('strategies.llm.llm_context')
         lines = llm_context._macro_lines({'usdt_d': 4.8, 'btc_d': 58, 'age_min': 190, 'stale': True})
         assert len(lines) == 1 and 'не измерено' in lines[0] and '190 мин' in lines[0]
 
     def test_nothing_is_a_dash(self):
-        import llm_context
+        llm_context = __import__('importlib').import_module('strategies.llm.llm_context')
         assert llm_context._macro_lines(None) == [llm_context._NONE]
 
     def test_the_block_is_in_the_market_text_and_the_prompt_defines_it(self):
-        import llm_context
+        llm_context = __import__('importlib').import_module('strategies.llm.llm_context')
         llm_prompt = __import__('importlib').import_module('strategies.llm.llm_prompt')
         text = chr(10).join(llm_context.market_lines({'macro': None}, 100.0))
         assert 'РЫНОК В ЦЕЛОМ' in text

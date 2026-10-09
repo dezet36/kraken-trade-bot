@@ -14,7 +14,7 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from data import liquidations
-import llm_context
+from strategies.llm import llm_context
 from analysis import llm_market
 
 

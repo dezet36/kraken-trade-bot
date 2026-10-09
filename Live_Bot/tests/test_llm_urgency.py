@@ -47,19 +47,19 @@ def _quiet_sources(monkeypatch):
 class TestEvents:
 
     def test_a_fresh_break_is_urgent(self, monkeypatch):
-        import llm_context
+        llm_context = __import__('importlib').import_module('strategies.llm.llm_context')
         monkeypatch.setattr(llm_context, 'levels', lambda df: ([], 0.0))
         points, why = llm_urgency.score('BTCUSDT', Ctx(make_df(np.linspace(100, 110, 300)), 2), NOW)
         assert points == 3 and 'BOS 2 св. назад' in why[0]
 
     def test_an_old_break_is_not(self, monkeypatch):
-        import llm_context
+        llm_context = __import__('importlib').import_module('strategies.llm.llm_context')
         monkeypatch.setattr(llm_context, 'levels', lambda df: ([], 0.0))
         points, _ = llm_urgency.score('BTCUSDT', Ctx(make_df(np.linspace(100, 110, 300)), 10), NOW)
         assert points == 0
 
     def test_price_at_a_level_counts(self, monkeypatch):
-        import llm_context
+        llm_context = __import__('importlib').import_module('strategies.llm.llm_context')
         monkeypatch.setattr(llm_context, 'levels',
                             lambda df: ([{'id': 'L3', 'dist_pct': -0.3}, {'id': 'L1', 'dist_pct': 4.0}], 1.0))
         points, why = llm_urgency.score('BTCUSDT', Ctx(make_df(np.linspace(100, 110, 300))), NOW)
@@ -87,7 +87,7 @@ class TestEvents:
 class TestTheQueue:
 
     def test_an_urgent_pair_goes_first_and_halves_the_reask_window(self, monkeypatch):
-        import llm_context
+        llm_context = __import__('importlib').import_module('strategies.llm.llm_context')
         monkeypatch.setattr(llm_context, 'levels', lambda df: ([], 0.0))
         contexts = {'SOLUSDT': Ctx(make_df(np.linspace(100, 110, 300)), 1)}
         strategy_llm._asked.clear()

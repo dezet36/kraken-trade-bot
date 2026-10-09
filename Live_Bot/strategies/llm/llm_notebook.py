@@ -319,7 +319,7 @@ def brief(data, t, items, held, free):
 
 def ask_model(question, timeout=600):
     """Решение модели без мысли — как в историческом прогоне. -> текст ответа."""
-    import llm_server
+    from infra import llm_server
     raw = (f'<|im_start|>system\n{NOTEBOOK}<|im_end|>\n<|im_start|>user\n{question}<|im_end|>\n'
            f'<|im_start|>assistant\n<think>\n\n</think>\n\n')
     out = llm_server._completion({'prompt': raw, 'n_predict': 160, 'temperature': 0.2, 'top_k': 20, 'top_p': 0.9,
@@ -793,7 +793,7 @@ def parse_review(text):
 
 def _run_review(question, slot, held):
     try:
-        import llm_server
+        from infra import llm_server
         raw = (f'<|im_start|>system\n{NOTEBOOK}<|im_end|>\n<|im_start|>user\n{question}<|im_end|>\n'
                f'<|im_start|>assistant\n<think>\n\n</think>\n\n')
         out = llm_server._completion({'prompt': raw, 'n_predict': 600, 'temperature': 0.3, 'top_k': 20,

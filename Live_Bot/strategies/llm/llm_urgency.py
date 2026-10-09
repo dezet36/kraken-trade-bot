@@ -101,7 +101,7 @@ def _fresh_break(context):
 
 
 def _near_level(context):
-    import llm_context
+    from strategies.llm import llm_context
     df = context.frames.get('poi')
     if df is None or len(df) < 100:
         return ''

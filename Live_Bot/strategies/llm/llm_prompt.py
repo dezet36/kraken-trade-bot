@@ -294,7 +294,7 @@ def definitions():
     from analysis.liquidity import params as liq_params
     from analysis.smc import params as smc_params      # структура рынка (сессии, допуск равных)
     from analysis import llm_market
-    import llm_context
+    from strategies.llm import llm_context
     zones = ', '.join(f'{name} {a:02d}–{b:02d}' for name, (a, b) in smc_params.KILLZONES.items())
     return (f"ATR — за {liq_params.ATR_PERIOD} часовых свечей, в % цены. "
             f"Медиана объёма — за 48 свечей. Покрытие дельты «(15/60 мин)» — сколько минут "
@@ -324,7 +324,7 @@ def limits():
 
     Берутся из тех же мест, что и проверки, а не переписываются.
     """
-    import llm_context
+    from strategies.llm import llm_context
     return (f"ПРЕДЕЛЫ: стоп не ближе минимального (в разметке: не меньше "
             f"{llm_context.min_stop_pct():.2f}% по издержкам и половины ATR); "
             f"факторов не меньше {llm_decide.MIN_CONFLUENCE} из "

@@ -65,7 +65,7 @@ def enter_answer(n, side='LONG', entry='L3', stop='L4', tp=('L1',), inval=None,
     if when != 'now':
         trigger = {'when': when, 'level': level, 'note': trig_note}
     # Уровень в ответе — номером с ценой из таблицы: «L3 (106)».
-    import llm_context
+    llm_context = __import__('importlib').import_module('strategies.llm.llm_context')
 
     def lab(level_id):
         index = int(level_id[1:]) - 1

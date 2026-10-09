@@ -46,7 +46,7 @@ import pandas as pd
 
 from infra import config
 from analysis import market_regime
-from data import positioning
+from analysis import market as market_data     # дверь данных: позиционирование
 from analysis.liquidity import core as liq
 
 # Сколько уровней максимум уходит в модель. Больше — не лучше: список на сорок
@@ -445,13 +445,13 @@ def _stop_buffer(atr_pct):
 def _positioning_facts(pair, upto=None):
     """Расстановка участников. Отсутствующий ряд остаётся None, а не нулём."""
     return {
-        'oi': positioning.latest('open_interest', pair, upto),
-        'oi_24h': positioning.change_pct('open_interest', pair, 24, upto),
-        'oi_4h': positioning.change_pct('open_interest', pair, 4, upto),
-        'funding': positioning.latest('funding', pair, upto),
-        'long_short': positioning.latest('long_short', pair, upto),
-        'long_short_24h': positioning.change_pct('long_short', pair, 24, upto),
-        'premium': positioning.latest('premium', pair, upto),
+        'oi': market_data.latest('open_interest', pair, upto),
+        'oi_24h': market_data.change_pct('open_interest', pair, 24, upto),
+        'oi_4h': market_data.change_pct('open_interest', pair, 4, upto),
+        'funding': market_data.latest('funding', pair, upto),
+        'long_short': market_data.latest('long_short', pair, upto),
+        'long_short_24h': market_data.change_pct('long_short', pair, 24, upto),
+        'premium': market_data.latest('premium', pair, upto),
     }
 
 

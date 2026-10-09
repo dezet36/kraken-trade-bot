@@ -29,8 +29,7 @@ import urllib.error
 import urllib.request
 
 from infra import config
-from strategies.llm import llm_grammar
-from strategies.llm import llm_prompt
+from infra import llm_think
 from infra.logger import log
 
 # Сколько ждём ответа: как у рабочего процесса — разбор с мыслью до 45 минут.
@@ -173,7 +172,7 @@ def _continues_last(ids):
     return bool(_last_ids) and i >= SAME_QUESTION_SHARE * len(_last_ids)
 
 
-def ask(prompt, grammar=None, max_tokens=None, timeout=None):
+def ask(prompt, grammar=None, max_tokens=None, timeout=None, think_seed=''):
     """
     Один вопрос серверу — в две фазы. -> (текст ответа, статистика).
 
@@ -189,16 +188,19 @@ def ask(prompt, grammar=None, max_tokens=None, timeout=None):
     обрезан», 37 минут. Предел в токенах на стороне сервера обойти нельзя.
     Мысль, не закрывшаяся сама, закрывается здесь — ответ будет всегда.
 
+    think_seed — первые слова мысли из промта вызывающего (у ИИ —
+    llm_prompt.THINK_SEED): сервис модели промта не знает (этап 10).
+
     Бросает RuntimeError с llm_gate: «модель недоступна», «модель зависла»,
     «модель упала».
     """
     limit = int(max_tokens or config.LLM_MAX_TOKENS)
     timeout = timeout or CALL_TIMEOUT_SEC
     temperature = float(getattr(config, 'LLM_TEMPERATURE', 0.3))
-    answer_grammar, think_open = (llm_grammar.open_thinking(grammar, llm_prompt.THINK_SEED)
+    answer_grammar, think_open = (llm_think.open_thinking(grammar, think_seed)
                                   if grammar else (grammar, ''))
     if think_open:
-        answer_grammar = llm_grammar.answer_only(grammar)
+        answer_grammar = llm_think.answer_only(grammar)
     text = _chatml(prompt + ('\n' + config.LLM_THINK_TAG if config.LLM_THINK_TAG else '')) + think_open
     # Вопрос уходит токенами, а не строкой: так префикс прогрева и начало
     # вопроса совпадают гарантированно, а не «обычно».

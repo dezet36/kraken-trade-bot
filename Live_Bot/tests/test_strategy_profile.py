@@ -95,7 +95,7 @@ class TestACommonParameterCannotLockOneStrategy:
         # Минимальный стоп в разметке выводится из того же предела, по
         # которому брокер потом проверяет план: на минимальном стопе доля
         # ровно равна пределу и проходит (<=), смещение лимита у ИИ — 0.
-        import llm_context
+        llm_context = __import__('importlib').import_module('strategies.llm.llm_context')
         risk_gate = __import__('importlib').import_module('execution.risk_gate')
         floor = llm_context.min_stop_pct()
         assert floor == pytest.approx(sp._config().ENTRY_COST_ROUND_TRIP / (sp.cost_limit_pct('LLM') / 100) * 100)
@@ -198,7 +198,7 @@ class TestTheMinStopKnobIsHonest:
         assert sp.min_stop_pct('RSIBB') == pytest.approx(rb.MIN_STOP_PCT)
 
     def test_llm_reports_the_cost_derived_floor(self):
-        import llm_context
+        llm_context = __import__('importlib').import_module('strategies.llm.llm_context')
         assert sp.min_stop_pct('LLM') == pytest.approx(llm_context.min_stop_pct())
 
     def test_fibo_and_smc_report_the_operator_knob(self, monkeypatch):

@@ -15,7 +15,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from infra import config  # noqa: E402
 from infra import llm_local  # noqa: E402
-import llm_server  # noqa: E402
+from infra import llm_server  # noqa: E402
 
 
 class FakeLlamaServer(BaseHTTPRequestHandler):
@@ -106,7 +106,8 @@ def test_the_thought_is_its_own_phase_with_a_token_limit(server, monkeypatch):
     llm_prompt = __import__('importlib').import_module('strategies.llm.llm_prompt')
     monkeypatch.setattr(config, 'LLM_THINK_TOKENS', 700)
     grammar = llm_grammar.with_thinking('root     ::= "{" "}"', 1800)
-    answer, stats = llm_server.ask('ВОПРОС', grammar=grammar, max_tokens=900)
+    answer, stats = llm_server.ask('ВОПРОС', grammar=grammar, max_tokens=900,
+                                   think_seed=llm_prompt.THINK_SEED)   # семя мысли — от стратегии
     phases = [b for b in FakeLlamaServer.seen if b.get('n_predict', 0) > 0]
     assert len(phases) == 2, 'мысль и ответ — два запроса'
     think, reply = phases
@@ -200,3 +201,21 @@ def test_a_new_pair_is_warmed_again(server):
     llm_server.ask(head + 'Пара: XRPUSDT ' + 'РАЗМЕТКА XRP ' * 60, max_tokens=5)
     llm_server.ask(head + 'Пара: BTCUSDT ' + 'РАЗМЕТКА BTC ' * 60, max_tokens=5)
     assert _warmups() == 2
+
+
+def test_the_strategy_hands_its_thinking_seed_to_the_server(monkeypatch):
+    """
+    С этапа 10 сервис модели промта не знает: первые слова мысли (THINK_SEED)
+    передаёт стратегия — llm_decide.ask_model, которым ИИ спрашивает модель.
+    Без них мысль начиналась бы с пустого места — другой вопрос, чем мерили.
+    """
+    llm_decide = __import__('importlib').import_module('strategies.llm.llm_decide')
+    llm_prompt = __import__('importlib').import_module('strategies.llm.llm_prompt')
+    seen = {}
+
+    def fake_ask(prompt, grammar=None, max_tokens=None, think_seed=''):
+        seen.update(prompt=prompt, grammar=grammar, max_tokens=max_tokens, think_seed=think_seed)
+        return 'ответ'
+    monkeypatch.setattr(llm_local, 'ask', fake_ask)
+    assert llm_decide.ask_model('ВОПРОС', 'root ::= "x"', 50) == 'ответ'
+    assert seen['think_seed'] == llm_prompt.THINK_SEED and seen['max_tokens'] == 50

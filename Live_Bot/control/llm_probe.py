@@ -66,7 +66,7 @@ def show(pair, verdict, context):
 def main(pairs):
     from infra import config
     from data import exchange
-    import llm_context
+    from strategies.llm import llm_context
     from strategies.llm import llm_decide
     from infra import llm_local
     from analysis import llm_market
@@ -92,7 +92,7 @@ def main(pairs):
         # бы разметку, которой модель в цикле не увидит.
         snapshot = llm_market.snapshot(pair, df, client=market)
         context = llm_context.build(pair, df, market=snapshot)
-        verdict = llm_decide.decide(pair, df, llm_local.ask, market=snapshot)
+        verdict = llm_decide.decide(pair, df, llm_decide.ask_model, market=snapshot)
         show(pair, verdict, context)
     return 0
 

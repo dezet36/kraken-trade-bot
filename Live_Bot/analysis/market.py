@@ -44,6 +44,12 @@ def latest(source, pair, upto=None, max_age_hours=None):
     return positioning.latest(source, pair, **_given(upto=upto, max_age_hours=max_age_hours))
 
 
+def change_pct(source, pair, hours, upto=None):
+    """На сколько процентов изменился ряд позиционирования за hours часов, или None."""
+    from data import positioning
+    return positioning.change_pct(source, pair, hours, **_given(upto=upto))
+
+
 def series(source, pair, limit=None, upto=None):
     """Ряд позиционирования пары (записи сборщика)."""
     from data import positioning

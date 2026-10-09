@@ -155,7 +155,7 @@ def _decide_one(pair, df, market):
         # 150 строк, а не 80: почти половина строк — отказы кода без модели,
         # а в разметку идут только её собственные разборы (llm_context).
         history = llm_journal.last(150)
-        verdict = llm_decide.decide(pair, df, llm_local.ask, market=market,
+        verdict = llm_decide.decide(pair, df, llm_decide.ask_model, market=market,
                                     history=history)
         # Отказ без модели — без её статистики. До 25.09.2026 такой строке
         # доставались токены и секунды ПРОШЛОГО вызова: 37 строк из 63 врали
@@ -1161,7 +1161,7 @@ def profile():
                 'limit_offset_pct': getattr(config, 'LLM_LIMIT_ENTRY_OFFSET_PCT', 0.0),
                 'min_stop_pct': float(rules.MIN_SL_PCT) * 100,
                 'max_same_direction': rules.MAX_SAME_DIRECTION}
-    import llm_context
+    from strategies.llm import llm_context
     # План модели: заявка живёт столько же, сколько ждёт условия план.
     return {'expiry_hours': getattr(config, 'LLM_TRIGGER_TTL_H', 12) or 12,
             'cooldown_hours': getattr(config, 'LLM_COOLDOWN_HOURS', 4.0),

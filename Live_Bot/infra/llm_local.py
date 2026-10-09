@@ -78,7 +78,7 @@ def available():
     Проверяется ДО сборки разметки: незачем считать уровни и грамматику для
     вызова, которого не будет.
     """
-    import llm_server
+    from infra import llm_server
     if llm_server.enabled():
         return llm_server.health() is not None
     if _failed or not model_path():
@@ -126,7 +126,7 @@ def _load():
     return _model
 
 
-def ask(prompt, grammar=None, max_tokens=None):
+def ask(prompt, grammar=None, max_tokens=None, think_seed=''):
     """
     Один вопрос модели. Возвращает текст ответа.
 
@@ -134,10 +134,13 @@ def ask(prompt, grammar=None, max_tokens=None):
     нативном коде убивает процесс целиком, и 19 сентября 2026 оно роняло
     бота на каждом разборе. С LLM_ISOLATE=0 модель работает прямо здесь —
     для отладки и для машин, где spawn дорог.
+
+    think_seed — первые слова мысли из промта вызывающего; нужны только
+    серверу модели (llm_server), который делит вопрос на мысль и ответ.
     """
-    import llm_server
+    from infra import llm_server
     if llm_server.enabled():
-        answer, stats = llm_server.ask(prompt, grammar, max_tokens)
+        answer, stats = llm_server.ask(prompt, grammar, max_tokens, think_seed=think_seed)
         if stats:
             _last.update(stats)
         return answer
@@ -255,7 +258,7 @@ def last_stats():
     out = {'model': os.path.basename(model_path()) if model_path() else ''}
     out.update(_last)
     try:
-        import llm_server
+        from infra import llm_server
         if llm_server.enabled():
             name = (llm_server.props().get('model_path') or '')
             out['model'] = os.path.basename(name) or 'llama-server'

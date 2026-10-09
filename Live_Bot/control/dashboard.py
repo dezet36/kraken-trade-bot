@@ -1400,7 +1400,7 @@ def llm_payload(limit=40):
     server = ''
     server_alive = None
     try:
-        import llm_server
+        from infra import llm_server
         if llm_server.enabled():
             server = llm_server.url()
             server_alive = llm_server.health() is not None
