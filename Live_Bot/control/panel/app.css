@@ -361,6 +361,88 @@ a.list-item:hover { background: var(--fill-2); text-decoration: none; }
   .table td, .table th { padding-left: 8px; padding-right: 8px; }
 }
 
+/* ── Кнопки ─────────────────────────────────────────────────────────── */
+.btn {
+  border: 0; border-radius: 10px; padding: 9px 16px; font-size: 14px; font-weight: 600; cursor: pointer;
+  background: var(--accent); color: #fff; transition: filter .15s, opacity .15s; white-space: nowrap;
+}
+.btn:hover { filter: brightness(1.08); }
+.btn:active { filter: brightness(.94); }
+.btn:disabled { opacity: .45; cursor: default; filter: none; }
+.btn.gray { background: var(--fill); color: var(--text); }
+.btn.plain { background: transparent; color: var(--accent); padding-left: 8px; padding-right: 8px; }
+.btn.danger { background: var(--down); color: #fff; }
+.btn.danger.soft { background: var(--down-fill); color: var(--down); }
+.btn.sm { padding: 5px 11px; font-size: 13px; border-radius: 8px; }
+.actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+
+/* ── Поля формы ─────────────────────────────────────────────────────── */
+.form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 16px; }
+.form .wide { grid-column: 1 / -1; }
+.field { display: flex; flex-direction: column; gap: 6px; font-size: 13px; }
+.field-label { font-weight: 600; color: var(--text-2); }
+.field small { color: var(--text-3); font-size: 12px; }
+.input, .field select {
+  border: 0; border-radius: 10px; background: var(--fill-2); padding: 9px 12px; font-size: 15px; width: 100%;
+  box-shadow: inset 0 0 0 1px var(--sep); font-variant-numeric: tabular-nums;
+}
+.input:focus, .field select:focus { outline: none; box-shadow: inset 0 0 0 2px var(--accent); background: var(--bg-elev); }
+.checks { display: flex; flex-wrap: wrap; gap: 8px; }
+.check { display: inline-flex; align-items: center; gap: 8px; padding: 7px 12px; border-radius: 999px; background: var(--fill-2);
+  cursor: pointer; font-size: 14px; box-shadow: inset 0 0 0 1px var(--sep); user-select: none; }
+.check input { position: absolute; opacity: 0; pointer-events: none; }
+.check:has(input:checked) { background: var(--accent-fill); box-shadow: inset 0 0 0 1.5px var(--accent); }
+.check:has(input:focus-visible) { outline: 3px solid var(--accent-fill); }
+
+/* ── Лист (sheet) ───────────────────────────────────────────────────── */
+dialog.sheet {
+  border: 0; padding: 0; border-radius: var(--radius-xl); background: var(--bg-elev); color: var(--text);
+  width: min(620px, calc(100vw - 32px)); max-height: calc(100vh - 48px); box-shadow: 0 24px 80px rgba(0, 0, 0, .28);
+  animation: sheet-in .22s ease both;
+}
+dialog.sheet::backdrop { background: rgba(0, 0, 0, .32); backdrop-filter: blur(2px); }
+@keyframes sheet-in { from { opacity: 0; transform: translateY(12px) scale(.98); } to { opacity: 1; transform: none; } }
+.sheet-head { display: flex; align-items: center; justify-content: space-between; padding: 18px 22px 0; }
+.sheet-head h2 { font: 600 20px/1.2 var(--font-display); margin: 0; letter-spacing: -.02em; }
+.sheet-x { border: 0; background: var(--fill); width: 30px; height: 30px; border-radius: 50%; font-size: 20px; line-height: 1; cursor: pointer; color: var(--text-2); }
+.sheet-body { padding: 16px 22px 22px; overflow: auto; max-height: calc(100vh - 120px); }
+.sheet-text { font-size: 15px; line-height: 1.5; margin: 0 0 18px; }
+.sheet-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; }
+
+/* ── Всплывающее сообщение ──────────────────────────────────────────── */
+.toast {
+  position: fixed; left: 50%; bottom: calc(24px + env(safe-area-inset-bottom)); transform: translateX(-50%); z-index: 50;
+  background: rgba(30, 30, 32, .92); color: #fff; padding: 11px 18px; border-radius: 14px; font-size: 14px;
+  box-shadow: var(--shadow-2); animation: fade .2s ease both; max-width: calc(100vw - 32px);
+}
+.toast.bad { background: var(--down); } .toast.good { background: var(--up); }
+.toast.out { opacity: 0; transition: opacity .4s; }
+
+/* ── Шкала правила (цель, просадка, дневной убыток) ─────────────────── */
+.meter { margin-top: 12px; }
+.meter-l { display: flex; justify-content: space-between; font-size: 13px; color: var(--text-2); margin-bottom: 6px; }
+.meter-l b { font-variant-numeric: tabular-nums; }
+.meter-track { height: 8px; border-radius: 4px; background: var(--fill); overflow: hidden; }
+.meter-track i { display: block; height: 100%; border-radius: 4px; }
+
+/* ── Инструкция (проп по инструкциям) ───────────────────────────────── */
+.instr { padding: 12px 14px; border-radius: var(--radius-md); background: var(--fill-2); }
+.instr + .instr { margin-top: 8px; }
+.instr.todo { background: var(--accent-fill); }
+.instr-h { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.instr-h b { font-weight: 600; }
+.instr-h .muted { font-size: 12px; }
+.instr-h .btn { margin-left: auto; }
+.instr-b { font-size: 13px; color: var(--text-2); margin-top: 6px; line-height: 1.55; }
+details.log summary { cursor: pointer; color: var(--accent); font-size: 14px; margin-top: 14px; }
+details.log[open] summary { margin-bottom: 10px; }
+
+.subhead { font-size: 13px; font-weight: 600; color: var(--text-3); margin: 18px 0 8px; }
+
+@media (max-width: 860px) {
+  .form { grid-template-columns: minmax(0, 1fr); }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
 }

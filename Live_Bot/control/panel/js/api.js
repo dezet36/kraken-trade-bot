@@ -26,6 +26,14 @@ export async function getJSON(url) {
   return r.json();
 }
 
+/** POST с JSON. Ошибка сервера — исключение с его текстом. */
+export async function postJSON(url, body) {
+  const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(data.error || String(r.status));
+  return data;
+}
+
 /* Кэш тяжёлых запросов (отчёты стратегий, свечи): не чаще раза в ttl, пока
    идёт обновление — показываются прежние данные. Готовность — через emit(),
    раздел перерисовывается и берёт значение из кэша. */

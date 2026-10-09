@@ -127,6 +127,64 @@ export function section(title, link, ...content) {
     content);
 }
 
+/* ── Кнопки, листы, подтверждения ───────────────────────────────────── */
+
+/** kind: '' (основная), 'gray', 'danger', 'plain'; small — компактная. */
+export function button(text, onClick, kind = '', small = false) {
+  return h('button', { type: 'button', class: `btn ${kind} ${small ? 'sm' : ''}`.trim(), onclick: onClick }, text);
+}
+
+/**
+ * Лист поверх страницы (как sheet в macOS). Живёт вне раздела: страница
+ * перерисовывается по опросу, а введённое в лист не должно пропадать.
+ * build(close) возвращает содержимое. -> { close }
+ */
+export function openSheet(title, build, onClose = null) {
+  const dlg = h('dialog', { class: 'sheet' });
+  let closed = false;
+  const close = () => {
+    if (closed) return;
+    closed = true;
+    dlg.close();
+    dlg.remove();
+    if (onClose) onClose();
+  };
+  dlg.append(h('div', { class: 'sheet-head' }, h('h2', null, title),
+    h('button', { type: 'button', class: 'sheet-x', 'aria-label': 'Закрыть', onclick: close }, '×')),
+    h('div', { class: 'sheet-body' }, build(close)));
+  dlg.addEventListener('cancel', (e) => { e.preventDefault(); close(); });
+  document.body.append(dlg);
+  dlg.showModal();
+  return { close };
+}
+
+/** Подтверждение действия. Закрытие крестиком или Esc — «нет». -> Promise<boolean> */
+export function confirmSheet(text, okText = 'Подтвердить', danger = false) {
+  return new Promise((resolve) => {
+    let answer = false;
+    openSheet('Подтвердите', (close) => {
+      const cancel = button('Отмена', close, 'gray');
+      cancel.autofocus = true;                    // по умолчанию — безопасный ответ
+      return h('div', null, h('p', { class: 'sheet-text' }, text),
+        h('div', { class: 'sheet-actions' }, cancel, button(okText, () => { answer = true; close(); }, danger ? 'danger' : '')));
+    }, () => resolve(answer));
+  });
+}
+
+/** Короткое сообщение снизу экрана. tone: '', 'bad', 'good'. */
+export function toast(text, tone = '') {
+  const el = h('div', { class: `toast ${tone}`, role: 'status' }, text);
+  document.body.append(el);
+  setTimeout(() => el.classList.add('out'), 3600);
+  setTimeout(() => el.remove(), 4000);
+}
+
+/** Поле формы: подпись, элемент, подсказка. */
+export function field(label, control, hint = null) {
+  return h('label', { class: 'field' }, h('span', { class: 'field-label' }, label), control,
+    hint ? h('small', null, hint) : null);
+}
+
 /** Сегментный переключатель. onChange(значение). */
 export function segmented(options, value, onChange, label = '') {
   const el = h('div', { class: 'seg', role: 'group', 'aria-label': label });
