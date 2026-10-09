@@ -159,7 +159,7 @@ class TestPool:
         """Порог по умолчанию — −1 б.п.: середина ставки Bybit +1 б.п. (docs/SMC_исследование_2026-09.md)."""
         if os.getenv('SMC_FUNDING_MAX_BP'):
             pytest.skip('порог переопределён окружением')
-        import params_env
+        params_env = __import__('importlib').import_module('infra.params_env')
         _f, _i, _b, _s = params_env.reader('SMC')
         assert _f('FUNDING_MAX_BP', -1.0) == -1.0
         src = open(params.__file__, encoding='utf-8').read()

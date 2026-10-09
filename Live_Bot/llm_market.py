@@ -39,9 +39,9 @@ import time
 import numpy as np
 import pandas as pd
 
-import config
+from infra import config
 from data import positioning
-from logger import log
+from infra.logger import log
 
 # Сколько свечей рабочего ТФ берём под профиль объёма. Двести часов — это
 # восемь суток: достаточно, чтобы зона нахождения цены сложилась, и не столько,

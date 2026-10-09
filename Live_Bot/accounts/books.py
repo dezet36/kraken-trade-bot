@@ -26,7 +26,7 @@ import os
 import threading
 from datetime import datetime, timezone
 
-from logger import log
+from infra.logger import log
 
 from execution import core
 
@@ -60,7 +60,7 @@ _notify = None         # куда слать: ставит bot.py (notify_with)
 # ── Мелочи ──────────────────────────────────────────────────────────────────
 
 def cfg():
-    import config                    # заново: тесты перезагружают config
+    from infra import config  # заново: тесты перезагружают config
     return config
 
 

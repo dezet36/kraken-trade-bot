@@ -1,7 +1,7 @@
 import ccxt
 import pandas as pd
-import config
-from logger import log
+from infra import config
+from infra.logger import log
 
 _exchange_instance = None       # legacy single-user клиент (из .env)
 _market_client = None           # общий keyless клиент для market-data (сканер)

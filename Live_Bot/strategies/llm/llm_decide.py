@@ -27,10 +27,10 @@
 
 import json
 
-import config
+from infra import config
 import llm_context
 from strategies.llm import llm_grammar
-from logger import log
+from infra.logger import log
 
 # Порог совпадения факторов. С 25.09.2026 три из пяти, было четыре: число
 # факторов с исходом не связано, скорее наоборот — идея верна у 57% планов

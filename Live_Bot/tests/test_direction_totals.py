@@ -25,7 +25,7 @@ import sys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
-import config  # noqa: E402
+from infra import config  # noqa: E402
 from control import dashboard  # noqa: E402
 
 

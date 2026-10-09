@@ -401,7 +401,7 @@ def llm_decide_min_rr():
 
 def build(context_text):
     """Полный текст вопроса: задача, пределы, данные."""
-    import config
+    from infra import config
     ttl = int(getattr(config, 'LLM_TRIGGER_TTL_H', 12) or 12)
     from strategies.llm import llm_grammar
     system = (SYSTEM.replace('{limits}', field_limits()).replace('{ttl}', str(ttl))

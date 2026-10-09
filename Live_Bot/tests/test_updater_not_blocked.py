@@ -31,7 +31,7 @@ import sys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
-import updater                                              # noqa: E402
+from infra import updater  # noqa: E402
 
 
 class TestThePathIsReadWhateverTheIndent:
@@ -117,7 +117,7 @@ class TestTheyAreDroppedBeforeTheMerge:
         assert updater._drop_runtime_changes() == []
 
     def test_the_drop_happens_before_the_merge(self):
-        src = open(os.path.join(ROOT, 'updater.py'), encoding='utf-8').read()
+        src = open(os.path.join(ROOT, 'infra', 'updater.py'), encoding='utf-8').read()
         spot = src.index('def apply(')
         body = src[spot:src.index('\ndef ', spot + 10)]
         assert '_drop_runtime_changes()' in body, (

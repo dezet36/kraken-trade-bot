@@ -19,7 +19,7 @@ ROOT = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(ROOT, 'Live_Bot'))
 
-import logger                                          # noqa: E402
+from infra import logger  # noqa: E402
 logger.log = lambda *a, **k: None
 
 CACHES = {'bear': 'backtest_cache_bear', 'mid1': 'backtest_cache_mid1', 'mid2': 'backtest_cache_mid2',

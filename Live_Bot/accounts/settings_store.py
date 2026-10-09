@@ -29,8 +29,8 @@ from datetime import datetime
 import os
 import threading
 
-import config
-from logger import log
+from infra import config
+from infra.logger import log
 from accounts import paper as accounts
 from strategies import settings as strategy_settings
 

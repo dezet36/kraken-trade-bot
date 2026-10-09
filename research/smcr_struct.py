@@ -142,7 +142,7 @@ def apply_patch(variant):
 
 def _job(args):
     variant, period, pair = args
-    import logger
+    from infra import logger
     logger.log = lambda *a, **k: None
     import backtest_smc as bt
     import smc_lab

@@ -84,7 +84,7 @@ def make_signal(strategy, pair, side, p):
         entry, stop = b - d * 0.5 * size, b - d * 0.896 * size
         # Уровень снятия заявки объявляет сама ФИБО (88.6% отката, этап 5) —
         # прежде брокер считал его по имени стратегии той же формулой.
-        import config
+        config = __import__('importlib').import_module('infra.config')
         inval = b - size * config.ZONE_B_TOP if d == 1 else b + size * config.ZONE_B_TOP
         targets, fr, extra = [b + d * 0.25 * size], [1.0], {'be_level': b, 'breakeven_after_tp': True,
                                                             'pending_invalidation': inval}
@@ -144,7 +144,7 @@ def schedule():
 
 
 # Модули, которые эталон загружает заново под свой каталог данных и свои часы.
-LOADED = ('config', 'accounts.settings_store', 'paper_broker', 'control.dashboard', 'shadow', 'execution.setup_journal',
+LOADED = ('infra.config', 'accounts.settings_store', 'paper_broker', 'control.dashboard', 'shadow', 'execution.setup_journal',
           'execution.refused', 'execution.follow_up', 'trade_journal')
 
 

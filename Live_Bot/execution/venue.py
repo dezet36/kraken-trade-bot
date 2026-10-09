@@ -19,7 +19,7 @@
     стороной (BOTH, LONG, SHORT).
 """
 
-from logger import log
+from infra.logger import log
 
 NOT_MODIFIED = ('34040', 'not modified', '110043')
 

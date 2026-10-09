@@ -25,7 +25,7 @@
 def _config():
     # Каждый раз через sys.modules: тесты перезагружают config между
     # проверками, и модуль, схваченный при импорте, был бы чужим.
-    import config
+    from infra import config
     return config
 
 

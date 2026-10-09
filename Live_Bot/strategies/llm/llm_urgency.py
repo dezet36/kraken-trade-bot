@@ -26,7 +26,7 @@
 
 import time
 
-from logger import log
+from infra.logger import log
 
 FRESH_BREAK_BARS = 3
 LIQ_BURST_X = 2.0

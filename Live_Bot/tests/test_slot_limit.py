@@ -25,7 +25,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 @pytest.fixture()
 def store(tmp_path, monkeypatch):
     monkeypatch.setenv('BOT_DATA_DIR', str(tmp_path))
-    for module in ('config', 'accounts.settings_store'):
+    for module in ('infra.config', 'accounts.settings_store'):
         forget(module, None)
     settings_store = __import__('importlib').import_module('accounts.settings_store')
     settings_store.SETTINGS_FILE = str(tmp_path / 'runtime_settings.json')
@@ -46,7 +46,7 @@ class TestDefault:
         """Осознанно заданный SLOTS_PER_STRATEGY сильнее умолчания."""
         monkeypatch.setenv('BOT_DATA_DIR', str(tmp_path))
         monkeypatch.setenv('SLOTS_PER_STRATEGY', '4')
-        for module in ('config', 'accounts.settings_store'):
+        for module in ('infra.config', 'accounts.settings_store'):
             forget(module, None)
         fresh = __import__('importlib').import_module('accounts.settings_store')
         fresh.SETTINGS_FILE = str(tmp_path / 'other.json')

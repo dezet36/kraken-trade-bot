@@ -35,9 +35,9 @@ positions_state.json не хранит ни realized_pnl, ни tp_hit, и пос
 факт; когда не отвечает, число и помечено как оценка.
 """
 
-import config
+from infra import config
 from execution.exit_plan import tp_plan
-from logger import log
+from infra.logger import log
 
 # Столько исполнений тянем с биржи за раз. Одна сделка — это вход, до четырёх
 # частичных фиксаций и выход, то есть с запасом.

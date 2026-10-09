@@ -25,7 +25,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 def store(tmp_path, monkeypatch):
     monkeypatch.setenv('BOT_DATA_DIR', str(tmp_path))
     monkeypatch.setenv('TRADING_MODE', 'PAPER')
-    for module in ('config', 'accounts.settings_store'):
+    for module in ('infra.config', 'accounts.settings_store'):
         forget(module, None)
     settings_store = __import__('importlib').import_module('accounts.settings_store')
     return settings_store

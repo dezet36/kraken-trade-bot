@@ -129,7 +129,7 @@ def _setups(combo, L, E, ctx, h1_stamps, ts1, period, pair):
 
 def _job(args):
     period, pair = args
-    import logger
+    from infra import logger
     logger.log = lambda *a, **k: None
     import backtest_smc as bt
     from strategies.smc import imbalance, liquidity, signal as smc_signal, structure as structure_mod

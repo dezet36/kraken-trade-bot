@@ -11,7 +11,7 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import config  # noqa: E402
+from infra import config  # noqa: E402
 from strategies.llm import llm_rules  # noqa: E402
 
 H = 3_600_000

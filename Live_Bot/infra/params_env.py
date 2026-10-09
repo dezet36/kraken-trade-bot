@@ -18,7 +18,7 @@
 записью в журнал: молчаливый откат превратил бы настройку в декорацию.
 """
 
-from logger import log
+from infra.logger import log
 
 
 def _clean(raw):

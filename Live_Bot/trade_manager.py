@@ -1,10 +1,10 @@
-import config
+from infra import config
 from accounts import live_costs
 from analysis import market_regime
 from control import telegram_notify as tg
 import trade_journal as journal
 from execution.exit_plan import direction_cap, tp_plan, tps_completed, wants_breakeven
-from logger import log, log_trade
+from infra.logger import log, log_trade
 from data.exchange import get_exchange, reset_exchange
 from datetime import datetime
 from collections import defaultdict

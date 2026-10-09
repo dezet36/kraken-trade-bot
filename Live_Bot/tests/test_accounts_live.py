@@ -32,7 +32,7 @@ SECRET = 'sEcReT-never-shown-0123456789'
 
 
 def history_text():
-    import config
+    config = __import__('importlib').import_module('infra.config')
     from accounts import paper
     try:
         with open(os.path.join(config.DATA_DIR, paper.HISTORY_NAME), encoding='utf-8') as fh:

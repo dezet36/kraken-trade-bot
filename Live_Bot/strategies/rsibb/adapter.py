@@ -56,7 +56,7 @@ from strategies import scan_report as report
 # Данные — через дверь анализа (analysis/market.py), не со сборщиков и не с
 # биржи напрямую (реорганизация, этап 4).
 from analysis.market import fetch_ohlcv
-from logger import log
+from infra.logger import log
 from strategies.rsibb import core, params
 
 NAME = 'RSIBB'

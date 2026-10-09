@@ -41,7 +41,7 @@ class Candles:
 @contextlib.contextmanager
 def _data_dir(path):
     """Каталог данных прогона и чистые кэши счетов на время работы."""
-    import config
+    from infra import config
     from accounts import books, live
     saved = (config.DATA_DIR, dict(books._cache), dict(live._cache), books._notify, list(books._outbox))
     config.DATA_DIR = path
@@ -70,7 +70,7 @@ def run(setups, candles, *, deposit=10_000.0, risk_pct=None, step_ms=STEP_MS, un
     ведение (налив, стопы, цели), потом новые сетапы — как в цикле бота.
     Возвращает {'trades': строки журнала, 'books': {стратегия: книга}}.
     """
-    import config
+    from infra import config
     from accounts import books, live, manual
     setups = sorted(setups, key=lambda s: s[0])
     if not setups:

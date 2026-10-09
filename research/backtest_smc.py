@@ -178,7 +178,7 @@ def fibo_orders(pair, data, reasons=None):
     живой фибо — по формирующейся раз в 5 минут. Для выводов о живой фибо —
     research/fibo_live_sim.py (боевой сканер на каждом 5-минутном шаге).
     """
-    import config
+    from infra import config
     from strategies.fibo import strategy
 
     df_1h = data['1h']
@@ -311,7 +311,7 @@ def run(pairs, which='both'):
             print(f'   {pair}: {len(found)} сетапов')
         print(f'   всего сетапов: {len(orders)}')
 
-        import config
+        from infra import config
         outcome = run_portfolio(
             orders, exec_data, risk_pct=RISK_PCT, max_positions=MAX_POSITIONS,
             cooldown_hours=COOLDOWN_HOURS, breakeven_after_tp1=False,

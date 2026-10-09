@@ -180,7 +180,7 @@ def _set(monkeypatch, **values):
     через strategy_profile из свежего экземпляра.
     """
     targets = {id(llm_context.config): llm_context.config}
-    targets.setdefault(id(sys.modules['config']), sys.modules['config'])
+    targets.setdefault(id(sys.modules['infra.config']), sys.modules['infra.config'])
     for cfg in targets.values():
         for key, value in values.items():
             monkeypatch.setattr(cfg, key, value, raising=False)

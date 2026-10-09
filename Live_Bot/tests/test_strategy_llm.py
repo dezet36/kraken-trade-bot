@@ -386,7 +386,7 @@ class TestItIsAStrategyLikeTheOthers:
         assert paper_broker.STRATEGIES == settings_store.STRATEGIES
 
     def test_it_has_its_own_budget(self):
-        import config
+        config = __import__('importlib').import_module('infra.config')
         assert config.PAPER_START_BALANCES['LLM'] > 0
 
 

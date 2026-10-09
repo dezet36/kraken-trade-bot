@@ -33,7 +33,7 @@
 
 import copy
 
-from logger import log
+from infra.logger import log
 
 from accounts import books
 from accounts.books import BAR_MS, DROP_TEXT, EXIT_TEXT, STATUS_TEXT, TARGET, move, p, usd

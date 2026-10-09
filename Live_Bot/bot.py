@@ -4,12 +4,12 @@ import time
 from datetime import datetime, date, timedelta, timezone
 from apscheduler.schedulers.blocking import BlockingScheduler
 
-import config
+from infra import config
 from control import telegram_notify as tg
 from control.telegram_bot import controller
 from data.exchange import get_exchange, make_market_client
 from control import dashboard
-import error_log
+from infra import error_log
 from data import positioning
 from data import market_cap
 from data import market_mood
@@ -30,7 +30,7 @@ from accounts import trading as trading_accounts
 from control import wiring
 wiring.install()
 from trade_manager import LiveTradeManager
-from logger import log
+from infra.logger import log
 
 trade_manager   = None
 broker          = None      # фантомный счёт (TRADING_MODE=PAPER)

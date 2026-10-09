@@ -28,9 +28,9 @@ import json
 import os
 import time
 
-import config
+from infra import config
 from data import sources
-from logger import log
+from infra.logger import log
 
 TOP = 125
 # Адрес CoinGecko — в реестре источников (data/sources.py), путь — здесь.

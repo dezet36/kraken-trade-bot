@@ -24,7 +24,7 @@
 import csv
 import os
 
-from logger import log
+from infra.logger import log
 
 
 def migrate_header(path, columns, what='журнал'):

@@ -35,7 +35,7 @@ import time
 import urllib.error
 import urllib.request
 
-from logger import log
+from infra.logger import log
 
 FILE_NAME = 'data_sources.json'
 USER_AGENT = 'kraken-bot/1.0'
@@ -111,7 +111,7 @@ _health = {}
 def settings_path():
     # config — заново: тесты перезагружают его, и каталог данных, схваченный
     # при импорте, был бы чужим.
-    import config
+    from infra import config
     return os.path.join(config.DATA_DIR, FILE_NAME)
 
 

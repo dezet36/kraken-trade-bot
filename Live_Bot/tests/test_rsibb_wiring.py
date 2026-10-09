@@ -27,7 +27,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 @pytest.fixture()
 def bot(monkeypatch, tmp_path):
     monkeypatch.setenv('BOT_DATA_DIR', str(tmp_path))
-    for module in ('config', 'accounts.settings_store'):
+    for module in ('infra.config', 'accounts.settings_store'):
         forget(module, None)
     import bot as module
     settings_store = __import__('importlib').import_module('accounts.settings_store')

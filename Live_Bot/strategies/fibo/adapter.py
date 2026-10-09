@@ -12,7 +12,7 @@ strategies/fibo/strategy.py, параметры — config.py (раздел «С
 
 from datetime import datetime, timezone
 
-from logger import log
+from infra.logger import log
 
 NAME = 'FIBO'
 
@@ -20,7 +20,7 @@ NAME = 'FIBO'
 def scan(pairs, gate, client=None):
     """Кандидаты сканера ФИБО. Блок-лист часов входа — её собственный фильтр
     (откалиброван под ФИБО; сейчас пуст)."""
-    import config
+    from infra import config
     hour = datetime.now(timezone.utc).hour
     if hour in config.BLOCK_ENTRY_HOURS_UTC:
         log(f"   FIBO: {hour:02d}:xx UTC в блок-листе, пропускаем")
@@ -52,13 +52,13 @@ def profile():
     """Величины исполнения. Остальное у ФИБО — общие из config (они и
     считались для неё). config — заново при каждом вызове: тесты его
     перезагружают."""
-    import config
+    from infra import config
     return {'fills_through_market': getattr(config, 'FIBO_FILL_THROUGH_MARKET', False)}
 
 
 def geometry(signal, g):
     """Зона A (там стоит лимит), зона B (граница инвалидации) и импульс."""
-    import config
+    from infra import config
     za, zb = signal.get('zone_a') or {}, signal.get('zone_b') or {}
 
     # Границы в подписи берутся ИЗ КОНФИГА, а не пишутся руками. Написанная

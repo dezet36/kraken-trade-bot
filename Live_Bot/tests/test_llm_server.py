@@ -13,8 +13,8 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import config  # noqa: E402
-import llm_local  # noqa: E402
+from infra import config  # noqa: E402
+from infra import llm_local  # noqa: E402
 import llm_server  # noqa: E402
 
 

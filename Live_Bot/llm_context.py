@@ -44,7 +44,7 @@ from datetime import datetime
 import numpy as np
 import pandas as pd
 
-import config
+from infra import config
 from analysis import market_regime
 from data import positioning
 from strategies.liquidity import core as liq

@@ -29,7 +29,7 @@ import os
 import threading
 import time
 
-from logger import log
+from infra.logger import log
 
 # Сколько ждём ответа, прежде чем считать модель зависшей. Разбор с критиком
 # укладывается в двадцать минут; тридцать — с запасом на загрузку модели.
@@ -40,7 +40,7 @@ CALL_TIMEOUT_SEC = int(os.getenv('LLM_CALL_TIMEOUT_MIN', 45)) * 60
 _lock = threading.Lock()
 _process = None
 _conn = None
-_impl = 'llm_local:ask_in_process'        # что зовём в дочернем процессе
+_impl = 'infra.llm_local:ask_in_process'        # что зовём в дочернем процессе
 _crashes = 0
 
 
@@ -75,7 +75,7 @@ def _serve(conn, impl):
                          request.get('max_tokens'))
             stats = {}
             try:
-                import llm_local
+                from infra import llm_local
                 stats = llm_local.last_stats()
             except Exception:                          # noqa: BLE001
                 pass

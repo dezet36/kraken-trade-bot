@@ -36,7 +36,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 @pytest.fixture()
 def broker(tmp_path, monkeypatch):
     monkeypatch.setenv('BOT_DATA_DIR', str(tmp_path))
-    for module in ('config', 'paper_broker'):
+    for module in ('infra.config', 'paper_broker'):
         forget(module, None)
     import paper_broker
     return paper_broker
@@ -129,7 +129,7 @@ class TestGapIsNotAGift:
 
 class TestFeeFollowsTheEntryType:
     def test_stop_entry_pays_taker(self, broker, tmp_path):
-        import config
+        config = __import__('importlib').import_module('infra.config')
         inst = make(broker, tmp_path)
         order = an_order(entry_type='MARKET')
         inst.state['pending']['LEVELS']['BTCUSDT'] = order
@@ -140,7 +140,7 @@ class TestFeeFollowsTheEntryType:
         assert position['fees_paid'] == pytest.approx(expected)
 
     def test_limit_entry_pays_maker(self, broker, tmp_path):
-        import config
+        config = __import__('importlib').import_module('infra.config')
         inst = make(broker, tmp_path)
         order = an_order(entry_type='LIMIT')
         inst.state['pending']['LEVELS']['BTCUSDT'] = order
@@ -158,7 +158,7 @@ class TestTheCostLimitComesFromTheStrategy:
     """
 
     def test_each_strategy_has_its_own_limit_fibo_the_common_one(self, broker):
-        import config
+        config = __import__('importlib').import_module('infra.config')
         from strategies.levels import params as levels_params
         from strategies.smc import params as smc_params
         from strategies.rsibb import params as rsibb_params
@@ -183,7 +183,7 @@ class TestTheCostLimitComesFromTheStrategy:
         assert pricey is True
 
     def test_a_levels_entry_with_a_1_2_percent_stop_is_not_refused(self, broker, monkeypatch):
-        import config
+        config = __import__('importlib').import_module('infra.config')
         risk_gate = __import__('importlib').import_module('accounts.risk_gate')
         monkeypatch.setattr(config, 'MAX_ENTRY_COST_SHARE_PCT', 5.0)
         share = risk_gate.entry_cost_share(100.0, 1.2, 0.00075) * 100
@@ -196,7 +196,7 @@ class TestTheCostLimitComesFromTheStrategy:
 
 class TestExpiryComesFromTheStrategy:
     def test_each_strategy_gets_its_own(self, broker):
-        import config
+        config = __import__('importlib').import_module('infra.config')
         strategy_profile = __import__('importlib').import_module('strategies.strategy_profile')
         from strategies.smc import params as smc_params
         assert broker.PaperBroker._expiry_hours('SMC') == pytest.approx(
@@ -218,7 +218,7 @@ class TestExpiryComesFromTheStrategy:
             config.PENDING_ORDER_MAX_HOURS)
 
     def test_levels_do_not_inherit_the_fibo_window(self, broker):
-        import config
+        config = __import__('importlib').import_module('infra.config')
         assert broker.PaperBroker._expiry_hours('LEVELS') != pytest.approx(
             config.PENDING_ORDER_MAX_HOURS), (
             'уровни снова живут по сроку Фибоначчи')

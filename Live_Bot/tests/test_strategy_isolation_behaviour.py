@@ -458,5 +458,8 @@ class TestNoStrategyImportsAnother:
         hits = {m.group(1) for m in ADAPTERS.finditer(src)}
         assert not hits, f'общий слой {path} импортирует стратегию: {sorted(hits)}'
         if path.startswith('strategies/') and path.count('/') >= 2:      # ядро пакета стратегии
-            assert not re.search(r'^\s*(import|from)\s+(config|settings_store)\b', src, re.M), (
+            # config — в infra/, settings_store — в accounts/ (этап 10): ловим и
+            # «from infra import config», и «from accounts.settings_store import …»
+            assert not re.search(r'^\s*(import|from)\s+((infra|accounts)(\.|\s+import\s+))?(config|settings_store)\b',
+                                 src, re.M), (
                 f'{path}: ядро читает config/настройки — оно должно считать по числам своего params')

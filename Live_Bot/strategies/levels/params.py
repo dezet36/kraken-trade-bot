@@ -29,7 +29,7 @@ import os
 # Читатели настроек — общие для всех стратегий (params_env). Свои копии
 # разошлись: одна ловила ошибку разбора, две другие роняли импорт, и
 # «0,5» вместо «0.5» не запускало бота целиком.
-import params_env
+from infra import params_env
 
 _f, _i, _b, _s = params_env.reader('LEVELS')
 

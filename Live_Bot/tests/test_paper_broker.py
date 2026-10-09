@@ -58,10 +58,10 @@ def broker_env(tmp_path, monkeypatch):
     for _name in ('FIBO', 'SMC', 'LEVELS', 'RSIBB'):
         monkeypatch.setenv(f'PAPER_START_BALANCE_{_name}', '10000')
     monkeypatch.setenv('PAPER_FUNDING', 'false')
-    for module in ('config', 'paper_broker', 'control.dashboard', 'shadow', 'execution.setup_journal'):
+    for module in ('infra.config', 'paper_broker', 'control.dashboard', 'shadow', 'execution.setup_journal'):
         forget(module, None)
 
-    import config
+    config = __import__('importlib').import_module('infra.config')
     import paper_broker
 
     # Издержки по умолчанию выключаем: их считает отдельный тест, а в
@@ -302,7 +302,7 @@ class TestExit:
 
     def test_time_stop_closes_stale_position(self, broker_env):
         broker, client, pb, cfg = broker_env
-        import config
+        config = __import__('importlib').import_module('infra.config')
         pb._now_ms = lambda: 1_700_000_000_000
         broker.open('FIBO', signal(entry=100.0, stop=90.0, tp1=130.0))
         feed(broker, client, 'BTCUSDT', [(100, 100, 100)])
@@ -324,7 +324,7 @@ class TestCosts:
     def test_fees_reduce_result(self, broker_env):
         """Комиссии обязаны уменьшать итог: без них месяц выглядит богаче, чем был."""
         broker, client, pb, _cfg = broker_env
-        import config
+        config = __import__('importlib').import_module('infra.config')
         config.PAPER_FEE_MAKER = 0.0002
         config.PAPER_FEE_TAKER = 0.00055
         pb._now_ms = lambda: 1_700_000_000_000
@@ -339,7 +339,7 @@ class TestCosts:
 
     def test_slippage_worsens_stop_exit(self, broker_env):
         broker, client, pb, _cfg = broker_env
-        import config
+        config = __import__('importlib').import_module('infra.config')
         config.PAPER_SLIPPAGE_PCT = 0.001
         pb._now_ms = lambda: 1_700_000_000_000
         broker.open('FIBO', signal(entry=100.0, stop=90.0, tp1=130.0))
@@ -467,7 +467,7 @@ class TestExitPlan:
         assert position['breakeven_set']
         # НЕ на цену входа: стоп ровно на входе терял комиссии круга и
         # записывался как «ноль». Он стоит выше входа на издержки и буфер.
-        import config
+        config = __import__('importlib').import_module('infra.config')
         exit_plan = __import__('importlib').import_module('execution.exit_plan')
         expected = 100.0 * (1 + config.BREAKEVEN_OFFSET_PCT / 100)
         assert position['stop_loss'] == pytest.approx(expected)
@@ -550,7 +550,7 @@ class TestSizing:
     def test_oversized_position_rejected(self, broker_env):
         """Позиция дороже депозита с плечом невозможна и на бирже."""
         broker, _client, pb, _cfg = broker_env
-        import config
+        config = __import__('importlib').import_module('infra.config')
         config.LEVERAGE = 1
         try:
             pb._now_ms = lambda: 1_700_000_000_000

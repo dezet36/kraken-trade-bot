@@ -64,11 +64,11 @@ def show(pair, verdict, context):
 
 
 def main(pairs):
-    import config
+    from infra import config
     from data import exchange
     import llm_context
     from strategies.llm import llm_decide
-    import llm_local
+    from infra import llm_local
     import llm_market
 
     if not llm_local.available():

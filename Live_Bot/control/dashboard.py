@@ -32,17 +32,17 @@ if __package__ in (None, ''):
     # Запуск файлом (python Live_Bot/control/dashboard.py): модули бота — в папке выше.
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import config
+from infra import config
 from strategies import scan_report
 from accounts import settings_store
 from strategies import strategy_profile
-from logger import log
+from infra.logger import log
 
 
 def _app_version():
     """Версия — короткий хеш коммита. Пусто — тоже ответ (не репозиторий)."""
     try:
-        import updater
+        from infra import updater
         return updater.current_commit() or ''
     except Exception:                              # noqa: BLE001
         return ''
@@ -1007,7 +1007,7 @@ def _plural(n, one, few, many):
 def _errors_summary():
     """Короткая сводка по ошибкам — для значка в меню."""
     try:
-        import error_log
+        from infra import error_log
         return error_log.summary()
     except Exception:                              # noqa: BLE001
         return {'groups': 0, 'total': 0, 'last': None, 'categories': []}
@@ -1307,7 +1307,7 @@ def llm_payload(limit=40):
     """
     from strategies.llm import llm_decide
     from strategies.llm import llm_journal
-    import llm_local
+    from infra import llm_local
 
     path = getattr(config, 'LLM_MODEL_PATH', '') or ''
     rows = llm_journal.last(limit, mode=config.TRADING_MODE)
@@ -1766,7 +1766,7 @@ class _Handler(BaseHTTPRequestHandler):
                 self._fail(500, f'история настроек недоступна: {exc}')
         elif path == '/api/errors':
             try:
-                import error_log
+                from infra import error_log
                 # Ошибки чистятся от ключей ДО показа, а не только в отчёте.
                 # Сообщения об отказе биржи часто содержат полный адрес
                 # запроса вместе с ключом, а трассировки — куски конфига. На
@@ -1783,7 +1783,7 @@ class _Handler(BaseHTTPRequestHandler):
         elif path == '/api/update':
             # fetch по требованию: без него страница ждала бы сеть на каждом
             # обновлении, а состояние репозитория меняется несравнимо реже.
-            import updater
+            from infra import updater
             fetch = 'check' in (self.path.split('?', 1) + [''])[1]
             self._send_json({'update': updater.status(fetch=fetch),
                              'writable': _controls_allowed()})
@@ -1894,7 +1894,7 @@ class _Handler(BaseHTTPRequestHandler):
             return
 
         if path == '/api/errors/clear':
-            import error_log
+            from infra import error_log
             ok = error_log.clear()
             if not ok:
                 self._fail(500, 'не удалось очистить журнал ошибок')
@@ -1903,7 +1903,7 @@ class _Handler(BaseHTTPRequestHandler):
             return
 
         if path in ('/api/update', '/api/update/rollback'):
-            import updater
+            from infra import updater
             if path.endswith('rollback'):
                 ok, message = updater.rollback()
                 info = updater.status(fetch=False)

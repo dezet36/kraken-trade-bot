@@ -442,7 +442,7 @@ class TestMarkup:
         исходами: блок есть почти в каждом живом вопросе. Самый длинный живой
         вопрос 25.09.2026 — 23 497 знаков = 9 414 токенов.
         """
-        import config
+        config = __import__('importlib').import_module('infra.config')
         llm_outcomes = __import__('importlib').import_module('strategies.llm.llm_outcomes')
         llm_prompt = __import__('importlib').import_module('strategies.llm.llm_prompt')
         why = ('Вход на L6 (скопление максимумов, касаний 2, объём ×7.5). Стоп за L5 '

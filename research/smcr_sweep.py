@@ -35,7 +35,7 @@ MIN_STOP = 0.008
 
 def _job(args):
     period, pair = args
-    import logger
+    from infra import logger
     logger.log = lambda *a, **k: None
     import backtest_smc as bt
     from strategies.smc import liquidity, signal as smc_signal

@@ -35,7 +35,7 @@ def _path(cache, pair):
 
 
 def _job(task):
-    import config
+    from infra import config
     config.FIBO_FUNDING_AGAINST_CROWD = False           # толпа — фильтром при оценке, как в fibo_crowd.py
     started = time.time()
     cache, pair, orders = FS.orders_for_pair(task)

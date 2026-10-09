@@ -54,7 +54,7 @@ def _stamps_ms(df):
 
 def _job(args):
     period, cache, pair = args
-    import logger
+    from infra import logger
     logger.log = lambda *a, **k: None
     import backtest_smc as bt
     import smc_lab

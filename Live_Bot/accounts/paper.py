@@ -37,7 +37,7 @@ import shutil
 import threading
 from datetime import datetime
 
-from logger import log
+from infra.logger import log
 from strategies import registry
 
 FILE_NAME = 'accounts.json'
@@ -93,7 +93,7 @@ _cache = {'key': None, 'data': None}
 def _data_dir():
     # config — заново при каждом вызове: тесты перезагружают его, и каталог
     # данных, схваченный при импорте, был бы чужим (боевым).
-    import config
+    from infra import config
     return config.DATA_DIR
 
 
@@ -125,7 +125,7 @@ def _default_slots():
     Осознанный выбор оператора сильнее: SLOTS_PER_STRATEGY в .env, а поле на
     панели перекрывает и его.
     """
-    import config
+    from infra import config
     if config.SLOTS_PER_STRATEGY:
         return int(config.SLOTS_PER_STRATEGY)
     return UNLIMITED
@@ -145,7 +145,7 @@ def _portfolio_defaults():
 
 
 def _defaults():
-    import config
+    from infra import config
     out = {code: {
         'enabled': True,
         'deposit': float(config.PAPER_START_BALANCES.get(code, config.PAPER_START_BALANCE)),
@@ -221,7 +221,7 @@ def load(force=False):
     Битый файл не останавливает торговлю — значения по умолчанию и строка в
     журнал.
     """
-    import config
+    from infra import config
     with _lock:
         p = path()
         key = (p, _mtime(p))
@@ -256,7 +256,7 @@ def save(changes, record=True):
         p = path()
         if not _write(p, data):
             return data
-        import config
+        from infra import config
         _cache['key'], _cache['data'], _cache['config'] = (p, _mtime(p)), data, config
     if record:
         write_history(before, data)
@@ -362,13 +362,13 @@ def enabled(strategy):
 
 def risk_pct(strategy):
     """Риск сделки, % депозита счёта (на тесте у всех 1%)."""
-    import config
+    from infra import config
     return float(load().get(strategy, {}).get('risk_pct', config.RISK_PER_TRADE))
 
 
 def deposit(strategy):
     """Стартовый депозит счёта."""
-    import config
+    from infra import config
     return float(load().get(strategy, {}).get('deposit', config.PAPER_START_BALANCE))
 
 

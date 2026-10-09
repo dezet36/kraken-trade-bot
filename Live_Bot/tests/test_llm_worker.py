@@ -14,7 +14,7 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-import llm_worker
+from infra import llm_worker
 
 
 @pytest.fixture(autouse=True)
@@ -63,7 +63,7 @@ class TestTheWorkerSurvivesItsModel:
 class TestTheDispatch:
 
     def test_local_ask_routes_to_the_worker_when_isolated(self, monkeypatch):
-        import llm_local
+        llm_local = __import__('importlib').import_module('infra.llm_local')
         monkeypatch.setattr(llm_local.config, 'LLM_ISOLATE', True)
         monkeypatch.setattr(llm_local, 'available', lambda: True)
         monkeypatch.setattr(llm_worker, 'ask',
@@ -72,7 +72,7 @@ class TestTheDispatch:
         assert llm_local.last_stats()['seconds'] == 1.5
 
     def test_in_process_path_still_exists_for_debugging(self, monkeypatch):
-        import llm_local
+        llm_local = __import__('importlib').import_module('infra.llm_local')
         monkeypatch.setattr(llm_local.config, 'LLM_ISOLATE', False)
         monkeypatch.setattr(llm_local, 'ask_in_process', lambda p, g, m: 'внутри')
         assert llm_local.ask('q') == 'внутри'

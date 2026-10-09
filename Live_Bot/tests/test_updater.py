@@ -68,9 +68,9 @@ def repo(tmp_path, monkeypatch):
     git(origin, 'add', '-A')
     git(origin, 'commit', '--quiet', '-m', 'вторая версия')
 
-    import config
+    config = __import__('importlib').import_module('infra.config')
     monkeypatch.setattr(config, 'DATA_DIR', str(data))
-    import updater
+    updater = __import__('importlib').import_module('infra.updater')
     monkeypatch.setattr(updater, 'ROOT', str(work))
     monkeypatch.setattr(updater, 'STATE_FILE', str(data / 'update_state.json'))
     monkeypatch.setattr(updater, 'run_tests', lambda: (True, '1 passed'))

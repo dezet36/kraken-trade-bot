@@ -65,7 +65,7 @@ BINGX_IDS = ['BTC-USDT', 'ETH-USDT']          # SHIB1000 у него нет
 @pytest.fixture()
 def ex(monkeypatch, tmp_path):
     monkeypatch.setenv('BOT_DATA_DIR', str(tmp_path))
-    for module in ('config', 'accounts.settings_store', 'data.exchange'):
+    for module in ('infra.config', 'accounts.settings_store', 'data.exchange'):
         forget(module, None)
     # import_module, а не «from data import exchange»: тот взял бы прежний
     # модуль из атрибута пакета data, хотя из sys.modules его выгрузили.

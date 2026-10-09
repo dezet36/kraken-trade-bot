@@ -29,7 +29,8 @@ import threading
 import traceback
 from datetime import datetime
 
-_BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+# Папка бота (Live_Bot) — на уровень выше infra/ (этап 10).
+_BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR = os.getenv('BOT_DATA_DIR') or _BASE_DIR
 ERRORS_FILE = os.path.join(DATA_DIR, 'errors.json')
 
@@ -209,7 +210,7 @@ def _hook(message, level):
 def install():
     """Подключает сбор к logger. Вызывается один раз при старте бота."""
     try:
-        import logger
+        from infra import logger
         logger.set_error_hook(_hook)
         return True
     except Exception:                              # noqa: BLE001

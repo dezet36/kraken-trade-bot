@@ -326,7 +326,7 @@ class TestTrailingCannotDivergeSilently:
     """
 
     def _live_trailing_enabled(self):
-        import config
+        config = __import__('importlib').import_module('infra.config')
         # 99 — сторожевое значение: столько целей не бывает, условие
         # `tp_hit >= 99` не выполняется никогда.
         return int(getattr(config, 'TRAIL_AFTER_TP', 99)) < 10
@@ -350,7 +350,7 @@ class TestTrailingCannotDivergeSilently:
         Если значение перестанет быть заведомо недостижимым, проверка выше
         начнёт молчать не потому, что всё хорошо.
         """
-        import config
+        config = __import__('importlib').import_module('infra.config')
         value = int(getattr(config, 'TRAIL_AFTER_TP', 99))
         assert value >= 10 or self._paper_has_trailing(), (
             f'TRAIL_AFTER_TP = {value}: это уже не «выключено», а рабочее '

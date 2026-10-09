@@ -34,13 +34,13 @@ _cache = {'key': None, 'data': {}}
 def path():
     # config — заново при каждом вызове: тесты перезагружают его, и каталог
     # данных, схваченный при импорте, был бы чужим.
-    import config
+    from infra import config
     return os.path.join(config.DATA_DIR, FILE_NAME)
 
 
 def defaults():
     """Поля стратегии, когда оператор их не задавал."""
-    import config
+    from infra import config
     return {'min_stop_pct': round(float(config.MIN_SL_PERCENT) * 100, 3), 'critic': True}
 
 
@@ -94,11 +94,11 @@ def min_stop_pct(strategy):
     try:
         from strategies import registry
         if registry.get(strategy) is None:
-            import config
+            from infra import config
             return float(config.MIN_SL_PERCENT)
         return float(section(_stored().get(strategy))['min_stop_pct']) / 100.0
     except Exception:                              # noqa: BLE001
-        import config
+        from infra import config
         return float(config.MIN_SL_PERCENT)
 
 
@@ -111,5 +111,5 @@ def critic_enabled():
     try:
         return bool(section(_stored().get('LLM'))['critic'])
     except Exception:                              # noqa: BLE001
-        import config
+        from infra import config
         return bool(getattr(config, 'LLM_CRITIC', True))

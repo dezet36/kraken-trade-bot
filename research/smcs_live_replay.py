@@ -21,7 +21,7 @@ import requests
 import pandas as pd
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'Live_Bot'))
-import logger  # noqa: E402
+from infra import logger  # noqa: E402
 logger.log = lambda *a, **k: None               # строка на каждый шаг прогона — лишняя
 from strategies.smcs import adapter as strategy_smcs  # noqa: E402
 from accounts import books, replay  # noqa: E402

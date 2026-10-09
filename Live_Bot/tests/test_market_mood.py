@@ -17,7 +17,7 @@ HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, HERE)
 RESEARCH = os.path.join(os.path.dirname(HERE), 'research')
 
-import config  # noqa: E402
+from infra import config  # noqa: E402
 from data import market_mood  # noqa: E402
 
 H = 3_600_000

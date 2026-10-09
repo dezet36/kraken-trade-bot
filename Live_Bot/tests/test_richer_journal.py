@@ -95,7 +95,7 @@ class TestTheEntryContextIsRecorded:
     def _broker(self, tmp_path, monkeypatch):
         monkeypatch.setenv('BOT_DATA_DIR', str(tmp_path))
         monkeypatch.setenv('PAPER_FUNDING', 'false')
-        for name in ('config', 'paper_broker'):
+        for name in ('infra.config', 'paper_broker'):
             forget(name, None)
         import paper_broker
         return paper_broker.PaperBroker(client=None, strategies=('FIBO',))

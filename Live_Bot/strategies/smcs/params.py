@@ -38,7 +38,7 @@ research/results/smcz/final_C2.txt), 2021–2026:
 поломка; убыточные годы бывают (2021 на пуле — −2…−9%).
 """
 
-import params_env
+from infra import params_env
 
 _f, _i, _b, _s = params_env.reader('SMCS')
 

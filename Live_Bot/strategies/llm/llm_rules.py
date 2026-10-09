@@ -46,8 +46,8 @@ import time
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
-import config
-from logger import log
+from infra import config
+from infra.logger import log
 
 NAME = 'LLM'
 

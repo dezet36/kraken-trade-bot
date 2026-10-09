@@ -144,7 +144,7 @@ class TestPendingInvalidationIsDeclaredByTheStrategy:
     def test_fibo_declares_the_level_the_broker_used_to_compute(self):
         """88.6%-уровень отката: прежде его считал paper_broker._invalidation по
         имени стратегии; теперь — сама ФИБО, тем же выражением."""
-        import config
+        config = __import__('importlib').import_module('infra.config')
         import pandas as pd
         strategy = __import__('importlib').import_module('strategies.fibo.strategy')
         path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data', 'golden_market_1h.json')

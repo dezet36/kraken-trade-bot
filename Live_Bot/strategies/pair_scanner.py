@@ -3,13 +3,13 @@ Pair scanner: uses fixed pool from config, filters by liquidity in LIVE mode.
 In DEMO mode volume filter is skipped (exchange returns 0 volume).
 """
 
-import config
+from infra import config
 from strategies import scan_report as report
 # Данные — через дверь анализа (analysis/market.py), не со сборщиков и не с
 # биржи напрямую (реорганизация, этап 4).
 from analysis.market import fetch_ohlcv
 from strategies.fibo.strategy import find_recent_impulse, get_zones, get_htf_trend, calculate_trade_params
-from logger import log
+from infra.logger import log
 
 
 def _norm_symbol(symbol: str) -> str:

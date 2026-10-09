@@ -28,9 +28,9 @@ import json
 import os
 from datetime import datetime, timezone
 
-import config
-import csv_journal
-from logger import log
+from infra import config
+from infra import csv_journal
+from infra.logger import log
 
 CSV_PATH = os.path.join(config.DATA_DIR, 'llm_calls.csv')
 

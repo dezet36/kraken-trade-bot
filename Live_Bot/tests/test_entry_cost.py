@@ -37,7 +37,7 @@ import sys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
-import config                                            # noqa: E402
+from infra import config  # noqa: E402
 from accounts import risk_gate  # noqa: E402
 from paper_broker import PaperBroker                     # noqa: E402
 
@@ -208,7 +208,7 @@ class TestTheNumberReachesTheJournal:
         работала. Здесь вместо этого пишется старый файл и проверяется, что
         значения остались под своими именами.
         """
-        import csv_journal
+        csv_journal = __import__('importlib').import_module('infra.csv_journal')
         import paper_broker
 
         path = str(tmp_path / 'trades.csv')

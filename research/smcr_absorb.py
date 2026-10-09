@@ -47,7 +47,7 @@ def _ms(index):
 # ── События ──────────────────────────────────────────────────────────────────
 def _job(args):
     period, pair = args
-    import logger
+    from infra import logger
     logger.log = lambda *a, **k: None
     import backtest_smc as bt
     from strategies.smc import signal as smc_signal

@@ -32,10 +32,10 @@ scan_report: «словарь в памяти, без диска». Значит
 другая величина.
 """
 
-import csv_journal
-import config
+from infra import csv_journal
+from infra import config
 import os
-from logger import log
+from infra.logger import log
 
 CSV_PATH = os.path.join(config.DATA_DIR, 'refused.csv')
 

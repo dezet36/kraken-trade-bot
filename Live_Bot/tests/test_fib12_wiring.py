@@ -31,7 +31,7 @@ GOLDEN = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data', 'fib12
 @pytest.fixture()
 def bot(monkeypatch, tmp_path):
     monkeypatch.setenv('BOT_DATA_DIR', str(tmp_path))
-    for module in ('config', 'accounts.settings_store'):
+    for module in ('infra.config', 'accounts.settings_store'):
         forget(module, None)
     import bot as module
     settings_store = __import__('importlib').import_module('accounts.settings_store')
@@ -159,7 +159,7 @@ class TestRegistration:
     def test_known_everywhere(self):
         import paper_broker
         settings_store = __import__('importlib').import_module('accounts.settings_store')
-        import config
+        config = __import__('importlib').import_module('infra.config')
         tg_format = __import__('importlib').import_module('control.tg_format')
         assert 'FIB12' in settings_store.STRATEGIES
         assert 'FIB12' in paper_broker.STRATEGIES

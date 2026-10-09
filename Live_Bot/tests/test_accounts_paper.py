@@ -38,7 +38,7 @@ def a_signal(direction='LONG', **params):
 
 
 def data_dir():
-    import config
+    config = __import__('importlib').import_module('infra.config')
     return config.DATA_DIR
 
 
@@ -46,7 +46,7 @@ def data_dir():
 
 class TestDefaults:
     def test_every_strategy_has_an_account_at_the_test_standard(self):
-        import config
+        config = __import__('importlib').import_module('infra.config')
         for code in registry.codes():
             assert account.enabled(code)
             assert account.risk_pct(code) == float(config.RISK_PER_TRADE)
@@ -54,7 +54,7 @@ class TestDefaults:
 
     def test_direction_cap_is_what_each_strategy_was_measured_with(self):
         """Те же числа, что стратегии клали в сигнал до этапа 2."""
-        import config
+        config = __import__('importlib').import_module('infra.config')
         from strategies.fib12 import params as fib12
         from strategies.levels import params as levels
         from strategies.rsibb import params as rsibb
@@ -70,7 +70,7 @@ class TestDefaults:
     def test_ai_cap_follows_its_mode(self, mode, monkeypatch):
         """ИИ: тетрадь — по числу мест, правила — своя копия правил SMC, планы
         модели — общее значение (до этапа 2 предела в их сигнале не было)."""
-        import config
+        config = __import__('importlib').import_module('infra.config')
         llm_notebook = __import__('importlib').import_module('strategies.llm.llm_notebook')
         llm_rules = __import__('importlib').import_module('strategies.llm.llm_rules')
         for module in (config, llm_rules.config, llm_notebook.config):

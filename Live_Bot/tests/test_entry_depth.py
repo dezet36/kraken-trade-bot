@@ -44,7 +44,7 @@ def test_entry_price_follows_depth(depth, expected, monkeypatch):
     Проверяется на числах, а не на «сигнал появился»: подменить одно на другое
     легко, и тогда тест перестанет ловить сдвиг входа.
     """
-    import config
+    config = __import__('importlib').import_module('infra.config')
     strategy = __import__('importlib').import_module('strategies.fibo.strategy')
 
     monkeypatch.setattr(config, 'ENTRY_RETRACE', depth)
@@ -62,7 +62,7 @@ def test_entry_price_follows_depth(depth, expected, monkeypatch):
 
 
 def test_short_entry_is_mirrored(monkeypatch):
-    import config
+    config = __import__('importlib').import_module('infra.config')
 
     monkeypatch.setattr(config, 'ENTRY_RETRACE', 0.5)
     end_price, size = 100.0, 10.0
@@ -78,7 +78,7 @@ def test_rr_matches_arithmetic(depth, rr, monkeypatch):
     плюс буфер 1%, цель — 25% за концом, и оба от входа не зависят. Если
     геометрию когда-нибудь тронут, тест скажет об этом раньше замера.
     """
-    import config
+    config = __import__('importlib').import_module('infra.config')
     strategy = __import__('importlib').import_module('strategies.fibo.strategy')
 
     monkeypatch.setattr(config, 'ENTRY_RETRACE', depth)
@@ -94,7 +94,7 @@ def test_rr_matches_arithmetic(depth, rr, monkeypatch):
 
 def test_default_is_the_measured_value():
     """По умолчанию стоит то, что принято замером, а не прежние 38.2%."""
-    import config
+    config = __import__('importlib').import_module('infra.config')
 
     assert config.ENTRY_RETRACE == pytest.approx(0.5)
 

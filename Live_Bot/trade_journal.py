@@ -16,9 +16,9 @@ import json
 import os
 from datetime import datetime, timezone
 
-import config
-import csv_journal
-from logger import log
+from infra import config
+from infra import csv_journal
+from infra.logger import log
 
 JOURNAL_FILE  = os.path.join(config.DATA_DIR, 'trades_journal.csv')
 DETAIL_JSONL  = os.path.join(config.DATA_DIR, 'trades_detail.jsonl')

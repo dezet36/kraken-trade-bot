@@ -21,9 +21,9 @@ import time
 
 import pandas as pd
 
-import config
+from infra import config
 from data import sources
-from logger import log
+from infra.logger import log
 
 H = 3_600_000
 HISTORY_H = 1000          # окнам признаков нужно до 744 ч (30 дней + сутки)

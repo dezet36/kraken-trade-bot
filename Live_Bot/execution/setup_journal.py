@@ -30,9 +30,9 @@ import re
 import time
 from datetime import datetime, timezone
 
-import config
-import csv_journal
-from logger import log
+from infra import config
+from infra import csv_journal
+from infra.logger import log
 
 DROPPED_CSV = os.path.join(config.DATA_DIR, 'orders_dropped.csv')
 

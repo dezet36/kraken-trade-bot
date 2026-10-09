@@ -36,9 +36,9 @@ from datetime import datetime, timezone
 
 import requests
 
-import config
+from infra import config
 from control import telegram_state
-from logger import log
+from infra.logger import log
 
 CONFIRM_TTL_S = 600
 POLL_TIMEOUT_S = 25

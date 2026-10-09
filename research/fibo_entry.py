@@ -101,7 +101,7 @@ def collect_setups(pair, data):
     Импульсы и цена на момент сигнала. Вход не фиксируется: он считается
     потом, по варианту.
     """
-    import config
+    from infra import config
     from strategies.fibo import strategy
 
     df_1h = data['1h']
@@ -141,7 +141,7 @@ def build_orders(setups, depth, sides, min_rr):
     стоп за 0.886 от конца импульса плюс буфер 1% размера, пол по расстоянию
     до стопа из настроек, цель 25% за концом импульса.
     """
-    import config
+    from infra import config
     from accounts import settings_store as settings
     from smc_engine import Order
 
@@ -195,7 +195,7 @@ def build_orders(setups, depth, sides, min_rr):
 
 
 def run_variant(setups, data, depth, sides, min_rr):
-    import config
+    from infra import config
     from smc_engine import compute_stats, run_portfolio
 
     orders = build_orders(setups, depth, sides, min_rr)
@@ -229,7 +229,7 @@ def run_variant(setups, data, depth, sides, min_rr):
 
 
 def load(cache_dir, pairs, label):
-    import config
+    from infra import config
 
     os.environ['SMC_CACHE_DIR'] = cache_dir
     sys.modules.pop('backtest_smc', None)
@@ -274,7 +274,7 @@ VARIANTS = [
 
 
 def main():
-    import config
+    from infra import config
 
     print('Арифметика, известная до замера: RR = (0.25 + r) / (0.896 - r)')
     for depth in (0.382, 0.5, 0.618):

@@ -23,7 +23,7 @@ import pytest
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
-import params_env                                           # noqa: E402
+from infra import params_env  # noqa: E402
 from _modules import forget, remember  # noqa: E402
 
 

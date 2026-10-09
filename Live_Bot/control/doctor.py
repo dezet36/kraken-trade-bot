@@ -65,7 +65,7 @@ def check_packages():
 
 
 def check_data_dir():
-    import config
+    from infra import config
     path = config.DATA_DIR
     if not os.path.isdir(path):
         return _result(FAIL, 'Каталог данных не создан', path,
@@ -92,7 +92,7 @@ def check_data_dir():
 
 
 def check_env():
-    import config
+    from infra import config
     if not os.path.exists(os.path.join(config.DATA_DIR, '.env')) and not config.env_loaded:
         return _result(FAIL, 'Файл .env не найден',
                        f'ожидался в {config.DATA_DIR}',
@@ -101,7 +101,7 @@ def check_env():
 
 
 def check_keys():
-    import config
+    from infra import config
     name = (config.EXCHANGE_NAME or '').lower()
     if name == 'bybit':
         key, secret = config.BYBIT_API_KEY, config.BYBIT_SECRET_KEY
@@ -122,7 +122,7 @@ def check_keys():
 
 
 def check_mode():
-    import config
+    from infra import config
     mode = config.TRADING_MODE
     if mode == 'LIVE':
         return _result(WARN, 'Режим LIVE — торговля реальными деньгами',
@@ -134,7 +134,7 @@ def check_mode():
 
 
 def check_strategy():
-    import config
+    from infra import config
     known = ('FIBO', 'SMC', 'LEVELS', 'BOTH')
     if config.STRATEGY not in known:
         return _result(FAIL, f'Неизвестная стратегия: {config.STRATEGY}',
@@ -144,7 +144,7 @@ def check_strategy():
 
 def check_exchange():
     """Живая проверка связи: ключи могут быть на месте и при этом неверны."""
-    import config
+    from infra import config
     # Проверяем ровно тот вызов, которым живёт бот: свечи. Тикер идёт по
     # другому маршруту и может падать там, где торговля работает.
     try:
@@ -168,7 +168,7 @@ def check_exchange():
 
 
 def check_pairs():
-    import config
+    from infra import config
     pool = config.TRADING_PAIRS_POOL
     if not pool:
         return _result(FAIL, 'Пул пар пуст', '', 'задайте TRADING_PAIRS_POOL')
@@ -183,7 +183,7 @@ def _strategy_risks():
     параметров не загрузился, — сама по себе повод для отчёта, а не причина
     промолчать обо всём.
     """
-    import config
+    from infra import config
     from accounts import settings_store as settings
     out = []
     # Риск — тот, с которым стратегия торгует (настройки оператора), один для
@@ -329,7 +329,7 @@ def check_strategy_knobs():
 
 
 def check_telegram():
-    import config
+    from infra import config
     if not config.TELEGRAM_BOT_TOKEN or not config.TELEGRAM_CHAT_ID:
         return _result(WARN, 'Telegram не настроен',
                        'уведомления о сделках приходить не будут',

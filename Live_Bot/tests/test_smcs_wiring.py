@@ -30,7 +30,7 @@ GOLDEN = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data', 'smcs_
 @pytest.fixture()
 def bot(monkeypatch, tmp_path):
     monkeypatch.setenv('BOT_DATA_DIR', str(tmp_path))
-    for module in ('config', 'accounts.settings_store'):
+    for module in ('infra.config', 'accounts.settings_store'):
         forget(module, None)
     import bot as module
     settings_store = __import__('importlib').import_module('accounts.settings_store')
@@ -154,7 +154,7 @@ class TestRegistration:
     def test_known_everywhere(self):
         import paper_broker
         settings_store = __import__('importlib').import_module('accounts.settings_store')
-        import config
+        config = __import__('importlib').import_module('infra.config')
         assert 'SMCS' in settings_store.STRATEGIES
         assert 'SMCS' in paper_broker.STRATEGIES
         assert config.PAPER_START_BALANCES['SMCS'] > 0

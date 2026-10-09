@@ -59,7 +59,7 @@ def test_golden_has_no_portfolio_refusals():
 
 def test_replay_trades_equal_broker_trades(monkeypatch):
     monkeypatch.setenv('PAPER_FUNDING', 'false')
-    import config
+    config = __import__('importlib').import_module('infra.config')
     monkeypatch.setattr(config, 'PAPER_FUNDING', False)
     from accounts import replay
     plan, candles = setups()
@@ -77,7 +77,7 @@ def test_replay_trades_equal_broker_trades(monkeypatch):
 
 def test_replay_leaves_the_bot_data_alone(tmp_path):
     """Прогон работает в своём каталоге и возвращает боту его каталог и кэши."""
-    import config
+    config = __import__('importlib').import_module('infra.config')
     from accounts import books, replay
     before = config.DATA_DIR
     plan, candles = setups()

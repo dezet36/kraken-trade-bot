@@ -18,7 +18,7 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import llm_local
+from infra import llm_local
 
 
 @pytest.fixture(autouse=True)
@@ -128,7 +128,7 @@ class TestItDoesNotRetryAHopelessLoad:
 class TestTheSettingsAreReadable:
 
     def test_defaults_exist(self):
-        import config
+        config = __import__('importlib').import_module('infra.config')
         for name in ('LLM_MODEL_PATH', 'LLM_THREADS', 'LLM_CTX',
                      'LLM_MAX_TOKENS', 'LLM_THINK_TAG', 'LLM_TEMPERATURE'):
             assert hasattr(config, name), name
@@ -138,7 +138,7 @@ class TestTheSettingsAreReadable:
         Модель не забирает все ядра. Замер показал упор в память, а не в счёт:
         лишние потоки скорости не дают, зато останавливают торговый цикл.
         """
-        import config
+        config = __import__('importlib').import_module('infra.config')
         assert 1 <= config.LLM_THREADS <= 8
 
     def test_thinking_is_on_with_a_budget(self):
@@ -147,7 +147,7 @@ class TestTheSettingsAreReadable:
         LLM_THINK_CHARS знаков, и метка /no_think к вопросу не добавляется.
         Нулевой бюджет возвращает метку — и режим выключен.
         """
-        import config
+        config = __import__('importlib').import_module('infra.config')
         assert config.LLM_THINK_CHARS > 0
         assert config.LLM_THINK_TAG == ''
 
@@ -253,5 +253,5 @@ class TestTheWindowFitsTheQuestion:
         Замерено на сервере: вопрос занимает около 1700 токенов. Окно обязано
         вмещать его вместе с полным ответом, иначе предел ответа — обман.
         """
-        import config
+        config = __import__('importlib').import_module('infra.config')
         assert config.LLM_CTX >= 1700 + config.LLM_MAX_TOKENS

@@ -213,12 +213,12 @@ class TestTheLongestAnswerStillFits:
         return chars / self.CHARS_PER_TOKEN + 120
 
     def test_it_fits_the_answer_limit(self):
-        import config
+        config = __import__('importlib').import_module('infra.config')
         assert self.worst_answer_tokens() < config.LLM_MAX_TOKENS
 
     def test_it_fits_the_context_window(self):
         """Вопрос замерен на сервере: около 1700 токенов вместе с разметкой."""
-        import config
+        config = __import__('importlib').import_module('infra.config')
         assert 1700 + self.worst_answer_tokens() < config.LLM_CTX
 
     def test_the_short_fields_cannot_ramble_for_minutes(self):

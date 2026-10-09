@@ -29,7 +29,7 @@ BingX, потом малая сумма).
 import copy
 import hashlib
 
-from logger import log
+from infra.logger import log
 
 from accounts import books
 from accounts.books import DROP_TEXT, EXIT_TEXT, TARGET, move, p, qty, usd

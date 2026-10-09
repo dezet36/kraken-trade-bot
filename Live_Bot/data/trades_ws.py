@@ -28,9 +28,9 @@ import os
 import threading
 import time
 
-import config
+from infra import config
 from data import sources
-from logger import log
+from infra.logger import log
 
 PATH = os.path.join(config.DATA_DIR, 'positioning', 'delta.jsonl')
 PING_SEC = 20

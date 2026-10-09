@@ -20,7 +20,7 @@ _lock = threading.Lock()
 def path():
     # Каждый раз через sys.modules: проверки перезагружают config с другой
     # папкой данных, и путь, схваченный при импорте, указывал бы в чужую.
-    import config
+    from infra import config
     return os.path.join(config.DATA_DIR, 'telegram_state.json')
 
 

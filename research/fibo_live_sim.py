@@ -48,14 +48,14 @@ sys.path.insert(0, os.path.join(ROOT, 'Live_Bot'))
 os.environ.setdefault('BOT_DATA_DIR', os.path.join(HERE, 'results', 'sim-data'))
 os.makedirs(os.environ['BOT_DATA_DIR'], exist_ok=True)
 
-import logger  # noqa: E402
+from infra import logger  # noqa: E402
 logger.log = lambda *a, **k: None          # строка на каждую оценку тормозила прогон
 
 import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
 
 import backtest_smc as bt  # noqa: E402
-import config  # noqa: E402
+from infra import config  # noqa: E402
 from accounts import risk_gate  # noqa: E402
 from strategies.fibo import strategy  # noqa: E402
 from strategies import strategy_profile  # noqa: E402

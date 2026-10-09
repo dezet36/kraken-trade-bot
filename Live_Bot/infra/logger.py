@@ -8,8 +8,9 @@ from datetime import datetime
 # config.py сам импортирует log из этого модуля) — считаем env напрямую.
 # У собранного .exe __file__ ведёт во временную папку распаковки, которая
 # удаляется при выходе, поэтому там точка отсчёта — папка самого .exe.
+# Папка бота (Live_Bot) — на уровень выше infra/ (этап 10).
 _BASE_DIR = (os.path.dirname(sys.executable) if getattr(sys, 'frozen', False)
-             else os.path.dirname(os.path.abspath(__file__)))
+             else os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 _DATA_DIR = os.getenv('BOT_DATA_DIR') or _BASE_DIR
 os.makedirs(_DATA_DIR, exist_ok=True)
 LOG_FILE  = os.path.join(_DATA_DIR, "bot_log.txt")

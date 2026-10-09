@@ -1,14 +1,15 @@
 import os
 import sys
 from dotenv import load_dotenv
-from logger import log
+from infra.logger import log
 
 # Каталог, относительно которого живут данные, когда BOT_DATA_DIR не задан.
 # В собранном .exe __file__ указывает во ВРЕМЕННУЮ папку распаковки, которая
 # удаляется при выходе: журнал сделок и состояние позиций там бы не пережили
 # перезапуск. Поэтому у замороженной сборки точка отсчёта — папка самого .exe.
+# Папка бота (Live_Bot) — на уровень выше infra/ (этап 10).
 _BASE_DIR = (os.path.dirname(sys.executable) if getattr(sys, 'frozen', False)
-             else os.path.dirname(os.path.abspath(__file__)))
+             else os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # ── DATA_DIR: каталог персистентных данных, ФИЗИЧЕСКИ отдельный от кода ──────
 # Проблема, которую это решает: если код деплоится ручным копированием папки

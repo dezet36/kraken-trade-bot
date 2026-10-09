@@ -36,7 +36,7 @@ ROOT = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(ROOT, 'Live_Bot'))
 
-import logger                                          # noqa: E402
+from infra import logger  # noqa: E402
 logger.log = lambda *a, **k: None
 
 import ai_doctrine as D                               # noqa: E402

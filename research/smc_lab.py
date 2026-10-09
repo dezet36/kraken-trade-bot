@@ -76,7 +76,7 @@ def rows_path(period, layout='1h'):
 
 def _job(args):
     period, cache, pair, layout = args
-    import logger
+    from infra import logger
     logger.log = lambda *a, **k: None
     import backtest_smc as bt
     from strategies.smc import signal as smc_signal

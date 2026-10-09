@@ -42,8 +42,8 @@ if __package__ in (None, ''):
     import sys
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-import config
-from logger import log
+from infra import config
+from infra.logger import log
 
 NAME = 'LLM'
 SLOTS = 6

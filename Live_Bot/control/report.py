@@ -154,14 +154,14 @@ def _version():
     это первый же уточняющий вопрос в переписке.
     """
     try:
-        import updater
+        from infra import updater
         return updater.current_commit() or 'не git-репозиторий'
     except Exception as exc:                       # noqa: BLE001
         return f'не определилась: {exc}'
 
 
 def _head():
-    import config
+    from infra import config
 
     mode = getattr(config, 'TRADING_MODE', '?')
     lines = [
@@ -190,7 +190,7 @@ def _section(title, body):
 
 def _errors():
     try:
-        import error_log
+        from infra import error_log
     except Exception as exc:                       # noqa: BLE001
         return f'журнал ошибок недоступен: {exc}'
 

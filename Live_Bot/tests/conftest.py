@@ -78,7 +78,7 @@ def pytest_configure(config):
     накрывает и импорты тоже.
     """
     import tempfile
-    import logger
+    logger = __import__('importlib').import_module('infra.logger')
     logger.LOG_FILE = os.path.join(tempfile.mkdtemp(prefix='kraken-test-log-'),
                                    'bot_log.txt')
 
@@ -102,7 +102,7 @@ def _isolate_the_log(tmp_path, monkeypatch):
     нарочно ломают тесты, писали в боевой журнал. Диагноз по журналу стал
     невозможен — настоящие события тонут в выдуманных.
     """
-    import logger
+    logger = __import__('importlib').import_module('infra.logger')
     monkeypatch.setattr(logger, 'LOG_FILE', str(tmp_path / 'bot_log.txt'))
 
 
@@ -137,7 +137,7 @@ def _isolate_bot_data(tmp_path, monkeypatch):
             targets.setdefault(id(inner), inner)
 
     # И сам config: остальные модули берут пути из его DATA_DIR при импорте.
-    config_module = sys.modules.get('config')
+    config_module = sys.modules.get('infra.config')
     if config_module is not None:
         monkeypatch.setattr(config_module, 'DATA_DIR', str(data_dir),
                             raising=False)

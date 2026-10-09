@@ -24,7 +24,7 @@ import re
 import threading
 from datetime import datetime, timezone
 
-from logger import log
+from infra.logger import log
 
 FILE_NAME = 'trading_accounts.json'
 KEYS_FILE = os.path.join('secrets', 'exchange_keys.json')
@@ -69,7 +69,7 @@ _cache = {'key': None, 'data': None}
 # ── Где лежит ───────────────────────────────────────────────────────────────
 
 def _data_dir():
-    import config                    # заново: тесты перезагружают config
+    from infra import config  # заново: тесты перезагружают config
     return config.DATA_DIR
 
 

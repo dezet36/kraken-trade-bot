@@ -49,12 +49,12 @@ import os
 import threading
 import time
 
-import config
+from infra import config
 from strategies.llm import llm_decide
 from strategies.llm import llm_journal
-import llm_local
+from infra import llm_local
 import llm_market
-from logger import log
+from infra.logger import log
 
 NAME = 'LLM'
 
@@ -1150,7 +1150,7 @@ def _rules():
 def profile():
     # config — заново при каждом вызове: тесты перезагружают его, и
     # схваченный при импорте адаптера был бы чужим (как и в strategy_profile).
-    import config
+    from infra import config
     rules = _rules()
     if rules is not None:
         return {'expiry_hours': rules.PENDING_ORDER_MAX_HOURS, 'cooldown_hours': rules.COOLDOWN_HOURS,

@@ -28,7 +28,7 @@ T0 = 1_790_000_000          # 2026-09-21, секунды
 @pytest.fixture()
 def env(tmp_path, monkeypatch):
     """Все источники журнала — во временную папку; фантомный режим."""
-    import config
+    config = __import__('importlib').import_module('infra.config')
     follow_up = __import__('importlib').import_module('execution.follow_up')
     llm_journal = __import__('importlib').import_module('strategies.llm.llm_journal')
     llm_outcomes = __import__('importlib').import_module('strategies.llm.llm_outcomes')
@@ -63,7 +63,7 @@ def env(tmp_path, monkeypatch):
 
 
 def write_csv(path, columns, rows):
-    import csv_journal
+    csv_journal = __import__('importlib').import_module('infra.csv_journal')
     csv_journal.append(path, columns, [{'mode': 'PAPER', **r} for r in rows])
 
 

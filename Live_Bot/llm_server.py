@@ -28,10 +28,10 @@ import time
 import urllib.error
 import urllib.request
 
-import config
+from infra import config
 from strategies.llm import llm_grammar
 from strategies.llm import llm_prompt
-from logger import log
+from infra.logger import log
 
 # Сколько ждём ответа: как у рабочего процесса — разбор с мыслью до 45 минут.
 CALL_TIMEOUT_SEC = int(os.getenv('LLM_CALL_TIMEOUT_MIN', 45)) * 60

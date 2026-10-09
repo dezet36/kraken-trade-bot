@@ -41,13 +41,13 @@ import shutil
 import threading
 from datetime import datetime, timezone
 
-import config
-import csv_journal
+from infra import config
+from infra import csv_journal
 from strategies import glossary
 from execution.exit_plan import cooldown_hours, direction_cap, tp_plan, wants_breakeven
 from accounts import settings_store as settings
 from strategies import setup_geometry
-from logger import log
+from infra.logger import log
 
 from strategies import registry as _registry
 

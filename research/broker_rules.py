@@ -24,7 +24,7 @@ ROOT = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(ROOT, 'Live_Bot'))
 
-import logger  # noqa: E402
+from infra import logger  # noqa: E402
 logger.log = lambda *a, **k: None
 
 import numpy as np  # noqa: E402
@@ -52,7 +52,7 @@ def variants(strategy):
             ('живые правила, снятие у цели', dict(LIVE, cancel_at_target=True)),
             ('живые, кэп только по позициям', dict(LIVE, pending_in_cap=False)),
         ]
-    import config
+    from infra import config
     base = dict(max_positions=bt.MAX_POSITIONS, cooldown_hours=bt.COOLDOWN_HOURS,
                 breakeven_after_tp1=False, max_hold_hours=config.MAX_POSITION_HOLD_HOURS or 336.0,
                 max_same_direction=getattr(config, 'MAX_SAME_DIRECTION', 0))

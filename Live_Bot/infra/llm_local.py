@@ -27,8 +27,8 @@ import os
 import threading
 import time
 
-import config
-from logger import log
+from infra import config
+from infra.logger import log
 
 _model = None
 _lock = threading.Lock()
@@ -144,7 +144,7 @@ def ask(prompt, grammar=None, max_tokens=None):
     if getattr(config, 'LLM_ISOLATE', True):
         if not available():
             raise RuntimeError('модель недоступна')
-        import llm_worker
+        from infra import llm_worker
         answer, stats = llm_worker.ask(prompt, grammar, max_tokens)
         if stats:
             _last.update(stats)
@@ -272,7 +272,7 @@ def unload():
         _model = None
         _failed = False
     try:
-        import llm_worker
+        from infra import llm_worker
         llm_worker.stop()
     except Exception:                              # noqa: BLE001
         pass

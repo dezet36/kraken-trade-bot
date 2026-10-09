@@ -121,9 +121,9 @@ class TestTargetsBreakevenAndExit:
 def broker_env(monkeypatch):
     monkeypatch.setenv('TRADING_MODE', 'PAPER')
     monkeypatch.setenv('PAPER_FUNDING', 'false')
-    for module in ('config', 'paper_broker', 'control.dashboard', 'shadow', 'execution.setup_journal'):
+    for module in ('infra.config', 'paper_broker', 'control.dashboard', 'shadow', 'execution.setup_journal'):
         forget(module, None)
-    import config
+    config = __import__('importlib').import_module('infra.config')
     import paper_broker
     for key, value in (('PAPER_FEE_MAKER', 0.0), ('PAPER_FEE_TAKER', 0.0), ('PAPER_SLIPPAGE_PCT', 0.0),
                        ('RISK_PER_TRADE', 1.0), ('LIMIT_ENTRY_OFFSET_PCT', 0.0)):

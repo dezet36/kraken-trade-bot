@@ -24,7 +24,7 @@ import os
 import time
 import tempfile
 import pandas as pd
-from logger import log
+from infra.logger import log
 
 
 def _rsi(close: pd.Series, period: int = 14) -> pd.Series:

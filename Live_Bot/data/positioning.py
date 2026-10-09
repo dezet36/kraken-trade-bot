@@ -35,9 +35,9 @@ import json
 import os
 import time
 
-import config
+from infra import config
 from data import exchange
-from logger import log
+from infra.logger import log
 
 SOURCES = ('open_interest', 'long_short', 'funding', 'premium', 'delta', 'book')
 

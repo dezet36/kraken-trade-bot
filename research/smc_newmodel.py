@@ -83,7 +83,7 @@ def _ms(series):
 # ── M1: сетапы ───────────────────────────────────────────────────────────────
 def _job(args):
     period, cache, pair = args
-    import logger
+    from infra import logger
     logger.log = lambda *a, **k: None
     import backtest_smc as bt
     from strategies.smc import imbalance, liquidity

@@ -1,5 +1,5 @@
-import config
-from logger import log
+from infra import config
+from infra.logger import log
 # Ручка оператора «минимальный стоп» — настройка стратегии (strategies/
 # settings.py). Денег стратегия не знает: риск и размер решает счёт.
 from strategies import settings

@@ -70,7 +70,7 @@ def flow(pair):
 @lru_cache(maxsize=None)
 def bias_timeline(period, pair):
     """Направление старшего ТФ (день + 4 ч, как у бота) на закрытии каждого часа."""
-    import logger
+    from infra import logger
     logger.log = lambda *a, **k: None
     from strategies.smc import signal as smc_signal
     bt.CACHE_DIR = os.path.join(HERE, D.PERIODS[period])

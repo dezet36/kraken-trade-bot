@@ -32,9 +32,9 @@ PACKAGES = {'infra': 'infra', 'data': 'data', 'analysis': 'analysis', 'strategie
 # «стратегии»; smc целиком — пока там же (его часть I уйдёт в анализ на этапе 4).
 LAYER = {
     # платформа
-    'config': 'infra', 'logger': 'infra', 'csv_journal': 'infra', 'params_env': 'infra',
-    'error_log': 'infra', 'updater': 'infra', 'llm_server': 'infra', 'llm_local': 'infra',
-    'llm_worker': 'infra',
+    # config, logger, csv_journal, params_env, error_log, updater, llm_local,
+    # llm_worker — в infra/ (этап 10, часть 8)
+    'llm_server': 'infra',
     # данные
     # анализ
     'market_structure': 'analysis', 'llm_market': 'analysis', 'llm_context': 'analysis',

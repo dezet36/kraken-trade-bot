@@ -27,7 +27,7 @@ from strategies import scan_report as report
 # биржи напрямую (реорганизация, этап 4).
 from analysis.market import fetch_ohlcv
 from strategies.fib12 import core, params
-from logger import log
+from infra.logger import log
 
 NAME = 'FIB12'
 BAR_MIN = 720

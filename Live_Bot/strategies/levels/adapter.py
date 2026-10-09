@@ -22,7 +22,7 @@ from strategies import scan_report as report
 # биржи напрямую (реорганизация, этап 4).
 from analysis.market import fetch_ohlcv
 from strategies.levels import core, params
-from logger import log
+from infra.logger import log
 
 NAME = 'LEVELS'
 

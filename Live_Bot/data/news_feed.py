@@ -13,9 +13,9 @@ import json
 import os
 import time
 
-import config
+from infra import config
 from data import sources
-from logger import log
+from infra.logger import log
 
 # Адрес Bybit — в реестре источников (data/sources.py), путь — здесь.
 PATH = '/v5/announcements/index?locale=en-US&limit=20'

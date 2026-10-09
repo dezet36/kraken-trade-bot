@@ -64,7 +64,7 @@ class TestRefusalsAreKeptApartByMode:
     """
 
     def test_the_mode_is_written(self, tmp_path, monkeypatch):
-        import config
+        config = __import__('importlib').import_module('infra.config')
         monkeypatch.setattr(refused, 'CSV_PATH', str(tmp_path / 'refused.csv'))
         signal = {'trading_pair': 'BTCUSDT', 'setup': {'type': 'LONG'},
                   'params': {'entry': 100, 'stop_loss': 98,

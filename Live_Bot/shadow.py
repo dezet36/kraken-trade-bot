@@ -36,9 +36,9 @@ import os
 import threading
 import time
 
-import config
-import csv_journal
-from logger import log
+from infra import config
+from infra import csv_journal
+from infra.logger import log
 
 STATE_PATH = os.path.join(config.DATA_DIR, 'shadow_state.json')
 CSV_PATH = os.path.join(config.DATA_DIR, 'shadow_trades.csv')

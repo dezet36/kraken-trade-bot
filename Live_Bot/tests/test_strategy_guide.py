@@ -151,7 +151,7 @@ class TestNumbersMatchTheCode:
     def test_fibo_numbers(self):
         import sys
         sys.path.insert(0, BOT)
-        import config
+        config = __import__('importlib').import_module('infra.config')
 
         block = guide_block('FIBO')
         assert_quoted(block, config.MAX_IMPULSE_CANDLES, 'длина импульса')

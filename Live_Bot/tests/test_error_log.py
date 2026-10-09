@@ -18,9 +18,9 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 @pytest.fixture
 def errors(tmp_path, monkeypatch):
     monkeypatch.setenv('BOT_DATA_DIR', str(tmp_path))
-    for module in ('error_log', 'logger'):
+    for module in ('infra.error_log', 'infra.logger'):
         forget(module, None)
-    import error_log
+    error_log = __import__('importlib').import_module('infra.error_log')
     error_log.ERRORS_FILE = str(tmp_path / 'errors.json')
     error_log._groups = {}
     return error_log
@@ -104,21 +104,21 @@ class TestНадёжность:
 
 class TestСборИзЛога:
     def test_znachki_popadayut_v_zhurnal(self, errors):
-        import logger
+        logger = __import__('importlib').import_module('infra.logger')
         errors.install()
         logger.log('⚠️ Сетевая ошибка: timeout')
         logger.log('❌ Ошибка загрузки свечей')
         assert len(errors.snapshot()) == 2
 
     def test_obychnye_stroki_ne_popadayut(self, errors):
-        import logger
+        logger = __import__('importlib').import_module('infra.logger')
         errors.install()
         logger.log('Цикл завершён, открыто 2 позиции')
         logger.log('SMC: сетапов найдено 0')
         assert errors.snapshot() == []
 
     def test_uroven_error_popadaet_bez_znachka(self, errors):
-        import logger
+        logger = __import__('importlib').import_module('infra.logger')
         errors.install()
         logger.log('Что-то пошло не так', level='ERROR')
         assert len(errors.snapshot()) == 1
@@ -128,7 +128,7 @@ class TestСборИзЛога:
         Обработчик — сторонний код в горячем пути логирования. Его падение
         не имеет права ронять ни лог, ни бота.
         """
-        import logger
+        logger = __import__('importlib').import_module('infra.logger')
 
         def broken(message, level):
             raise RuntimeError('обработчик сломан')

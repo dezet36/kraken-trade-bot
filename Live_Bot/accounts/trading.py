@@ -8,7 +8,7 @@
 одного исполнителя другого не останавливает.
 """
 
-from logger import log
+from infra.logger import log
 
 from accounts import books
 

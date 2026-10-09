@@ -31,7 +31,7 @@ Bybit 31 пара 2021–2026, издержки Bybit, фактический ф
     в одну сторону ≤8      +14%/год, просадка −20%   (HOLD +7%)
     без предела            +34%/год, просадка −33%   (HOLD +8%)  ← выбор владельца 07.10
 """
-import params_env
+from infra import params_env
 
 _f, _i, _b, _s = params_env.reader('FIB12')
 

@@ -21,7 +21,7 @@
 """
 
 from strategies import scan_report as report
-from logger import log
+from infra.logger import log
 from strategies import settings
 from strategies.smc import params as smc_params
 # Псевдоним обязателен: ниже определена функция market_regime(), и без

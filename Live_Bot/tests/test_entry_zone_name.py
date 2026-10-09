@@ -55,7 +55,7 @@ class TestTheNameFollowsThePrice:
         ENTRY_RETRACE = 0.5, зона A это откат 38.2–61.8%. Совпадение с прежним
         литералом — и оно объясняет, почему подмена так долго не замечалась.
         """
-        import config
+        config = __import__('importlib').import_module('infra.config')
         for kind in ('LONG', 'SHORT'):
             setup, za, zb = _zones(kind)
             price = _price_at(setup, config.ENTRY_RETRACE)

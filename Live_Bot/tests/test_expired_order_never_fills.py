@@ -38,7 +38,7 @@ def broker(tmp_path, monkeypatch):
        почему именно возвращаются, а не удаляются, см. тот же фикстур в
        test_candle_gap."""
     monkeypatch.setenv('BOT_DATA_DIR', str(tmp_path))
-    saved = {m: forget(m, None) for m in ('config', 'paper_broker')}
+    saved = {m: forget(m, None) for m in ('infra.config', 'paper_broker')}
     import paper_broker
     yield paper_broker
     for name, module in saved.items():

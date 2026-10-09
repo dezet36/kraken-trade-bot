@@ -44,10 +44,11 @@ import re
 import subprocess
 import sys
 
-import config
-from logger import log
+from infra import config
+from infra.logger import log
 
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# Корень репозитория — на два уровня выше infra/ (этап 10).
+ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 STATE_FILE = os.path.join(config.DATA_DIR, 'update_state.json')
 TIMEOUT = 120
 

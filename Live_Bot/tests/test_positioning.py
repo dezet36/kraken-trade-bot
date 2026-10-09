@@ -25,7 +25,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 @pytest.fixture()
 def store(tmp_path, monkeypatch):
     monkeypatch.setenv('BOT_DATA_DIR', str(tmp_path))
-    for module in ('config', 'data.positioning'):
+    for module in ('infra.config', 'data.positioning'):
         forget(module, None)
     # import_module: «from data import positioning» взял бы прежний модуль из
     # атрибута пакета data, хотя из sys.modules его выгрузили.

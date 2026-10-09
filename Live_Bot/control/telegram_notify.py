@@ -6,9 +6,9 @@ Set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID in .env to enable.
 
 import os
 import requests
-import config
+from infra import config
 from execution.exit_plan import tp_plan
-from logger import log
+from infra.logger import log
 from datetime import datetime, timedelta, timezone
 
 # ── internal send ─────────────────────────────────────────────────────────────
@@ -454,7 +454,7 @@ def llm_plan_caption(signal: dict, chart_span: str = '') -> str:
     when = llm.get('trigger_when') or 'now'
     lvl = _fmt_p(float(llm['trigger_level'])) if llm.get('trigger_level') else ''
     condition = TRIGGER_TEXT.get(when, when).format(lvl=lvl)
-    import config
+    from infra import config
     ttl = int(getattr(config, 'LLM_TRIGGER_TTL_H', 12) or 12)
     lines.append(f"⏳ Условие: {condition} — ждёт до {ttl} ч")
     critic = llm.get('critic') or {}

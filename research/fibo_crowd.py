@@ -39,7 +39,7 @@ sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(ROOT, 'Live_Bot'))
 os.environ.setdefault('BOT_DATA_DIR', os.path.join(HERE, 'results', 'sim-data'))
 
-import logger                                          # noqa: E402
+from infra import logger  # noqa: E402
 logger.log = lambda *a, **k: None
 
 import ai_setups as S                                 # noqa: E402

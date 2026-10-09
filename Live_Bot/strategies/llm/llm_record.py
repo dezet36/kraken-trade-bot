@@ -24,8 +24,8 @@ import os
 import re
 from datetime import datetime, timezone
 
-import config
-from logger import log
+from infra import config
+from infra.logger import log
 
 MARKUP_DIR = os.path.join(config.DATA_DIR, 'llm_markup')
 FEATURES_PATH = os.path.join(config.DATA_DIR, 'llm_features.jsonl')

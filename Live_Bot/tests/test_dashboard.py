@@ -27,7 +27,7 @@ def dash(tmp_path, monkeypatch):
     # падали на пустой статистике — при том, что код был исправен. Тест,
     # зависящий от настройки рабочей машины, проверяет не то, что нужно.
     monkeypatch.setenv('TRADING_MODE', 'DEMO')
-    for module in ('config', 'trade_journal', 'control.dashboard'):
+    for module in ('infra.config', 'trade_journal', 'control.dashboard'):
         forget(module, None)
 
     import trade_journal
@@ -189,7 +189,7 @@ def paper_dash(tmp_path, monkeypatch):
     """Дашборд в фантомном режиме, читающий изолированный каталог."""
     monkeypatch.setenv('BOT_DATA_DIR', str(tmp_path))
     monkeypatch.setenv('TRADING_MODE', 'PAPER')
-    for module in ('config', 'paper_broker', 'control.dashboard'):
+    for module in ('infra.config', 'paper_broker', 'control.dashboard'):
         forget(module, None)
 
     import paper_broker
