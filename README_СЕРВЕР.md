@@ -51,7 +51,7 @@ RISK_PER_TRADE=0.5
 по-русски, что не так и как чинить:
 
 ```bash
-BOT_DATA_DIR=$PWD/bot_data venv/bin/python Live_Bot/doctor.py
+BOT_DATA_DIR=$PWD/bot_data venv/bin/python Live_Bot/control/doctor.py
 ```
 
 Пока в списке есть строка `ОШИБКА`, бот запускать бессмысленно.
@@ -152,7 +152,7 @@ systemctl restart kraken-bot
 
 ## Если что-то не работает
 
-Первым делом — `doctor.py` (выше). Дальше — лог: `bot_data/bot_log.txt`,
+Первым делом — `control/doctor.py` (выше). Дальше — лог: `bot_data/bot_log.txt`,
 раздел «Диагностика» на панели или отчёт одним файлом (Диагностика →
 Отчёт), который можно отправить целиком.
 

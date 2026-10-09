@@ -17,7 +17,7 @@
              pair_strategy.json (кто из стратегий владеет парой).
 
 Запуск отдельно от бота (для просмотра истории):
-    python Live_Bot/dashboard.py
+    python Live_Bot/control/dashboard.py
 """
 
 import csv
@@ -27,6 +27,10 @@ import sys
 import threading
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+if __package__ in (None, ''):
+    # Запуск файлом (python Live_Bot/control/dashboard.py): модули бота — в папке выше.
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import config
 import scan_report
@@ -1227,7 +1231,7 @@ def _run_action(request):
 
     if action in ('pause', 'resume'):
         try:
-            from telegram_bot import controller
+            from control.telegram_bot import controller
             # Через set_paused: пауза пишется на диск и переживает перезапуск
             # (telegram_state) — до 26.09.2026 её снимала каждая выкатка.
             controller.set_paused(action == 'pause', source='сайт')
@@ -1670,7 +1674,7 @@ class _Handler(BaseHTTPRequestHandler):
             # состояние на момент нажатия, иначе присланное описывает не ту
             # неполадку, из-за которой его и делали.
             try:
-                import report
+                from control import report
                 body = report.build().encode('utf-8')
                 name = report.filename()
             except Exception as exc:               # noqa: BLE001
@@ -1768,7 +1772,7 @@ class _Handler(BaseHTTPRequestHandler):
                 # запроса вместе с ключом, а трассировки — куски конфига. На
                 # экране это лежит открытым текстом, и достаточно одного
                 # скриншота, отправленного за помощью, чтобы ключ уехал.
-                import report
+                from control import report
                 self._send_json({
                     'errors': report.scrub_obj(error_log.snapshot()),
                     'summary': report.scrub_obj(error_log.summary()),
@@ -2006,7 +2010,7 @@ class _Handler(BaseHTTPRequestHandler):
             os.makedirs(folder, exist_ok=True)
             stamp = datetime.now().strftime('%Y%m%d-%H%M')
             if kind == 'report':
-                import report
+                from control import report
                 body = report.build().encode('utf-8')
                 name = report.filename()
             elif kind.startswith('journal-'):

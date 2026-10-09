@@ -37,7 +37,7 @@ from datetime import datetime, timezone
 import requests
 
 import config
-import telegram_state
+from control import telegram_state
 from logger import log
 
 CONFIRM_TTL_S = 600
@@ -267,7 +267,7 @@ class BotController:
 
     def _render(self, code):
         """Код кнопки → (всплывающая подсказка, текст, кнопки). Действия — здесь же."""
-        import telegram_panel as panel
+        from control import telegram_panel as panel
         if not self._paper():
             return self._legacy_render(code)
         parts = code.split(':')
@@ -361,7 +361,7 @@ class BotController:
             log(f"Telegram: торговые счета не прочитаны — {e}")
             d['accounts'] = []
         try:
-            from dashboard import _read_paper_trades
+            from control.dashboard import _read_paper_trades
             d['trades'] = _read_paper_trades()
         except Exception:                              # noqa: BLE001
             pass
@@ -387,7 +387,7 @@ class BotController:
 
     def _toggle_event(self, event):
         from accounts import settings_store
-        import telegram_panel as panel
+        from control import telegram_panel as panel
         if event in {e for e, _l, _w in panel.EVENTS}:
             on = settings_store.notify_on(event, 'telegram')
             settings_store.save({settings_store.NOTIFY: {f'{event}_telegram': not on}})
@@ -399,7 +399,7 @@ class BotController:
 
     def _toggle_strategy_notify(self, name, back_to_strategy=False):
         from accounts import settings_store
-        import telegram_panel as panel
+        from control import telegram_panel as panel
         on = settings_store.notify_strategy(name)
         settings_store.save({name: {'notify': not on}})
         log(f"🖐 Сделки {name} в Telegram {'не присылать' if on else 'присылать'} (Telegram)")
@@ -410,7 +410,7 @@ class BotController:
     def _toggle_strategy(self, name):
         """Выключить входы — через подтверждение; включить — сразу (это снятие ограничения)."""
         from accounts import settings_store
-        import telegram_panel as panel
+        from control import telegram_panel as panel
         d = self._collect()
         if settings_store.enabled(name):
             return ('', *panel.strategy_off_confirm_view(d, name, _stamp()))
@@ -422,7 +422,7 @@ class BotController:
 
     def _confirmed(self, rest):
         from accounts import settings_store
-        import telegram_panel as panel
+        from control import telegram_panel as panel
         if len(rest) < 3:
             return ('', *panel.main_view(self._collect()))
         action, stamp, args = rest[0], rest[1], rest[2:]
@@ -470,7 +470,7 @@ class BotController:
         """Итог только что закрытой вручную позиции — из журнала сделок."""
         try:
             import paper_broker
-            import tg_format as fmt
+            from control import tg_format as fmt
             rows = [r for r in paper_broker.read_journal()
                     if r.get('strategy') == strategy and r.get('pair') == pair]
             if not rows:
@@ -582,7 +582,7 @@ class BotController:
 
     def _legacy_render(self, code):
         """LiveTradeManager: снимка у него нет — показываем то, что было до панели."""
-        import telegram_panel as panel
+        from control import telegram_panel as panel
         head = code.split(':')[0]
         if head == 'pl':
             text = self._legacy_positions_text()
@@ -591,7 +591,7 @@ class BotController:
         elif head == 'ai':
             try:
                 import strategy_llm
-                import telegram_notify as tg
+                from control import telegram_notify as tg
                 text = tg.llm_setups_text(strategy_llm.current_setups(self.trade_manager))
             except Exception as e:                     # noqa: BLE001
                 text = f"⚠️ Список сетапов не собран: {e}"
@@ -609,7 +609,7 @@ class BotController:
         return '', text, keyboard
 
     def _legacy_status_text(self):
-        import tg_format as fmt
+        from control import tg_format as fmt
         tm = self.trade_manager
         if tm is None:
             return "⚠️ Торговый модуль не запущен"
@@ -623,7 +623,7 @@ class BotController:
                 f"Пары: {fmt.esc(pairs)}")
 
     def _legacy_positions_text(self):
-        import tg_format as fmt
+        from control import tg_format as fmt
         tm = self.trade_manager
         if tm is None:
             return "⚠️ Торговый модуль не запущен"

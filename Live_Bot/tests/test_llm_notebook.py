@@ -96,7 +96,7 @@ def notebook_mode(monkeypatch, tmp_path):
     monkeypatch.setattr(llm_notebook, '_submit', run_now)
     monkeypatch.setattr(llm_notebook, '_asked', [])
     monkeypatch.setattr(llm_notebook, '_health', {'fails': {}, 'last': {}, 'alerted': 0.0})
-    import telegram_notify
+    telegram_notify = __import__('importlib').import_module('control.telegram_notify')
     monkeypatch.setattr(telegram_notify, 'llm_notebook_health', lambda text: True)
     # Биржи в тестах нет: цена сейчас — 100, если тест не назвал свою.
     monkeypatch.setattr(llm_notebook, '_price_now', lambda pair, client=None: 100.0)
@@ -443,7 +443,7 @@ class TestPositionHold:
         monkeypatch.setenv('BOT_DATA_DIR', str(tmp_path))
         monkeypatch.setenv('TRADING_MODE', 'PAPER')
         monkeypatch.setenv('PAPER_FUNDING', 'false')
-        for module in ('config', 'paper_broker', 'dashboard', 'shadow', 'setup_journal'):
+        for module in ('config', 'paper_broker', 'control.dashboard', 'shadow', 'setup_journal'):
             sys.modules.pop(module, None)
         import config as cfg
         import paper_broker
@@ -518,7 +518,7 @@ class TestNotebookSignalThroughTheBroker:
         monkeypatch.setenv('TRADING_MODE', 'PAPER')
         monkeypatch.setenv('PAPER_FUNDING', 'false')
         monkeypatch.setattr(llm_notebook.config, 'LLM_MODE', 'notebook', raising=False)
-        for module in ('config', 'paper_broker', 'dashboard', 'shadow', 'setup_journal'):
+        for module in ('config', 'paper_broker', 'control.dashboard', 'shadow', 'setup_journal'):
             sys.modules.pop(module, None)
         import config as cfg
         import paper_broker
@@ -526,7 +526,7 @@ class TestNotebookSignalThroughTheBroker:
                             ('MAX_POSITION_HOLD_HOURS', 0.0)):
             monkeypatch.setattr(cfg, name, value)
         settings_store = __import__('importlib').import_module('accounts.settings_store')
-        import telegram_notify
+        telegram_notify = __import__('importlib').import_module('control.telegram_notify')
         monkeypatch.setattr(settings_store, 'load', lambda: {})           # стороны — обе, риск — общий
         monkeypatch.setattr(telegram_notify, '_send', lambda *a, **k: True)
         monkeypatch.setattr(telegram_notify, '_send_photo', lambda *a, **k: True)
@@ -759,7 +759,7 @@ class TestHealth:
 
     @pytest.fixture()
     def sent(self, notebook_mode, monkeypatch):
-        import telegram_notify
+        telegram_notify = __import__('importlib').import_module('control.telegram_notify')
         box = []
         monkeypatch.setattr(telegram_notify, 'llm_notebook_health', lambda text: box.append(text) or True)
         return box
@@ -859,7 +859,7 @@ class TestHumanNames:
                        '«Продажа на отскоке» не актуален; паттерн «Отскок после ликвидаций» ждём.')
 
     def test_decision_message_groups_coins_by_pattern_name(self, monkeypatch):
-        import telegram_notify
+        telegram_notify = __import__('importlib').import_module('control.telegram_notify')
         got = []
         monkeypatch.setattr(telegram_notify, 'llm_notebook_decision', lambda a, p, r: got.append((a, p, r)))
         llm_notebook._notify_decision([('AVAXUSDT', 'P1'), ('ADAUSDT', 'P1'), ('ZECUSDT', 'B3')],

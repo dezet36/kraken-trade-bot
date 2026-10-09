@@ -14,11 +14,15 @@
     fail   торговать нельзя, запуск бессмысленен
 
 Запуск отдельно:
-    python Live_Bot/doctor.py
+    python Live_Bot/control/doctor.py   (или из Live_Bot: python -m control.doctor)
 """
 
 import os
 import sys
+
+if __package__ in (None, ''):
+    # Запуск файлом (python Live_Bot/control/doctor.py): модули бота — в папке выше.
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 OK, WARN, FAIL = 'ok', 'warn', 'fail'
 
@@ -78,7 +82,7 @@ def check_data_dir():
 
     # Данные ВНУТРИ кода переживут запуск, но не переживут обновление
     # копированием папки поверх старой.
-    code_dir = os.path.dirname(os.path.abspath(__file__))
+    code_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     if os.path.abspath(path) == os.path.abspath(code_dir):
         return _result(WARN, 'Данные лежат внутри папки с кодом', path,
                        'задайте BOT_DATA_DIR на каталог вне Live_Bot, иначе '

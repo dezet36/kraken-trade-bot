@@ -480,7 +480,7 @@ class TestWiring:
         assert len(book(code)['pending']) == 3
 
     def test_telegram_message(self, monkeypatch):
-        import telegram_notify as tg
+        tg = __import__('importlib').import_module('control.telegram_notify')
         out = []
         monkeypatch.setattr(tg, '_send', lambda text, **kw: out.append(text) or True)
         item = {'icon': '📥', 'title': 'Поставить заявку · BTCUSDT LONG', 'lines': ['Стоп: 98 <проверить>'],
@@ -491,8 +491,8 @@ class TestWiring:
 
     def test_done_button_in_telegram(self, monkeypatch):
         """Кнопка «Готово» под инструкцией-действием отмечает её в книге счёта."""
-        import telegram_bot
-        import telegram_notify as tg
+        telegram_bot = __import__('importlib').import_module('control.telegram_bot')
+        tg = __import__('importlib').import_module('control.telegram_notify')
         markups = []
         monkeypatch.setattr(tg, '_send', lambda text, reply_markup=None, **kw: markups.append(reply_markup) or True)
         books.notify_with(tg.account_instruction)
@@ -513,7 +513,7 @@ class TestWiring:
 
     def test_telegram_message_can_be_switched_off(self, monkeypatch):
         settings_store = __import__('importlib').import_module('accounts.settings_store')
-        import telegram_notify as tg
+        tg = __import__('importlib').import_module('control.telegram_notify')
         out = []
         monkeypatch.setattr(tg, '_send', lambda text, **kw: out.append(text) or True)
         settings_store.save({'NOTIFY': {'account_orders_telegram': False}})
@@ -524,7 +524,7 @@ class TestWiring:
 
 @pytest.fixture(scope='module')
 def server():
-    import dashboard
+    dashboard = __import__('importlib').import_module('control.dashboard')
     port = 8938
     threading.Thread(
         target=lambda: dashboard.start_dashboard(port=port, host='127.0.0.1'),

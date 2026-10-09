@@ -32,7 +32,7 @@ def page_text():
     во временной папке. Защита права; подстраивается тест.
     """
     page = os.path.join(os.path.dirname(os.path.dirname(
-        os.path.abspath(__file__))), 'dashboard.html')
+        os.path.abspath(__file__))), 'control', 'dashboard.html')
     return open(page, encoding='utf-8').read()
 
 

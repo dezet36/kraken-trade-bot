@@ -63,7 +63,8 @@ def settings_path():
     if getattr(sys, 'frozen', False):
         base = os.path.dirname(sys.executable)
     else:
-        base = os.path.dirname(os.path.abspath(__file__))
+        # из исходников — в Live_Bot, где файл лежал до переезда в control/
+        base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     return os.path.join(base, SETTINGS_NAME)
 
 

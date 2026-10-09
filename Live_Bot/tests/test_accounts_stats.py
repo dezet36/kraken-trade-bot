@@ -147,7 +147,7 @@ class TestAccount:
 
 class TestPanel:
     def test_endpoints_answer(self, monkeypatch):
-        import dashboard
+        dashboard = __import__('importlib').import_module('control.dashboard')
         monkeypatch.setattr(dashboard, '_broker', None)
         monkeypatch.setattr(dashboard, '_report_cache', {})
         monkeypatch.setattr(dashboard, '_strategy_rows', lambda strategy: [trade(1.0), trade(-1.0)])
@@ -159,14 +159,14 @@ class TestPanel:
             dashboard._strategy_report('НЕТ', None)
 
     def test_period_from_the_query(self):
-        import dashboard
+        dashboard = __import__('importlib').import_module('control.dashboard')
         assert dashboard._period('30') == 30.0
         assert dashboard._period('') is None and dashboard._period('all') is None
         assert dashboard._period('0') is None and dashboard._period('-5') is None
 
     def test_the_page_is_in_the_menu(self):
         page = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                                 'dashboard.html'), encoding='utf-8').read()
+                                 'control', 'dashboard.html'), encoding='utf-8').read()
         assert "id: 'strategies'" in page and 'data-page="strategies"' in page
         assert '/api/strategy_report' in page and '/api/strategy_compare' in page
 
@@ -174,5 +174,5 @@ class TestPanel:
 def test_the_cache_is_short():
     """Журнал собирается из нескольких файлов — но цифры не должны стареть
     дольше минуты."""
-    import dashboard
+    dashboard = __import__('importlib').import_module('control.dashboard')
     assert dashboard.REPORT_TTL_S <= 120

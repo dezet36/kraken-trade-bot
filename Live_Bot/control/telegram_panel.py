@@ -20,7 +20,7 @@
 
 from datetime import datetime, timedelta, timezone
 
-import tg_format as fmt
+from control import tg_format as fmt
 
 PAGE = 10                      # позиций/заявок на страницу списка
 
@@ -118,7 +118,7 @@ def summarise(trades):
     совпасть с числом на панели сайта.
     """
     try:
-        from dashboard import _summarise
+        from control.dashboard import _summarise
         return _summarise(list(trades))
     except Exception:                                  # noqa: BLE001
         pnl = [fmt.num(t.get('pnl')) for t in trades]
@@ -431,7 +431,7 @@ def cancel_confirm_view(d, strategy, pair, token):
 # ── ИИ ───────────────────────────────────────────────────────────────────────
 
 def ai_view(d):
-    import telegram_notify as tg
+    from control import telegram_notify as tg
     text = tg.llm_setups_text(d.get('ai') or {'armed': [], 'pending': [], 'open': []})
     if len(text) > 3900:
         text = text[:3890].rsplit('\n', 1)[0] + '\n…'

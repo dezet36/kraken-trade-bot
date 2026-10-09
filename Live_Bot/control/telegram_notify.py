@@ -32,7 +32,7 @@ def _send(text: str, chat_id=None, reply_markup=None) -> bool:
     # Глобальный mute касается только legacy общего чата (per-user mute — фаза C)
     if chat_id is None:
         try:
-            from telegram_bot import controller
+            from control.telegram_bot import controller
             if controller.is_muted():
                 return False
         except Exception:
@@ -78,7 +78,7 @@ def _send_photo(photo_path: str, caption: str = "", chat_id=None) -> bool:
         return False
     if chat_id is None:
         try:
-            from telegram_bot import controller
+            from control.telegram_bot import controller
             if controller.is_muted():
                 return False
         except Exception:
@@ -119,7 +119,7 @@ def bot_started(balance: float, broker=None):
     подписывало бумажный счёт «🔴 LIVE»: метка сравнивала режим только с
     DEMO. Теперь режим назван как есть, а выключается событием «service».
     """
-    import tg_format as fmt
+    from control import tg_format as fmt
     if not _allowed('service'):
         return False
     mode = fmt.mode_label(config.TRADING_MODE)
@@ -130,7 +130,7 @@ def bot_started(balance: float, broker=None):
             since = (balance / start - 1) * 100 if start else 0.0
             paused = False
             try:
-                from telegram_bot import controller
+                from control.telegram_bot import controller
                 paused = controller.is_paused()
             except Exception:                          # noqa: BLE001
                 pass
@@ -191,7 +191,7 @@ def limit_order_placed(pair: str, side: str, limit_price: float, stop_loss: floa
     # График сетапа прямо в момент постановки лимита (df_1h уже есть в execute_trade)
     if signal is not None and df_1h is not None:
         try:
-            from chart_generator import generate_trade_chart
+            from control.chart_generator import generate_trade_chart
             chart_path = generate_trade_chart(signal, df_1h)
             if chart_path and _send_photo(chart_path, caption=text):
                 return
@@ -312,7 +312,7 @@ def trade_opened(signal: dict, df_1h=None):
     # Try to send chart with the trade text as caption
     if df_1h is not None:
         try:
-            from chart_generator import generate_trade_chart
+            from control.chart_generator import generate_trade_chart
             chart_path = generate_trade_chart(signal, df_1h)
             if chart_path and _send_photo(chart_path, caption=text):
                 return  # photo sent — no need for plain text
@@ -433,7 +433,7 @@ def llm_plan_caption(signal: dict, chart_span: str = '') -> str:
     def pct(p):
         return f"{abs(p - entry) / entry * 100:.2f}%" if entry else "—"
 
-    import tg_format as fmt
+    from control import tg_format as fmt
 
     def tail(level_id):
         kind = _level_kind(llm, level_id)
@@ -498,7 +498,7 @@ def llm_plan_story(signal: dict, budget: int = CAPTION_LIMIT) -> str:
         ('📈 Куда рынок' + (f' — {bias}' if bias else ''), parts.get('direction'), 160),
         ('⚠️ Что сломает идею', llm.get('risk'), 140),
     ]
-    import tg_format as fmt
+    from control import tg_format as fmt
     rendered = []
     for title, body, limit in blocks:
         body = ' '.join((body or '').split())
@@ -538,8 +538,8 @@ def llm_setup_found(signal: dict, df_1h=None, frames=None):
     pair = signal.get('trading_pair', '?')
     if df_1h is not None:
         try:
-            import chart_frame
-            from chart_generator import generate_trade_chart
+            from control import chart_frame
+            from control.chart_generator import generate_trade_chart
             price = float(df_1h['close'].iloc[-1]) if len(df_1h) else None
             tf, bars = chart_frame.pick(signal, price)
             df, shown = df_1h, '1h'
@@ -561,7 +561,7 @@ def llm_setup_found(signal: dict, df_1h=None, frames=None):
 
 def _esc(text):
     """Текст модели в разметке HTML — экранируется (см. tg_format.esc)."""
-    import tg_format as fmt
+    from control import tg_format as fmt
     return fmt.esc(text)
 
 
@@ -645,7 +645,7 @@ def llm_notebook_decision(alerts, picks, reason: str = ''):
     «Отскок после ликвидаций (лонг, 24 ч): AVAX, ADA» (28.09.2026 владелец не
     понял, что за «P1»). Тот же тумблер, что у планов ИИ (llm_setup).
     """
-    import tg_format as fmt
+    from control import tg_format as fmt
     if not _allowed('llm_setup'):
         return False
     return _send(
@@ -663,7 +663,7 @@ def llm_notebook_health(text: str):
     Тумблер сообщений ИИ (llm_setup), а не ошибок: ошибки владелец выключил,
     а неработающая стратегия выглядела бы как «сигналов нет».
     """
-    import tg_format as fmt
+    from control import tg_format as fmt
     if not _allowed('llm_setup'):
         return False
     return _send(f"⚠️ <b>ИИ по тетради не работает</b> · {_now()}\n━━━━━━━━━━━━━━━━━━━━\n{fmt.esc(text[:600])}")
@@ -671,7 +671,7 @@ def llm_notebook_health(text: str):
 
 def llm_market_review(text: str):
     """Обзор рынка от ИИ (раз в 4 ч, llm_notebook) — тот же тумблер, что у планов ИИ."""
-    import tg_format as fmt
+    from control import tg_format as fmt
     if not _allowed('llm_setup') or not text:
         return False
     return _send(f"🧭 <b>ИИ: обзор рынка</b> · {_now()}\n━━━━━━━━━━━━━━━━━━━━\n{fmt.esc(text[:1500])}")
@@ -684,7 +684,7 @@ def llm_setup_rejected(pair: str, side: str, entry: float, gate: str, detail: st
     под одним ключом с принятыми планами, и выключить поток отказов, не
     потеряв планы, было нельзя.
     """
-    import tg_format as fmt
+    from control import tg_format as fmt
     if not _allowed('llm_rejected'):
         return False
     return _send(
@@ -708,7 +708,7 @@ def plan_dropped(strategy: str, pair: str, side: str, entry: float,
     За четверо суток так умерли 47 заявок — то есть картина «что стало с
     планом» была неполной у каждой второй.
     """
-    import tg_format as fmt
+    from control import tg_format as fmt
     if not _allowed('plan_dropped') or not _strategy_on(strategy):
         return False
     arrow = "🟢" if str(side).upper() == "LONG" else "🔴"
@@ -754,7 +754,7 @@ def _r_of(pos, level):
 
 def paper_entry(strategy, pair, pos, balance=None):
     """Позиция открыта: цифры, чтобы понять сделку с одного взгляда."""
-    import tg_format as fmt
+    from control import tg_format as fmt
     if not _allowed('trade_opened') or not _strategy_on(strategy):
         return False
     direction = pos['direction']
@@ -796,7 +796,7 @@ def paper_entry(strategy, pair, pos, balance=None):
 
 def paper_target(strategy, pair, pos, index, level):
     """Взята частичная цель: сколько зафиксировано и что осталось."""
-    import tg_format as fmt
+    from control import tg_format as fmt
     if not _allowed('tp_hit') or not _strategy_on(strategy):
         return False
     targets = pos.get('targets') or []
@@ -816,7 +816,7 @@ def paper_target(strategy, pair, pos, index, level):
 
 def paper_breakeven(strategy, pair, pos):
     """Стоп перенесён в безубыток правилом стратегии."""
-    import tg_format as fmt
+    from control import tg_format as fmt
     if not _allowed('breakeven') or not _strategy_on(strategy):
         return False
     be = pos.get('be_level')
@@ -849,7 +849,7 @@ def _strategy_today(strategy):
 
 def paper_exit(row):
     """Сделка закрыта: итог, путь от входа до выхода и что это значит для стратегии."""
-    import tg_format as fmt
+    from control import tg_format as fmt
     strategy, pair = row.get('strategy', ''), row.get('pair', '')
     if not _allowed('trade_closed') or not _strategy_on(strategy):
         return False
@@ -878,13 +878,13 @@ def paper_exit(row):
 
 def daily_report_text(broker, day):
     """Итог суток UTC по журналу: по стратегиям, лучшая и худшая, что в рынке сейчас."""
-    import tg_format as fmt
-    import telegram_panel as panel
+    from control import tg_format as fmt
+    from control import telegram_panel as panel
     start = datetime.fromisoformat(day).replace(tzinfo=timezone.utc)
     end = start + timedelta(days=1)
     snap = broker.snapshot()
     try:
-        from dashboard import _read_paper_trades
+        from control.dashboard import _read_paper_trades
         trades = _read_paper_trades()
     except Exception:                                  # noqa: BLE001
         trades = []
@@ -924,7 +924,7 @@ def daily_report_once(broker, now=None):
     было» — память после перезапуска пуста. Теперь сделки — из журнала, дата
     отправки — на диске (telegram_state).
     """
-    import telegram_state
+    from control import telegram_state
     now = now or datetime.now(timezone.utc)
     day = (now - timedelta(days=1)).date().isoformat()
     if telegram_state.load().get('daily_sent') == day:
@@ -999,7 +999,7 @@ def account_instruction(account, item):
     что поставить, снять, перенести и закрыть руками. Приходит сразу, как бот
     решил, — с ценами, которые вбиваются в терминал как есть.
     """
-    import tg_format as fmt
+    from control import tg_format as fmt
     if not _allowed('account_orders'):
         return False
     lines = [f"{item.get('icon') or '📋'} <b>{fmt.esc(item.get('title', ''))}</b> · {fmt.esc(account)}",
@@ -1015,7 +1015,7 @@ def account_instruction(account, item):
 
 
 def error_alert(message: str):
-    import tg_format as fmt
+    from control import tg_format as fmt
     if not _allowed('error'):
         return
     _send(

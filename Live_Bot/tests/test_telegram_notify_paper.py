@@ -16,7 +16,7 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import telegram_notify as tg  # noqa: E402
+from control import telegram_notify as tg  # noqa: E402
 
 BAR_MS = 5 * 60 * 1000
 T0 = 1_700_000_000_000
@@ -120,7 +120,7 @@ class TestTargetsBreakevenAndExit:
 def broker_env(monkeypatch):
     monkeypatch.setenv('TRADING_MODE', 'PAPER')
     monkeypatch.setenv('PAPER_FUNDING', 'false')
-    for module in ('config', 'paper_broker', 'dashboard', 'shadow', 'setup_journal'):
+    for module in ('config', 'paper_broker', 'control.dashboard', 'shadow', 'setup_journal'):
         sys.modules.pop(module, None)
     import config
     import paper_broker
@@ -200,7 +200,7 @@ class TestTheDailyReport:
         text = outbox[-1][0]
         assert 'Итог ' + closed.strftime('%d.%m.%Y') in text and 'SMC · 1 сд' in text
         assert tg.daily_report_once(broker, now=next_day) is False, 'второй раз за сутки — нет'
-        import telegram_state
+        telegram_state = __import__('importlib').import_module('control.telegram_state')
         assert telegram_state.load()['daily_sent'] == closed.date().isoformat()
 
     def test_a_switched_off_report_is_still_marked_as_handled(self, broker_env, outbox, monkeypatch):
@@ -208,7 +208,7 @@ class TestTheDailyReport:
         monkeypatch.setattr(tg, '_allowed', lambda event: event != 'daily')
         now = datetime(2026, 9, 27, 0, 5, tzinfo=timezone.utc)
         assert tg.daily_report_once(broker, now=now) is False
-        import telegram_state
+        telegram_state = __import__('importlib').import_module('control.telegram_state')
         assert telegram_state.load()['daily_sent'] == '2026-09-26' and not outbox
 
 

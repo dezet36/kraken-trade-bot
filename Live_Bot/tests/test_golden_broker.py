@@ -143,7 +143,7 @@ def schedule():
 
 
 # Модули, которые эталон загружает заново под свой каталог данных и свои часы.
-LOADED = ('config', 'accounts.settings_store', 'paper_broker', 'dashboard', 'shadow', 'setup_journal',
+LOADED = ('config', 'accounts.settings_store', 'paper_broker', 'control.dashboard', 'shadow', 'setup_journal',
           'refused', 'follow_up', 'trade_journal')
 
 

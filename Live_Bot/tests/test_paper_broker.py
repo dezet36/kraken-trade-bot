@@ -57,7 +57,7 @@ def broker_env(tmp_path, monkeypatch):
     for _name in ('FIBO', 'SMC', 'LEVELS', 'RSIBB'):
         monkeypatch.setenv(f'PAPER_START_BALANCE_{_name}', '10000')
     monkeypatch.setenv('PAPER_FUNDING', 'false')
-    for module in ('config', 'paper_broker', 'dashboard', 'shadow', 'setup_journal'):
+    for module in ('config', 'paper_broker', 'control.dashboard', 'shadow', 'setup_journal'):
         sys.modules.pop(module, None)
 
     import config
@@ -200,7 +200,7 @@ class TestFill:
         одинаково для всех пяти стратегий.
         """
         broker, client, pb, cfg = broker_env
-        import telegram_notify as tg
+        tg = __import__('importlib').import_module('control.telegram_notify')
         sent = []
         monkeypatch.setattr(tg, '_allowed', lambda e: True)
         monkeypatch.setattr(tg, '_send', lambda text, chat_id=None: sent.append(text) or True)
@@ -216,7 +216,7 @@ class TestFill:
     def test_the_announcement_can_be_switched_off(self, broker_env, monkeypatch):
         """Настройка `plan_dropped` гасит сообщение — 12 снятий в сутки не всем нужны."""
         broker, client, pb, cfg = broker_env
-        import telegram_notify as tg
+        tg = __import__('importlib').import_module('control.telegram_notify')
         sent = []
         monkeypatch.setattr(tg, '_allowed', lambda e: e != 'plan_dropped')
         monkeypatch.setattr(tg, '_send', lambda text, chat_id=None: sent.append(text) or True)

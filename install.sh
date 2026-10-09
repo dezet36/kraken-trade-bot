@@ -140,7 +140,7 @@ if [ "$NEED_KEYS" = "1" ]; then
 fi
 
 export BOT_DATA_DIR="$DATA_DIR"
-python Live_Bot/doctor.py || die "проверка не пройдена — см. список выше"
+python Live_Bot/control/doctor.py || die "проверка не пройдена — см. список выше"
 
 say "Готово"
 cat <<EOF

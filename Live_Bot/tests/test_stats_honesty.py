@@ -28,8 +28,8 @@ import sys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
-HTML = open(os.path.join(ROOT, 'dashboard.html'), encoding='utf-8').read()
-SERVER = open(os.path.join(ROOT, 'dashboard.py'), encoding='utf-8').read()
+HTML = open(os.path.join(ROOT, 'control', 'dashboard.html'), encoding='utf-8').read()
+SERVER = open(os.path.join(ROOT, 'control', 'dashboard.py'), encoding='utf-8').read()
 
 
 def _fn(name):

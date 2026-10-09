@@ -23,7 +23,7 @@ import sys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
-import dashboard                                            # noqa: E402
+from control import dashboard  # noqa: E402
 
 
 def trade(pnl, gap=0, risk=50.0):
@@ -92,8 +92,8 @@ class TestTheSummaryDropsOnlyWhatItShould:
 
 class TestThePanelCarriesTheField:
 
-    SRC = open(os.path.join(ROOT, 'dashboard.py'), encoding='utf-8').read()
-    HTML = open(os.path.join(ROOT, 'dashboard.html'), encoding='utf-8').read()
+    SRC = open(os.path.join(ROOT, 'control', 'dashboard.py'), encoding='utf-8').read()
+    HTML = open(os.path.join(ROOT, 'control', 'dashboard.html'), encoding='utf-8').read()
 
     def test_the_journal_field_reaches_the_payload(self):
         assert "'gap_min'" in self.SRC and 'data_gap_min' in self.SRC

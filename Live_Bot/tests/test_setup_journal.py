@@ -423,7 +423,7 @@ class TestRegimeForTheJournal:
 
 class TestDashboardExport:
     def test_a_journal_per_strategy_and_a_clear_refusal_for_an_unknown_one(self, env):
-        import dashboard
+        dashboard = __import__('importlib').import_module('control.dashboard')
         write_trades([trade(strategy='SMC')])
         body, name = dashboard._journal_export('SMC')
         assert name.startswith('journal-SMC-') and name.endswith('.csv')
@@ -433,6 +433,6 @@ class TestDashboardExport:
 
     def test_the_page_has_a_button_per_strategy(self):
         page = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                                 'dashboard.html'), encoding='utf-8').read()
+                                 'control', 'dashboard.html'), encoding='utf-8').read()
         assert 'id="setup-journal"' in page and 'data-export="journal-${esc(k)}"' in page
         assert "/api/journal.csv?strategy=" in page

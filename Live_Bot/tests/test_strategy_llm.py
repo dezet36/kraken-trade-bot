@@ -956,7 +956,7 @@ class TestATargetReachedBeforeEntryDropsThePlan:
             'close': [(h + l) / 2 for h, l in zip(highs, lows)], 'volume': [1.0] * n})
 
     def test_the_plan_is_dropped_and_reported(self, monkeypatch):
-        import telegram_notify as tg
+        tg = __import__('importlib').import_module('control.telegram_notify')
         sent = []
         monkeypatch.setattr(tg, '_allowed', lambda e: True)
         monkeypatch.setattr(tg, '_send', lambda text, chat_id=None: sent.append(text) or True)
@@ -986,7 +986,7 @@ class TestATargetReachedBeforeEntryDropsThePlan:
         четыре плана, потом три, и никакого объяснения. Остальные исходы
         (нашёлся, отклонён, цель без входа, открыт, закрыт) сообщались все.
         """
-        import telegram_notify as tg
+        tg = __import__('importlib').import_module('control.telegram_notify')
         sent = []
         monkeypatch.setattr(tg, '_allowed', lambda e: True)
         monkeypatch.setattr(tg, '_send', lambda text, chat_id=None: sent.append(text) or True)
@@ -1045,7 +1045,7 @@ class TestTheSetupIsAnnounced:
     """
 
     def test_an_accepted_plan_is_announced_with_the_numbers(self, monkeypatch):
-        import telegram_notify as tg
+        tg = __import__('importlib').import_module('control.telegram_notify')
         sent = []
         monkeypatch.setattr(tg, '_allowed', lambda e: True)
         monkeypatch.setattr(tg, '_send', lambda text, chat_id=None: sent.append(text) or True)
@@ -1077,7 +1077,7 @@ class TestTheSetupIsAnnounced:
 
     def test_the_message_never_exceeds_the_caption_limit(self, monkeypatch):
         """Не влезает — уходит второстепенное (риск, рынок), а вход/стоп/цель остаются."""
-        import telegram_notify as tg
+        tg = __import__('importlib').import_module('control.telegram_notify')
         verdict = approving_verdict(trigger_when='close_above', trigger_level=103.0, trigger_id='L2', bias='up')
         verdict['why'] = 'п' * 400
         verdict['stop_why'] = 'с' * 300
@@ -1090,7 +1090,7 @@ class TestTheSetupIsAnnounced:
             assert piece in text, piece
 
     def test_a_rejected_plan_is_announced_briefly(self, monkeypatch):
-        import telegram_notify as tg
+        tg = __import__('importlib').import_module('control.telegram_notify')
         sent = {}
         monkeypatch.setattr(tg, '_allowed', lambda e: True)
         monkeypatch.setattr(tg, '_send', lambda text, chat_id=None: (sent.setdefault('text', text), True)[1])
@@ -1098,13 +1098,13 @@ class TestTheSetupIsAnnounced:
         assert 'отклонён' in sent['text'] and 'ETHUSDT SHORT' in sent['text'] and 'стоп внутри' in sent['text']
 
     def test_the_switch_silences_it(self, monkeypatch):
-        import telegram_notify as tg
+        tg = __import__('importlib').import_module('control.telegram_notify')
         monkeypatch.setattr(tg, '_allowed', lambda e: False)
         monkeypatch.setattr(tg, '_send', lambda *a, **k: (_ for _ in ()).throw(AssertionError('слать нельзя')))
         assert tg.llm_setup_found(strategy_llm._reshape('BTCUSDT', approving_verdict()), None) is False
 
     def test_the_collector_announces_and_the_signal_carries_the_plan(self, monkeypatch):
-        import telegram_notify as tg
+        tg = __import__('importlib').import_module('control.telegram_notify')
         announced = []
         monkeypatch.setattr(tg, 'llm_setup_found', lambda signal, df=None, **k: announced.append(signal) or True)
         monkeypatch.setattr(strategy_llm.llm_local, 'available', lambda: True)

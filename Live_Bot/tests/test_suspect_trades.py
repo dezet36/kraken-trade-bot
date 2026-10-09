@@ -17,7 +17,7 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import dashboard  # noqa: E402
+from control import dashboard  # noqa: E402
 
 LEVEL_GEO = {'lines': [{'price': 100.0, 'label': 'уровень · касаний 3'}]}
 FIBO_GEO = {'bands': [{'bottom': 1, 'top': 2, 'label': 'зона A · 38.2–61.8%'}],

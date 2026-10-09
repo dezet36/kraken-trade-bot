@@ -53,13 +53,7 @@ LAYER = {
     'follow_up': 'execution', 'trade_journal': 'execution', 'setup_journal': 'execution',
     'refused': 'execution', 'shadow': 'execution',
     # счета
-    # интерфейсы
-    'dashboard': 'control', 'telegram_bot': 'control', 'telegram_notify': 'control',
-    'telegram_panel': 'control', 'telegram_state': 'control', 'tg_format': 'control',
-    'chart_generator': 'control', 'chart_frame': 'control',
-    'remote': 'control', 'remote_app': 'control', 'doctor': 'control', 'report': 'control',
-    # прогон модели по парам — инструмент оператора, а не стратегия (этап 4)
-    'llm_probe': 'control',
+    # интерфейсы — в control/ (этап 10, часть 5)
     # дирижёр цикла
     'bot': 'app',
 }
@@ -91,11 +85,11 @@ KNOWN = {
     # на модуль: брокер и боевой исполнитель сами проверяют пределы портфеля
     # и издержки по правилам счёта (risk_gate, settings_store, live_costs).
     ('paper_broker', 'accounts'): 'этап 5: пределы портфеля — в решении счёта',
-    ('paper_broker', 'telegram_notify'): 'этап 5',
+    ('paper_broker', 'control'): 'этап 5: уведомления брокера — через порт',
     ('shadow', 'accounts'): 'этап 5',
     ('trade_journal', 'accounts'): 'этап 5',
     ('trade_manager', 'accounts'): 'этап 5/7: пределы портфеля — в решении счёта',
-    ('trade_manager', 'telegram_notify'): 'этап 5',
+    ('trade_manager', 'control'): 'этап 5: уведомления исполнителя — через порт',
 }
 
 

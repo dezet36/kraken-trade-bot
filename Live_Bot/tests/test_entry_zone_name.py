@@ -140,7 +140,7 @@ class TestTheSignalStoppedDeclaringIt:
 
 class TestTelegramStoppedGuessing:
 
-    SRC = open(os.path.join(ROOT, 'telegram_notify.py'), encoding='utf-8').read()
+    SRC = open(os.path.join(ROOT, 'control', 'telegram_notify.py'), encoding='utf-8').read()
 
     def test_the_icon_has_a_third_case(self):
         """

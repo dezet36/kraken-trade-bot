@@ -30,7 +30,7 @@ PAGE = None
 def _page():
     global PAGE
     if PAGE is None:
-        with open(os.path.join(ROOT, 'dashboard.html'), encoding='utf-8') as fh:
+        with open(os.path.join(ROOT, 'control', 'dashboard.html'), encoding='utf-8') as fh:
             PAGE = fh.read()
     return PAGE
 
@@ -39,7 +39,7 @@ class TestSaveEndpoint:
 
     @pytest.fixture(scope='class')
     def server(self):
-        import dashboard
+        dashboard = __import__('importlib').import_module('control.dashboard')
         port = 8931
         threading.Thread(
             target=lambda: dashboard.start_dashboard(port=port, host='127.0.0.1'),
@@ -57,7 +57,7 @@ class TestSaveEndpoint:
         отвечает 404 «история пуста» — верное поведение, на котором работу
         выгрузки проверить нельзя.
         """
-        import dashboard
+        dashboard = __import__('importlib').import_module('control.dashboard')
         csv_path, jsonl_path = dashboard.export_paths()
         for path, body in ((csv_path, 'trade_id,strategy\n1,FIBO\n'),
                            (jsonl_path, '{"trade_id": 1}\n')):

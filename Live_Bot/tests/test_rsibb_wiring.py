@@ -157,7 +157,7 @@ class TestRegistration:
 
     def test_dashboard_knows_name_and_colour(self):
         page = os.path.join(os.path.dirname(os.path.dirname(
-            os.path.abspath(__file__))), 'dashboard.html')
+            os.path.abspath(__file__))), 'control', 'dashboard.html')
         text = open(page, encoding='utf-8').read()
         assert 'RSIBB:' in text
         assert '--rsibb:' in text

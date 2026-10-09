@@ -21,7 +21,7 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import remote
+from control import remote
 
 
 class FakeProcess:
@@ -308,7 +308,7 @@ class TestPastingWorksOnAnyKeyboardLayout:
         Код физической клавиши от раскладки не зависит: V — это 86 независимо
         от того, какая буква на ней нарисована.
         """
-        import remote_app
+        remote_app = __import__('importlib').import_module('control.remote_app')
         assert remote_app._KEY_V == 86
         assert remote_app._KEY_C == 67
         assert remote_app._KEY_X == 88
@@ -319,7 +319,7 @@ class TestPastingWorksOnAnyKeyboardLayout:
         Решение принимается по коду клавиши, поэтому раскладка на него не
         влияет: физическая V имеет код 86 независимо от буквы на ней.
         """
-        import remote_app
+        remote_app = __import__('importlib').import_module('control.remote_app')
         assert remote_app.edit_action(remote_app._KEY_V, 0x4) == 'Paste'
         assert remote_app.edit_action(remote_app._KEY_C, 0x4) == 'Copy'
         assert remote_app.edit_action(remote_app._KEY_X, 0x4) == 'Cut'
@@ -327,11 +327,11 @@ class TestPastingWorksOnAnyKeyboardLayout:
 
     def test_a_plain_key_is_left_alone(self):
         """Без Ctrl это обычный ввод, и перехватывать его нельзя."""
-        import remote_app
+        remote_app = __import__('importlib').import_module('control.remote_app')
         assert remote_app.edit_action(remote_app._KEY_V, 0) is None
 
     def test_other_combinations_are_not_intercepted(self):
-        import remote_app
+        remote_app = __import__('importlib').import_module('control.remote_app')
         assert remote_app.edit_action(70, 0x4) is None      # Ctrl+F
 
     def test_the_right_click_menu_is_in_russian(self):
@@ -341,7 +341,7 @@ class TestPastingWorksOnAnyKeyboardLayout:
         """
         import inspect
 
-        import remote_app
+        remote_app = __import__('importlib').import_module('control.remote_app')
 
         source = inspect.getsource(remote_app.enable_editing)
         for label in ('Вставить', 'Копировать', 'Выделить всё'):
@@ -354,7 +354,7 @@ class TestPastingWorksOnAnyKeyboardLayout:
         """
         import inspect
 
-        import remote_app
+        remote_app = __import__('importlib').import_module('control.remote_app')
 
         source = inspect.getsource(remote_app.enable_editing)
         assert "return 'break'" in source
@@ -399,7 +399,7 @@ class TestTheWindowEngine:
     """
 
     def test_a_browser_window_is_looked_for(self):
-        import remote_app
+        remote_app = __import__('importlib').import_module('control.remote_app')
         assert remote_app.CHROME_PATHS, 'путей к браузеру нет вовсе'
         joined = ' '.join(p for p in remote_app.CHROME_PATHS if p).lower()
         assert 'chrome.exe' in joined
@@ -413,7 +413,7 @@ class TestTheWindowEngine:
         """
         import inspect
 
-        import remote_app
+        remote_app = __import__('importlib').import_module('control.remote_app')
 
         source = inspect.getsource(remote_app.open_app_window)
         assert '--user-data-dir' in source
@@ -426,7 +426,7 @@ class TestTheWindowEngine:
         """
         import inspect
 
-        import remote_app
+        remote_app = __import__('importlib').import_module('control.remote_app')
 
         assert 'REMOTE_ENGINE' in inspect.getsource(remote_app.main)
 
@@ -539,7 +539,7 @@ class TestAnOpenedWindowIsNotYetAShownOne:
     """
 
     def test_a_moved_counter_means_the_page_is_alive(self, monkeypatch):
-        import remote_app
+        remote_app = __import__('importlib').import_module('control.remote_app')
 
         answers = iter([7, 7, 8])
         monkeypatch.setattr(remote_app, 'views',
@@ -548,7 +548,7 @@ class TestAnOpenedWindowIsNotYetAShownOne:
         assert remote_app.painted('http://127.0.0.1:8799/', 7, timeout=5)
 
     def test_a_frozen_counter_means_a_blank_window(self, monkeypatch):
-        import remote_app
+        remote_app = __import__('importlib').import_module('control.remote_app')
 
         monkeypatch.setattr(remote_app, 'views', lambda url, timeout=3.0: 7)
         monkeypatch.setattr(remote_app.time, 'sleep', lambda _s: None)
@@ -559,7 +559,7 @@ class TestAnOpenedWindowIsNotYetAShownOne:
         Счётчик сбрасывается вместе с ботом. Требование «стало больше»
         соврало бы про исправное окно — считается любой сдвиг.
         """
-        import remote_app
+        remote_app = __import__('importlib').import_module('control.remote_app')
 
         monkeypatch.setattr(remote_app, 'views', lambda url, timeout=3.0: 1)
         monkeypatch.setattr(remote_app.time, 'sleep', lambda _s: None)
@@ -571,7 +571,7 @@ class TestAnOpenedWindowIsNotYetAShownOne:
         Неизвестность за показ выдавать нельзя: ровно так белое окно и
         считалось рабочим.
         """
-        import remote_app
+        remote_app = __import__('importlib').import_module('control.remote_app')
 
         monkeypatch.setattr(remote_app, 'views', lambda url, timeout=3.0: None)
         monkeypatch.setattr(remote_app.time, 'sleep', lambda _s: None)
@@ -581,7 +581,7 @@ class TestAnOpenedWindowIsNotYetAShownOne:
 class TestABlankWindowIsOpenedAgain:
 
     def test_the_first_good_window_is_kept_as_is(self, monkeypatch):
-        import remote_app
+        remote_app = __import__('importlib').import_module('control.remote_app')
 
         opened = []
         killed = []
@@ -603,7 +603,7 @@ class TestABlankWindowIsOpenedAgain:
         Chrome один профиль — один процесс, и новый запуск лишь просит его
         показать ещё одно окно. Поэтому прежнее закрывается.
         """
-        import remote_app
+        remote_app = __import__('importlib').import_module('control.remote_app')
 
         order = []
         monkeypatch.setattr(remote_app, 'views', lambda url, timeout=3.0: 0)
@@ -622,7 +622,7 @@ class TestABlankWindowIsOpenedAgain:
         Браузера нет — повторять нечего, и решать должен вызвавший: у него
         остаются своё окно и запасной путь через браузер по умолчанию.
         """
-        import remote_app
+        remote_app = __import__('importlib').import_module('control.remote_app')
 
         tries = []
         monkeypatch.setattr(remote_app, 'views', lambda url, timeout=3.0: 0)
@@ -643,7 +643,7 @@ class TestOnlyOurOwnWindowsAreClosed:
         """
         import inspect
 
-        import remote_app
+        remote_app = __import__('importlib').import_module('control.remote_app')
 
         source = inspect.getsource(remote_app.close_windows)
         assert 'window_profile' in source
@@ -665,7 +665,7 @@ class TestTheDashboardCountsItsViewers:
         import json
         import urllib.request
 
-        import dashboard
+        dashboard = __import__('importlib').import_module('control.dashboard')
 
         server = dashboard.start_dashboard(port=self.PORT)
         assert server, 'дашборд не поднялся'
@@ -709,8 +709,8 @@ class TestTheTunnelComesBackByItself:
             self.dies = True
 
     def test_a_dead_tunnel_is_reopened(self, monkeypatch):
-        import remote
-        import remote_app
+        remote = __import__('importlib').import_module('control.remote')
+        remote_app = __import__('importlib').import_module('control.remote_app')
 
         calls = []
         replacement = self._Proc(dies=False)
@@ -738,8 +738,8 @@ class TestTheTunnelComesBackByItself:
         assert any('восстановлено' in m for m in logged)
 
     def test_it_stops_when_the_window_closes(self, monkeypatch):
-        import remote
-        import remote_app
+        remote = __import__('importlib').import_module('control.remote')
+        remote_app = __import__('importlib').import_module('control.remote_app')
 
         monkeypatch.setattr(remote, 'open_tunnel',
                             lambda cfg: (_ for _ in ()).throw(AssertionError('не должно звать')))
@@ -757,7 +757,7 @@ class TestOnlyOneCopyRuns:
     """
 
     def test_the_second_copy_focuses_and_leaves(self, monkeypatch):
-        import remote_app
+        remote_app = __import__('importlib').import_module('control.remote_app')
 
         focused = []
         monkeypatch.setattr(remote_app, 'claim_single_instance', lambda: False)
@@ -769,7 +769,7 @@ class TestOnlyOneCopyRuns:
         assert focused == [1]
 
     def test_the_mutex_is_claimed_once_per_process(self, monkeypatch):
-        import remote_app
+        remote_app = __import__('importlib').import_module('control.remote_app')
         if not remote_app.sys.platform.startswith('win'):
             pytest.skip('мьютекс Windows')
         # Своё имя: на машине разработки настоящая программа может быть
@@ -781,7 +781,7 @@ class TestOnlyOneCopyRuns:
         assert remote_app.claim_single_instance() is False
 
     def test_an_orphaned_tunnel_is_reused_not_fought(self, monkeypatch):
-        import remote_app
+        remote_app = __import__('importlib').import_module('control.remote_app')
 
         monkeypatch.setattr(remote_app.remote, 'port_open', lambda port, host='127.0.0.1': True)
         monkeypatch.setattr(remote_app, 'views', lambda url, timeout=3.0: 5)
@@ -791,7 +791,7 @@ class TestOnlyOneCopyRuns:
         assert remote_app.tunnel_already_up() is False, 'чужой порт — не наш туннель'
 
     def test_the_keeper_watches_an_orphaned_tunnel_by_port(self, monkeypatch):
-        import remote_app
+        remote_app = __import__('importlib').import_module('control.remote_app')
 
         ports = iter([True, True, False])              # порт закрылся на третьей проверке
         monkeypatch.setattr(remote_app.remote, 'port_open',
@@ -833,7 +833,7 @@ class TestAHungTunnelIsNoticedAndRebuilt:
             self.terminated = True
 
     def test_no_answer_three_times_in_a_row_restarts_ssh(self, monkeypatch):
-        import remote_app
+        remote_app = __import__('importlib').import_module('control.remote_app')
 
         stuck = self._Proc()
         fresh = self._Proc()
@@ -854,7 +854,7 @@ class TestAHungTunnelIsNoticedAndRebuilt:
 
     def test_a_single_missed_answer_is_forgiven(self, monkeypatch):
         """Сервер занят разбором модели — один неответ не повод рвать туннель."""
-        import remote_app
+        remote_app = __import__('importlib').import_module('control.remote_app')
 
         proc = self._Proc()
         link = {'process': proc, 'closed': False}
@@ -871,7 +871,7 @@ class TestAHungTunnelIsNoticedAndRebuilt:
         assert not proc.terminated
 
     def test_a_dead_process_reports_what_ssh_said(self):
-        import remote_app
+        remote_app = __import__('importlib').import_module('control.remote_app')
 
         proc = self._Proc()
         proc.terminated = True
@@ -885,7 +885,7 @@ class TestAHungTunnelIsNoticedAndRebuilt:
         ни при чём, и перезапускать его нельзя — поднимется он, а панель нет.
         """
         import urllib.request
-        import remote_app
+        remote_app = __import__('importlib').import_module('control.remote_app')
 
         def refuse(*a, **k):
             raise ConnectionResetError(10054, 'сброшено')
@@ -895,7 +895,7 @@ class TestAHungTunnelIsNoticedAndRebuilt:
     def test_silence_after_connect_is_a_hang(self, monkeypatch):
         import socket
         import urllib.request
-        import remote_app
+        remote_app = __import__('importlib').import_module('control.remote_app')
 
         def hang(*a, **k):
             raise socket.timeout('timed out')
@@ -909,7 +909,7 @@ class TestAHungTunnelIsNoticedAndRebuilt:
         """
         import io
         import threading
-        import remote
+        remote = __import__('importlib').import_module('control.remote')
 
         monkeypatch.setattr(remote, 'ssh_exe', lambda: 'ssh')
         monkeypatch.setattr(remote, 'port_open', lambda port, host='127.0.0.1': False)

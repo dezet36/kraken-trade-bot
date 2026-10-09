@@ -663,7 +663,7 @@ class PaperBroker:
         mark['paused_alerted'] = True
         self._save_state()
         try:
-            import telegram_notify as tg
+            from control import telegram_notify as tg
             tg.error_alert(f'Термостат: просадка портфеля за день {drawdown:.2f}% '
                            f'при пределе {limit:.2f}% — новые входы остановлены '
                            f'до следующих суток UTC. Позиции ведутся как обычно.')
@@ -1416,7 +1416,7 @@ class PaperBroker:
         except Exception:                              # noqa: BLE001
             pass
         try:
-            import telegram_notify as tg
+            from control import telegram_notify as tg
             tg.plan_dropped(strategy, pair, order.get('direction', ''),
                             float(order.get('limit_price') or 0), reason,
                             (order.get('context') or {}).get('why', ''))
@@ -1490,7 +1490,7 @@ class PaperBroker:
         # Уведомление — вспомогательное: его отказ не имеет права мешать
         # торговле, поэтому глушится целиком.
         try:
-            import telegram_notify as tg
+            from control import telegram_notify as tg
             tg.paper_entry(strategy, pair, position, self.balance(strategy))
         except Exception:                          # noqa: BLE001
             pass
@@ -1596,7 +1596,7 @@ class PaperBroker:
     def _notify(name, *args):
         """Уведомление в Telegram. Его отказ торговле не мешает — глушится целиком."""
         try:
-            import telegram_notify as tg
+            from control import telegram_notify as tg
             getattr(tg, name)(*args)
         except Exception:                          # noqa: BLE001
             pass

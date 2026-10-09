@@ -261,7 +261,7 @@ class TestTheDisabledLimitIsNamed:
     def test_diagnostics_asks_about_it(self, monkeypatch):
         # Предел — у каждой стратегии свой (strategy_profile); диагностика
         # обязана заметить, если выключен хотя бы один.
-        import doctor
+        doctor = __import__('importlib').import_module('control.doctor')
         import strategy_profile
         assert 'предел расхода на вход' not in (doctor.check_limits().get('detail') or '')
         monkeypatch.setattr(strategy_profile, 'cost_limit_pct',

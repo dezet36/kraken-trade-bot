@@ -20,7 +20,7 @@ import sys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
-HTML = open(os.path.join(ROOT, 'dashboard.html'), encoding='utf-8').read()
+HTML = open(os.path.join(ROOT, 'control', 'dashboard.html'), encoding='utf-8').read()
 
 # Ключевые слова языка, встроенные имена и функции CSS: они пишутся как вызов,
 # но объявлять их нам не нужно.

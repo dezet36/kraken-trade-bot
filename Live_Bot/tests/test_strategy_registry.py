@@ -43,7 +43,7 @@ def test_profile_is_a_dict_of_known_keys(code):
 def test_common_modules_take_the_list_from_the_registry():
     import paper_broker
     settings_store = __import__('importlib').import_module('accounts.settings_store')
-    import tg_format
+    tg_format = __import__('importlib').import_module('control.tg_format')
     assert tuple(paper_broker.STRATEGIES) == registry.codes()
     assert tuple(settings_store.STRATEGIES) == registry.codes()
     assert tuple(tg_format.ORDER) == registry.codes()
@@ -74,8 +74,8 @@ def test_unknown_signal_is_nobodys():
 
 
 def test_dashboard_gets_every_name_and_colour():
-    import dashboard
-    page = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'dashboard.html')
+    dashboard = __import__('importlib').import_module('control.dashboard')
+    page = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'control', 'dashboard.html')
     body = dashboard._with_strategy_registry(open(page, 'rb').read()).decode('utf-8')
     assert 'window.STRATEGY_REGISTRY' in body
     for entry in registry.REGISTRY:

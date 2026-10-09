@@ -58,11 +58,11 @@ def env(monkeypatch):
     monkeypatch.setenv('PAPER_FUNDING', 'false')
     for name in ('FIBO', 'SMC', 'LEVELS', 'RSIBB', 'LLM'):
         monkeypatch.setenv(f'PAPER_START_BALANCE_{name}', '10000')
-    for module in ('config', 'paper_broker', 'dashboard', 'shadow', 'setup_journal', 'telegram_bot'):
+    for module in ('config', 'paper_broker', 'control.dashboard', 'shadow', 'setup_journal', 'control.telegram_bot'):
         sys.modules.pop(module, None)
     import config
     import paper_broker
-    import telegram_bot
+    telegram_bot = __import__('importlib').import_module('control.telegram_bot')
     for key, value in (('PAPER_FEE_MAKER', 0.0), ('PAPER_FEE_TAKER', 0.0), ('PAPER_SLIPPAGE_PCT', 0.0),
                        ('RISK_PER_TRADE', 1.0), ('LIMIT_ENTRY_OFFSET_PCT', 0.0),
                        ('TELEGRAM_CHAT_ID', '42'), ('TELEGRAM_BOT_TOKEN', '')):

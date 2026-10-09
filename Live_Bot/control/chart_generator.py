@@ -134,7 +134,7 @@ def generate_trade_chart(signal: dict, df_1h, timeframe: str = '1h') -> str:
         # неделях уровни плана сжимались в полоску у края.
         llm = signal.get('llm') or {}
         if llm:
-            import chart_frame
+            from control import chart_frame
             window = chart_frame.FRAMES.get(timeframe, 120)
             if len(df) > window:
                 df = df.iloc[-window:]

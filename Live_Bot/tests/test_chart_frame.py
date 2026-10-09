@@ -13,7 +13,7 @@ import pandas as pd
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
-import chart_frame  # noqa: E402
+from control import chart_frame  # noqa: E402
 
 
 def signal(entry, stop, targets, trigger_level=None):
@@ -82,8 +82,8 @@ class TestTheWindowFitsThePlan:
 
 class TestTheMessageUsesTheChosenFrame:
     def test_frames_are_asked_for_the_picked_timeframe(self, monkeypatch):
-        import telegram_notify as tg
-        import chart_generator
+        tg = __import__('importlib').import_module('control.telegram_notify')
+        chart_generator = __import__('importlib').import_module('control.chart_generator')
         asked = []
         drawn = {}
         monkeypatch.setattr(tg, '_allowed', lambda e: True)
@@ -102,8 +102,8 @@ class TestTheMessageUsesTheChosenFrame:
         assert drawn['tf'] == '1h' and 'часовые' in drawn['caption']
 
     def test_exchange_refusal_falls_back_to_the_hours_at_hand(self, monkeypatch):
-        import telegram_notify as tg
-        import chart_generator
+        tg = __import__('importlib').import_module('control.telegram_notify')
+        chart_generator = __import__('importlib').import_module('control.chart_generator')
         drawn = {}
         monkeypatch.setattr(tg, '_allowed', lambda e: True)
         monkeypatch.setattr(tg, '_send_photo', lambda path, caption=None, chat_id=None: drawn.setdefault('caption', caption) or True)
@@ -121,7 +121,7 @@ class TestTheChartIsDrawn:
     def test_the_title_names_the_timeframe_and_the_file_exists(self):
         import pytest
         pytest.importorskip('mplfinance')
-        import chart_generator
+        chart_generator = __import__('importlib').import_module('control.chart_generator')
         df = candles(192, 100.0, 0.01, tf_minutes=15)
         path = chart_generator.generate_trade_chart(signal(100.5, 99.0, [103.0, 104.5]), df, timeframe='15m')
         assert path and os.path.exists(path)

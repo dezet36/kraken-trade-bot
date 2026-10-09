@@ -15,7 +15,7 @@ import pytest
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
-import telegram_panel as panel  # noqa: E402
+from control import telegram_panel as panel  # noqa: E402
 from accounts import books, live, manual, onexchange  # noqa: E402
 
 from test_accounts_onexchange import Candles, Venue, a_setup  # noqa: E402,F401
@@ -40,7 +40,7 @@ class Ctl:
     """Контроллер Telegram без бота: только разбор кнопок."""
 
     def __init__(self, monkeypatch):
-        import telegram_bot
+        telegram_bot = __import__('importlib').import_module('control.telegram_bot')
         self.ctl = telegram_bot.BotController()
         self.ctl.trade_manager = type('Paper', (), {'snapshot': lambda self: {}})()
         monkeypatch.setattr(self.ctl, '_collect', lambda: collected())

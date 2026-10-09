@@ -128,23 +128,23 @@ class TestTheCommentStoppedPromising:
 class TestDiagnosticsShowsIt:
 
     def test_it_is_registered(self):
-        import doctor
+        doctor = __import__('importlib').import_module('control.doctor')
         assert any(fn is doctor.check_strategy_knobs for _, fn in doctor.CHECKS)
 
     def test_it_warns_at_the_current_settings(self, monkeypatch):
-        import doctor
+        doctor = __import__('importlib').import_module('control.doctor')
         monkeypatch.setattr(params, 'THIN_STOP', 'widen')
         monkeypatch.setattr(params, 'MIN_RR', 1.0)
         r = doctor.check_strategy_knobs()
         assert r['level'] == 'warn' and 'THIN_STOP' in r['detail']
 
     def test_a_working_knob_is_silent(self, monkeypatch):
-        import doctor
+        doctor = __import__('importlib').import_module('control.doctor')
         monkeypatch.setattr(params, 'THIN_STOP', 'skip')
         assert doctor.check_strategy_knobs()['level'] == 'ok'
 
     def test_a_lower_threshold_also_clears_it(self, monkeypatch):
-        import doctor
+        doctor = __import__('importlib').import_module('control.doctor')
         monkeypatch.setattr(params, 'THIN_STOP', 'widen')
         monkeypatch.setattr(params, 'MIN_RR', 0.6)
         assert doctor.check_strategy_knobs()['level'] == 'ok'
@@ -154,7 +154,7 @@ class TestDiagnosticsShowsIt:
         Мёртвая настройка — повод посмотреть, а не отказ работать: торговле
         она не мешает, она мешает делать выводы.
         """
-        import doctor
+        doctor = __import__('importlib').import_module('control.doctor')
         monkeypatch.setattr(params, 'THIN_STOP', 'widen')
         monkeypatch.setattr(params, 'MIN_RR', 1.0)
         assert doctor.check_strategy_knobs()['level'] != 'fail'

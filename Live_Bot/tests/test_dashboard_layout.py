@@ -19,7 +19,7 @@ import sys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
-HTML = open(os.path.join(ROOT, 'dashboard.html'), encoding='utf-8').read()
+HTML = open(os.path.join(ROOT, 'control', 'dashboard.html'), encoding='utf-8').read()
 
 
 class TestEveryPageExists:
@@ -84,7 +84,7 @@ class TestDirectionsDoNotMix:
         делом появилось бы в браузере. Поэтому проверяется не текст
         объяснения, а само отсутствие сложения.
         """
-        server = open(os.path.join(ROOT, 'dashboard.py'), encoding='utf-8').read()
+        server = open(os.path.join(ROOT, 'control', 'dashboard.py'), encoding='utf-8').read()
         for name, src in (('панель', HTML), ('сервер', server)):
             for bad in ('directions.reduce', 'sum(d[', 'sum(direction'):
                 assert bad not in src, (
@@ -166,7 +166,7 @@ class TestServerSideSummary:
         Складывать чужие суммы в браузере — верный способ однажды сложить
         несуммируемое. Считается там же, где данные.
         """
-        source = open(os.path.join(ROOT, 'dashboard.py'), encoding='utf-8').read()
+        source = open(os.path.join(ROOT, 'control', 'dashboard.py'), encoding='utf-8').read()
         assert 'def _directions()' in source
         assert "payload['directions']" in source
 
@@ -179,7 +179,7 @@ class TestServerSideSummary:
         относилось ко второму направлению, которого больше нет: осталась одна
         касса, и падать ей не с чем.
         """
-        source = open(os.path.join(ROOT, 'dashboard.py'), encoding='utf-8').read()
+        source = open(os.path.join(ROOT, 'control', 'dashboard.py'), encoding='utf-8').read()
         spot = source.index('def _directions()')
         block = source[spot:source.index('\ndef ', spot + 10)]
         assert "'id': 'exchange'" in block
@@ -200,7 +200,7 @@ class TestActionsArePostAndGuarded:
     меняет состояние.
     """
 
-    PY = open(os.path.join(ROOT, 'dashboard.py'), encoding='utf-8').read()
+    PY = open(os.path.join(ROOT, 'control', 'dashboard.py'), encoding='utf-8').read()
     ACTIONS = ('/api/settings', '/api/deposit', '/api/action',
                '/api/update', '/api/errors/clear', '/api/accounts/save',
                '/api/accounts/delete', '/api/accounts/keys')
@@ -247,7 +247,7 @@ class TestHiddenMeansHidden:
         import re
 
         path = os.path.join(os.path.dirname(os.path.dirname(
-            os.path.abspath(__file__))), 'dashboard.html')
+            os.path.abspath(__file__))), 'control', 'dashboard.html')
         html = open(path, encoding='utf-8').read()
 
         # Классы, которым код где-то ставит hidden через свойство .hidden

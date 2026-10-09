@@ -17,13 +17,18 @@
 
 ЗАПУСК
 
-    LLM_MODEL_PATH=/путь/model.gguf python llm_probe.py
-    LLM_MODEL_PATH=... python llm_probe.py BTCUSDT ETHUSDT
+    LLM_MODEL_PATH=/путь/model.gguf python -m control.llm_probe   (из Live_Bot)
+    LLM_MODEL_PATH=... python -m control.llm_probe BTCUSDT ETHUSDT
 
 Без аргументов берутся три пары из пула. Каждая занимает около минуты.
 """
 
+import os
 import sys
+
+if __package__ in (None, ''):
+    # Запуск файлом (python Live_Bot/control/llm_probe.py): модули бота — в папке выше.
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 DEFAULT_PAIRS = ('BTCUSDT', 'ETHUSDT', 'SOLUSDT')
 

@@ -13,7 +13,7 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import strategy_llm          # noqa: E402
-import telegram_notify as tg  # noqa: E402
+from control import telegram_notify as tg  # noqa: E402
 
 
 def approving_verdict(**over):
@@ -134,8 +134,8 @@ class TestNotebookMode:
 
 class TestTheButtonAndCommandSendTheList:
     def test_the_command_sends_the_list_and_the_menu_has_the_button(self, monkeypatch):
-        import telegram_bot
-        import telegram_panel
+        telegram_bot = __import__('importlib').import_module('control.telegram_bot')
+        telegram_panel = __import__('importlib').import_module('control.telegram_panel')
         sent = []
         ctl = telegram_bot.BotController()
         ctl.trade_manager = FakeBroker()

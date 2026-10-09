@@ -142,7 +142,7 @@ def test_both_chart_surfaces_share_one_geometry():
     with open(broker, encoding='utf-8') as handle:
         assert 'setup_geometry.build(strategy, signal)' in handle.read()
 
-    png = os.path.join(ROOT, 'chart_generator.py')
+    png = os.path.join(ROOT, 'control', 'chart_generator.py')
     with open(png, encoding='utf-8') as handle:
         text = handle.read()
     assert 'setup_geometry.build(' in text
@@ -159,7 +159,7 @@ def test_telegram_chart_recognises_every_strategy():
     Ошибиться здесь означало бы собрать разметку не той стратегии — молча и
     правдоподобно, потому что форма разметки у всех одинаковая.
     """
-    import chart_generator as cg
+    cg = __import__('importlib').import_module('control.chart_generator')
 
     assert cg._strategy_of({'smc': {'poi_top': 1}}) == 'SMC'
     assert cg._strategy_of({'levels': {'level': 1}}) == 'LEVELS'

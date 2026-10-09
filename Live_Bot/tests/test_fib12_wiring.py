@@ -159,7 +159,7 @@ class TestRegistration:
         import paper_broker
         settings_store = __import__('importlib').import_module('accounts.settings_store')
         import config
-        import tg_format
+        tg_format = __import__('importlib').import_module('control.tg_format')
         assert 'FIB12' in settings_store.STRATEGIES
         assert 'FIB12' in paper_broker.STRATEGIES
         assert config.PAPER_START_BALANCES['FIB12'] > 0
@@ -167,7 +167,7 @@ class TestRegistration:
 
     def test_dashboard_knows_name_colour_and_guide(self):
         page = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                            'dashboard.html')
+                            'control', 'dashboard.html')
         text = open(page, encoding='utf-8').read()
         assert "FIB12: 'Фибо 12ч'" in text
         assert text.count('--fib12:') >= 3

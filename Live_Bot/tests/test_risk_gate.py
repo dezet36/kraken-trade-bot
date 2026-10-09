@@ -256,7 +256,7 @@ class TestExposureIsPerStrategy:
     def test_the_panel_and_diagnostics_ask_per_strategy(self):
         import os
         root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        for name in ('dashboard.py', 'doctor.py'):
+        for name in (os.path.join('control', 'dashboard.py'), os.path.join('control', 'doctor.py')):
             src = open(os.path.join(root, name), encoding='utf-8').read()
             assert 'exposure_by_strategy(' in src, name
             assert 'max_exposure(' not in src, name

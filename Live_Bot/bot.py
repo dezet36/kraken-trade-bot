@@ -5,10 +5,10 @@ from datetime import datetime, date, timedelta, timezone
 from apscheduler.schedulers.blocking import BlockingScheduler
 
 import config
-import telegram_notify as tg
-from telegram_bot import controller
+from control import telegram_notify as tg
+from control.telegram_bot import controller
 from data.exchange import get_exchange, make_market_client
-import dashboard
+from control import dashboard
 import error_log
 from data import positioning
 from data import market_cap

@@ -1,7 +1,7 @@
 import config
 from accounts import live_costs
 import market_regime
-import telegram_notify as tg
+from control import telegram_notify as tg
 import trade_journal as journal
 from exit_plan import direction_cap, tp_plan, tps_completed, wants_breakeven
 from logger import log, log_trade

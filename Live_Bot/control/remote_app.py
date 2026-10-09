@@ -26,7 +26,11 @@ import sys
 import threading
 import time
 
-import remote
+if __package__ in (None, ''):
+    # Запуск файлом (python Live_Bot/control/remote_app.py): модули бота — в папке выше.
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from control import remote
 
 WINDOW_TITLE = 'Kraken — сервер'
 

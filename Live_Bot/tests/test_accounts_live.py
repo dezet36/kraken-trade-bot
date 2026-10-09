@@ -216,7 +216,7 @@ class TestKeys:
 
 @pytest.fixture(scope='module')
 def server():
-    import dashboard
+    dashboard = __import__('importlib').import_module('control.dashboard')
     port = 8937
     threading.Thread(
         target=lambda: dashboard.start_dashboard(port=port, host='127.0.0.1'),
@@ -284,7 +284,7 @@ class TestPanel:
 
 
 def test_page_has_the_accounts_screen():
-    html = open(os.path.join(ROOT, 'dashboard.html'), encoding='utf-8').read()
+    html = open(os.path.join(ROOT, 'control', 'dashboard.html'), encoding='utf-8').read()
     assert "id: 'accounts'" in html and 'data-page="accounts"' in html
     assert "'/api/accounts/keys'" in html or '/api/accounts/keys' in html
     # прежняя запись ключей в общий .env убрана

@@ -232,7 +232,7 @@ def _settings():
 def _state():
     """Короткая сводка состояния — без списка сделок целиком."""
     try:
-        import dashboard
+        from control import dashboard
         payload = dashboard.build_payload()
     except Exception as exc:                       # noqa: BLE001
         return f'состояние недоступно: {exc}'
@@ -265,7 +265,7 @@ def _state():
 
 def _log(limit=400):
     try:
-        import dashboard
+        from control import dashboard
         return '\n'.join(dashboard.read_log(limit=limit))
     except Exception as exc:                       # noqa: BLE001
         return f'журнал недоступен: {exc}'
