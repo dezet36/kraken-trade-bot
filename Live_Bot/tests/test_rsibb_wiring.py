@@ -157,11 +157,9 @@ class TestRegistration:
         assert 'RSIBB' in paper_broker.STRATEGIES
 
     def test_dashboard_knows_name_and_colour(self):
-        page = os.path.join(os.path.dirname(os.path.dirname(
-            os.path.abspath(__file__))), 'control', 'dashboard.html')
-        text = open(page, encoding='utf-8').read()
-        assert 'RSIBB:' in text
-        assert '--rsibb:' in text
-        # Цвет обязан быть задан в ОБЕИХ темах: тёмная не осветлённая светлая,
-        # и подобранный для одной в другой сливается с синим.
-        assert text.count('--rsibb:') >= 3
+        """Имя и цвет — из реестра. Цвет обязан быть задан в ОБЕИХ темах: тёмная не
+        осветлённая светлая, и подобранный для одной в другой сливается с синим."""
+        from strategies import registry
+        entry = registry.get('RSIBB')
+        assert entry.title and entry.color_light and entry.color_dark
+        assert entry.color_light != entry.color_dark

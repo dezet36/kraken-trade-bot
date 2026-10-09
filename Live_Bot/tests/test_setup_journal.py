@@ -433,6 +433,6 @@ class TestDashboardExport:
 
     def test_the_page_has_a_button_per_strategy(self):
         page = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                                 'control', 'dashboard.html'), encoding='utf-8').read()
-        assert 'id="setup-journal"' in page and 'data-export="journal-${esc(k)}"' in page
+                                 'control', 'panel', 'js', 'pages', 'system.js'), encoding='utf-8').read()
+        assert 'exportButton(`journal-${c}`' in page
         assert "/api/journal.csv?strategy=" in page

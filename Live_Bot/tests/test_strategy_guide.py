@@ -1,5 +1,8 @@
 """
-Описания стратегий на дашборде не должны расходиться с кодом.
+Описания стратегий на панели не должны расходиться с кодом.
+
+С 09.10.2026 описания — control/panel/js/guide.js (лист «Как торгует» на
+странице стратегии), до того — объект GUIDE в dashboard.html.
 
 ЗАЧЕМ. Описание, разошедшееся с кодом, хуже отсутствующего: по нему принимают
 решения, а проверить его нечем. Человек читает «вход на 50% отката», меняет
@@ -23,7 +26,7 @@ BOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 def page_text():
     """
-    Разметка дашборда.
+    Описания стратегий панели (js/guide.js).
 
     Путь считается ЗДЕСЬ, а не константой модуля, и это не стилистика.
     conftest уводит во временный каталог любую заглавную строковую константу,
@@ -32,15 +35,15 @@ def page_text():
     во временной папке. Защита права; подстраивается тест.
     """
     page = os.path.join(os.path.dirname(os.path.dirname(
-        os.path.abspath(__file__))), 'control', 'dashboard.html')
+        os.path.abspath(__file__))), 'control', 'panel', 'js', 'guide.js')
     return open(page, encoding='utf-8').read()
 
 
 def guide_block(key):
     """Кусок описания одной стратегии из объекта GUIDE."""
     text = page_text()
-    start = text.index('const GUIDE = {')
-    block = text[start:text.index('\nconst PERIODS', start)]
+    start = text.index('export const GUIDE = {')
+    block = text[start:]
     at = block.index(f'{key}: {{')
     # Следующая стратегия начинается со своего ключа в начале строки.
     rest = block[at:]
@@ -172,31 +175,29 @@ class TestNumbersMatchTheCode:
         assert_quoted(block, params.MIN_RR, 'минимальное отношение к риску')
 
 
-class TestWindowBehaves:
+class TestSheetBehaves:
     """
-    Окно должно закрываться тремя способами. Открытое случайно и не
-    закрывающееся окно чинится только перезагрузкой страницы.
+    Лист «Как торгует» (ui.openSheet) закрывается тремя способами: крестиком,
+    Esc и щелчком по фону. Открытое случайно и не закрывающееся окно чинится
+    только перезагрузкой страницы.
     """
+
+    UI = open(os.path.join(BOT, 'control', 'panel', 'js', 'ui.js'), encoding='utf-8').read()
+    CSS = open(os.path.join(BOT, 'control', 'panel', 'app.css'), encoding='utf-8').read()
 
     def test_all_three_ways_to_close_exist(self):
-        text = page_text()
-        assert 'sheet-close' in text, 'нет крестика'
-        assert "event.key === 'Escape'" in text, 'не закрывается по Esc'
-        assert 'event.target === back' in text, 'не закрывается щелчком по фону'
+        assert "class: 'sheet-x'" in self.UI, 'нет крестика'
+        assert "addEventListener('cancel'" in self.UI, 'не закрывается по Esc'
+        assert 'e.target === dlg' in self.UI, 'не закрывается щелчком по фону'
 
     def test_focus_returns_to_the_opener(self):
-        """Иначе читающий с клавиатуры после закрытия окажется в начале страницы."""
-        text = page_text()
-        assert 'GUIDE_OPENER' in text and 'GUIDE_OPENER.focus()' in text
-
-    def test_dialog_is_marked_for_screen_readers(self):
-        text = page_text()
-        assert 'role="dialog"' in text and 'aria-modal="true"' in text
+        """Модальный <dialog> сам возвращает фокус туда, откуда его открыли."""
+        assert "h('dialog'" in self.UI and 'showModal()' in self.UI and 'dlg.close()' in self.UI
 
     def test_body_scrolls_only_vertically(self):
-        """
-        Горизонтальная перемотка внутри окна — то же неудобство, которое уже
-        вычищали со страницы целиком.
-        """
-        text = page_text()
-        assert 'overflow-x: hidden' in text.split('.sheet-body')[1][:120]
+        """Горизонтальная перемотка внутри листа — то же неудобство, что на странице."""
+        assert 'overflow-x: hidden' in self.CSS.split('.sheet-body')[1][:160]
+
+    def test_the_strategy_page_opens_it(self):
+        page = open(os.path.join(BOT, 'control', 'panel', 'js', 'pages', 'strategies.js'), encoding='utf-8').read()
+        assert "button('Как торгует'" in page and 'GUIDE[code]' in page

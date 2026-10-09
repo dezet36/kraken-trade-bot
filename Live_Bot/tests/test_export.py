@@ -24,17 +24,6 @@ sys.path.insert(0, ROOT)
 
 import pytest  # noqa: E402
 
-PAGE = None
-
-
-def _page():
-    global PAGE
-    if PAGE is None:
-        with open(os.path.join(ROOT, 'control', 'dashboard.html'), encoding='utf-8') as fh:
-            PAGE = fh.read()
-    return PAGE
-
-
 class TestSaveEndpoint:
 
     @pytest.fixture(scope='class')
@@ -105,44 +94,32 @@ class TestSaveEndpoint:
 
 
 class TestClientChoosesTheRightWay:
+    """
+    Окно приложения (pywebview) не умеет скачивать: файл сохраняет сервер и
+    называет путь. В браузере — обычное скачивание. С 09.10.2026 кнопки —
+    вкладка «Система → Ошибки и выгрузки» (control/panel/js/pages/system.js).
+    """
+
+    @staticmethod
+    def page():
+        return open(os.path.join(ROOT, 'control', 'panel', 'js', 'pages', 'system.js'), encoding='utf-8').read()
 
     def test_buttons_are_not_plain_download_links(self):
-        """
-        Ссылок со свойством download в разметке больше нет.
-
-        Именно они и не работали в окне приложения. Вернуть их — значит вернуть
-        поломку, причём молча: в браузере всё будет выглядеть исправно.
-        """
-        page = _page()
-        assert 'href="/api/export.csv" download' not in page
-        assert 'href="/api/export.jsonl" download' not in page
-        assert 'href="/api/report.txt" download' not in page
+        page = self.page()
+        assert 'href="/api/export' not in page and "href: '/api/export" not in page
 
     def test_all_three_buttons_exist(self):
-        page = _page()
-        for kind in ('csv', 'jsonl', 'report'):
-            assert f'data-export="{kind}"' in page, kind
+        page = self.page()
+        for kind in ("'report'", "'csv'", "'jsonl'"):
+            assert f'exportButton({kind}' in page, kind
 
     def test_app_window_is_detected_by_pywebview_object(self):
-        """
-        Окно приложения различается по объекту pywebview, а не по строке агента.
-
-        Агент подделывается и меняется от версии к версии; объект есть ровно
-        тогда, когда есть мост pywebview, то есть когда скачивание не сработает.
-        """
-        page = _page()
-        assert "typeof window.pywebview !== 'undefined'" in page
-        assert 'navigator.userAgent' not in page.split('function inAppWindow')[1][:400]
+        assert "typeof window.pywebview !== 'undefined'" in self.page()
 
     def test_both_paths_are_wired(self):
-        """И сохранение на диск, и скачивание через blob присутствуют."""
-        page = _page()
-        assert '/api/export/save?kind=' in page
-        assert 'URL.createObjectURL' in page
-        assert 'if (inAppWindow()) saveExport(kind); else downloadExport(kind);' in page
+        page = self.page()
+        assert "/api/export/save?kind=" in page and 'URL.createObjectURL' in page
 
     def test_failure_is_shown_not_swallowed(self):
-        """Неудача сообщается человеку, а не гасится в консоли."""
-        page = _page()
-        assert 'не сохранилось: ' in page
-        assert 'не скачалось: ' in page
+        page = self.page()
+        assert "toast('Не сохранилось: '" in page and "toast('Не скачалось: '" in page

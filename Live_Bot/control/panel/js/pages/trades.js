@@ -8,7 +8,7 @@ import { h, row, pill, empty, icon, strategyBadge, strategyColor, strategyTitle,
 import { money, signedMoney, signedR, signedPct, pct, num, price, tone, ago, dateTime, day, hours,
   isNum, toDate, plural } from '../format.js';
 import { candleChart, lineChart, bars, calendar } from '../charts.js';
-import { strategyOrder, closedTrades, positionTrack, positionKey, totalSeries, strategySeries } from '../model.js';
+import { strategyOrder, closedTrades, positionTrack, positionKey, totalSeries, strategySeries, honestStats } from '../model.js';
 import { cachedJSON } from '../api.js';
 import { tradeRow, sliceTable } from './strategies.js';
 
@@ -40,8 +40,6 @@ function lists(data, tab, filter) {
   const closed = closedTrades(data, filter || null, period || null);
   const floating = open.reduce((a, p) => a + (isNum(p.unrealised) ? p.unrealised : 0), 0);
   const closedSum = closed.reduce((a, t) => a + (t.pnl || 0), 0);
-  const closedR = closed.reduce((a, t) => a + (t.pnl_r || 0), 0);
-  const wins = closed.filter(t => (t.pnl || 0) > 0).length;
   const go = (t) => { location.hash = `#/trades/${t}${filter ? '/' + filter : ''}`; };
 
   const select = h('select', { class: 'select', 'aria-label': 'Стратегия',
@@ -62,11 +60,7 @@ function lists(data, tab, filter) {
     body = h('div', null,
       h('div', { class: 'toolbar', style: { marginBottom: '14px' } },
         segmented(PERIODS, period, (v) => { period = v; rerender(); }, 'Период')),
-      h('div', { class: 'kpis', style: { marginBottom: '18px' } },
-        kpi('Сделок', num(closed.length), `${wins} в плюс · ${closed.length - wins} в минус`),
-        kpi('Итог', signedMoney(closedSum, 0), signedR(closedR, 1), tone(closedSum)),
-        kpi('Побед', closed.length ? pct(wins / closed.length * 100, 0) : '—'),
-        kpi('На сделку', closed.length ? signedR(closedR / closed.length) : '—', 'в среднем', tone(closedR))),
+      honestKpis(closed, closedSum),
       h('div', { class: 'card' }, closed.length ? historyList(closed) : empty('Сделок за период нет', 'Выберите период длиннее')));
   }
 
@@ -184,6 +178,23 @@ function analytics(data, filter, closed) {
         : empty('Отказов из-за пределов нет', ''),
       h('div', { class: 'muted', style: { fontSize: '12px', marginTop: '10px' } },
         `Тень исполнения: сетап, отсеянный пределом, ведётся «как если бы» — минус в итоге значит, что предел сберёг деньги. Сейчас в тени ${num(((data.shadow || {}).active || []).length)}.`)));
+}
+
+/** Показатели с погрешностью (model.honestStats): интервал, накрывающий
+    ноль, подписан «не отличить от 0» и не красится — прибыли не доказано. */
+export function honestKpis(trades, pnlSum) {
+  const st = honestStats(trades);
+  return h('div', { class: 'kpis', style: { marginBottom: '18px' } },
+    kpi('Сделок', num(trades.length), st.skipped
+      ? `${st.wins} в плюс · ${st.losses} в минус · без ${st.skipped} с дырой в данных`
+      : `${st.wins} в плюс · ${st.losses} в минус`),
+    kpi('Итог', signedMoney(pnlSum, 0), signedR(st.sumR, 1), tone(pnlSum)),
+    kpi('Побед', isNum(st.winrate) ? pct(st.winrate, 0) : '—', isNum(st.wrCI) ? `± ${num(st.wrCI, 0)} п.п.` : null),
+    kpi('На сделку', isNum(st.expectancy) ? signedR(st.expectancy) : '—',
+      isNum(st.expCI) ? `± ${num(st.expCI, 2)}R${st.noise ? ' · не отличить от 0' : ''}` : 'погрешность — от двух сделок',
+      st.noise ? '' : tone(st.expectancy)),
+    kpi('Издержки', isNum(st.costR) ? `${num(st.costR, 3)} R/сд` : '—',
+      isNum(st.gross) ? `без них было бы ${signedR(st.gross)} на сделку` : 'комиссии и фандинг в долях риска'));
 }
 
 function kpi(label, value, hint, cls = '') {

@@ -8,7 +8,7 @@ import { GUIDE } from '../guide.js';
 import { money, moneyShort, signedMoney, signedPct, signedR, pct, num, tone, ago, dateTime,
   hours, plural, isNum } from '../format.js';
 import { lineChart, multiLine } from '../charts.js';
-import { strategyOrder, strategySeries, returnSeries, sliceSeries, closedTrades } from '../model.js';
+import { strategyOrder, strategySeries, returnSeries, sliceSeries, closedTrades, honestStats } from '../model.js';
 import { cachedJSON } from '../api.js';
 
 export const title = 'Стратегии';
@@ -105,7 +105,7 @@ function detail(data, code) {
           + (settings.sides && settings.sides !== 'both' ? ` · только ${settings.sides === 'long' ? 'лонги' : 'шорты'}` : ''))),
       periodSeg()),
     equityCard(data, code, s),
-    rep ? kpis(rep.quality || {}) : report.error ? h('div', { class: 'section' }, empty('Статистика не загрузилась', report.error))
+    rep ? kpis(rep.quality || {}, honestStats(closedTrades(data, code, period || null))) : report.error ? h('div', { class: 'section' }, empty('Статистика не загрузилась', report.error))
       : h('div', { class: 'section skeleton', style: { height: '170px' } }),
     rep ? h('div', { class: 'grid grid-2 section' }, funnelCard(rep.funnel || {}), notTradedCard(rep.not_traded || {})) : null,
     rep ? breakdowns(rep) : null,
@@ -146,18 +146,21 @@ function kpi(label, value, cls = '', hint = null) {
     h('div', { class: 'kpi-v ' + cls }, value), hint ? h('small', null, hint) : null);
 }
 
-function kpis(q) {
+function kpis(q, st) {
   return section(`Сделки ${periodWord()}`, null, h('div', { class: 'kpis' },
     kpi('Сделок', num(q.trades), '', q.trades ? `${num(q.wins)} в плюс · ${num(q.losses)} в минус` : null),
-    kpi('Побед', isNum(q.win_rate) ? pct(q.win_rate * 100, 0) : '—'),
+    kpi('Побед', isNum(q.win_rate) ? pct(q.win_rate * 100, 0) : '—', '', isNum(st.wrCI) ? `± ${num(st.wrCI, 0)} п.п.` : null),
     kpi('Итог', signedR(q.total_r, 1), tone(q.total_r), isNum(q.total_usd) ? signedMoney(q.total_usd, 0) : null),
-    kpi('На сделку', signedR(q.avg_r), tone(q.avg_r), 'средний результат в R'),
+    kpi('На сделку', signedR(q.avg_r), st.noise ? '' : tone(q.avg_r),
+      isNum(st.expCI) ? `± ${num(st.expCI, 2)}R${st.noise ? ' · не отличить от 0' : ''}` : 'погрешность — от двух сделок'),
     kpi('Профит-фактор', isNum(q.profit_factor) ? num(q.profit_factor, 2) : '—', '', 'прибыль ÷ убытки'),
     kpi('Макс. просадка', isNum(q.max_dd_r) ? `${num(q.max_dd_r, 1)}R` : '—', '', isNum(q.max_loss_streak) ? `серия убытков: ${q.max_loss_streak}` : null),
     kpi('Лучшая / худшая', `${signedR(q.best_r, 1)} / ${signedR(q.worst_r, 1)}`),
     kpi('В сделке', isNum(q.median_minutes) ? hours(q.median_minutes / 60) : '—', '', 'медиана'),
     kpi('Ход в плюс', signedR(q.avg_mfe_r, 1), '', 'в среднем до выхода (MFE)'),
-    kpi('Ход в минус', signedR(q.avg_mae_r, 1), '', 'в среднем (MAE)')));
+    kpi('Ход в минус', signedR(q.avg_mae_r, 1), '', 'в среднем (MAE)'),
+    kpi('Издержки', isNum(st.costR) ? `${num(st.costR, 3)} R/сд` : '—', '',
+      isNum(st.gross) ? `без них было бы ${signedR(st.gross)}` : 'комиссии и фандинг в долях риска')));
 }
 
 function funnelCard(f) {
@@ -265,7 +268,8 @@ export function tradeRow(t) {
   return h('a', { class: 'list-item', href: `#/trades/h/${encodeURIComponent(t.id)}` },
     h('span', { class: 'side ' + (long ? 'long' : 'short') }, long ? 'ЛОНГ' : 'ШОРТ'),
     h('div', { style: { minWidth: 0 } },
-      h('div', { class: 'title' }, t.pair.replace(/USDT$/, ''), h('span', { class: 'meta', style: { fontWeight: 400, marginLeft: '8px' } }, t.reason_ru || t.reason || '')),
+      h('div', { class: 'title' }, t.pair.replace(/USDT$/, ''), h('span', { class: 'meta', style: { fontWeight: 400, marginLeft: '8px' } }, t.reason_ru || t.reason || ''),
+        t.suspect ? h('span', { class: 'pill warn', style: { marginLeft: '8px' }, title: 'В свечах этой сделки была дыра — в статистику она не идёт' }, 'дыра в данных') : null),
       h('div', { class: 'meta' }, `${strategyTitle(t.strategy)} · ${dateTime(t.closed)} · ${hours((t.duration_min || 0) / 60)}`)),
     h('div', { class: 'val ' + tone(t.pnl) }, signedMoney(t.pnl), h('small', null, signedR(t.pnl_r))));
 }

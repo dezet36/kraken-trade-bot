@@ -75,7 +75,7 @@ def test_unknown_signal_is_nobodys():
 
 def test_dashboard_gets_every_name_and_colour():
     dashboard = __import__('importlib').import_module('control.dashboard')
-    page = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'control', 'dashboard.html')
+    page = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'control', 'panel', 'index.html')
     body = dashboard._with_strategy_registry(open(page, 'rb').read()).decode('utf-8')
     assert 'window.STRATEGY_REGISTRY' in body
     for entry in registry.REGISTRY:

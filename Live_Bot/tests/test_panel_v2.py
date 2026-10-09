@@ -48,7 +48,6 @@ class TestServing:
         # С 09.10.2026 главная — новая панель, прежняя — на /old
         root = src.index("elif path in ('/', '/index.html'):")
         assert "self._send_panel('index.html')" in src[root:root + 400], 'главная — новая панель'
-        assert "elif path in ('/old', '/old/'):" in src
         html = open(os.path.join(PANEL, 'index.html'), encoding='utf-8').read()
         assert '</head>' in html, 'реестр стратегий вставляется перед </head>'
         assert '<script type="module" src="/v2/js/app.js">' in html
@@ -115,6 +114,10 @@ class TestModules:
                 continue
             assert 'innerHTML' not in src and "html:" not in src, path
 
-    def test_old_panel_links_to_the_new(self):
-        old = open(os.path.join(ROOT, 'control', 'dashboard.html'), encoding='utf-8').read()
-        assert 'href="/"' in old and 'Новая' in old
+    def test_the_old_page_is_gone(self):
+        """Прежняя страница убрана 09.10.2026 после проверки владельцем: ни файла,
+        ни маршрута /old, ни ссылки на него из панели."""
+        assert not os.path.exists(os.path.join(ROOT, 'control', 'dashboard.html'))
+        src = open(os.path.join(ROOT, 'control', 'dashboard.py'), encoding='utf-8').read()
+        assert "'/old'" not in src and '_send_html' not in src
+        assert 'href="/old"' not in open(os.path.join(PANEL, 'index.html'), encoding='utf-8').read()

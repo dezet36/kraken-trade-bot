@@ -165,9 +165,10 @@ class TestPanel:
         assert dashboard._period('0') is None and dashboard._period('-5') is None
 
     def test_the_page_is_in_the_menu(self):
-        page = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                                 'control', 'dashboard.html'), encoding='utf-8').read()
-        assert "id: 'strategies'" in page and 'data-page="strategies"' in page
+        root = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'control', 'panel', 'js')
+        app = open(os.path.join(root, 'app.js'), encoding='utf-8').read()
+        page = open(os.path.join(root, 'pages', 'strategies.js'), encoding='utf-8').read()
+        assert "id: 'strategies'" in app and 'page: strategies' in app
         assert '/api/strategy_report' in page and '/api/strategy_compare' in page
 
 

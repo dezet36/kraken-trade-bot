@@ -284,8 +284,9 @@ class TestPanel:
 
 
 def test_page_has_the_accounts_screen():
-    html = open(os.path.join(ROOT, 'control', 'dashboard.html'), encoding='utf-8').read()
-    assert "id: 'accounts'" in html and 'data-page="accounts"' in html
-    assert "'/api/accounts/keys'" in html or '/api/accounts/keys' in html
+    app = open(os.path.join(ROOT, 'control', 'panel', 'js', 'app.js'), encoding='utf-8').read()
+    html = open(os.path.join(ROOT, 'control', 'panel', 'js', 'pages', 'accounts.js'), encoding='utf-8').read()
+    assert "id: 'accounts'" in app and 'page: accounts' in app
+    assert "'/api/accounts/keys'" in html
     # прежняя запись ключей в общий .env убрана
     assert '/api/keys' not in html

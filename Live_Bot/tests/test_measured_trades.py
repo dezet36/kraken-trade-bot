@@ -93,14 +93,15 @@ class TestTheSummaryDropsOnlyWhatItShould:
 class TestThePanelCarriesTheField:
 
     SRC = open(os.path.join(ROOT, 'control', 'dashboard.py'), encoding='utf-8').read()
-    HTML = open(os.path.join(ROOT, 'control', 'dashboard.html'), encoding='utf-8').read()
+    PANEL = (open(os.path.join(ROOT, 'control', 'panel', 'js', 'pages', 'strategies.js'), encoding='utf-8').read()
+             + open(os.path.join(ROOT, 'control', 'panel', 'js', 'model.js'), encoding='utf-8').read())
 
     def test_the_journal_field_reaches_the_payload(self):
         assert "'gap_min'" in self.SRC and 'data_gap_min' in self.SRC
 
     def test_the_trade_list_marks_it(self):
-        assert 'дыра в данных' in self.HTML
+        assert 'дыра в данных' in self.PANEL
 
     def test_the_count_of_skipped_is_shown(self):
-        assert 'skipped' in self.HTML, (
+        assert 'skipped' in self.PANEL, (
             'отброшенные сделки посчитаны, но человеку о них не сказали')

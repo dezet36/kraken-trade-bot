@@ -167,12 +167,13 @@ class TestRegistration:
         assert tg_format.NAMES['FIB12'] == 'Фибо 12ч'
 
     def test_dashboard_knows_name_colour_and_guide(self):
-        page = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                            'control', 'dashboard.html')
-        text = open(page, encoding='utf-8').read()
-        assert "FIB12: 'Фибо 12ч'" in text
-        assert text.count('--fib12:') >= 3
-        assert '  FIB12: {' in text
+        """Панель берёт имя и цвета (обе темы) из реестра, описание — js/guide.js."""
+        from strategies import registry
+        entry = registry.get('FIB12')
+        assert entry.title == 'Фибо 12ч' and entry.color_light and entry.color_dark
+        guide = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                             'control', 'panel', 'js', 'guide.js')
+        assert '  FIB12: {' in open(guide, encoding='utf-8').read()
 
     def test_execution_is_what_was_measured(self):
         sp = __import__('importlib').import_module('strategies.strategy_profile')

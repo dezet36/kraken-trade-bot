@@ -117,6 +117,42 @@ export function closedTrades(data, code = null, days = null) {
     .sort((a, b) => (toDate(b.closed)?.getTime() || 0) - (toDate(a.closed)?.getTime() || 0));
 }
 
+/**
+ * Показатели сделок вместе с погрешностью — правило прежней панели (разбор
+ * 29.08.2026: «винрейт 37.7%» и «+0.012R» читались фактами, а интервал
+ * накрывал ноль у всех стратегий).
+ *   wrCI   — ±1.96·√(p(1−p)/n), в процентных пунктах;
+ *   expCI  — ±1.96·sd/√n по разбросу результатов в R (при n=1 не определён);
+ *   costR  — комиссии и фандинг в долях риска на сделку;
+ *   gross  — средний результат без издержек.
+ * Сделки с дырой в данных (suspect) в счёт не идут — их число в skipped.
+ */
+export function honestStats(trades) {
+  const rows = trades.filter(t => !t.suspect);
+  const n = rows.length;
+  const rOf = t => (isNum(t.pnl_r) ? t.pnl_r : (t.risk ? (t.pnl || 0) / t.risk : 0));
+  const rs = rows.map(rOf);
+  const wins = rows.filter(t => (t.pnl || 0) > 0).length;
+  const winrate = n ? wins / n * 100 : null;
+  const wrCI = n ? 1.96 * Math.sqrt((winrate / 100) * (1 - winrate / 100) / n) * 100 : null;
+  const sumR = rs.reduce((a, x) => a + x, 0);
+  const expectancy = n ? sumR / n : null;
+  let expCI = null;
+  if (n > 1) {
+    const sd = Math.sqrt(rs.reduce((a, x) => a + (x - expectancy) ** 2, 0) / (n - 1));
+    expCI = 1.96 * sd / Math.sqrt(n);
+  }
+  const costR = n ? rows.reduce((a, t) => a + (t.risk ? ((t.fees || 0) + (t.funding || 0)) / t.risk : 0), 0) / n : null;
+  return {
+    n, wins, losses: n - wins, winrate, wrCI, sumR, expectancy, expCI, costR,
+    gross: isNum(expectancy) && isNum(costR) ? expectancy + costR : null,
+    pnl: rows.reduce((a, t) => a + (t.pnl || 0), 0),
+    skipped: trades.length - n,
+    // Интервал накрывает ноль — прибыль (или убыток) не доказаны
+    noise: isNum(expCI) ? Math.abs(expectancy) <= expCI : true,
+  };
+}
+
 /** Ключ открытой позиции или заявки в адресе: СТРАТЕГИЯ-ПАРА. */
 export function positionKey(p) { return `${p.strategy}-${p.pair}`; }
 

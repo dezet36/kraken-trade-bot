@@ -22,35 +22,36 @@
 """
 
 import os
-import re
 import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
-HTML = open(os.path.join(ROOT, 'control', 'dashboard.html'), encoding='utf-8').read()
+PANEL = os.path.join(ROOT, 'control', 'panel', 'js')
+MODEL = open(os.path.join(PANEL, 'model.js'), encoding='utf-8').read()
+TRADES = open(os.path.join(PANEL, 'pages', 'trades.js'), encoding='utf-8').read()
+STRATEGIES = open(os.path.join(PANEL, 'pages', 'strategies.js'), encoding='utf-8').read()
 SERVER = open(os.path.join(ROOT, 'control', 'dashboard.py'), encoding='utf-8').read()
 
 
-def _fn(name):
-    """Тело функции целиком, со сверкой парности скобок."""
-    spot = HTML.index(f'function {name}(')
-    depth, end = 0, None
-    for i in range(HTML.index('{', spot), len(HTML)):
-        if HTML[i] == '{':
+def _fn(src, name):
+    """Тело функции JS по имени (до парной закрывающей скобки)."""
+    spot = src.index(f'function {name}(')
+    depth = 0
+    for i in range(src.index('{', spot), len(src)):
+        if src[i] == '{':
             depth += 1
-        elif HTML[i] == '}':
+        elif src[i] == '}':
             depth -= 1
             if depth == 0:
-                end = i + 1
-                break
-    assert end, f'{name} не закрывается'
-    return HTML[spot:end]
+                return src[spot:i + 1]
+    raise AssertionError(name)
 
 
 class TestTheMetricsCarryTheirError:
+    """С 09.10.2026 считает панель (control/panel/js/model.js, honestStats)."""
 
-    BODY = _fn('summarise')
+    BODY = _fn(MODEL, 'honestStats')
 
     def test_the_winrate_interval_is_computed(self):
         assert 'wrCI' in self.BODY
@@ -74,10 +75,13 @@ class TestTheMetricsCarryTheirError:
         """
         assert '** 2' in self.BODY or 'Math.pow' in self.BODY
 
+    def test_trades_with_a_data_hole_are_left_out(self):
+        assert '!t.suspect' in self.BODY and 'skipped' in self.BODY
+
 
 class TestCostsAreComparable:
 
-    BODY = _fn('summarise')
+    BODY = _fn(MODEL, 'honestStats')
 
     def test_costs_are_expressed_in_risk(self):
         assert 'costR' in self.BODY
@@ -87,7 +91,7 @@ class TestCostsAreComparable:
         Пара «с издержками / без» отвечает на вопрос, который иначе не
         задаётся: стратегия не работает или её съедают комиссии.
         """
-        assert 'grossExpectancy' in self.BODY
+        assert 'gross' in self.BODY
 
     def test_costs_include_funding_not_just_fees(self):
         """Фандинг бьёт по тем, кто держит дольше, и молчать о нём нельзя."""
@@ -99,39 +103,37 @@ class TestCostsAreComparable:
 
 class TestTheCardsShowIt:
 
+    BODY = _fn(TRADES, 'honestKpis')
+
     def test_the_winrate_card_shows_its_error(self):
-        spot = HTML.index("kpi('Винрейт'")
-        assert 'wrCI' in HTML[spot:spot + 300]
+        spot = self.BODY.index("kpi('Побед'")
+        assert 'wrCI' in self.BODY[spot:spot + 200]
 
     def test_expectancy_has_its_own_cell(self):
-        """
-        Ожидание стояло подписью под профит-фактором мелким шрифтом. Это
-        главное число выборки — у него своя клетка.
-        """
-        assert "kpi('Ожидание'" in HTML
+        assert "kpi('На сделку'" in self.BODY
 
     def test_an_interval_covering_zero_says_so(self):
-        spot = HTML.index("kpi('Ожидание'")
-        block = HTML[spot:spot + 700]
-        # Текст сокращён с «неотличимо от нуля»: в клетке шириной в треть
-        # карточки он ломался на три строки и разъезжал сетку показателей.
-        assert 'не отличить от 0' in block
-        assert 'expCI' in block
+        spot = self.BODY.index("kpi('На сделку'")
+        block = self.BODY[spot:spot + 400]
+        assert 'не отличить от 0' in block and 'expCI' in block
 
     def test_such_a_number_loses_its_colour(self):
         """
         Зелёный плюс читается как прибыль. Когда интервал накрывает ноль,
         прибыли не доказано, и красить нечего.
         """
-        spot = HTML.index("kpi('Ожидание'")
-        block = HTML[spot:spot + 700]
-        assert "? '' : cls(" in block
+        spot = self.BODY.index("kpi('На сделку'")
+        assert "st.noise ? '' : tone(" in self.BODY[spot:spot + 400]
 
     def test_the_cost_card_speaks_in_risk(self):
-        spot = HTML.index("kpi('Издержки'")
-        block = HTML[spot:spot + 400]
+        spot = self.BODY.index("kpi('Издержки'")
+        block = self.BODY[spot:spot + 300]
         assert 'costR' in block and 'R/сд' in block
-        assert 'grossExpectancy' in block, 'карточка не говорит, что было бы без них'
+        assert 'gross' in block, 'карточка не говорит, что было бы без них'
+
+    def test_the_strategy_page_shows_it_too(self):
+        assert 'honestStats(closedTrades(data, code' in STRATEGIES
+        assert 'не отличить от 0' in STRATEGIES and "st.noise ? '' : tone(" in STRATEGIES
 
 
 class TestTheDisconnectedDirectionIsShouted:

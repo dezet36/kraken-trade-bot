@@ -19,144 +19,6 @@ import sys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
-HTML = open(os.path.join(ROOT, 'control', 'dashboard.html'), encoding='utf-8').read()
-
-
-class TestEveryPageExists:
-
-    def test_menu_and_markup_agree(self):
-        """
-        Раздел в меню без страницы открывается пустым, страница без меню
-        недостижима. И то и другое молча.
-        """
-        pages = set(re.findall(r'<section class="page" data-page="(\w+)"', HTML))
-        menu = set(re.findall(r"\{ id: '(\w+)',\s+ic:", HTML))
-        assert menu - pages == set(), f'в меню есть, страницы нет: {menu - pages}'
-        assert pages - menu == set(), f'страница есть, в меню нет: {pages - menu}'
-
-    def test_the_default_page_shows_the_real_numbers(self):
-        """
-        ЗАМЫСЕЛ ТОТ ЖЕ, ЦЕЛЬ ДРУГАЯ. Здесь проверялось, что первой открывается
-        «Сводка»: прежний «Обзор» показывал одну биржу и молчал об этом, а
-        направлений было два.
-
-        Направление осталось одно — Polymarket вырезан, — и «Сводка» стала
-        показывать его же таблицей беднее той, что рядом: без винрейта,
-        ожидания, профит-фактора и просадки. Первым экраном стоял пересказ
-        соседней страницы, и открывался он вместо неё.
-
-        Требование к первому экрану не изменилось: он обязан показывать
-        настоящие числа торговли, а не отсылать за ними дальше.
-        """
-        assert "q.get('page') : 'overview'" in HTML
-        assert "q.get('page') : 'summary'" not in HTML
-
-
-class TestDirectionsDoNotMix:
-
-    def test_each_trading_page_declares_its_direction(self):
-        """
-        Принадлежность видна ДО нажатия. Иначе её приходится помнить, а
-        помнить нечего: имена разделов у направлений одинаковые.
-        """
-        for page in ('overview', 'positions', 'history', 'analytics'):
-            spot = HTML.index(f"id: '{page}'")
-            assert "dir: 'exchange'" in HTML[spot:spot + 120], page
-        # Второе направление вырезано; проверка осталась на том, что есть.
-
-    def test_filters_hide_where_they_do_not_apply(self):
-        """
-        Период и стратегия относятся к сделкам биржи. На чужих страницах они
-        не фильтруют ничего, но своим видом обещают управление, которого нет:
-        пустое место честнее.
-        """
-        assert "filters.hidden = PAGE_DIR[page] !== 'exchange'" in HTML
-
-    def test_totals_are_not_summed_across_directions(self):
-        """
-        Сорок тысяч бумажных на бирже и сто настоящих долларов рядом —
-        величины разной природы. Сложив их, мы получили бы число, которое
-        ничего не значит, зато выглядит убедительно.
-
-        ПРАВИЛО ПЕРЕЖИВАЕТ СТРАНИЦУ. Проверялось оно на тексте «Сводки», а та
-        удалена: направление осталось одно, и складывать пока нечего. Но
-        «пока» — не гарантия: вернись второе направление, сложение первым
-        делом появилось бы в браузере. Поэтому проверяется не текст
-        объяснения, а само отсутствие сложения.
-        """
-        server = open(os.path.join(ROOT, 'control', 'dashboard.py'), encoding='utf-8').read()
-        for name, src in (('панель', HTML), ('сервер', server)):
-            for bad in ('directions.reduce', 'sum(d[', 'sum(direction'):
-                assert bad not in src, (
-                    f'{name}: суммы по направлениям снова складываются — '
-                    f'бумажные и настоящие деньги дадут убедительное ничто')
-
-
-class TestConnectionsAreInOnePlace:
-
-    def _connect_block(self):
-        start = HTML.index('data-page="connect"')
-        return HTML[start:HTML.index('<section class="page"', start + 10)]
-
-    def test_exchange_and_wallet_live_together(self):
-        block = self._connect_block()
-        for what in ('id="exchange"', 'id="keys"'):
-            assert what in block, what
-
-    def test_they_are_no_longer_in_settings(self):
-        """Два места для одного действия — это поиск вместо настройки."""
-        start = HTML.index('data-sub="app"')
-        block = HTML[start:start + 700]
-        assert 'id="exchange"' not in block
-        assert 'id="keys"' not in block
-
-    def test_no_wallet_lives_outside_connections(self):
-        """
-        Кошелёк площадки жил на вкладке маркет-мейкера — втором месте для того
-        же действия. Вкладки больше нет, и вернуться ей некуда.
-        """
-        assert 'pm-wallet' not in HTML
-
-
-class TestRenderersAreIntact:
-
-    def _balanced(self, name):
-        start = HTML.index(f'function {name}(')
-        depth, end = 0, None
-        for k in range(HTML.index('{', start), len(HTML)):
-            if HTML[k] == '{':
-                depth += 1
-            elif HTML[k] == '}':
-                depth -= 1
-                if depth == 0:
-                    end = k
-                    break
-        assert end is not None, f'{name} не закрывается'
-        body = HTML[start:end + 1]
-        assert body.count('`') % 2 == 0, f'{name}: непарные шаблонные кавычки'
-        return body
-
-    def test_new_renderers_are_whole(self):
-        for name in ('buildNav', 'showPage'):
-            self._balanced(name)
-
-    def test_the_removed_renderer_left_nothing_behind(self):
-        """
-        Удалять страницу надо целиком. Забытый вызов исчезнувшей функции — это
-        ошибка в консоли, после которой не рисуется ВСЁ, что шло следом:
-        ровно так панель осталась пустой, когда вырезали Polymarket, а
-        `pmMoney` остался в вызовах.
-        """
-        assert 'renderSummary' not in HTML
-        assert 'summary-body' not in HTML
-        assert "title: 'Сводка'" not in HTML
-
-    def test_the_page_list_has_no_hole(self):
-        """Меню и страницы обязаны совпадать и после удаления."""
-        pages = set(re.findall(r'<section class="page" data-page="(\w+)"', HTML))
-        menu = set(re.findall(r"\{ id: '(\w+)',\s+ic:", HTML))
-        assert pages == menu, (pages ^ menu)
-        assert 'summary' not in pages
 
 
 class TestServerSideSummary:
@@ -234,25 +96,12 @@ class TestActionsArePostAndGuarded:
 
 class TestHiddenMeansHidden:
     """
-    Атрибут hidden слабее правила по классу, и на этом уже один раз погорели.
-
+    Атрибут hidden слабее правила по классу, и на этом уже один раз погорели:
     `.filters { display: flex }` перебивало браузерное `[hidden]{display:none}`,
-    и панель фильтров периода оставалась видимой на ВСЕХ страницах — включая
-    настройки и подключения, где она не фильтрует ничего. Код при этом честно
-    ставил hidden, и по коду всё выглядело правильно.
+    и панель фильтров оставалась видимой на всех страницах. В новой панели
+    правило одно на всё — [hidden] сильнее любого класса.
     """
 
-    def test_every_display_class_that_is_hidden_has_an_override(self):
-        import os
-        import re
-
-        path = os.path.join(os.path.dirname(os.path.dirname(
-            os.path.abspath(__file__))), 'control', 'dashboard.html')
-        html = open(path, encoding='utf-8').read()
-
-        # Классы, которым код где-то ставит hidden через свойство .hidden
-        hidden_by_code = set(re.findall(r"querySelector\('\.([a-z-]+)'\)[^\n]*\n?[^\n]*\.hidden", html))
-        for name in hidden_by_code:
-            assert re.search(rf"\.{name}\[hidden\]", html), (
-                f'.{name} прячут из кода, но правила .{name}[hidden] нет — '
-                f'display по классу перебьёт атрибут')
+    def test_hidden_beats_every_class(self):
+        css = open(os.path.join(ROOT, 'control', 'panel', 'app.css'), encoding='utf-8').read()
+        assert re.search(r'\[hidden\]\s*\{\s*display:\s*none\s*!important', css)

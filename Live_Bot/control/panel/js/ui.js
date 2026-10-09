@@ -152,7 +152,10 @@ export function openSheet(title, build, onClose = null) {
   dlg.append(h('div', { class: 'sheet-head' }, h('h2', null, title),
     h('button', { type: 'button', class: 'sheet-x', 'aria-label': 'Закрыть', onclick: close }, '×')),
     h('div', { class: 'sheet-body' }, build(close)));
-  dlg.addEventListener('cancel', (e) => { e.preventDefault(); close(); });
+  dlg.addEventListener('cancel', (e) => { e.preventDefault(); close(); });      // Esc
+  dlg.addEventListener('click', (e) => { if (e.target === dlg) close(); });     // щелчок по фону
+  // Фокус после закрытия возвращается туда, откуда лист открыли: так делает
+  // сам <dialog> (showModal/close) — читающий с клавиатуры не теряет места.
   document.body.append(dlg);
   dlg.showModal();
   return { close };

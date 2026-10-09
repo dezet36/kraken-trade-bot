@@ -52,9 +52,8 @@ def _with_strategy_registry(body):
     """
     Имена и цвета стратегий — из реестра (strategies/registry.py), вставкой в
     страницу перед </head>: новая стратегия появляется на панели записью в
-    реестре, без правки dashboard.html. Цвета — переменные CSS для светлой и
-    тёмной темы теми же селекторами, что в самой странице; имена дополняют
-    NAMES/COLOR страницы (window.STRATEGY_REGISTRY).
+    реестре, без правки панели. Цвета — переменные CSS для светлой и тёмной
+    темы теми же селекторами, что в app.css; имена — window.STRATEGY_REGISTRY.
     """
     try:
         import json as _json
@@ -72,16 +71,8 @@ def _with_strategy_registry(body):
         return body
 
 
-def _page_stamp():
-    """Отпечаток dashboard.html: меняется с каждой выкаткой, пусто — если файла нет."""
-    try:
-        st = os.stat(HTML_FILE)
-        return f'{int(st.st_mtime)}-{st.st_size}'
-    except OSError:
-        return ''
-
-
-# Новая панель (/v2, с 09.10.2026) — статика из control/panel/: разметка, стили,
+# Панель (с 09.10.2026; до того — одна страница dashboard.html) — статика из
+# control/panel/: разметка, стили,
 # модули JS. Отдаются только эти типы и только из этой папки.
 PANEL_TYPES = {'.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8',
                '.js': 'text/javascript; charset=utf-8', '.svg': 'image/svg+xml',
@@ -133,7 +124,6 @@ def _controls_allowed():
 # Страница — часть КОДА, а не данных: в собранном .exe она лежит во временной
 # папке распаковки (sys._MEIPASS), рядом с остальными ресурсами сборки.
 _CODE_DIR = getattr(sys, '_MEIPASS', os.path.dirname(os.path.abspath(__file__)))
-HTML_FILE = os.path.join(_CODE_DIR, 'dashboard.html')
 PANEL_DIR = os.path.join(_CODE_DIR, 'panel')
 JOURNAL_FILE = os.path.join(config.DATA_DIR, 'trades_journal.csv')
 POSITIONS_FILE = os.path.join(config.DATA_DIR, 'positions_state.json')
@@ -1654,11 +1644,10 @@ class _Handler(BaseHTTPRequestHandler):
             # запуск возвращает успех в любом случае.
             _views['n'] += 1
             payload = build_payload()
-            # ОТПЕЧАТОК СТРАНИЦЫ. Окно приложения на ПК живёт днями, а код
+            # ОТПЕЧАТОК ПАНЕЛИ. Окно приложения на ПК живёт днями, а код
             # на сервере обновляется; страница, открытая до выкатки, так и
             # показывала старые кнопки, пока её не перезагрузили руками. По
-            # отпечатку страница сама замечает, что файл сменился.
-            payload['page'] = _page_stamp()
+            # отпечатку страница сама замечает, что файлы сменились.
             payload['panel'] = _panel_stamp()
             self._send_json(payload)
         elif path == '/api/log':
@@ -1844,11 +1833,9 @@ class _Handler(BaseHTTPRequestHandler):
                 'exchange': _exchange_state(stored),
                 'writable': _controls_allowed()})
         elif path in ('/', '/index.html'):
-            # С 09.10.2026 главная — новая панель (control/panel). Прежняя
-            # страница — на /old, пока владелец не убедится, что всё переехало.
+            # Панель — control/panel (с 09.10.2026). /v2 — прежний адрес той же
+            # панели: окно, открытое по нему, продолжает работать.
             self._send_panel('index.html')
-        elif path in ('/old', '/old/'):
-            self._send_html()
         elif path in ('/v2', '/v2/') or path.startswith('/v2/'):
             self._send_panel(path[4:])
         else:
@@ -2097,7 +2084,8 @@ class _Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def _send_panel(self, rel):
-        """Файл новой панели (/v2). Без кэша — по той же причине, что страница."""
+        """Файл панели. Без кэша: окно приложения — Chromium со своим кэшем, и без
+        запрета оно вправе показать вчерашнюю копию поверх сегодняшнего API."""
         file = _panel_file(rel)
         if file is None:
             self.send_error(404)
@@ -2110,25 +2098,6 @@ class _Handler(BaseHTTPRequestHandler):
         self.send_header('Content-Type', PANEL_TYPES[os.path.splitext(file)[1].lower()])
         self.send_header('Cache-Control', 'no-store')
         self.send_header('X-Content-Type-Options', 'nosniff')
-        self.send_header('Content-Length', str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
-
-    def _send_html(self):
-        try:
-            with open(HTML_FILE, 'rb') as fh:
-                body = fh.read()
-        except Exception as exc:
-            self._fail(500, f'dashboard.html не найден: {exc}')
-            return
-        body = _with_strategy_registry(body)
-        self.send_response(200)
-        self.send_header('Content-Type', 'text/html; charset=utf-8')
-        # Страница меняется с каждым обновлением кода, а окно приложения —
-        # это Chromium со своим кэшем: без запрета он вправе показать
-        # вчерашнюю копию поверх сегодняшнего API, и раздел, которого во
-        # вчерашней копии не было, окажется пустым.
-        self.send_header('Cache-Control', 'no-store')
         self.send_header('Content-Length', str(len(body)))
         self.end_headers()
         self.wfile.write(body)
