@@ -180,7 +180,7 @@ class TestTheStopActuallyReachesTheExchange:
         except Exception:                          # noqa: BLE001
             pytest.skip(f'{name}: нет сети — описание рынков не загрузилось')
         params = {'reduce_only': False, 'timeInForce': 'GTC',
-                  'stopLoss': '58000.0'}
+                  'stopLoss': {'triggerPrice': 58000.0}}  # как ставит trade_manager
         if name == 'bybit':
             params['slTriggerBy'] = 'LastPrice'
         return ex.create_order_request('BTC/USDT:USDT', 'limit', 'buy',

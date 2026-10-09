@@ -1189,16 +1189,22 @@ class LiveTradeManager:
                 # `stopLoss` и `takeProfit` — общие имена ccxt: и bybit, и
                 # bingx разбирают их в create_order_request. Уточнение
                 # источника цены остаётся у Bybit: это его поле.
+                #
+                # Цена — словарём {'triggerPrice': …}, а не строкой: ccxt 4.5.78
+                # строку для BingX больше не оборачивает в стоп-приказ и
+                # отправляет голым числом (на 4.5.59 оборачивал). Словарь оба
+                # разбирают одинаково на обеих биржах — так же, как
+                # execution/venue.py торговых счетов.
                 is_bybit = getattr(self.exchange, 'id', '') == 'bybit'
                 limit_params = {'reduce_only': False, 'timeInForce': 'GTC'}
-                limit_params['stopLoss'] = str(round(params['stop_loss'], 8))
+                limit_params['stopLoss'] = {'triggerPrice': round(params['stop_loss'], 8)}
                 if is_bybit:
                     limit_params['slTriggerBy'] = 'LastPrice'
                 # Тейк вешаем на ордер входа ТОЛЬКО при единственной цели:
                 # биржевой TP закрывает всю позицию, и при плане с частичной
                 # фиксацией он обрубил бы дальние цели.
                 if len(plan_targets) == 1:
-                    limit_params['takeProfit'] = str(round(plan_targets[0], 8))
+                    limit_params['takeProfit'] = {'triggerPrice': round(plan_targets[0], 8)}
                     if is_bybit:
                         limit_params['tpTriggerBy'] = 'LastPrice'
                 try:
