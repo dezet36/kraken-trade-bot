@@ -347,6 +347,12 @@ class TestTheCycleIsNotHeldUp:
         for _ in range(3):                       # три цикла подряд, модель занята
             strategy_llm.scan_for_setups(many, gate=None,
                                          candles=lambda pair: [0] * 500)
+        # Разбор идёт в фоновом потоке: на загруженной машине (сервер с живым
+        # ботом) он мог ещё не начаться к этой строке — тогда asked пуст, и
+        # проверка падала через раз, хотя код верен. Ждём начала разбора.
+        deadline = real_time.time() + 2
+        while not asked and real_time.time() < deadline:
+            real_time.sleep(0.01)
         assert asked == ['P0USDT'], asked
         strategy_llm.join(5)
 
