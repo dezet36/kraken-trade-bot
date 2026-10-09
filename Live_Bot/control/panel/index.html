@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Kraken</title>
+<link rel="stylesheet" href="/v2/app.css">
+<script>
+  /* Тема — до первой отрисовки, иначе тёмная тема мигает светлой. */
+  try { const t = localStorage.getItem('kraken.theme'); if (t) document.documentElement.dataset.theme = t; } catch (e) {}
+</script>
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar" aria-label="Разделы">
+    <div class="brand">
+      <div class="brand-mark" aria-hidden="true">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 17l5-6 4 3 6-8 3 4"/></svg>
+      </div>
+      <div>
+        <div class="brand-name">Kraken</div>
+        <div class="brand-sub" id="brand-sub">торговый бот</div>
+      </div>
+    </div>
+    <nav class="nav" id="nav"></nav>
+    <div class="sidebar-foot">
+      <div class="status" id="status">
+        <span class="status-dot" id="status-dot"></span>
+        <div class="status-text" id="status-text">Подключение…</div>
+      </div>
+      <div class="seg" id="theme" role="group" aria-label="Тема" style="width: 100%; display: grid; grid-template-columns: repeat(3, 1fr);">
+        <button type="button" data-theme="" title="Как в системе">Авто</button>
+        <button type="button" data-theme="light" title="Светлая">Светлая</button>
+        <button type="button" data-theme="dark" title="Тёмная">Тёмная</button>
+      </div>
+      <a class="foot-row" href="/" title="Прежняя панель — пока не все разделы переехали">Прежняя панель →</a>
+    </div>
+  </aside>
+
+  <main class="main" id="main" tabindex="-1"></main>
+</div>
+<nav class="tabbar" id="tabbar" aria-label="Разделы"></nav>
+
+<script type="module" src="/v2/js/app.js"></script>
+</body>
+</html>

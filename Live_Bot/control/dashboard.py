@@ -81,6 +81,42 @@ def _page_stamp():
         return ''
 
 
+# Новая панель (/v2, с 09.10.2026) — статика из control/panel/: разметка, стили,
+# модули JS. Отдаются только эти типы и только из этой папки.
+PANEL_TYPES = {'.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8',
+               '.js': 'text/javascript; charset=utf-8', '.svg': 'image/svg+xml',
+               '.png': 'image/png', '.woff2': 'font/woff2', '.json': 'application/json'}
+
+
+def _panel_file(rel):
+    """Путь к файлу новой панели или None: «..», абсолютный путь, скрытый файл и
+    чужой тип не отдаются — сервер не должен показывать ничего, кроме панели."""
+    rel = (rel or '').lstrip('/') or 'index.html'
+    parts = rel.split('/')
+    if any(p in ('', '.', '..') or p.startswith('.') or '\\' in p or ':' in p for p in parts):
+        return None
+    if os.path.splitext(rel)[1].lower() not in PANEL_TYPES:
+        return None
+    path = os.path.realpath(os.path.join(PANEL_DIR, *parts))
+    root = os.path.realpath(PANEL_DIR)
+    if os.path.commonpath([path, root]) != root or not os.path.isfile(path):
+        return None
+    return path
+
+
+def _panel_stamp():
+    """Отпечаток новой панели: меняется, когда меняется любой её файл."""
+    newest, total = 0, 0
+    for dp, _dn, fn in os.walk(PANEL_DIR):
+        for f in fn:
+            try:
+                st = os.stat(os.path.join(dp, f))
+            except OSError:
+                continue
+            newest, total = max(newest, int(st.st_mtime)), total + st.st_size
+    return f'{newest}-{total}' if total else ''
+
+
 def _controls_allowed():
     """
     Можно ли менять настройки через дашборд.
@@ -98,6 +134,7 @@ def _controls_allowed():
 # папке распаковки (sys._MEIPASS), рядом с остальными ресурсами сборки.
 _CODE_DIR = getattr(sys, '_MEIPASS', os.path.dirname(os.path.abspath(__file__)))
 HTML_FILE = os.path.join(_CODE_DIR, 'dashboard.html')
+PANEL_DIR = os.path.join(_CODE_DIR, 'panel')
 JOURNAL_FILE = os.path.join(config.DATA_DIR, 'trades_journal.csv')
 POSITIONS_FILE = os.path.join(config.DATA_DIR, 'positions_state.json')
 PENDING_FILE = os.path.join(config.DATA_DIR, 'pending_orders.json')
@@ -1622,6 +1659,7 @@ class _Handler(BaseHTTPRequestHandler):
             # показывала старые кнопки, пока её не перезагрузили руками. По
             # отпечатку страница сама замечает, что файл сменился.
             payload['page'] = _page_stamp()
+            payload['panel'] = _panel_stamp()
             self._send_json(payload)
         elif path == '/api/log':
             self._send_json({'lines': read_log(), 'status': dict(_status)})
@@ -1807,6 +1845,8 @@ class _Handler(BaseHTTPRequestHandler):
                 'writable': _controls_allowed()})
         elif path in ('/', '/index.html'):
             self._send_html()
+        elif path in ('/v2', '/v2/') or path.startswith('/v2/'):
+            self._send_panel(path[4:])
         else:
             self.send_error(404)
 
@@ -2048,6 +2088,24 @@ class _Handler(BaseHTTPRequestHandler):
         self.send_header('Content-Type', content_type)
         self.send_header('Content-Disposition',
                          f'attachment; filename="{os.path.basename(path)}"')
+        self.send_header('Content-Length', str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _send_panel(self, rel):
+        """Файл новой панели (/v2). Без кэша — по той же причине, что страница."""
+        file = _panel_file(rel)
+        if file is None:
+            self.send_error(404)
+            return
+        with open(file, 'rb') as fh:
+            body = fh.read()
+        if file.endswith('index.html'):
+            body = _with_strategy_registry(body)
+        self.send_response(200)
+        self.send_header('Content-Type', PANEL_TYPES[os.path.splitext(file)[1].lower()])
+        self.send_header('Cache-Control', 'no-store')
+        self.send_header('X-Content-Type-Options', 'nosniff')
         self.send_header('Content-Length', str(len(body)))
         self.end_headers()
         self.wfile.write(body)
