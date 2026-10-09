@@ -72,7 +72,7 @@ class TestAnalyzeMarket:
     def _patch(self, monkeypatch, setup, rate):
         monkeypatch.setattr(strategy_smc, 'get_context', lambda pair, client=None: self._ctx(setup))
         monkeypatch.setattr(strategy_smc, '_apply_settings', lambda: None)
-        import positioning
+        from data import positioning
         monkeypatch.setattr(positioning, 'latest', lambda source, pair, **k: rate if source == 'funding' else None)
 
     def test_crowd_with_the_trade_is_refused_with_a_reason(self, monkeypatch):
@@ -119,7 +119,7 @@ class TestAnalyzeMarket:
         выплату, совпавшую с закрытием часа, не ждать от сборщика (01.10.2026).
         """
         self._patch(monkeypatch, make_setup('BEARISH', targets=(90.0, 85.0, 80.0)), None)
-        import positioning
+        from data import positioning
         seen = []
         monkeypatch.setattr(positioning, 'settled_funding',
                             lambda pair, client=None, **k: seen.append((pair, client)) or 0.0001)

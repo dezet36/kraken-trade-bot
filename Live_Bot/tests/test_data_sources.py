@@ -59,7 +59,7 @@ def write_settings(data):
 
 class TestSameRequestsAsBefore:
     def test_flow_data(self, calls):
-        import flow_data
+        from data import flow_data
         seen, answers = calls
         answers['https://fapi.binance.com'] = []
         answers['https://api.bybit.com'] = {'result': {'list': []}}
@@ -81,7 +81,7 @@ class TestSameRequestsAsBefore:
         assert all(t == 20 and p is None for _, t, p in seen)
 
     def test_market_mood(self, calls):
-        import market_mood
+        from data import market_mood
         seen, _ = calls
         t_ms = 1_700_000_000_000 // H * H
         market_mood._fetch(t_ms)            # все отказали — прочерки, без исключений
@@ -92,7 +92,7 @@ class TestSameRequestsAsBefore:
                               f'&endTime={t_ms + H - 1}&limit=30')
 
     def test_market_cap_supply(self, calls):
-        import market_cap
+        from data import market_cap
         seen, answers = calls
         answers['https://api.coingecko.com'] = []
         with pytest.raises(RuntimeError):        # пустой ответ — отказ, как и раньше
@@ -101,7 +101,7 @@ class TestSameRequestsAsBefore:
                               f'?vs_currency=usd&order=market_cap_desc&per_page={market_cap.TOP}&page=1')
 
     def test_news(self, calls):
-        import news_feed
+        from data import news_feed
         seen, answers = calls
         answers['https://api.bybit.com'] = {'result': {'list': []}}
         news_feed._last_poll['ts'] = 0
@@ -229,7 +229,7 @@ class TestCcxtClient:
         assert client.httpsProxy == 'http://10.0.0.5:3128'
 
     def test_real_market_client_goes_through_the_registry(self, monkeypatch):
-        import exchange
+        from data import exchange
         monkeypatch.setattr(exchange, '_market_client', None)
         client = exchange.make_market_client('bybit')
         try:

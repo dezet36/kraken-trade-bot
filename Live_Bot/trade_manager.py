@@ -5,7 +5,7 @@ import telegram_notify as tg
 import trade_journal as journal
 from exit_plan import direction_cap, tp_plan, tps_completed, wants_breakeven
 from logger import log, log_trade
-from exchange import get_exchange, reset_exchange
+from data.exchange import get_exchange, reset_exchange
 from datetime import datetime
 from collections import defaultdict
 import traceback
@@ -401,7 +401,7 @@ class LiveTradeManager:
     # ─────────────────────────────────────────────────────────────────────────
 
     def test_connection(self):
-        from exchange import test_connection
+        from data.exchange import test_connection
         return test_connection()
 
     def _reset_daily_pnl_if_needed(self):
@@ -1123,7 +1123,7 @@ class LiveTradeManager:
             # настройки, сделка на реальном счёте BingX помечалась зелёным
             # «DEMO»: человек просил демо, демо не включалось, а подпись
             # отражала просьбу.
-            from exchange import effective_mode
+            from data.exchange import effective_mode
             mode_text = ("🟢 DEMO"
                          if effective_mode(self.exchange, config.TRADING_MODE) == 'DEMO'
                          else "🔴 LIVE (РЕАЛЬНЫЕ ДЕНЬГИ)")

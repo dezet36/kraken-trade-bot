@@ -66,7 +66,7 @@ def last(c):
 
 @pytest.fixture(autouse=True)
 def fresh_symbols(monkeypatch):
-    import exchange
+    from data import exchange
     monkeypatch.setattr(exchange, '_symbol_cache', {})
 
 

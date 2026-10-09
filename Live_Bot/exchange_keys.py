@@ -16,7 +16,7 @@ def check_keys(exchange, mode, key, secret):
     адресе не работают. Проверка «просто ключи валидные» без учёта режима
     пропустила бы самую частую ошибку — демо-ключи при TRADING_MODE=LIVE.
     """
-    import exchange as ex
+    from data import exchange as ex
 
     endpoint = 'DEMO' if mode in ('DEMO', 'PAPER') else 'LIVE'
     try:

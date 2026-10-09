@@ -144,7 +144,7 @@ def check_exchange():
     # Проверяем ровно тот вызов, которым живёт бот: свечи. Тикер идёт по
     # другому маршруту и может падать там, где торговля работает.
     try:
-        import exchange
+        from data import exchange
         ex = exchange.get_exchange()
         candles = ex.fetch_ohlcv(config.TRADING_PAIRS_POOL[0], '1h', limit=5)
         if not candles:

@@ -584,7 +584,7 @@ def result_lines(book, pos, exit_price, net, after):
 
 def bars(client, pair, since_ts, now):
     """Закрытые 5-минутные свечи новее since_ts — постранично, как у брокера."""
-    import exchange
+    from data import exchange
     out, cursor, pages = [], since_ts, 0
     while cursor + 2 * BAR_MS <= now and pages < MAX_PAGES:
         pages += 1

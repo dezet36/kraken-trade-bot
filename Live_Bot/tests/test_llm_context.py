@@ -352,7 +352,7 @@ class TestStaleDataIsNotPassedOffAsCurrent:
         import json
         import time
 
-        import positioning
+        from data import positioning
 
         path = tmp_path / 'open_interest.jsonl'
         old_ts = int(time.time() * 1000) - 20 * 3_600_000      # 20 часов назад
@@ -371,7 +371,7 @@ class TestStaleDataIsNotPassedOffAsCurrent:
         import json
         import time
 
-        import positioning
+        from data import positioning
 
         path = tmp_path / 'open_interest.jsonl'
         fresh = int(time.time() * 1000) - 3_600_000            # час назад
@@ -387,7 +387,7 @@ class TestStaleDataIsNotPassedOffAsCurrent:
         import json
         import time
 
-        import positioning
+        from data import positioning
 
         path = tmp_path / 'open_interest.jsonl'
         base = int(time.time() * 1000) - 30 * 24 * 3_600_000   # месяц назад

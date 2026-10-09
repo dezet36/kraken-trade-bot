@@ -18,7 +18,7 @@ sys.path.insert(0, HERE)
 RESEARCH = os.path.join(os.path.dirname(HERE), 'research')
 
 import config  # noqa: E402
-import market_mood  # noqa: E402
+from data import market_mood  # noqa: E402
 
 H = 3_600_000
 T0 = pd.Timestamp('2026-06-01', tz='UTC')

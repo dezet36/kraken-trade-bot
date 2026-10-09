@@ -66,7 +66,7 @@ def _venue(code, rules):
     cached = _venues.get(code)
     if cached and cached[0] == stamp:
         return cached[1]
-    import exchange
+    from data import exchange
     from execution.venue import Venue
     client = exchange.make_client(rules['exchange'], keys[0], keys[1], rules['mode'].upper())
     client.timeout = 15000          # зависшая биржа не держит цикл бота по полминуты

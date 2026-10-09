@@ -46,7 +46,7 @@ import pandas as pd
 
 import config
 import market_regime
-import positioning
+from data import positioning
 from strategies.liquidity import core as liq
 
 # Сколько уровней максимум уходит в модель. Больше — не лучше: список на сорок

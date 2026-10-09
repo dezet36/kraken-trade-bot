@@ -1174,7 +1174,7 @@ class PaperBroker:
         while cursor + 2 * BAR_MS <= now and pages < self.MAX_PAGES:
             pages += 1
             try:
-                import exchange
+                from data import exchange
                 raw = exchange.fetch_raw(self.client, pair, BAR_TF,
                                          cursor + 1, self.MAX_BARS)
             except Exception as exc:

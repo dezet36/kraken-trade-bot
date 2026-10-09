@@ -204,7 +204,7 @@ class TestBook:
 
     @pytest.fixture(autouse=True)
     def symbol(self, monkeypatch):
-        import exchange
+        from data import exchange
         monkeypatch.setattr(exchange, 'market_symbol', lambda pair, client: pair)
 
     def test_walls_and_imbalance(self):

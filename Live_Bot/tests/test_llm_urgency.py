@@ -38,8 +38,8 @@ class Ctx:
 
 @pytest.fixture(autouse=True)
 def _quiet_sources(monkeypatch):
-    import liquidations
-    import positioning
+    from data import liquidations
+    from data import positioning
     monkeypatch.setattr(liquidations, 'rows', lambda pair, since=None, upto=None, path=None: [])
     monkeypatch.setattr(positioning, 'series', lambda *a, **k: [])
 
@@ -66,7 +66,7 @@ class TestEvents:
         assert points == 2 and 'цена у L3' in why[0]
 
     def test_a_liquidation_burst_counts(self, monkeypatch):
-        import liquidations
+        from data import liquidations
         rows = [{'ts': NOW - h * 3_600_000 - 1000, 'size': 1.0} for h in range(2, 14)]
         rows += [{'ts': NOW - 600_000, 'size': 5.0}]            # последний час: ×5
         monkeypatch.setattr(liquidations, 'rows', lambda pair, since=None, upto=None, path=None: rows)
@@ -74,7 +74,7 @@ class TestEvents:
         assert points == 2 and 'ликвидации ×5.0' in why[0]
 
     def test_an_oi_jump_counts_only_when_fresh(self, monkeypatch):
-        import positioning
+        from data import positioning
         monkeypatch.setattr(positioning, 'series', lambda *a, **k: [
             {'ts': NOW - 7_200_000, 'value': 1000.0}, {'ts': NOW - 600_000, 'value': 1015.0}])
         points, why = llm_urgency.score('BTCUSDT', None, NOW)

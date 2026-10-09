@@ -49,7 +49,7 @@ class Venue:
     # ── Рынок ────────────────────────────────────────────────────────────────
 
     def symbol(self, pair):
-        import exchange
+        from data import exchange
         sym = exchange.market_symbol(pair, self.client)
         if not sym:
             raise VenueError(f'{pair}: на {self.id} такого рынка нет')

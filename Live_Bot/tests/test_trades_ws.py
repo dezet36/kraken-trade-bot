@@ -12,7 +12,7 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import trades_ws
+from data import trades_ws
 
 
 @pytest.fixture(autouse=True)
@@ -57,7 +57,7 @@ class TestTradesBecomeMinutes:
 
     def test_the_row_reads_like_the_polled_one(self):
         """positioning.series читает buy/sell/ts/pair — формат тот же."""
-        import positioning
+        from data import positioning
         m = 1_700_000_000_000 // 60_000 * 60_000
         trades_ws.handle(frame([{'T': m, 's': 'BTCUSDT', 'S': 'Sell', 'v': '2', 'p': '1'}]))
         trades_ws.flush(now_ms=m + 120_000)
@@ -78,7 +78,7 @@ class TestHealth:
         assert not trades_ws.healthy()
 
     def test_polling_stops_while_the_stream_is_alive(self, monkeypatch):
-        import positioning
+        from data import positioning
         monkeypatch.setattr(trades_ws, 'healthy', lambda now=None: True)
         monkeypatch.setattr(positioning, '_last_run', {})
         seen = {}

@@ -895,7 +895,7 @@ def _trade_candles(pair, opened, closed, setup_from=None):
     if key in _candle_cache:
         return _candle_cache[key]
 
-    from exchange import fetch_ohlcv
+    from data.exchange import fetch_ohlcv
     limit = min(max(need, 60), 1000)
     # Отметка начала — то, чего здесь не было и из-за чего у закрытых сделок
     # график не строился вовсе. Берём с запасом в две свечи: биржи по-разному
@@ -965,7 +965,7 @@ def _exchange_state(stored=None):
     переключивший биржу, должен видеть, что именно он теряет, — а не
     обнаружить это через неделю по пустому хранилищу.
     """
-    import exchange as ex_mod
+    from data import exchange as ex_mod
 
     stored = settings_store.load() if stored is None else stored
     configured = ex_mod.configured_exchanges()
@@ -1332,7 +1332,8 @@ def llm_payload(limit=40):
     streams = {}
     for name, module in (('trades', 'trades_ws'), ('liquidations', 'liquidations')):
         try:
-            mod = __import__(module)
+            import importlib
+            mod = importlib.import_module(f'data.{module}')   # сборщики — в data/ (этап 10)
             s = mod.stats()
             streams[name] = {'connected': bool(s.get('connected')),
                              'events': s.get('events', 0),
@@ -1370,7 +1371,7 @@ def llm_payload(limit=40):
     # Рынок в целом — то, что модель видит в разметке; человеку тоже нужно.
     macro = None
     try:
-        import market_cap
+        from data import market_cap
         macro = market_cap.facts()
     except Exception:                                  # noqa: BLE001
         pass
@@ -1378,7 +1379,7 @@ def llm_payload(limit=40):
     # Настроение рынка (DVOL, премия Coinbase у BTC, доля спота) — фон обзоров тетради, общий слой market_mood.
     mood = {}
     try:
-        import market_mood
+        from data import market_mood
         mood = market_mood.facts()
     except Exception:                                  # noqa: BLE001
         pass

@@ -413,9 +413,9 @@ class TestWiring:
         """Один фантомный цикл бота без сети: три кандидата SMCS, у теста —
         одно свободное место. Возвращает заявки теста и ответы счетам."""
         import bot
-        import liquidations
+        from data import liquidations
         import market_regime
-        import trades_ws
+        from data import trades_ws
         from strategies import registry
 
         pairs = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT']

@@ -36,7 +36,7 @@ import os
 import time
 
 import config
-import exchange
+from data import exchange
 from logger import log
 
 SOURCES = ('open_interest', 'long_short', 'funding', 'premium', 'delta', 'book')
@@ -356,7 +356,7 @@ def collect_if_due(client, pairs=None):
     # считалась бы дважды. Упал поток — опрос возвращается сам.
     if 'delta' in due:
         try:
-            import trades_ws
+            from data import trades_ws
             if trades_ws.healthy():
                 due.remove('delta')
                 _last_run['delta'] = now

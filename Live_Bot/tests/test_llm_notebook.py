@@ -651,7 +651,7 @@ class TestDecisionLogAndReview:
         data = llm_notebook.market(market_with_cascade())
         t = T0 + pd.Timedelta(hours=450)
         assert 'MARKET MOOD: not available this hour.' in llm_notebook.review_question(data, t)
-        import market_mood
+        from data import market_mood
         monkeypatch.setattr(market_mood, 'facts', lambda: {'dvol': 35.29, 'dvol_chg_24h': 0.68, 'dvol_pct_30d': 0.19,
                                                            'btc_cb_prem_bp': -5.29, 'btc_spot_share_24h': 0.0927})
         q = llm_notebook.review_question(data, t)

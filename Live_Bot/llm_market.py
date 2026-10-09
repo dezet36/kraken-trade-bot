@@ -40,7 +40,7 @@ import numpy as np
 import pandas as pd
 
 import config
-import positioning
+from data import positioning
 from logger import log
 
 # Сколько свечей рабочего ТФ берём под профиль объёма. Двести часов — это
@@ -339,7 +339,7 @@ def book_facts(client, pair, limit=None, range_pct=None):
     """
     if client is None:
         return None
-    import exchange
+    from data import exchange
 
     symbol = exchange.market_symbol(pair, client)
     book = client.fetch_order_book(symbol, limit=limit or BOOK_LIMIT)
@@ -1026,7 +1026,7 @@ def minute_tape(pair, client, upto=None, bars=MINUTE_BARS):
     продавали в стакан. Лента дельты хранится по минутам без цены, свечи 1м
     берутся с биржи одним запросом и склеиваются по метке минуты.
     """
-    import exchange
+    from data import exchange
     if client is None:
         return None                    # без клиента биржи — нет и минут
     rows = positioning.series('delta', pair, upto=upto)
@@ -1147,7 +1147,7 @@ def _mark_realized(estimate, pair, price, upto, hours=48):
     if not estimate:
         return
     try:
-        import liquidations
+        from data import liquidations
         import time as _time
         now = int(upto) if upto else int(_time.time() * 1000)
         rows = liquidations.rows(pair, since=now - hours * 3_600_000, upto=now) or []
@@ -1176,7 +1176,7 @@ def liquidation_facts(pair, price, upto=None, hours=24):
     (liquidations.py), и первые часы честно называются «сбор идёт N ч»:
     источник есть, ряда ещё нет.
     """
-    import liquidations
+    from data import liquidations
 
     now = int(upto) if upto else int(time.time() * 1000)
     started = liquidations.first_ts()
@@ -1397,7 +1397,7 @@ def _macro_facts(upto=None):
     отсечка — сейчас, для прошлой — её закрытие.
     """
     import time
-    import market_cap
+    from data import market_cap
     if upto is not None:
         upto = min(int(time.time() * 1000), int(upto) + 3_600_000)
     return market_cap.facts(upto)

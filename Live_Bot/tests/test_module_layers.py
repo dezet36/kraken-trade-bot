@@ -36,8 +36,6 @@ LAYER = {
     'error_log': 'infra', 'updater': 'infra', 'llm_server': 'infra', 'llm_local': 'infra',
     'llm_worker': 'infra',
     # данные
-    'exchange': 'data', 'positioning': 'data', 'liquidations': 'data', 'trades_ws': 'data',
-    'flow_data': 'data', 'market_cap': 'data', 'market_mood': 'data', 'news_feed': 'data',
     # анализ
     'market_structure': 'analysis', 'market_regime': 'analysis', 'flow_features': 'analysis',
     'llm_market': 'analysis', 'llm_context': 'analysis',
@@ -74,7 +72,6 @@ LAYER = {
 KNOWN = {
     # Чтение рынка с этапа 3 — через реестр источников (data/sources.py); здесь
     # остаётся торговая половина exchange.py: выбор биржи ТОРГОВЛИ и ключи.
-    ('exchange', 'settings_store'): 'этап 7: выбор биржи торговли — у реального счёта',
     # Разметка ИИ и общий слой структуры берут функции ядра smc: в нём структура
     # (часть I) и решения SMC (часть II) живут в одном классе MarketContext.
     # Ядро делится на «структуру → анализ» и «решения → стратегия» при переносе

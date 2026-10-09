@@ -64,9 +64,12 @@ BINGX_IDS = ['BTC-USDT', 'ETH-USDT']          # SHIB1000 у него нет
 @pytest.fixture()
 def ex(monkeypatch, tmp_path):
     monkeypatch.setenv('BOT_DATA_DIR', str(tmp_path))
-    for module in ('config', 'settings_store', 'exchange'):
+    for module in ('config', 'settings_store', 'data.exchange'):
         sys.modules.pop(module, None)
-    import exchange
+    # import_module, а не «from data import exchange»: тот взял бы прежний
+    # модуль из атрибута пакета data, хотя из sys.modules его выгрузили.
+    import importlib
+    exchange = importlib.import_module('data.exchange')
     exchange._symbol_cache.clear()
     return exchange
 
@@ -148,8 +151,9 @@ class TestCapabilities:
         Источник, которого у биржи нет, — это её свойство, а не сбой. Сборщик
         обязан молчать: иначе на BingX он писал бы три отказа каждый час.
         """
-        sys.modules.pop('positioning', None)
-        import positioning
+        sys.modules.pop('data.positioning', None)
+        import importlib
+        positioning = importlib.import_module('data.positioning')
 
         lines = []
         monkeypatch.setattr(positioning, 'log', lines.append)

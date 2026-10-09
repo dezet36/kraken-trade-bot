@@ -428,7 +428,7 @@ SHARED = ('market_structure.py', 'strategies/smc/signal.py', 'strategies/smc/str
           'strategies/smc/poi.py', 'strategies/smc/fib.py', 'strategies/smc/sessions.py',
           'strategies/levels/core.py', 'strategies/rsibb/core.py', 'strategies/liquidity/core.py',
           'strategies/smcs/core.py',
-          'exchange.py', 'market_regime.py', 'strategy_profile.py')
+          'data/exchange.py', 'market_regime.py', 'strategy_profile.py')
 # Импорт адаптера: прежние имена (strategy_llm) и пакеты (from strategies.smc import
 # adapter, from strategies.smc.adapter import ...) — с 09.10.2026, этап 10.
 ADAPTERS = re.compile(r'^\s*(?:import|from)\s+(?:(strategy_llm)\b|strategies\.(smcs|smc|levels|rsibb)'

@@ -65,7 +65,7 @@ class TestScanner:
         monkeypatch.setattr(pair_scanner, 'get_zones', lambda s: zones)
         monkeypatch.setattr(pair_scanner, 'get_htf_trend', lambda *a, **k: (trend, 0.5))
         monkeypatch.setattr(pair_scanner, 'calculate_trade_params', lambda *a, **k: {'rr': 2.0})
-        import positioning
+        from data import positioning
         monkeypatch.setattr(positioning, 'latest', lambda source, pair, **k: rate if source == 'funding' else None)
 
     class TM:
@@ -89,7 +89,7 @@ class TestScanner:
     def test_rate_is_asked_with_the_exchange_client(self, monkeypatch):
         """Ставка на момент решения: клиент биржи доходит до общего слоя (01.10.2026)."""
         self._patch(monkeypatch, 'SHORT', None)
-        import positioning
+        from data import positioning
         seen = []
         monkeypatch.setattr(positioning, 'settled_funding',
                             lambda pair, client=None, **k: seen.append((pair, client)) or 0.0001)

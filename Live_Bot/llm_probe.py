@@ -60,7 +60,7 @@ def show(pair, verdict, context):
 
 def main(pairs):
     import config
-    import exchange
+    from data import exchange
     import llm_context
     import llm_decide
     import llm_local

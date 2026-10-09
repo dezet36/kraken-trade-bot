@@ -84,7 +84,7 @@ def _market_id(pair, client):
     if client is None:
         return pair
     try:
-        import exchange
+        from data import exchange
         symbol = exchange.market_symbol(pair, client)
         market = client.market(symbol) if symbol else None
         return (market or {}).get('id') or pair

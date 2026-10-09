@@ -25,7 +25,7 @@ import sys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
-import exchange                                             # noqa: E402
+from data import exchange  # noqa: E402
 
 
 class TestTheModeIsWhatHappened:
@@ -68,7 +68,7 @@ class TestTheModeIsWhatHappened:
         assert exchange.effective_mode(Mute(), 'DEMO') == 'LIVE'
 
     def test_the_stale_claim_is_gone(self):
-        text = open(os.path.join(ROOT, 'exchange.py'), encoding='utf-8').read()
+        text = open(os.path.join(ROOT, 'data', 'exchange.py'), encoding='utf-8').read()
         assert 'отдельного demo endpoint в ccxt нет' not in text, (
             'утверждение устарело и стоило реальных денег под подписью DEMO')
 

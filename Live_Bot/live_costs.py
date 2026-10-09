@@ -123,7 +123,7 @@ def _actual_fees(client, pair, since_ms):
     поэтому он тоже считается неудачей и уводит в оценку.
     """
     try:
-        import exchange as ex
+        from data import exchange as ex
         if not ex.supports(client, 'fetchMyTrades'):
             return None
         fills = client.fetch_my_trades(pair, since=since_ms, limit=_TRADES_LIMIT)
@@ -160,7 +160,7 @@ def _actual_funding(client, pair, since_ms):
     неудачей считается только исключение.
     """
     try:
-        import exchange as ex
+        from data import exchange as ex
         if not ex.supports(client, 'fetchFundingHistory'):
             return None
         rows = client.fetch_funding_history(pair, since=since_ms, limit=_TRADES_LIMIT)

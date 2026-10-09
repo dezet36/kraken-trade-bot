@@ -232,8 +232,10 @@ def active_exchange_name():
     """
     name = (config.EXCHANGE_NAME or 'bybit').lower()
     try:
-        import settings_store
-        chosen = (settings_store.exchange_name() or '').lower()
+        # Выбор с панели хранят счета (settings_store); данные о них не знают —
+        # спрашивают через крючок, его подставляет control/wiring.
+        from infra import hooks
+        chosen = (hooks.call('trading_exchange') or '').lower()
         if chosen in SUPPORTED_EXCHANGES and configured_exchanges().get(chosen):
             name = chosen
     except Exception:                              # noqa: BLE001

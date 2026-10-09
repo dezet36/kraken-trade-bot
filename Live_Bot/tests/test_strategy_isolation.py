@@ -53,6 +53,8 @@ def _top(name):
     parts = name.split('.')
     if parts[0] == 'strategies' and len(parts) > 1 and parts[1] in PACKAGES:
         return parts[1]
+    if parts[0] == 'data' and len(parts) > 1:      # data.exchange → exchange
+        return parts[1]
     return parts[0]
 
 
@@ -72,6 +74,8 @@ def modules_of(path):
                 # from strategies import levels — тоже импорт пакета стратегии
                 if node.module == 'strategies':
                     found.update(a.name for a in node.names if a.name in PACKAGES)
+                if node.module == 'data':        # from data import exchange
+                    found.update(a.name for a in node.names)
     return found
 
 

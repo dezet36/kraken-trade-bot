@@ -15,7 +15,7 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import exchange  # noqa: E402
+from data import exchange  # noqa: E402
 
 
 class Flaky:

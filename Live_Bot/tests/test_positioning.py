@@ -24,9 +24,12 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 @pytest.fixture()
 def store(tmp_path, monkeypatch):
     monkeypatch.setenv('BOT_DATA_DIR', str(tmp_path))
-    for module in ('config', 'positioning'):
+    for module in ('config', 'data.positioning'):
         sys.modules.pop(module, None)
-    import positioning
+    # import_module: «from data import positioning» взял бы прежний модуль из
+    # атрибута пакета data, хотя из sys.modules его выгрузили.
+    import importlib
+    positioning = importlib.import_module('data.positioning')
     positioning._seen = None
     # Расписание теперь ПОИСТОЧНИКОВОЕ: у дельты своё, потому что лента
     # отдаёт девять минут, а остальное — от восьми дней.

@@ -20,6 +20,11 @@ def _receiver(module_name):
 
 
 def install():
+    from infra import hooks
     from strategies import outbox
     for port, module_name in PORTS.items():
         outbox.connect(port, _receiver(module_name))
+    # Биржа торговли, выбранная на панели, — у счетов; данные спрашивают её
+    # через крючок (data/exchange.active_exchange_name).
+    hooks.provide('trading_exchange',
+                  lambda: importlib.import_module('settings_store').exchange_name())

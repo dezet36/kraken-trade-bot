@@ -7,12 +7,12 @@ from apscheduler.schedulers.blocking import BlockingScheduler
 import config
 import telegram_notify as tg
 from telegram_bot import controller
-from exchange import get_exchange, make_market_client
+from data.exchange import get_exchange, make_market_client
 import dashboard
 import error_log
-import positioning
-import market_cap
-import market_mood
+from data import positioning
+from data import market_cap
+from data import market_mood
 from strategies.levels import adapter as strategy_levels
 import strategy_llm
 from strategies.rsibb import adapter as strategy_rsibb
@@ -301,13 +301,13 @@ def _paper_cycle():
     # трогает — без него всё торгует как вчера.
     recorded = _recorded_pairs(liquid_pairs)
     try:
-        import liquidations
+        from data import liquidations
         liquidations.ensure_running(recorded, client)
     except Exception as exc:                           # noqa: BLE001
         log(f'   ликвидации: сборщик не запущен — {exc}')
     # Лента сделок — тоже потоком: опрос покрывал у BTC 28% минут.
     try:
-        import trades_ws
+        from data import trades_ws
         trades_ws.ensure_running(recorded, client)
     except Exception as exc:                           # noqa: BLE001
         log(f'   лента сделок: сборщик не запущен — {exc}')
@@ -318,7 +318,7 @@ def _paper_cycle():
     # Раз в сутки UTC; запрос тот же, что у SMC, и берётся из кэша свечей.
     try:
         import market_regime
-        from exchange import fetch_ohlcv
+        from data.exchange import fetch_ohlcv
         market_regime.btc_regime(
             lambda tf, limit, sym: fetch_ohlcv(tf, limit=limit, symbol=sym, client=client))
     except Exception as exc:                           # noqa: BLE001
@@ -422,7 +422,7 @@ def _poll_news():
     news_feed.poll; отказ — строка в журнал, торговля от него не зависит.
     """
     try:
-        import news_feed
+        from data import news_feed
         news_feed.poll()
     except Exception as exc:                           # noqa: BLE001
         log(f'   новости биржи не записаны — {exc}')
@@ -484,13 +484,13 @@ def _watch_streams():
     now = time.time()
     checks = []
     try:
-        import trades_ws
+        from data import trades_ws
         s = trades_ws.stats()
         checks.append(('лента сделок', s.get('last_event') or 0, s.get('since')))
     except Exception:                                  # noqa: BLE001
         pass
     try:
-        import liquidations
+        from data import liquidations
         s = liquidations.stats()
         checks.append(('ликвидации', s.get('last_event') or 0, s.get('since')))
     except Exception:                                  # noqa: BLE001

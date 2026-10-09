@@ -20,7 +20,7 @@ strategy_smc держит лишь псевдонимы для старого к
 модуля, чтобы тесты подменяли источник свечей, не трогая биржу.
 """
 
-from exchange import fetch_ohlcv
+from data.exchange import fetch_ohlcv
 from logger import log
 from strategies.smc import params
 from strategies.smc import signal as smc_signal
