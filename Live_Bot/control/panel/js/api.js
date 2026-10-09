@@ -16,10 +16,33 @@ export function subscribe(fn) {
 
 function emit() { for (const fn of listeners) { try { fn(store); } catch (e) { console.error(e); } } }
 
-async function getJSON(url) {
+export async function getJSON(url) {
   const r = await fetch(url, { cache: 'no-store' });
-  if (!r.ok) throw new Error(`${url}: ${r.status}`);
+  if (!r.ok) {
+    let why = String(r.status);
+    try { why = (await r.json()).error || why; } catch (e) { /* не JSON */ }
+    throw new Error(why);
+  }
   return r.json();
+}
+
+/* Кэш тяжёлых запросов (отчёты стратегий, свечи): не чаще раза в ttl, пока
+   идёт обновление — показываются прежние данные. Готовность — через emit(),
+   раздел перерисовывается и берёт значение из кэша. */
+const cache = new Map();
+
+export function cachedJSON(url, ttl = 60000) {
+  const entry = cache.get(url) || { at: 0, value: undefined, error: null, loading: false };
+  if (!entry.loading && Date.now() - entry.at > ttl) {
+    entry.loading = true;
+    entry.at = Date.now();
+    getJSON(url)
+      .then(v => { entry.value = v; entry.error = null; })
+      .catch(e => { entry.error = e.message || String(e); })
+      .finally(() => { entry.loading = false; entry.at = Date.now(); emit(); });
+  }
+  cache.set(url, entry);
+  return entry;
 }
 
 export async function refreshData() {

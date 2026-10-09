@@ -7,7 +7,7 @@ import { money, moneyShort, signedMoney, signedPct, signedR, pct, num, price, to
   plural, isNum } from '../format.js';
 import { lineChart, sparkline, donut, bars } from '../charts.js';
 import { strategyOrder, testTotals, totalSeries, sliceSeries, strategySeries, positionTrack,
-  dailyPnl, openFloating } from '../model.js';
+  positionKey, dailyPnl, openFloating } from '../model.js';
 
 const PERIODS = [
   { value: 7, label: '7 дней' },
@@ -187,7 +187,7 @@ function positionsCard(data) {
   return h('div', { class: 'card' },
     h('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' } },
       h('div', { class: 'card-title' }, `Открытые позиции · ${total}`),
-      total > list.length ? h('a', { href: '#/trades', style: { fontSize: '13px' } }, 'Все') : null),
+      total > list.length ? h('a', { href: '#/trades/open', style: { fontSize: '13px' } }, 'Все') : null),
     list.length ? h('div', { class: 'plist' }, list.map(positionItem))
       : empty('Позиций нет', 'Стратегии ждут своих сетапов'));
 }
@@ -205,7 +205,7 @@ function positionItem(p) {
       h('div', { class: 'track-entry', style: { left: `calc(${tr.entry * 100}% - 1px)` } }));
   }
   const ends = tr ? h('div', { class: 'track-ends' }, h('span', null, `стоп ${price(p.stop)}`), h('span', null, `цель ${price((p.targets || [])[0] ?? p.tp1)}`)) : null;
-  return h('div', { class: 'pitem' },
+  return h('a', { class: 'pitem', href: `#/trades/p/${encodeURIComponent(positionKey(p))}` },
     h('span', { class: 'dot', style: { background: color, width: '10px', height: '10px' } }),
     h('div', { style: { minWidth: 0 } },
       h('div', null, h('span', { class: 'pitem-pair' }, p.pair.replace(/USDT$/, '')), ' ',

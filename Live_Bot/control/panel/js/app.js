@@ -5,14 +5,14 @@ import { h, icon } from './ui.js';
 import { ago, num } from './format.js';
 import { start, subscribe, getStore } from './api.js';
 import * as home from './pages/home.js';
+import * as strategies from './pages/strategies.js';
+import * as trades from './pages/trades.js';
 import { make } from './pages/soon.js';
 
 const ROUTES = [
   { id: 'home', title: 'Главная', icon: 'home', page: home },
-  { id: 'strategies', title: 'Стратегии', icon: 'strategies',
-    page: make('Стратегии', 'Карточка каждой стратегии: кривая капитала, метрики, сделки, воронка отказов и её настройки.', 'strategies') },
-  { id: 'trades', title: 'Сделки', icon: 'trades',
-    page: make('Сделки', 'Открытые позиции, заявки и история с графиком каждой сделки.', 'positions') },
+  { id: 'strategies', title: 'Стратегии', icon: 'strategies', page: strategies },
+  { id: 'trades', title: 'Сделки', icon: 'trades', page: trades },
   { id: 'accounts', title: 'Счета', icon: 'accounts',
     page: make('Счета', 'Тестовые счета стратегий и торговые счета: биржи и проп по инструкциям.', 'accounts') },
   { id: 'ai', title: 'ИИ', icon: 'ai',

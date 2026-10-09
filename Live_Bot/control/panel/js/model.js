@@ -102,6 +102,24 @@ export function dailyPnl(data, days = 30) {
   return [...buckets.values()].map(b => ({ ...b, v: Math.round(b.v * 100) / 100 }));
 }
 
+/** Доходность стратегии в % от стартового депозита во времени. */
+export function returnSeries(data, code) {
+  const start = ((data.strategies || {})[code] || {}).start_balance;
+  if (!isNum(start) || !start) return [];
+  return strategySeries(data, code).map(p => ({ t: p.t, v: (p.v / start - 1) * 100 }));
+}
+
+/** Закрытые сделки (новые сверху), по стратегии и за days дней. */
+export function closedTrades(data, code = null, days = null) {
+  const from = days ? Date.now() - days * DAY : null;
+  return (data.closed || [])
+    .filter(t => (!code || t.strategy === code) && (!from || (toDate(t.closed)?.getTime() || 0) >= from))
+    .sort((a, b) => (toDate(b.closed)?.getTime() || 0) - (toDate(a.closed)?.getTime() || 0));
+}
+
+/** Ключ открытой позиции или заявки в адресе: СТРАТЕГИЯ-ПАРА. */
+export function positionKey(p) { return `${p.strategy}-${p.pair}`; }
+
 export function openFloating(data) {
   return (data.open_positions || []).reduce((a, p) => a + (isNum(p.unrealised) ? p.unrealised : 0), 0);
 }
