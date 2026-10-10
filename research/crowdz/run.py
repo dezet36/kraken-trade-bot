@@ -46,8 +46,9 @@ TURN_BARS = 6
 MIN_STOP = 0.005
 
 
-def funding(pair):
-    z = np.load(os.path.join(D.CACHE, 'funding_bybit', f'{pair}.npz'))
+def funding(pair, src='bybit'):
+    name = 'funding_binance' if src == 'bv1h' else 'funding_bybit'
+    z = np.load(os.path.join(D.CACHE, name, f"{pair.partition('@')[0]}.npz"))
     t, r = z['t'].astype(np.int64), z['rate'].astype(float)
     order = np.argsort(t)
     t, r = t[order], r[order]
@@ -103,7 +104,13 @@ def build(bars, t, f, p5, p95, dname, n, trig):
         lo6, hi6 = B.l[j - 5:j + 1].min(), B.h[j - 5:j + 1].max()
         c7 = B.c[max(0, j - 42)]
         rows.append((d, ts, i0, ref, a, lo6, hi6, f[k], ref / c7 - 1))
-    return pd.DataFrame(rows, columns=['dir', 't', 'i_place', 'ref', 'atr', 'lo6', 'hi6', 'f_bp', 'ret7d'])
+    ev = pd.DataFrame(rows, columns=['dir', 't', 'i_place', 'ref', 'atr', 'lo6', 'hi6', 'f_bp', 'ret7d'])
+    # ликвидность на дату события (широкая выборка): оборот прошлых 30 дней и возраст ряда
+    D1 = bars['1d']
+    adv = pd.Series(D1.qv, index=D1.t // 1440).rolling(30, min_periods=20).mean()
+    ev['adv30'] = adv.reindex(ev.t.to_numpy() // 1440 - 1).to_numpy()
+    ev['age_d'] = (ev.t.to_numpy() - m1.t[0]) / 1440.0
+    return ev
 
 
 def orders(ev, unit, stop, target, hold_d, ctrl):
@@ -124,22 +131,29 @@ def orders(ev, unit, stop, target, hold_d, ctrl):
 
 
 def run_pair(args):
-    pair, tag = args
+    pair, tag, src, only = args
     out = os.path.join(OUT_ROOT, tag, f'{pair}.pkl')
     if os.path.exists(out):
         return pair, 'уже есть'
     t0 = time.time()
-    bars = D.load(pair, tfs=('4h', '1d'), src='bybit')
+    bars = D.load(pair, tfs=('4h', '1d'), src=src)
     m1 = bars['base']
-    cumf = D.funding_cum(pair, 'bybit', m1.t)
-    t, f, p5, p95 = funding(pair)
+    cumf = D.funding_cum(pair, 'binance' if src == 'bv1h' else src, m1.t)
+    try:
+        t, f, p5, p95 = funding(pair, src)
+    except FileNotFoundError:
+        return pair, 'нет фандинга'
     evs, res = {}, {}
     for dname, n, trig in itertools.product(DEFS, STREAK, TRIG):
+        if only and not any(k[:3] == (dname, n, trig) for k in only):
+            continue
         ev = build(bars, t, f, p5, p95, dname, n, trig)
         evs[(dname, n, trig)] = ev
         if ev.empty:
             continue
         for stop, tg, hd, ctrl in itertools.product(STOPS, TARGETS, HOLD_D, ('against', 'with')):
+            if only and (dname, n, trig, stop, tg, hd, ctrl) not in only:
+                continue
             od, v = orders(ev, m1.tf, stop, tg, hd, ctrl)
             odv = {kk: x[v] for kk, x in od.items()}
             if not len(odv['side']):
@@ -164,10 +178,16 @@ def main():
     ap.add_argument('--tag', default='c1')
     ap.add_argument('--pairs', nargs='*')
     ap.add_argument('--procs', type=int, default=4)
+    ap.add_argument('--src', default='bybit')
+    ap.add_argument('--cand', action='store_true', help='только кандидаты V1, V2 (и контроль)')
     a = ap.parse_args()
-    pairs = a.pairs or D.bybit_pairs()
+    pairs = a.pairs or {'bybit': D.bybit_pairs, 'bv1h': D.bv_pairs}[a.src]()
+    only = None
+    if a.cand:
+        from crowdz.val import V1, V2
+        only = {V1, V2, V1[:6] + ('with',), V2[:6] + ('with',)}
     with Pool(a.procs) as pool:
-        for pair, msg in pool.imap_unordered(run_pair, [(p, a.tag) for p in pairs]):
+        for pair, msg in pool.imap_unordered(run_pair, [(p, a.tag, a.src, only) for p in pairs]):
             print(pair, msg, flush=True)
 
 
