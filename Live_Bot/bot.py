@@ -254,7 +254,7 @@ def _run_dual_strategy(liquid_pairs, balance, open_pairs):
     log(f"\nИтог цикла: открыто новых сделок — {total_opened}")
 
 
-def _shadow_verdict(strategy, pair, signal):
+def _shadow_verdict(strategy, pair, signal, candidate=None):
     """
     Сетап с поставленной заявкой — ИИ на вердикт в тени (strategies/llm/
     llm_shadow, 10.10.2026): «брал бы / не брал бы» пишется в журнал и ни на
@@ -264,7 +264,11 @@ def _shadow_verdict(strategy, pair, signal):
     try:
         from strategies.llm import llm_shadow
         why = signal.get('why') or PaperBroker._context(strategy, signal).get('why', '')
-        llm_shadow.observe(strategy, pair, signal, why)
+        # Цена сейчас — закрытие последней (формирующейся) свечи кандидата, если
+        # сканер её отдал; у сигналов с market_price она уже есть.
+        df = (candidate or {}).get('df_1h')
+        price = float(df['close'].iloc[-1]) if df is not None and len(df) else None
+        llm_shadow.observe(strategy, pair, signal, why, price=price)
     except Exception as exc:                           # noqa: BLE001
         log(f'   ИИ в тени: {strategy} {pair} — {exc}')
 
@@ -405,7 +409,7 @@ def _paper_cycle():
                 if signal and broker.open(strategy, signal):
                     opened += 1
                     total_opened += 1
-                    _shadow_verdict(strategy, candidate['pair'], signal)
+                    _shadow_verdict(strategy, candidate['pair'], signal, candidate)
             except Exception as exc:
                 log(f"   {strategy}: ошибка входа {candidate['pair']} — {exc}")
 

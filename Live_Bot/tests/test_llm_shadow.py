@@ -91,6 +91,15 @@ class TestQuestion:
         text, _ = llm_shadow.question('FIBO', 'BICOUSDT', signal(), now=NOW, title='Фибоначчи')
         assert llm_shadow.NO_MARKET in text
 
+    def test_price_is_never_faked(self, shadow):
+        """Цены нет ни в сигнале, ни от цикла — так и сказано, а не «0% от цены»."""
+        sig = signal()
+        del sig['market_price']
+        text, rec = llm_shadow.question('FIBO', 'ETHUSDT', sig, now=NOW, title='Фибоначчи')
+        assert 'current price not given' in text and rec['price'] is None
+        text, rec = llm_shadow.question('FIBO', 'ETHUSDT', sig, now=NOW, title='Фибоначчи', price=102.0)
+        assert '-1.96% from the current price 102' in text
+
 
 class TestParse:
     def test_verdicts(self):
@@ -155,7 +164,7 @@ class TestBotHook:
         """Вызов стоит сразу за broker.open в цикле бумаги — и только там."""
         src = open(os.path.join(HERE, 'bot.py'), encoding='utf-8').read()
         at = src.index('if signal and broker.open(strategy, signal):')
-        assert '_shadow_verdict(strategy, candidate[\'pair\'], signal)' in src[at:at + 300]
+        assert "_shadow_verdict(strategy, candidate['pair'], signal, candidate)" in src[at:at + 300]
 
 
 class TestRules:

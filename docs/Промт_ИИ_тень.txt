@@ -18,7 +18,7 @@ Answer with JSON only, one line:
 === ВОПРОС ===
 It is {time} UTC. Strategy: {title}. Setup: {side} {coin}.
 Strategy's own description of the setup (Russian): {why}
-Entry {entry} ({entry_vs_price} from the current price {price}); stop {stop_pct} from entry; target {target_pct}
+Entry {entry} ({where}); stop {stop_pct} from entry; target {target_pct}
 from entry = {rr} R.
 {market}
 

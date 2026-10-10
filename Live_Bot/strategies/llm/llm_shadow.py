@@ -57,7 +57,7 @@ Answer with JSON only, one line:
 
 QUESTION = """It is {time} UTC. Strategy: {title}. Setup: {side} {coin}.
 Strategy's own description of the setup (Russian): {why}
-Entry {entry} ({entry_vs_price} from the current price {price}); stop {stop_pct} from entry; target {target_pct}
+Entry {entry} ({where}); stop {stop_pct} from entry; target {target_pct}
 from entry = {rr} R.
 {market}"""
 
@@ -128,25 +128,29 @@ def market_text(pair, now=None):
     return text, hour
 
 
-def setup_of(signal):
-    """Сетап из сигнала (общий договор): сторона, вход, стоп, первая цель, цена сейчас."""
+def setup_of(signal, price=None):
+    """Сетап из сигнала (общий договор): сторона, вход, стоп, первая цель, цена сейчас.
+
+    Цена — из сигнала (market_price) или от цикла бота (закрытие последней свечи
+    кандидата); нет ни той, ни другой — None, а не вход: «вход в 0% от цены»
+    был бы неправдой."""
     params = signal.get('params') or {}
     targets = params.get('tp_targets') or [params.get('take_profit_1')]
     entry = float(params['entry'])
-    price = signal.get('market_price') or (signal.get('trigger') or {}).get('trigger_price') or entry
+    price = signal.get('market_price') or price
     return {
         'side': str((signal.get('setup') or {}).get('type') or signal.get('direction') or '').upper(),
         'entry': entry,
         'stop': float(params['stop_loss']),
         'target': float(targets[0]) if targets and targets[0] is not None else None,
-        'price': float(price),
+        'price': float(price) if price else None,
     }
 
 
-def question(strategy, pair, signal, why='', now=None, title=None):
+def question(strategy, pair, signal, why='', now=None, title=None, price=None):
     """(вопрос модели, запись-заготовка журнала). Всё — на момент сетапа."""
     now = time.time() if now is None else now
-    s = setup_of(signal)
+    s = setup_of(signal, price)
     why = why or signal.get('why') or ''
     if title is None:
         try:
@@ -161,7 +165,9 @@ def question(strategy, pair, signal, why='', now=None, title=None):
     text = QUESTION.format(
         time=datetime.fromtimestamp(now, timezone.utc).strftime('%Y-%m-%d %H:%M'),
         title=title, side=s['side'], coin=pair.replace('USDT', ''), why=why or '—',
-        entry=f"{s['entry']:.6g}", entry_vs_price=_pct(s['entry'], s['price']), price=f"{s['price']:.6g}",
+        entry=f"{s['entry']:.6g}",
+        where=(f"{_pct(s['entry'], s['price'])} from the current price {s['price']:.6g}" if s['price']
+               else 'current price not given'),
         stop_pct=_pct(s['stop'], s['entry']), target_pct=_pct(s['target'], s['entry']) if s['target'] else '—',
         rr=_num(rr, '.2f'), market=market)
     record = {'at': datetime.fromtimestamp(now, timezone.utc).isoformat(timespec='seconds'),
@@ -274,7 +280,7 @@ def _serve():
             time.sleep(30)
 
 
-def observe(strategy, pair, signal, why=''):
+def observe(strategy, pair, signal, why='', price=None):
     """
     Сетап, по которому тестовый счёт поставил заявку, — в очередь вердиктов.
     Зовёт цикл бота после broker.open; ничего не ждёт и ничего не бросает.
@@ -282,7 +288,7 @@ def observe(strategy, pair, signal, why=''):
     if strategy == NAME or not enabled():
         return False
     try:
-        text, record = question(strategy, pair, signal, why)
+        text, record = question(strategy, pair, signal, why, price=price)
     except Exception as exc:                           # noqa: BLE001
         log(f'   ИИ в тени: {strategy} {pair} — вопрос не собран ({exc})')
         return False
