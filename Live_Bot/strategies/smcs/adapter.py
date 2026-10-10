@@ -78,6 +78,13 @@ def analyze_market(pair, client=None, now=None):
     if setup is None:
         log(f"   {pair}: нет сигнала — {reason}")
         return None
+    # Цель ниже нуля (шорт со стопом шире 1/TARGET_R) недостижима — отказ,
+    # а не сделка, которая кончится только стопом или сроком (params).
+    if params.REFUSE_UNREACHABLE_TARGET and setup['target'] <= 0:
+        _last_reason[pair] = 'цель ниже нуля — недостижима'
+        log(f"   {pair}: нет сигнала — цель {params.TARGET_R:g}R ниже нуля "
+            f"(стоп {setup['stop_pct']:.1f}%)")
+        return None
     # Цена уже ушла за стоп или за цель — сетапа больше нет.
     d = setup['dir']
     if (price - setup['stop']) * d <= 0 or (setup['target'] - price) * d <= 0:

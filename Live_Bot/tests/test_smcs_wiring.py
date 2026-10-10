@@ -130,6 +130,24 @@ class TestAdapter:
         now = bar_close(df) + pd.Timedelta(minutes=5)
         assert smcs.analyze_market('ETHUSDT', now=now) is None
 
+    def test_short_with_target_below_zero_refuses(self, adapter, monkeypatch):
+        """Цель шорта ниже нуля недостижима — отказ с причиной (params,
+        REFUSE_UNREACHABLE_TARGET). Цель 8R опускается ниже нуля при стопе
+        шире 12.5%; здесь то же получено большой целью на обычном сломе."""
+        smcs, state = adapter
+        with open(GOLDEN, encoding='utf-8') as fh:
+            g = json.load(fh)['ETHUSDT']
+        ev = next(e for e in g['events'] if e['kind'] == 'BOS' and e['dir'] == -1 and e['bar'] > 100)
+        state['df'], _ = frame('ETHUSDT', ev['bar'])
+        now = bar_close(state['df']) + pd.Timedelta(minutes=5)
+        monkeypatch.setattr(smcs.params, 'TARGET_R', 1000.0)
+        assert smcs.analyze_market('ETHUSDT', now=now) is None
+        assert smcs._last_reason['ETHUSDT'] == 'цель ниже нуля — недостижима'
+        # Выключенное правило — прежнее поведение: сигнал есть, цель ниже нуля.
+        monkeypatch.setattr(smcs.params, 'REFUSE_UNREACHABLE_TARGET', False)
+        sig = smcs.analyze_market('ETHUSDT', now=now)
+        assert sig is not None and sig['params']['take_profit_1'] < 0
+
 
 class TestDispatcher:
     def test_own_branch_keeps_the_scanner_signal(self, bot, adapter):
