@@ -61,17 +61,20 @@ def _data_dir(path):
 
 
 def run(setups, candles, *, deposit=10_000.0, risk_pct=None, step_ms=STEP_MS, until=None,
-        offer_delay_ms=0, data_dir=None):
+        offer_delay_ms=0, data_dir=None, max_same_direction=None):
     """
     setups: [(момент_мс, стратегия, сетап)] — сетап в форме books.setup_copy;
     candles: {пара: [[мс, open, high, low, close, volume], ...]} 5-минутные.
     Каждая стратегия торгует на своём счёте (deposit, risk_pct — по умолчанию
-    стандарт теста config.RISK_PER_TRADE). Шаг цикла — step_ms: сначала
+    стандарт теста config.RISK_PER_TRADE; предел позиций в одну сторону — по
+    умолчанию тот, с которым стратегия измерена, как у её тестового счёта в
+    боте, strategy_profile.max_same_direction; 0 — без предела). Шаг цикла — step_ms: сначала
     ведение (налив, стопы, цели), потом новые сетапы — как в цикле бота.
     Возвращает {'trades': строки журнала, 'books': {стратегия: книга}}.
     """
     from infra import config
     from accounts import books, live, manual
+    from strategies import strategy_profile
     setups = sorted(setups, key=lambda s: s[0])
     if not setups:
         return {'trades': [], 'books': {}}
@@ -81,8 +84,14 @@ def run(setups, candles, *, deposit=10_000.0, risk_pct=None, step_ms=STEP_MS, un
         stack.enter_context(_data_dir(path))
         codes = {}
         for strategy in dict.fromkeys(s[1] for s in setups):
+            # До 10.10.2026 счёт прогона был без предела в одну сторону, а
+            # тестовый счёт бота берёт предел замера: аудит SMCS 10.10 — стенд
+            # открыл шесть шортов со слома 08.10 16:00, бот один (у SMCS 8).
+            same = (strategy_profile.max_same_direction(strategy)
+                    if max_same_direction is None else max_same_direction)
             code, _ = live.save({'name': f'Прогон {strategy}', 'kind': 'manual', 'enabled': True,
                                  'strategies': [strategy], 'deposit': deposit, 'risk_pct': risk,
+                                 'max_same_direction': same,
                                  'profit_target_pct': 0, 'max_drawdown_pct': 0, 'daily_loss_pct': 0,
                                  'draft': False})
             codes[strategy] = code
