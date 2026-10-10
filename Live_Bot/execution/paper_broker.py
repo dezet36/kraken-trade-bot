@@ -721,7 +721,13 @@ class PaperBroker:
         return True, f'{strategy}: депозит ${deposit:,.2f}'
 
     def apply_settings(self, settings):
-        """Применяет депозит из настроек, когда это возможно без перезапуска."""
+        """Применяет депозит из настроек, когда это возможно без перезапуска.
+
+        Возвращает отказы [(стратегия, причина)]: панель показывает их
+        человеку. До 10.10.2026 отказ уходил только в журнал бота — депозит
+        ФИБО 10 000 лёг в настройки, а счёт продолжал считать от 20 000.
+        """
+        refused = []
         for name in self.strategies:
             wanted = (settings.get(name) or {}).get('deposit')
             if wanted is None:
@@ -729,6 +735,8 @@ class PaperBroker:
             ok, message = self.set_deposit(name, wanted)
             if not ok:
                 log(f"⚠️ {name}: {message}")
+                refused.append((name, message))
+        return refused
 
     # ── Открытие ─────────────────────────────────────────────────────────────
 

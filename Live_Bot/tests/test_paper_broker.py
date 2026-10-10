@@ -645,6 +645,21 @@ class TestDeposit:
         broker.set_deposit('SMC', 25_000, restart=True)
         assert len(pb.read_journal()) == 1
 
+    def test_settings_report_a_refused_deposit(self, broker_env):
+        """«Применить» на панели шлёт депозит вместе с прочими настройками.
+        Счёт торговавшей стратегии его не примет — и об этом надо сказать
+        панели, а не только журналу (10.10.2026: ФИБО 10 000 в настройках
+        при счёте от 20 000)."""
+        broker, client, pb, _cfg = broker_env
+        pb._now_ms = lambda: 1_700_000_000_000
+        broker.open('SMC', signal(strategy='SMC'))
+
+        refused = broker.apply_settings({'SMC': {'deposit': 25_000}, 'FIBO': {'deposit': 30_000}})
+
+        assert [name for name, _ in refused] == ['SMC']
+        assert broker.start_balance('SMC') == 10_000
+        assert broker.start_balance('FIBO') == 30_000, 'не торговавшая — меняется сразу'
+
     def test_nonsense_deposit_rejected(self, broker_env):
         broker, _client, _pb, _cfg = broker_env
 

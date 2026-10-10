@@ -77,7 +77,9 @@ function toggleSwitch(checked, onChange, disabled = false, label = '') {
 async function saveSettings(payload, okText = 'Сохранено') {
   try {
     const r = await postJSON('/api/settings', payload);
-    toast(okText, 'good');
+    const warn = (r && r.warnings) || [];
+    if (warn.length) toast('Не всё применено. ' + warn.join(' · '), 'bad');
+    else toast(okText, 'good');
     invalidate('/api/settings');
     refreshData();
     return r;
@@ -160,20 +162,25 @@ function strategies(data, s) {
   const lim = f => (s.limits || {})[f] || [];
   const msg = h('span', { class: 'muted', style: { fontSize: '13px' } });
   const changed = () => { msg.textContent = dirty() ? 'Есть несохранённые изменения' : 'Изменений нет'; };
+  const started = k => {
+    const live = ((data || {}).strategies || {})[k] || {};
+    return (live.trades || 0) > 0 || (live.open || 0) > 0 || (live.pending || 0) > 0;
+  };
 
   const cards = keys.map(k => {
     const own = (s.own || {})[k] || {};
     const live = ((data || {}).strategies || {})[k] || {};
-    const started = (live.trades || 0) > 0 || (live.open || 0) > 0 || (live.pending || 0) > 0;
+    const begun = started(k);
     const knobOff = own.min_stop_knob === false;
     const ownStop = isNum(own.min_stop_pct) ? pct(own.min_stop_pct, 2) : '—';
     const slots = value(k, 'max_slots');
-    const depBtn = button(started ? 'Начать заново' : 'Задать', async () => {
+    const held = (live.open || 0) + (live.pending || 0);
+    const depBtn = button(begun ? 'Начать заново' : 'Задать', async () => {
       const dep = Number(value(k, 'deposit'));
       if (!isNum(dep) || dep <= 0) { toast('Укажите депозит', 'bad'); return; }
-      if (started && !(await confirmSheet(`Начать отсчёт «${strategyTitle(k)}» заново с ${money(dep, 0)}? Прежние сделки останутся в журнале и выгрузке, но в статистику стратегии входить не будут.`, 'Начать заново', true))) return;
+      if (begun && !(await confirmSheet(`Начать отсчёт «${strategyTitle(k)}» заново с ${money(dep, 0)}? Прежние сделки останутся в журнале и выгрузке, но в статистику стратегии входить не будут.${held ? ` Открытые позиции и заявки (${num(held)}) будут сняты со счёта без закрытия по рынку.` : ''}`, 'Начать заново', true))) return;
       try {
-        const r = await postJSON('/api/deposit', { strategy: k, deposit: dep, restart: started });
+        const r = await postJSON('/api/deposit', { strategy: k, deposit: dep, restart: begun });
         toast(r.message || 'Депозит задан', 'good');
         if (drafts.strategies[k]) delete drafts.strategies[k].deposit;
         invalidate('/api/settings'); refreshData();
@@ -189,7 +196,9 @@ function strategies(data, s) {
       h('div', { class: 'rows' },
         paper ? setting('Стартовый депозит', h('span', { class: 'actions' },
           numberInput(value(k, 'deposit'), v => set(k, 'deposit', v), { step: 100, min: lim('deposit')[0], unit: '$', disabled: !writable }), depBtn),
-          started ? `Стратегия уже торгует (${num(live.trades || 0)} сделок): новый депозит — только с началом отсчёта заново.`
+          begun ? `Стратегия уже торгует (${num(live.trades || 0)} сделок): новый депозит — только кнопкой «Начать заново».`
+            + (isNum(live.start_balance) && Math.abs(Number(value(k, 'deposit')) - live.start_balance) >= 0.01
+              ? ` Сейчас счёт ведётся от ${money(live.start_balance, 0)}.` : '')
             : 'Стратегия ещё не торговала — депозит меняется сразу.') : null,
         setting('Риск на сделку', numberInput(value(k, 'risk_pct'), v => set(k, 'risk_pct', v), { step: 0.05, min: lim('risk_pct')[0], max: lim('risk_pct')[1], unit: '%', disabled: !writable }),
           'Доля депозита, теряемая при срабатывании стопа. На тесте у всех стратегий одна — 1%.'),
@@ -214,6 +223,10 @@ function strategies(data, s) {
       for (const f of FIELDS) {
         if (f === 'critic' && k !== 'LLM') continue;
         if (f === 'deposit' && !paper) continue;
+        // Депозит торговавшей стратегии меняется только кнопкой «Начать
+        // заново»: «Применить» записал бы его в настройки, а счёт его не
+        // примет (10.10.2026 — так у ФИБО разошлись 10 000 и 20 000).
+        if (f === 'deposit' && started(k)) continue;
         const v = value(k, f);
         if (v !== undefined) p[f] = v;
       }

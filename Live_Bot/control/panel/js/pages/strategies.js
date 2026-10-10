@@ -246,14 +246,19 @@ function accountCard(acc, s) {
   return h('div', { class: 'card' },
     h('div', { class: 'card-title' }, 'Тестовый счёт стратегии'),
     h('div', { class: 'rows' },
-      row('Депозит', money(st.deposit ?? s.start_balance, 0)),
+      // Депозит — тот, от которого счёт ведётся (брокер), а не число в
+      // настройках: у торговавшей стратегии оно применяется только с началом
+      // отсчёта заново (10.10.2026 у ФИБО было 10 000 против 20 000).
+      row('Депозит', money(s.start_balance ?? st.deposit, 0),
+        isNum(st.deposit) && isNum(s.start_balance) && Math.abs(st.deposit - s.start_balance) >= 0.01
+          ? { hint: `в настройках ${money(st.deposit, 0)} — применится с началом отсчёта заново` } : undefined),
       row('Риск на сделку', pct(st.risk_pct ?? 1, 1), { hint: 'одинаковый у всех стратегий на тесте' }),
       row('Стороны', sides),
       row('Позиций одновременно', st.max_slots ? num(st.max_slots) : 'без предела'),
       row('В одну сторону', st.max_same_direction ? num(st.max_same_direction) : 'без предела'),
       acc ? row('Риск в рынке', money(acc.open_risk, 0), { hint: isNum(acc.open_risk_pct) ? `${pct(acc.open_risk_pct, 2)} депозита` : null }) : null,
       row('Макс. просадка счёта', isNum(s.max_dd_pct) ? pct(s.max_dd_pct, 1) : '—')),
-    h('div', { class: 'muted', style: { fontSize: '12px', marginTop: '8px' } }, 'Изменить правила счёта — в разделе «Система» (пока в прежней панели).'));
+    h('div', { class: 'muted', style: { fontSize: '12px', marginTop: '8px' } }, 'Изменить правила счёта — в разделе «Система», «Стратегии».'));
 }
 
 function recentTrades(data, code) {

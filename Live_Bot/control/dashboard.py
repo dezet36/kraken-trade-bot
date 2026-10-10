@@ -1974,9 +1974,11 @@ class _Handler(BaseHTTPRequestHandler):
             return
 
         result = settings_store.save(changes)
-        if _broker is not None:
-            _broker.apply_settings(result)
+        refused = _broker.apply_settings(result) if _broker is not None else []
         self._send_json({'settings': _strategy_settings(result),
+                         # Депозит, который счёт не принял (у стратегии уже есть
+                         # сделки), — сказать, а не молча оставить в настройках.
+                         'warnings': [f'{name}: {message}' for name, message in refused or []],
                          'portfolio': result.get(settings_store.PORTFOLIO, {}),
                          'notify': result.get(settings_store.NOTIFY, {}),
                          'limits': settings_store.LIMITS,
