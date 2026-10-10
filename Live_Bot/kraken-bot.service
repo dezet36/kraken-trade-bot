@@ -72,7 +72,12 @@ Environment=PYTHONUNBUFFERED=1
 #
 # Файл весит 15 ГБ и читается с диска по мере нужды (mmap), поэтому при 24 ГБ
 # памяти боту остаётся достаточно — проверено на работающем боте.
-Environment=LLM_MODEL_PATH=/opt/kraken/bot_data/models/Qwen3.6-35B-A3B-UD-Q3_K_S.gguf
+#
+# С 20.09.2026 модель живёт в службе kraken-llm (llama-server, MTP-сборка), и
+# бот ходит к ней по LLM_SERVER_URL; путь здесь — для панели и для запасного
+# пути без сервера. 10.10.2026 он указывает на тот же файл, что у kraken-llm:
+# прежние Q3_K_S, Qwen3-30B и Qwen3-8B удалены с диска (37 ГБ).
+Environment=LLM_MODEL_PATH=/opt/kraken/bot_data/models/Qwen3.6-35B-A3B-MTP-UD-Q3_K_M.gguf
 
 ExecStart=/opt/kraken/venv/bin/python bot.py
 

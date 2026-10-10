@@ -335,6 +335,9 @@ LLM_ISOLATE = os.getenv('LLM_ISOLATE', '1') not in ('0', 'false', 'False', '')
 # поднимается. Пусто — как раньше. Причина: MTP-ускорение есть только в
 # llama-server (см. шапку llm_server.py).
 LLM_SERVER_URL = os.getenv('LLM_SERVER_URL', '').strip()
+# Вердикты ИИ по сетапам других стратегий — в тени (strategies/llm/llm_shadow,
+# 10.10.2026): только журнал, на сделки не влияют. 0 — выключить.
+LLM_SHADOW = os.getenv('LLM_SHADOW', '1') not in ('0', 'false', 'False', '')
 
 # Второе мнение о каждом плане «войти»: тот же движок, роль проверяющего.
 # Выключается, если нужно замерить аналитика без него.

@@ -870,6 +870,10 @@ def _new_hour(hour_ms, gate, now_ms, frames_of, ask):
     _health_event('data', True)
     data = market(frames)
     t = pd.Timestamp(hour_ms, unit='ms', tz='UTC')
+    # Снимок рынка — вердиктам ИИ по сетапам других стратегий (llm_shadow): только
+    # чтение, на решения тетради не влияет.
+    from strategies.llm import llm_shadow
+    llm_shadow.remember_market(t, data)
     # Торгует своя вселенная тетради (UNIVERSE), а не общий список ликвидных пар бота:
     # это настройка стратегии ИИ, на другие стратегии она не влияет.
     items = [(p, k) for p, k in alerts_at(data, t) if p in UNIVERSE and not gate.has_position_or_order(p)]
