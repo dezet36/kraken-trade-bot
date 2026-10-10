@@ -39,11 +39,11 @@ ROOT = os.path.dirname(BOT)
 RESEARCH = os.path.join(ROOT, 'research')
 
 # Пакеты стратегий: чистая логика, без биржи и без настроек.
-PACKAGES = ('smc', 'levels', 'rsibb', 'smcs', 'fib12')   # liquidity — структура, с 09.10.2026 в analysis/
+PACKAGES = ('smc', 'levels', 'rsibb', 'smcs', 'fib12', 'crowd')   # liquidity — структура, с 09.10.2026 в analysis/
 
 # Адаптер -> пакет, который ему единственно разрешён. С 09.10.2026 (этап 10)
 # адаптер лежит в своём пакете: strategies/<пакет>/adapter.py.
-ADAPTERS = {os.path.join('strategies', p, 'adapter.py'): p for p in ('smc', 'levels', 'rsibb', 'smcs', 'fib12')}
+ADAPTERS = {os.path.join('strategies', p, 'adapter.py'): p for p in ('smc', 'levels', 'rsibb', 'smcs', 'fib12', 'crowd')}
 
 
 
