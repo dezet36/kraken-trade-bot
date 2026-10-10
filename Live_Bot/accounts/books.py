@@ -44,9 +44,10 @@ WIN, LOSS, FLAT = 'плюс', 'минус', 'ноль'       # как в account
 
 ICONS = {'place': '📥', 'market': '⚡', 'cancel': '✖️', 'breakeven': '🛡', 'close': '⏱',
          'fill': '✅', 'target': '🎯', 'exit': '🏁', 'rules': '⛔', 'pass': '🏆', 'phase': '🔄',
-         'order': '📤', 'error': '⚠️'}
+         'order': '📤', 'error': '⚠️', 'ai': '🤖'}
 EXIT_TEXT = {'SL': 'стоп', 'BE': 'безубыток', 'TIME': 'срок удержания',
-             'MANUAL': 'закрыта владельцем', 'RULES': 'правила пропа', 'EXCHANGE': 'закрыта на бирже'}
+             'MANUAL': 'закрыта владельцем', 'RULES': 'правила пропа', 'EXCHANGE': 'закрыта на бирже',
+             'AI': 'закрыта по решению ИИ'}
 DROP_TEXT = {'expired': 'срок заявки вышел', 'beyond': 'цена ушла за уровень до входа — импульс продолжился',
              'broken': 'сетап разрушен', 'target': 'цена дошла до цели без нас'}
 
@@ -416,16 +417,19 @@ def refuse(book, gate, detail=''):
     return f'{gate}: {detail}' if detail else gate
 
 
-def decide(rules, book, strategy, setup, now):
+def decide(rules, book, strategy, setup, now, count=True):
     """
     Решение счёта по сетапу: (заявка, None) или (None, причина отказа).
     Заявка — план входа на деньгах счёта; в книгу её кладёт register.
+    count=False — повторное решение по уже предложенному сетапу (после ответа
+    ИИ-контроля): «предложено» второй раз не считается.
     """
     from execution import risk_gate
     from strategies import strategy_profile
     from execution.exit_plan import cooldown_hours, tp_plan, wants_breakeven
     c = cfg()
-    book['counts']['offered'] += 1
+    if count:
+        book['counts']['offered'] += 1
     pair = norm(setup.get('trading_pair'))
     params = setup.get('params') or {}
     direction = (setup.get('setup') or {}).get('type')

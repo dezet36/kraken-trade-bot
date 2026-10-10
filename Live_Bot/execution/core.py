@@ -222,6 +222,20 @@ def take_partial(pos, index, level, maker_fee):
     pos['tp_hit'] = index + 1
 
 
+def take_market_part(pos, fraction, price, slippage_pct, taker_fee):
+    """Закрыть долю fraction остатка позиции по рынку (тейкер, проскальзывание против
+    нас) — действие владельца или ИИ-контроля счёта (10.10.2026). Остаток живёт
+    дальше по своим стопу и целям. -> (цена выхода, закрытый объём)."""
+    portion = pos['size'] * min(max(float(fraction), 0.0), 1.0)
+    long_ = pos['direction'] == 'LONG'
+    exit_price = price - price * slippage_pct if long_ else price + price * slippage_pct
+    sign = 1 if long_ else -1
+    pos['realized_pnl'] += sign * (exit_price - pos['entry_price']) * portion
+    pos['fees_paid'] += portion * exit_price * taker_fee
+    pos['size'] = max(0.0, pos['size'] - portion)
+    return exit_price, portion
+
+
 def exit_fee_rate(reason, maker_fee, taker_fee):
     """Цель — лимит в стакане (мейкер); стоп, безубыток, срок, ручное — рынком
     (тейкер)."""

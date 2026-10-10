@@ -35,7 +35,7 @@ import copy
 
 from infra.logger import log
 
-from accounts import books
+from accounts import ai_control, books
 from accounts.books import BAR_MS, DROP_TEXT, EXIT_TEXT, STATUS_TEXT, TARGET, move, p, usd
 from execution import core
 
@@ -68,7 +68,10 @@ def offer(strategy, setup, now_ms=None):
             if not books.open_for(strategy, rules, books.state().get(code)):
                 continue
             book = books.get(code, rules)
-            why = _place(code, rules, book, strategy, copy.deepcopy(setup), now)
+            if ai_control.enabled(rules):
+                why = _ask_ai(code, rules, book, strategy, copy.deepcopy(setup), now)
+            else:
+                why = _place(code, rules, book, strategy, copy.deepcopy(setup), now)
             books.save()
         if why:
             log(f"   📋 [{rules.get('name') or code}] {strategy} "
@@ -78,10 +81,29 @@ def offer(strategy, setup, now_ms=None):
     return out
 
 
-def _place(code, rules, book, strategy, setup, now):
-    """Решение счёта и инструкция. None — заявка поставлена, иначе причина."""
-    cfg = books.cfg()
+def _ask_ai(code, rules, book, strategy, setup, now):
+    """Счёт ведёт ИИ: сетап, прошедший решение счёта, ждёт ответа «открыть /
+    пропустить» (accounts/ai_control.py). None — ушёл к ИИ, иначе причина."""
+    pair = books.norm(setup.get('trading_pair'))
+    if pair in book.setdefault('ai_wait', {}):
+        return 'ждёт решения ИИ'
     order, why = books.decide(rules, book, strategy, setup, now)
+    if why:
+        return why
+    question, _ = ai_control.gate_question(strategy, setup, book, rules, now)
+    book['ai_wait'][pair] = {'strategy': strategy, 'setup': setup, 'asked_ts': now,
+                             'expires_ts': now + ai_control.wait_ms(strategy, setup, order),
+                             'question': question, 'answer': None}
+    ai_control.start()
+    log(f"   🤖 [{rules.get('name') or code}] {strategy} {pair} {order['direction']}: ждёт решения ИИ")
+    return None
+
+
+def _place(code, rules, book, strategy, setup, now, note=None, count=True):
+    """Решение счёта и инструкция. None — заявка поставлена, иначе причина.
+    note — строки к инструкции (решение ИИ-контроля)."""
+    cfg = books.cfg()
+    order, why = books.decide(rules, book, strategy, setup, now, count=count)
     if why:
         return why
     books.register(book, order, now)
@@ -93,14 +115,15 @@ def _place(code, rules, book, strategy, setup, now):
         books.instruct(code, rules, book, 'market', f'Войти по рынку · {head}',
                        [f'Стратегия: {books.name(strategy)}',
                         f'Цена ≈ {p(price)} — лимит {p(limit)} уже за рынком']
-                       + books.plan_lines(order, price), pair, strategy, now=now)
+                       + books.plan_lines(order, price) + list(note or []), pair, strategy, now=now)
         _fill(code, rules, book, pair, order, now, price, taker=True, quiet=True)
         return None
     kind = 'Стоп-заявка на вход (по ходу движения)' if core.stop_entry(order) else 'Лимит на вход'
     books.instruct(code, rules, book, 'place', f'Поставить заявку · {head}',
                    [f'Стратегия: {books.name(strategy)}', f'{kind}: {p(limit)}']
                    + books.plan_lines(order)
-                   + [f"Не налилась до {books.when(order['expires_ts'])} — снять (напомню)."],
+                   + [f"Не налилась до {books.when(order['expires_ts'])} — снять (напомню)."]
+                   + list(note or []),
                    pair, strategy, now=now)
     return None
 
@@ -222,6 +245,7 @@ def update(client, now_ms=None):
     # Сеть — вне замка: панель и Telegram не ждут свечей.
     bars = {pair: books.bars(client, pair, start, now) for pair, start in since.items()}
     rates = {pair: books.funding_rate(client, pair, now) for pair in since}
+    prices = _approved_prices(client, accounts)
     with books.lock:
         state = books.state()
         touched = False
@@ -233,11 +257,128 @@ def update(client, now_ms=None):
             for pair in sorted(set(book['pending']) | set(book['positions'])):
                 for bar in bars.get(pair) or []:
                     _step(code, rules, book, pair, bar, rates.get(pair, 0.0))
+            if book.get('ai_wait') or book.get('ai_actions'):
+                _apply_ai(code, rules, book, now, prices)
+            if ai_control.enabled(rules) and book['positions']:
+                ai_control.start()
             books.check_rules(code, rules, book, now,
                               lambda status, why, c=code, r=rules, b=book: _finish(c, r, b, status, why, now))
         if touched:
             books.save()
     books.flush()
+
+
+# ── ИИ-контроль счёта (accounts/ai_control.py) ─────────────────────────────
+
+def _approved_prices(client, accounts):
+    """Цена сейчас по парам, где ИИ одобрил вход: вход по рынку — по ней, а не по
+    цене сетапа, которой может быть полчаса. Сеть — вне замка."""
+    with books.lock:
+        state = books.state()
+        pairs = {pair for code in accounts for pair, item in (state.get(code) or {}).get('ai_wait', {}).items()
+                 if (item.get('answer') or {}).get('take')}
+    out = {}
+    for pair in pairs:
+        try:
+            from analysis.market import fetch_ohlcv
+            df = fetch_ohlcv('5m', limit=3, symbol=pair, client=client)
+            if df is not None and len(df):
+                out[pair] = float(df['close'].iloc[-1])
+        except Exception as exc:                       # noqa: BLE001
+            log(f'   🤖 {pair}: цена для входа по решению ИИ не получена ({exc})')
+    return out
+
+
+def _apply_ai(code, rules, book, now, prices):
+    """Ответы ИИ — в заявки и действия по позициям, через ограничители кода."""
+    cfg = books.cfg()
+    for pair, item in list(book.get('ai_wait', {}).items()):
+        answer, strategy, setup = item.get('answer'), item['strategy'], item['setup']
+        if answer is None:
+            if now > item['expires_ts']:
+                book['ai_wait'].pop(pair)
+                books.refuse(book, 'ИИ не ответил')
+                books.instruct(code, rules, book, 'ai', f'ИИ не успел ответить · {pair}',
+                               [f'Сетап {books.name(strategy)} пропущен: без согласия ИИ сделка не '
+                                f'открывается.'], pair, strategy, action=False, now=now)
+                ai_control.journal({'at': books.iso(now), 'account': code, 'kind': 'gate_timeout',
+                                    'pair': pair, 'strategy': strategy})
+            continue
+        book['ai_wait'].pop(pair)
+        reason = answer.get('reason') or '—'
+        conf = answer.get('conf')
+        mark = f' ({conf}/5)' if conf else ''
+        if not answer.get('take'):
+            books.refuse(book, 'ИИ: пропустить')
+            books.instruct(code, rules, book, 'ai', f'ИИ пропустил сетап · {pair}',
+                           [f'{books.name(strategy)}: не открывать{mark} — {reason}'],
+                           pair, strategy, action=False, now=now)
+            continue
+        price = prices.get(pair)
+        params = setup.get('params') or {}
+        d = 1 if (setup.get('setup') or {}).get('type') == 'LONG' else -1
+        targets = params.get('tp_targets') or [params.get('take_profit_1')]
+        if price:
+            setup['market_price'] = price
+            stop, target = float(params.get('stop_loss') or 0), float(targets[0] or 0)
+            if (price - stop) * d <= 0 or (target - price) * d <= 0:
+                books.instruct(code, rules, book, 'ai', f'ИИ одобрил, но сетап устарел · {pair}',
+                               [f'Пока ждали ответа, цена {p(price)} ушла за стоп или цель — не открывать.'],
+                               pair, strategy, action=False, now=now)
+                continue
+        why = _place(code, rules, book, strategy, setup, now, count=False,
+                     note=[f'🤖 ИИ: открыть{mark} — {reason}'])
+        if why:
+            books.instruct(code, rules, book, 'ai', f'ИИ одобрил, но счёт не берёт · {pair}', [why],
+                           pair, strategy, action=False, now=now)
+
+    for act in book.get('ai_actions', []):
+        if act.get('applied'):
+            continue
+        act['applied'] = True
+        pair = act['pair']
+        pos = book['positions'].get(pair)
+        if not pos:
+            continue
+        price = float(pos.get('last_price') or pos['entry_price'])
+        what, value, refused = ai_control.validate(pos, act, price)
+        record = {'at': books.iso(now), 'account': code, 'kind': 'action', 'pair': pair,
+                  'strategy': pos['strategy'], 'trade_id': pos['trade_id'], 'do': act.get('do'),
+                  'reason': act.get('reason'), 'price': price,
+                  'r_now': round(ai_control.r_at(pos, price), 3), 'stop_before': pos['stop_loss']}
+        head = f"{pair} {pos['direction']}"
+        why_line = f"Причина: {act.get('reason') or '—'}"
+        if refused:
+            ai_control.journal({**record, 'refused': refused})
+            log(f"   🤖 [{rules.get('name') or code}] {head}: «{act.get('do')}» не принято — {refused}")
+            continue
+        if what == 'stop':
+            be = abs(value - pos['entry_price']) < 1e-12
+            pos['stop_loss'] = value
+            if be:
+                pos['breakeven_set'] = True
+            title = 'стоп в безубыток' if be else 'подтянуть стоп'
+            books.instruct(code, rules, book, 'ai', f'ИИ: {title} · {head}',
+                           [f"Перенесите стоп на {p(value)} (был {p(record['stop_before'])}); "
+                            f"цена {p(price)}, {record['r_now']:+.2f}R.", why_line],
+                           pair, pos['strategy'], now=now)
+        elif what == 'half':
+            exit_price, portion = core.take_market_part(pos, value, price, cfg.PAPER_SLIPPAGE_PCT,
+                                                        cfg.PAPER_FEE_TAKER)
+            pos['ai_half'] = True
+            books.instruct(code, rules, book, 'ai', f'ИИ: закрыть половину по рынку · {head}',
+                           [f"Закрыть {books.qty(portion)} по ≈{p(exit_price)} ({record['r_now']:+.2f}R); "
+                            f"остаток — со стопом {p(pos['stop_loss'])} и прежней целью.", why_line],
+                           pair, pos['strategy'], now=now)
+        elif what == 'close':
+            row = _close(code, rules, book, pair, pos, now, price, 'AI', slip=True, quiet=True)
+            books.instruct(code, rules, book, 'ai', f'ИИ: закрыть позицию по рынку · {head}',
+                           books.result_lines(book, pos, row['exit_price'], row['pnl_usd'],
+                                              row['balance_after']) + [why_line],
+                           pair, pos['strategy'], now=now)
+        if what != 'hold':
+            ai_control.journal({**record, 'applied': what, 'value': value})
+    book['ai_actions'] = [a for a in book.get('ai_actions', []) if not a.get('applied')]
 
 
 def _finish(code, rules, book, status, why, now):

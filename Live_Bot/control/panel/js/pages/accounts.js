@@ -74,6 +74,7 @@ function accountCard(acc, a) {
           pill(a.kind_title),
           ex ? pill(`${(a.exchange || '').toUpperCase()} · ${live ? 'реальные деньги' : 'демо'}`, live ? 'down' : 'accent') : pill(`счёт ${money(a.deposit, 0)}`),
           pill(a.enabled ? 'торгует' : 'выключен', a.enabled ? 'up' : ''),
+          !ex && a.ai_control ? pill('🤖 ИИ ведёт', 'accent') : null,
           ex ? pill(a.has_keys ? 'ключи заданы' : 'ключей нет', a.has_keys ? '' : 'warn') : null)),
       acc.writable ? h('div', { class: 'actions' },
         button('Изменить', () => accountForm(acc, a), 'gray', true),
@@ -257,11 +258,19 @@ function accountForm(acc, a) {
       field('Макс. просадка, %', input('max_drawdown_pct', base.max_drawdown_pct, 'number', 0.5), '0 — нет'),
       field('Дневной убыток, %', input('daily_loss_pct', base.daily_loss_pct, 'number', 0.5), '0 — нет'),
     ];
+    // ИИ ведёт счёт (accounts/ai_control.py): допуск сделок и ведение позиций раз в час.
+    const aiBox = h('input', { type: 'checkbox', id: 'f-ai_control', checked: !!base.ai_control });
+    only.manual3 = h('div', { class: 'wide' }, h('label', { class: 'check' }, aiBox, h('span', null,
+      h('b', null, 'ИИ ведёт счёт'),
+      h('small', { class: 'muted', style: { display: 'block' } },
+        'Сетап стратегии открывается только с согласия ИИ (нет ответа — пропуск). Раз в час ИИ смотрит позиции ' +
+        'и может перевести стоп в безубыток (после +1R), подтянуть стоп, закрыть половину или всё. ' +
+        'Стоп только к цене. Каждое решение — инструкция с причиной.'))));
     const strategies = h('div', { class: 'checks' }, (acc.strategies || []).map(s => h('label', { class: 'check' },
       h('input', { type: 'checkbox', 'data-strat': s.code, checked: (base.strategies || []).includes(s.code) }),
       h('span', { class: 'dot', style: { background: strategyColor(s.code) } }), strategyTitle(s.code))));
     const msg = h('span', { class: 'muted', style: { fontSize: '13px' } });
-    const body = h('div', null, h('div', { class: 'form' }, fields),
+    const body = h('div', null, h('div', { class: 'form' }, fields, only.manual3),
       h('div', { class: 'field-label', style: { margin: '18px 0 8px', fontSize: '13px' } }, 'Стратегии счёта'),
       strategies,
       h('div', { class: 'muted', style: { fontSize: '12px', marginTop: '8px' } }, 'ИИ торгуется только на тесте.'),
@@ -269,7 +278,7 @@ function accountForm(acc, a) {
     const fit = () => {
       const k = kindSel.value;
       only.exchange1.hidden = only.exchange2.hidden = k !== 'exchange';
-      only.manual1.hidden = only.manual2.hidden = k !== 'manual';
+      only.manual1.hidden = only.manual2.hidden = only.manual3.hidden = k !== 'manual';
       warn.hidden = !(k === 'exchange' && modeSel.value === 'live');
     };
     kindSel.addEventListener('change', () => {
@@ -285,6 +294,7 @@ function accountForm(acc, a) {
       const req = { name: val('name'), kind: val('kind'), sides: val('sides'), draft: false,
         strategies: [...body.querySelectorAll('[data-strat]')].filter(x => x.checked).map(x => x.dataset.strat) };
       for (const f of ['exchange', 'mode']) if (shown(f)) req[f] = val(f);
+      if (!only.manual3.hidden) req.ai_control = aiBox.checked;
       for (const f of ['deposit', 'risk_pct', 'max_slots', 'max_same_direction', 'profit_target_pct', 'max_drawdown_pct', 'daily_loss_pct']) {
         if (shown(f)) req[f] = Number(val(f));
       }

@@ -50,6 +50,9 @@ DEFAULTS = {
     'strategies': [], 'risk_pct': 1.0, 'sides': 'both', 'max_slots': 0, 'max_same_direction': 0,
     'deposit': 10_000.0, 'daily_loss_pct': 0.0, 'max_drawdown_pct': 0.0, 'profit_target_pct': 0.0,
     'draft': False,
+    # ИИ ведёт счёт (10.10.2026, accounts/ai_control.py): допуск сделок и ведение
+    # позиций раз в час. Пока — только у счёта по инструкциям.
+    'ai_control': False,
 }
 # Новый проп-счёт: типичные правила оценочного этапа проп-компаний — ЧЕРНОВИК,
 # пока владелец не сохранит свои (поле draft на панели: «проверьте правила»).
@@ -158,6 +161,8 @@ def clean(changes, current=None):
             out[field] = _clamp(field, changes[field], out[field])
     if 'draft' in changes:
         out['draft'] = bool(changes['draft'])
+    if 'ai_control' in changes:
+        out['ai_control'] = bool(changes['ai_control'])
     return out
 
 
