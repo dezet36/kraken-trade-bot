@@ -742,8 +742,11 @@ def _start_paper():
     strategies = (PAPER_STRATEGIES if config.STRATEGY == 'BOTH'
                   else (config.STRATEGY,))
     client = make_market_client(config.EXCHANGE_NAME)
+    # Депозит — из правил тестового счёта (accounts.json, панель), а не из
+    # чисел по умолчанию в config: до 10.10.2026 бот при запуске сверял счёт
+    # с давними 6 800 / 9 200 / 4 000 и писал их как «депозит в настройках».
     broker = PaperBroker(client, strategies=strategies,
-                         start_balance=config.PAPER_START_BALANCES)
+                         start_balance={name: account.deposit(name) for name in strategies})
 
     controller.trade_manager = broker
     controller.start()

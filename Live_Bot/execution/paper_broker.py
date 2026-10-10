@@ -348,9 +348,9 @@ class PaperBroker:
             wanted = float(start_balance.get(name, config.PAPER_START_BALANCE))
             stored = float(state['start_balance'][name])
             if abs(wanted - stored) > 0.01:
-                log(f"⚠️ {name}: в настройках депозит ${wanted:,.0f}, но эксперимент "
-                    f"начат с ${stored:,.0f}. Оставляю начальный. "
-                    f"Чтобы начать заново — PAPER_RESET=true")
+                log(f"⚠️ {name}: в правилах счёта депозит ${wanted:,.0f}, а счёт "
+                    f"ведётся от ${stored:,.0f}. Оставляю начальный: новый "
+                    f"применится с началом отсчёта заново (панель, «Начать заново»).")
 
         # ЦЕЛИ — ОТ БЛИЖНЕЙ К ДАЛЬНЕЙ, и у уже стоящих заявок тоже. До
         # 26.09.2026 план ИИ мог прийти с дальней целью первой (ARB LONG
