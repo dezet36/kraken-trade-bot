@@ -155,15 +155,14 @@ class TestPool:
             'BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'XRPUSDT', 'BNBUSDT',
             'DOGEUSDT', 'ADAUSDT', 'AVAXUSDT', 'LINKUSDT', 'LTCUSDT'}
 
-    def test_default_threshold_is_the_bybit_midpoint(self):
-        """Порог по умолчанию — −1 б.п.: середина ставки Bybit +1 б.п. (docs/SMC_исследование_2026-09.md)."""
-        if os.getenv('SMC_FUNDING_MAX_BP'):
-            pytest.skip('порог переопределён окружением')
-        params_env = __import__('importlib').import_module('infra.params_env')
-        _f, _i, _b, _s = params_env.reader('SMC')
-        assert _f('FUNDING_MAX_BP', -1.0) == -1.0
+    def test_default_threshold_is_zero(self):
+        """Порог по умолчанию — 0 с 14.10.2026 (решение владельца): −1 б.п. при ставке
+        Bybit 0…+1 отсекал и шорты, SMC молчала; 0 — ~80 сделок в год, +0.164R/сд."""
+        if os.getenv('SMC_FUNDING_MAX_BP') or os.getenv('SMC_FUNDING_AGAINST_CROWD'):
+            pytest.skip('фильтр переопределён окружением')
         src = open(params.__file__, encoding='utf-8').read()
-        assert "FUNDING_MAX_BP = _f('FUNDING_MAX_BP', -1.0)" in src
+        assert "FUNDING_MAX_BP = _f('FUNDING_MAX_BP', 0.0)" in src
+        assert "FUNDING_AGAINST_CROWD = _b('FUNDING_AGAINST_CROWD', True)" in src
 
     def test_new_names_are_decisions_not_structure(self):
         for name in ('TRADE_POOL', 'FUNDING_AGAINST_CROWD', 'FUNDING_MAX_BP'):

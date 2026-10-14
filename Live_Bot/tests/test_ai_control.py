@@ -45,6 +45,8 @@ def env(monkeypatch):
     monkeypatch.setattr(config, 'LLM_SERVER_URL', 'http://127.0.0.1:1', raising=False)
     monkeypatch.setattr(ai_control, 'start', lambda: None)
     monkeypatch.setattr(manual, '_approved_prices', lambda client, accounts: {})
+    from strategies.llm import llm_shadow
+    monkeypatch.setattr(llm_shadow, 'ensure_market', lambda now=None, build=None: False)
     return values
 
 

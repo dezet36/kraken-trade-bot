@@ -27,7 +27,8 @@ from infra import config  # noqa: E402
 from strategies.llm import llm_shadow  # noqa: E402
 
 T = pd.Timestamp('2026-10-10 10:00', tz='UTC')
-NOW = T.timestamp() + 3600 + 40 * 60            # 11:40 UTC: снимок часа 10:00–11:00 свежий
+NOW = T.timestamp() + 3600 + 40 * 60
+REAL_ENSURE = llm_shadow.ensure_market      # фикстура подменяет; свой тест зовёт настоящую            # 11:40 UTC: снимок часа 10:00–11:00 свежий
 
 
 def signal(side='SHORT', entry=100.0, stop=103.0, target=94.0, price=99.0, why=None):
@@ -54,6 +55,8 @@ def shadow(monkeypatch, tmp_path):
     monkeypatch.setattr(config, 'LLM_SERVER_URL', 'http://127.0.0.1:1', raising=False)
     monkeypatch.setattr(config, 'LLM_SHADOW', True, raising=False)
     monkeypatch.setattr(llm_shadow, '_snapshot', {'t': None, 'data': None, 'at': 0.0})
+    # Снимок рынка тесты кладут сами; сборка из часовых данных бота — в своём тесте.
+    monkeypatch.setattr(llm_shadow, 'ensure_market', lambda now=None, build=None: False)
     monkeypatch.setattr(llm_shadow, '_jobs', llm_shadow.queue.Queue())
     # Поток вердиктов в тестах не поднимается: очередь проверяется сама.
     monkeypatch.setattr(llm_shadow, '_worker', {'thread': type('Alive', (), {'is_alive': lambda self: True})()})
@@ -99,6 +102,23 @@ class TestQuestion:
         assert 'current price not given' in text and rec['price'] is None
         text, rec = llm_shadow.question('FIBO', 'ETHUSDT', sig, now=NOW, title='Фибоначчи', price=102.0)
         assert '-1.96% from the current price 102' in text
+
+
+class TestSnapshot:
+    def test_missing_or_old_snapshot_is_built(self, shadow):
+        """После перезапуска снимка тетради нет до следующего часа — собрать самому
+        (14.10.2026: вопросы ИИ уходили «без рыночных данных»)."""
+        assert REAL_ENSURE(NOW, build=lambda: (T, snapshot())) is True
+        assert llm_shadow._snapshot['t'] == T
+        assert llm_shadow.market_text('ETHUSDT', NOW)[1] == '2026-10-10 10:00'
+        calls = []
+        assert REAL_ENSURE(NOW + 600, build=lambda: calls.append(1)) is True and not calls, 'свежий — не пересобирается'
+        assert REAL_ENSURE(NOW + 3 * 3600, build=lambda: (T, snapshot())) is True, 'старый — пересобирается'
+
+    def test_broken_build_is_not_fatal(self, shadow):
+        def boom():
+            raise RuntimeError('нет данных')
+        assert REAL_ENSURE(NOW, build=boom) is False
 
 
 class TestParse:

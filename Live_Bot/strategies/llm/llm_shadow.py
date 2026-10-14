@@ -88,6 +88,43 @@ def remember_market(t, data):
     _snapshot.update(t=t, data=data, at=time.time())
 
 
+def ensure_market(now=None, build=None):
+    """
+    Снимок рынка есть и свежий — иначе собрать его самому теми же признаками, что
+    тетрадь (llm_notebook.market по часовым данным бота).
+
+    ЗАЧЕМ (14.10.2026). Снимок кладёт тетрадь в начале нового часа; после
+    перезапуска бота час уже «разобран», и до следующего закрытия снимка нет — а
+    без тетради (ИИ выключен) его нет никогда. Вопросы ИИ-контроля в это время
+    уходили без рынка («нет рыночных данных — оценка нейтральная»): XRP, DOGE,
+    LINK 14.10 после выкаток. Собирается раз на час, в цикле бота.
+    """
+    now = time.time() if now is None else now
+    if _snapshot.get('data') and now - _snapshot.get('at', 0) <= SNAPSHOT_MAX_AGE_S:
+        return True
+    try:
+        if build is None:
+            from concurrent.futures import ThreadPoolExecutor
+            import pandas as pd
+            from analysis import market
+            from strategies.llm import llm_notebook as nb
+            now_ms = int(now * 1000)
+            hour_ms = market.last_closed_hour(now_ms)
+            with ThreadPoolExecutor(max_workers=4) as pool:
+                frames = dict(zip(nb.UNIVERSE, pool.map(lambda p: market.flow_frame(p, now_ms), nb.UNIVERSE)))
+            if frames.get('BTCUSDT') is None:
+                return False
+            t, data = pd.Timestamp(hour_ms, unit='ms', tz='UTC'), nb.market(frames)
+        else:
+            t, data = build()
+        remember_market(t, data)
+        _snapshot['at'] = now
+        return True
+    except Exception as exc:                           # noqa: BLE001
+        log(f'   ИИ: снимок рынка не собран ({exc}) — вопрос уйдёт без строк рынка')
+        return False
+
+
 # ── Вопрос ──────────────────────────────────────────────────────────────────
 
 def _num(x, fmt):
@@ -154,6 +191,7 @@ def setup_of(signal, price=None):
 def question(strategy, pair, signal, why='', now=None, title=None, price=None):
     """(вопрос модели, запись-заготовка журнала). Всё — на момент сетапа."""
     now = time.time() if now is None else now
+    ensure_market(now)
     s = setup_of(signal, price)
     why = why or signal.get('why') or ''
     if title is None:
