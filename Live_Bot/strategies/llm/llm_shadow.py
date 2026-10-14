@@ -45,15 +45,19 @@ MAX_AGE_S = 24 * 3600            # вопрос старше суток не з�
 QUEUE_MAX = 60                   # очередь длиннее — старые вопросы выбрасываются
 SNAPSHOT_MAX_AGE_S = 2 * 3600    # рынок тетради старше — вопрос без строк рынка
 
-SYSTEM = """You review trade setups of a crypto futures bot. Rule-based strategies propose trades; you see ONE
-setup and the market at that moment, and say whether YOU would take it. You cannot change the entry, stop or
-target, and your answer does not open or cancel anything - it is recorded and later compared with the outcome.
-R = profit in units of the risk (stop distance). Most setups of these strategies have an average edge near
-zero, so a good reviewer skips the ones whose context argues against the trade: the move already exhausted,
-the crowd and the aggressive flow on the same side as the trade, BTC pushing the other way, a stop inside
-normal noise. Judge only from the numbers given.
+SYSTEM = """You rate trade setups of a crypto futures bot. A rule-based strategy proposes a trade; you see ONE
+setup and the market at that moment. Rate how favourable the market context is for THIS trade compared with a
+typical setup of the same strategy:
+  1 = clearly against the trade, 2 = somewhat against, 3 = typical / neutral, 4 = somewhat in favour,
+  5 = clearly in favour.
+Most setups are typical - give 3 unless the numbers clearly say otherwise.
+Mind the direction. For a SHORT, a falling coin and falling BTC are IN FAVOUR, and a crowd crowded in longs
+(high funding, high retail longs rank) is in favour; for a LONG it is the mirror. Against the trade: the move
+in the trade's direction is already very stretched, the aggressive flow pushes hard the other way, BTC moves
+strongly against the trade.
+R = profit in units of the risk (stop distance). Judge only from the numbers given.
 Answer with JSON only, one line:
-{"take": "yes" or "no", "conf": 1-5 (5 = very sure), "reason": "at most 20 words, IN RUSSIAN"}"""
+{"score": 1-5, "reason": "at most 20 words, IN RUSSIAN"}"""
 
 QUESTION = """It is {time} UTC. Strategy: {title}. Setup: {side} {coin}.
 Strategy's own description of the setup (Russian): {why}
@@ -179,11 +183,17 @@ def question(strategy, pair, signal, why='', now=None, title=None, price=None):
 
 # ── Ответ ───────────────────────────────────────────────────────────────────
 
-_JSON = re.compile(r'\{[^{}]*"take"[^{}]*\}', re.S)
+_JSON = re.compile(r'\{[^{}]*"score"[^{}]*\}', re.S)
+# «Брал бы», если оценка не ниже этой. До 14.10.2026 модель отвечала «да/нет»,
+# и вопрос подсказывал «пропускай, если есть довод против» — 34 вердикта в тени
+# и 111 решений ИИ-контроля из 111 были «нет» (довод против находится всегда, а
+# направление модель путала: «нисходящий тренд против шорта»). Теперь модель
+# ставит оценку относительно обычного сетапа стратегии, порог держит код.
+TAKE_MIN = 3
 
 
 def parse(text):
-    """Ответ модели -> {'take': True/False, 'conf': 1..5|None, 'reason': str} или None."""
+    """Ответ модели -> {'take': оценка ≥ TAKE_MIN, 'score': 1..5, 'conf': то же, 'reason'} или None."""
     found = _JSON.findall(text or '')
     if not found:
         return None
@@ -191,15 +201,14 @@ def parse(text):
         raw = json.loads(found[-1])
     except Exception:                                  # noqa: BLE001
         return None
-    take = str(raw.get('take', '')).strip().lower()
-    if take not in ('yes', 'no'):
-        return None
     try:
-        conf = int(raw.get('conf'))
-        conf = conf if 1 <= conf <= 5 else None
+        score = int(raw.get('score'))
     except (TypeError, ValueError):
-        conf = None
-    return {'take': take == 'yes', 'conf': conf, 'reason': str(raw.get('reason') or '')[:300]}
+        return None
+    if not 1 <= score <= 5:
+        return None
+    return {'take': score >= TAKE_MIN, 'score': score, 'conf': score,
+            'reason': str(raw.get('reason') or '')[:300]}
 
 
 def ask_model(text, timeout=TIMEOUT_S):

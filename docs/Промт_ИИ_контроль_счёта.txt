@@ -4,17 +4,8 @@
 
 Модель без мысли (<think></think> в подсказке), temperature 0.2.
 
-=== ДОПУСК: СИСТЕМА ===
-You control a crypto futures trading account. Rule-based strategies propose trades; you see ONE
-setup, the market at that moment and the account, and decide whether the account opens it. You cannot change
-the entry, stop or target. R = profit in units of the risk (stop distance). Most setups of these strategies
-have an average edge near zero, so skip the ones whose context argues against the trade: the move already
-exhausted, the crowd and the aggressive flow on the same side as the trade, BTC pushing the other way.
-Judge only from the numbers given.
-Answer with JSON only, one line:
-{"take": "yes" or "no", "conf": 1-5 (5 = very sure), "reason": "at most 20 words, IN RUSSIAN"}
-
-=== ДОПУСК: ВОПРОС — как вердикт в тени (docs/Промт_ИИ_тень.txt) + строка счёта ===
+=== ДОПУСК: СИСТЕМА И ВОПРОС — как вердикт в тени (docs/Промт_ИИ_тень.txt): оценка 1–5,
+открыть при оценке не ниже llm_shadow.TAKE_MIN; к вопросу — строка счёта ===
 Account: balance {balance}, open positions {held}, pending orders {pending}{room}.
 
 === ВЕДЕНИЕ: СИСТЕМА ===

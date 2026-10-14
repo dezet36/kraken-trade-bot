@@ -92,7 +92,7 @@ class TestGate:
         st = state(code)
         assert 'BTCUSDT' in st['pending'] and not st['ai_wait']
         item = sent[-1][1]
-        assert item['kind'] == 'place' and any('ИИ: открыть (4/5) — по тренду' in x for x in item['lines'])
+        assert item['kind'] == 'place' and any('ИИ: открыть (оценка 4/5) — по тренду' in x for x in item['lines'])
         assert st['counts']['offered'] == 1, 'повторное решение не считается вторым предложением'
 
     def test_skip_tells_the_owner_without_a_button(self, sent):
@@ -133,6 +133,17 @@ class TestGate:
         monkeypatch.setattr(manual, '_approved_prices', lambda client, accounts: {'BTCUSDT': 97.0})
         manual.update(Client(), now_ms=T0 + 60_000)
         assert not state(code)['pending'] and 'устарел' in sent[-1][1]['title']
+
+    def test_same_setup_is_asked_once(self):
+        """Сканер предлагает сетап каждые 5 минут; ИИ решает по нему один раз
+        (14.10.2026: NEAR спрашивали 38 раз)."""
+        code = prop(ai_control=True)
+        manual.offer('SMCS', a_setup(), now_ms=T0)
+        answer(code, 'BTCUSDT', take=False, score=2, conf=2, reason='нет')
+        manual.update(Client(), now_ms=T0 + 60_000)
+        assert manual.offer('SMCS', a_setup(), now_ms=T0 + 5 * 60_000)[0][1] == 'ИИ уже решил по этому сетапу'
+        assert manual.offer('SMCS', a_setup(entry=100.4), now_ms=T0 + 5 * 60_000)[0][1] is None, 'новый сетап — новый вопрос'
+        assert manual.offer('SMCS', a_setup(), now_ms=T0 + 25 * H)[0][1] in (None, 'ждёт решения ИИ')
 
     def test_account_without_ai_places_at_once(self):
         code = prop()
@@ -220,7 +231,7 @@ class TestQueue:
         at = T0 - T0 % H + 20 * 60_000
         job = ai_control.next_job(at)
         assert job == ('gate', code, 'BTCUSDT')
-        ai_control.run_job(job, ask_fn=lambda s, q, n: ('{"take": "yes", "conf": 4, "reason": "ок"}', 50.0),
+        ai_control.run_job(job, ask_fn=lambda s, q, n: ('{"score": 4, "reason": "ок"}', 50.0),
                            now_ms=at)
         assert state(code)['ai_wait']['BTCUSDT']['answer']['take'] is True
         assert ai_control.next_job(T0 - T0 % H + 2 * 60_000) is None, 'начало часа — тетради'

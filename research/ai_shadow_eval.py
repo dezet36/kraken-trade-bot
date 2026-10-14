@@ -76,7 +76,8 @@ def line(name, rs):
 
 def main(trades_path, shadow_path):
     trades = [t for t in rows(trades_path) if t.get('pnl_r') not in (None, '')]
-    verdicts = [v for v in rows(shadow_path) if 'take' in v]
+    # Только вердикты по оценке 1–5 (с 14.10.2026): прежний вопрос «да/нет» отвечал «нет» всегда.
+    verdicts = [v for v in rows(shadow_path) if 'take' in v and v.get('score') is not None]
     errors = [v for v in rows(shadow_path) if 'take' not in v]
     pairs = match(verdicts, trades)
     done = [(v, r) for v, r in pairs if r is not None]

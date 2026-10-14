@@ -102,15 +102,23 @@ class TestQuestion:
 
 
 class TestParse:
-    def test_verdicts(self):
-        assert llm_shadow.parse('{"take": "yes", "conf": 4, "reason": "по тренду"}') == \
-            {'take': True, 'conf': 4, 'reason': 'по тренду'}
-        assert llm_shadow.parse('думаю...\n{"take": "no", "conf": 2, "reason": "толпа в шортах"}')['take'] is False
+    def test_score_decides_take_by_the_code_threshold(self):
+        assert llm_shadow.parse('{"score": 4, "reason": "по тренду"}') == \
+            {'take': True, 'score': 4, 'conf': 4, 'reason': 'по тренду'}
+        assert llm_shadow.parse('{"score": 3, "reason": "обычный"}')['take'] is True, 'обычный сетап — берётся'
+        assert llm_shadow.parse('думаю...\n{"score": 2, "reason": "толпа в шортах"}')['take'] is False
 
     def test_bad_answers(self):
         assert llm_shadow.parse('') is None
-        assert llm_shadow.parse('{"take": "maybe", "conf": 3, "reason": "x"}') is None
-        assert llm_shadow.parse('{"take": "yes", "conf": 9, "reason": "x"}')['conf'] is None
+        assert llm_shadow.parse('{"score": "high", "reason": "x"}') is None
+        assert llm_shadow.parse('{"score": 9, "reason": "x"}') is None
+        assert llm_shadow.parse('{"take": "yes", "conf": 4}') is None, 'прежний формат не принимается'
+
+    def test_prompt_does_not_push_to_skip(self):
+        """До 14.10.2026 вопрос велел «пропускать при доводе против» — 145 ответов из 145 были
+        «нет». Вопрос — оценка относительно обычного сетапа, с подсказкой направления."""
+        assert 'skips' not in llm_shadow.SYSTEM and 'give 3 unless' in llm_shadow.SYSTEM
+        assert 'For a SHORT, a falling coin and falling BTC are IN FAVOUR' in llm_shadow.SYSTEM
 
 
 class TestQueue:
@@ -133,8 +141,8 @@ class TestQueue:
     def test_answer_is_journaled(self, shadow):
         llm_shadow.observe('SMCS', 'ETHUSDT', signal())
         job = llm_shadow._jobs.get_nowait()
-        rec = llm_shadow.answer(job, ask=lambda q: ('{"take": "no", "conf": 3, "reason": "против BTC"}', 80.0))
-        assert rec['take'] is False and rec['conf'] == 3 and rec['seconds'] == 80.0
+        rec = llm_shadow.answer(job, ask=lambda q: ('{"score": 2, "reason": "против BTC"}', 80.0))
+        assert rec['take'] is False and rec['score'] == 2 and rec['seconds'] == 80.0
         assert journal(shadow)[-1]['reason'] == 'против BTC'
 
     def test_model_failure_is_journaled(self, shadow):

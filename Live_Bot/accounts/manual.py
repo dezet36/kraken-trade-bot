@@ -87,16 +87,34 @@ def _ask_ai(code, rules, book, strategy, setup, now):
     pair = books.norm(setup.get('trading_pair'))
     if pair in book.setdefault('ai_wait', {}):
         return 'ждёт решения ИИ'
+    key = _setup_key(strategy, pair, setup)
+    seen = book.setdefault('ai_seen', {})
+    for k in [k for k, ts in seen.items() if now - ts > ai_control.SEEN_HOURS * 3_600_000]:
+        seen.pop(k)
+    if key in seen:
+        return 'ИИ уже решил по этому сетапу'
     order, why = books.decide(rules, book, strategy, setup, now)
     if why:
         return why
     question, _ = ai_control.gate_question(strategy, setup, book, rules, now)
+    seen[key] = now
     book['ai_wait'][pair] = {'strategy': strategy, 'setup': setup, 'asked_ts': now,
                              'expires_ts': now + ai_control.wait_ms(strategy, setup, order),
                              'question': question, 'answer': None}
     ai_control.start()
     log(f"   🤖 [{rules.get('name') or code}] {strategy} {pair} {order['direction']}: ждёт решения ИИ")
     return None
+
+
+def _setup_key(strategy, pair, setup):
+    """Один и тот же сетап: стратегия, пара, сторона, вход. Сканер предлагает его каждые
+    5 минут — ИИ по нему спрашивается один раз (14.10.2026: NEAR спрашивали 38 раз)."""
+    params = setup.get('params') or {}
+    try:
+        entry = f"{float(params.get('entry')):.8g}"
+    except (TypeError, ValueError):
+        entry = '?'
+    return f"{strategy}|{pair}|{(setup.get('setup') or {}).get('type')}|{entry}"
 
 
 def _place(code, rules, book, strategy, setup, now, note=None, count=True):
@@ -306,8 +324,8 @@ def _apply_ai(code, rules, book, now, prices):
             continue
         book['ai_wait'].pop(pair)
         reason = answer.get('reason') or '—'
-        conf = answer.get('conf')
-        mark = f' ({conf}/5)' if conf else ''
+        conf = answer.get('score') or answer.get('conf')
+        mark = f' (оценка {conf}/5)' if conf else ''
         if not answer.get('take'):
             books.refuse(book, 'ИИ: пропустить')
             books.instruct(code, rules, book, 'ai', f'ИИ пропустил сетап · {pair}',

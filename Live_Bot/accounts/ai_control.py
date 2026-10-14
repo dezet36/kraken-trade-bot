@@ -55,14 +55,14 @@ BE_MIN_R = 1.0                 # безубыток — только после 
 TRAIL_GAP_R = 0.25             # подтянутый стоп — не ближе 0.25R к цене
 ACTIONS = ('hold', 'be', 'trail', 'half', 'close')
 
-SYSTEM_GATE = """You control a crypto futures trading account. Rule-based strategies propose trades; you see ONE
-setup, the market at that moment and the account, and decide whether the account opens it. You cannot change
-the entry, stop or target. R = profit in units of the risk (stop distance). Most setups of these strategies
-have an average edge near zero, so skip the ones whose context argues against the trade: the move already
-exhausted, the crowd and the aggressive flow on the same side as the trade, BTC pushing the other way.
-Judge only from the numbers given.
-Answer with JSON only, one line:
-{"take": "yes" or "no", "conf": 1-5 (5 = very sure), "reason": "at most 20 words, IN RUSSIAN"}"""
+def _gate_system():
+    """Допуск — та же оценка 1–5, что вердикт в тени (llm_shadow.SYSTEM); открыть —
+    при оценке не ниже llm_shadow.TAKE_MIN. Строка счёта в вопросе — для сведения."""
+    from strategies.llm import llm_shadow
+    return llm_shadow.SYSTEM
+
+
+SEEN_HOURS = 24      # решение по сетапу (та же стратегия, пара, сторона, вход) не переспрашивается
 
 SYSTEM_REVIEW = """You manage the open positions of a crypto futures trading account once an hour. For EACH position
 choose exactly one action:
@@ -293,7 +293,7 @@ def run_job(job, ask_fn=ask, now_ms=None):
             question, pairs = review_question(book, rules, now)
             book['ai_review_hour'] = now // 3_600_000
             books.save()
-    system, limit = (SYSTEM_GATE, 120) if kind == 'gate' else (SYSTEM_REVIEW, 90 + 70 * len(pairs))
+    system, limit = (_gate_system(), 120) if kind == 'gate' else (SYSTEM_REVIEW, 90 + 70 * len(pairs))
     try:
         text, seconds = ask_fn(system, question, limit)
     except Exception as exc:                           # noqa: BLE001
@@ -309,8 +309,8 @@ def run_job(job, ask_fn=ask, now_ms=None):
             item = book.get('ai_wait', {}).get(pair)
             if item is None:
                 return
-            verdict = llm_shadow.parse(text) or {'take': False, 'conf': None,
-                                                 'reason': 'ответ без решения — пропуск'}
+            verdict = llm_shadow.parse(text) or {'take': False, 'score': None, 'conf': None,
+                                                 'reason': 'ответ без оценки — пропуск'}
             item['answer'] = verdict
             item['answered_ts'] = now
             journal({'at': books.iso(now), 'account': code, 'kind': 'gate', 'pair': pair,
@@ -356,8 +356,8 @@ def export_text():
             'Промт меняется только вместе с этим файлом: совпадение держит tests/test_ai_control.py.\n'
             'Пересобрать (из Live_Bot): python -m accounts.ai_control export\n\n'
             'Модель без мысли (<think></think> в подсказке), temperature 0.2.\n\n'
-            f'=== ДОПУСК: СИСТЕМА ===\n{SYSTEM_GATE}\n\n'
-            '=== ДОПУСК: ВОПРОС — как вердикт в тени (docs/Промт_ИИ_тень.txt) + строка счёта ===\n'
+            '=== ДОПУСК: СИСТЕМА И ВОПРОС — как вердикт в тени (docs/Промт_ИИ_тень.txt): оценка 1–5,\n'
+            'открыть при оценке не ниже llm_shadow.TAKE_MIN; к вопросу — строка счёта ===\n'
             f'{ACCOUNT}\n'
             f'=== ВЕДЕНИЕ: СИСТЕМА ===\n{SYSTEM_REVIEW}\n\n'
             f'=== ВЕДЕНИЕ: ПОЗИЦИЯ (по каждой) ===\n{POSITION}\n')
