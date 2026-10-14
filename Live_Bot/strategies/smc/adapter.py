@@ -299,7 +299,9 @@ def analyze_market(pair, client=None):
 
     # Против толпы — решение SMC, а не ядра: ядро не знает про биржу, а
     # фандинг лежит в общем слое (positioning).
-    rate = _funding_rate(pair, client=client) if smc_params.FUNDING_AGAINST_CROWD else None
+    # Ставка читается всегда — и при выключенном фильтре: она едет в журнал сделки,
+    # чтобы фильтр можно было проверить на живых сделках (14.10.2026).
+    rate = _funding_rate(pair, client=client)
     if smc_params.FUNDING_AGAINST_CROWD and rate is None:
         log(f"   {pair}: фандинг неизвестен — фильтр толпы пропущен")
     blocked = crowd_reason(setup['direction'], rate)
