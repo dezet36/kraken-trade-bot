@@ -677,6 +677,18 @@ def llm_market_review(text: str):
     return _send(f"🧭 <b>ИИ: обзор рынка</b> · {_now()}\n━━━━━━━━━━━━━━━━━━━━\n{fmt.esc(text[:1500])}")
 
 
+def asset_report(text: str):
+    """
+    Анализ дня по активу (strategies/llm/llm_daily, раз в сутки к 06:00 UTC):
+    выжимка — вывод, скоринг и сетапы с R:R кода; полный разбор — на панели.
+    Текст уже в HTML и экранирован модулем разбора. Свой тумблер (asset_report):
+    разбор — не план сделки, и выключать его вместе с планами ИИ незачем.
+    """
+    if not _allowed('asset_report') or not text:
+        return False
+    return _send(text[:4000])
+
+
 def llm_setup_rejected(pair: str, side: str, entry: float, gate: str, detail: str = ''):
     """
     Модель предложила сетап, но его отклонил код или критик — коротко, без

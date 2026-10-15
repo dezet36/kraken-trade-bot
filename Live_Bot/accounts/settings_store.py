@@ -13,9 +13,10 @@
     сторону, пределы портфеля;
   - правила решений стратегии — strategies/settings.py (минимальный стоп,
     критик ИИ), файл runtime_settings.json;
-  - уведомления и выбор биржи — здесь же, в runtime_settings.json.
+  - уведомления, выбор биржи и анализ дня по активу — здесь же, в
+    runtime_settings.json.
 load() отдаёт всё одним словарём в прежнем виде (раздел на стратегию, PORTFOLIO,
-EXCHANGE, NOTIFY), save() делит правку между хозяевами и пишет ОДНУ запись в
+EXCHANGE, NOTIFY, DAILY), save() делит правку между хозяевами и пишет ОДНУ запись в
 историю настроек. Стратегии этот модуль не читают: денег они не знают, а свои
 правила берут из strategies/settings.py.
 
@@ -33,6 +34,7 @@ from infra import config
 from infra.logger import log
 from accounts import paper as accounts
 from strategies import settings as strategy_settings
+from strategies.llm import llm_daily
 
 SETTINGS_FILE = os.path.join(config.DATA_DIR, 'runtime_settings.json')
 # RSIBB добавлена ЧЕТВЁРТОЙ и на особом положении: она единственная не прошла
@@ -80,10 +82,16 @@ NOTIFY = 'NOTIFY'
 # бота (service — раньше уходил без спроса после каждой выкатки).
 # С 08.10.2026 — инструкции по торговым счетам без API (account_orders): что
 # поставить, снять, перенести и закрыть руками (accounts/manual.py).
+# С 15.10.2026 — анализ дня по активу (asset_report, strategies/llm/llm_daily).
 NOTIFY_EVENTS = ('trade_opened', 'trade_closed', 'error', 'daily', 'llm_setup',
                  'plan_dropped', 'tp_hit', 'breakeven', 'llm_rejected', 'service',
-                 'account_orders')
+                 'account_orders', 'asset_report')
 NOTIFY_CHANNELS = ('telegram',)
+
+# Анализ дня по активу (с 15.10.2026): включён ли, какие активы, к какому часу
+# UTC. Поля и их проверка — у модуля разбора (llm_daily.defaults/clean); раздел
+# ему передаёт цикл бота: стратегический слой этот модуль не читает.
+DAILY = 'DAILY'
 
 # Поля раздела стратегии в порядке, в котором их видели панель и журнал до
 # разделения хозяев: деньги (счёт) вперемешку с правилами (стратегия).
@@ -109,6 +117,7 @@ def _own_defaults():
     base[EXCHANGE] = {'name': (config.EXCHANGE_NAME or 'bybit').lower()}
     base[NOTIFY] = {f'{event}_{channel}': True
                     for event in NOTIFY_EVENTS for channel in NOTIFY_CHANNELS}
+    base[DAILY] = llm_daily.defaults()
     return base
 
 
@@ -122,6 +131,8 @@ def _apply_own(data, changes):
     for key in data[NOTIFY]:
         if key in notify:
             data[NOTIFY][key] = bool(notify[key])
+    if isinstance(changes.get(DAILY), dict):
+        data[DAILY] = llm_daily.clean(changes[DAILY], data[DAILY])
     for name in STRATEGIES:
         item = changes.get(name)
         if not isinstance(item, dict):
@@ -133,7 +144,7 @@ def _apply_own(data, changes):
 
 def _compose(own, money):
     """Один словарь в прежнем виде: раздел на стратегию, портфель, биржа,
-    уведомления."""
+    уведомления, анализ дня."""
     data = {}
     for name in STRATEGIES:
         merged = {**money.get(name, {}), **own.get(name, {})}
@@ -141,6 +152,7 @@ def _compose(own, money):
     data[PORTFOLIO] = dict(money.get(PORTFOLIO, {}))
     data[EXCHANGE] = dict(own[EXCHANGE])
     data[NOTIFY] = dict(own[NOTIFY])
+    data[DAILY] = {**own[DAILY], 'pairs': list(own[DAILY]['pairs'])}
     return data
 
 

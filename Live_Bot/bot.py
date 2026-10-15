@@ -303,6 +303,7 @@ def _paper_cycle():
         market_cap.collect_if_due(broker.client)
         market_mood.collect_if_due()
         _poll_news()
+        _daily_report(broker.client)
         return
 
     client = broker.client
@@ -432,6 +433,24 @@ def _paper_cycle():
     market_mood.collect_if_due()
     # Объявления биржи: раз в час, только запись.
     _poll_news()
+    # Анализ дня по активу: раз в сутки к часу из настроек.
+    _daily_report(broker.client)
+
+
+def _daily_report(client):
+    """
+    Анализ дня по активу (strategies/llm/llm_daily, с 15.10.2026): раз в сутки
+    к часу из настроек (DAILY) — разбор каждого актива моделью; полный текст на
+    панели, выжимка в Telegram. Данные собираются здесь, в цикле (клиент биржи),
+    модель отвечает в своём потоке. Торговлю не трогает; сбой — строка в журнал.
+    Настройки передаются отсюда: стратегический слой не читает слой счетов.
+    """
+    try:
+        from accounts import settings_store
+        from strategies.llm import llm_daily
+        llm_daily.tick(client, cfg=settings_store.load().get(settings_store.DAILY))
+    except Exception as exc:                           # noqa: BLE001
+        log(f'   ИИ: анализ дня — {exc}')
 
 
 def _poll_news():

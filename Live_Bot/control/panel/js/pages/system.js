@@ -250,6 +250,7 @@ const EVENTS = [
   ['breakeven', 'Стоп в безубыток'], ['plan_dropped', 'Заявка или план сняты без сделки'],
   ['llm_setup', 'Сетап ИИ (план с графиком)'], ['llm_rejected', 'Отказ плана ИИ'], ['error', 'Ошибки бота'],
   ['daily', 'Дневная сводка'], ['service', 'Запуск бота'], ['account_orders', 'Инструкции по счетам без API (проп)'],
+  ['asset_report', 'Анализ дня по активу (ИИ)'],
 ];
 
 function notifications(s) {
@@ -440,6 +441,7 @@ const FIELD_NAMES = {
   portfolio_risk_pct: 'предел портфеля, %', portfolio_max_positions: 'предел позиций', daily_loss_pct: 'дневной предел убытка, %',
 };
 const CHANNELS = { telegram: 'Telegram', desktop: 'на рабочем столе' };
+const DAILY_FIELDS = { enabled: 'включён', pairs: 'активы', hour_utc: 'час готовности, UTC' };
 const EVENT_NAMES = Object.fromEntries(EVENTS);
 const fieldLabel = (path) => {
   const [section, field = ''] = String(path).split('.');
@@ -447,11 +449,13 @@ const fieldLabel = (path) => {
     const m = /^(.*)_(telegram|desktop)$/.exec(field);
     return m ? `Уведомления · ${EVENT_NAMES[m[1]] || m[1]} (${CHANNELS[m[2]]})` : `Уведомления · ${field}`;
   }
+  if (section === 'DAILY') return `Анализ дня · ${DAILY_FIELDS[field] || field}`;
   const where = section === 'PORTFOLIO' ? 'Портфель' : section === 'EXCHANGE' ? 'Биржа' : strategyTitle(section);
   return `${where} · ${FIELD_NAMES[field] || field}`;
 };
 const SIDE_WORDS = { both: 'обе', long: 'только лонги', short: 'только шорты' };
-const fieldValue = v => (typeof v === 'boolean' ? (v ? 'да' : 'нет') : v == null ? '—' : SIDE_WORDS[v] || String(v));
+const fieldValue = v => (typeof v === 'boolean' ? (v ? 'да' : 'нет') : v == null ? '—'
+  : Array.isArray(v) ? (v.map(x => String(x).replace(/USDT$/, '')).join(', ') || 'нет') : SIDE_WORDS[v] || String(v));
 
 function updates() {
   const res = cachedJSON('/api/update', 60000);

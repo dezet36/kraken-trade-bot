@@ -1318,6 +1318,21 @@ def _run_action(request):
     return False, f'Неизвестное действие: {action}'
 
 
+def daily_payload(days=7):
+    """
+    Анализ дня по активу: отчёты за последние дни (без текста вопроса), что
+    разбирается сейчас, настройки и пул активов на выбор. Модели нет — так и
+    сказано: «не настроена» и «нет отчётов» — разные положения.
+    """
+    from strategies.llm import llm_daily
+    stored = settings_store.load()
+    return {'reports': llm_daily.recent(days), 'busy': llm_daily.busy(),
+            'settings': stored.get(settings_store.DAILY, {}),
+            'allowed': list(llm_daily.ALLOWED), 'max_pairs': llm_daily.MAX_PAIRS,
+            'model': bool(getattr(config, 'LLM_SERVER_URL', '')),
+            'writable': _controls_allowed()}
+
+
 def llm_payload(limit=40):
     """
     Работа модели: чем она занята, что разобрала и чего стоил каждый разбор.
@@ -1654,6 +1669,13 @@ class _Handler(BaseHTTPRequestHandler):
             self._send_json({'lines': read_log(), 'status': dict(_status)})
         elif path == '/api/llm':
             self._send_json(llm_payload())
+        elif path == '/api/daily':
+            # Анализ дня по активу (strategies/llm/llm_daily): отчёты за неделю
+            # и настройки. Отдельно от /api/llm: отчёты весят десятки КБ текста.
+            try:
+                self._send_json(daily_payload())
+            except Exception as exc:               # noqa: BLE001
+                self._fail(500, f'анализ дня недоступен: {exc}')
         elif path == '/api/export.csv':
             self._send_file(export_paths()[0], 'text/csv; charset=utf-8')
         elif path == '/api/export.jsonl':
@@ -1831,6 +1853,7 @@ class _Handler(BaseHTTPRequestHandler):
                 'own': {name: strategy_profile.describe(name)
                         for name in settings_store.STRATEGIES},
                 'exchange': _exchange_state(stored),
+                'daily': stored.get(settings_store.DAILY, {}),
                 'writable': _controls_allowed()})
         elif path in ('/', '/index.html'):
             # Панель — control/panel (с 09.10.2026). /v2 — прежний адрес той же
@@ -1981,6 +2004,7 @@ class _Handler(BaseHTTPRequestHandler):
                          'warnings': [f'{name}: {message}' for name, message in refused or []],
                          'portfolio': result.get(settings_store.PORTFOLIO, {}),
                          'notify': result.get(settings_store.NOTIFY, {}),
+                         'daily': result.get(settings_store.DAILY, {}),
                          'limits': settings_store.LIMITS,
                          'writable': True})
 
