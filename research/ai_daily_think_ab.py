@@ -36,9 +36,10 @@ logger.LOG_FILE = os.path.join(OUT, 'log.txt')       # не в журнал бо
 
 from strategies.llm import llm_daily, llm_shadow  # noqa: E402
 
-JOBS = [('BTCUSDT', True), ('ETHUSDT', True), ('SOLUSDT', False), ('SOLUSDT', True),
-        ('XRPUSDT', False), ('XRPUSDT', True)]
-WINDOW = (5, 13)          # минуты часа: тетрадь спрашивает в начале часа, ответ ~30–50 мин
+PAIRS = ('BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'XRPUSDT')
+# Задания: на каждый вопрос — оба варианта; «без мысли» у BTC и ETH уже есть из боя.
+JOBS = [(p, t) for p in PAIRS for t in (False, True)]
+WINDOW = (5, 20)          # минуты начала: тетрадь спрашивает в начале часа; с мыслью ответ ~50 мин
 SKIP_HOURS = {4, 5}       # часы разбора дня в бою (BTC, ETH к 06:00) — бой важнее
 SECTIONS = ('MARKET REGIME', 'HTF STRUCTURE', 'EMOTIONAL STATE', 'POSITIONING', 'LIQUIDITY MAP',
             'ALGO BEHAVIOR', 'NARRATIVE CONTEXT', 'CONTINUATION VS EXHAUSTION', 'BULLISH SCENARIO',
