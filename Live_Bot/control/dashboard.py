@@ -1441,14 +1441,18 @@ def llm_payload(limit=40):
     # Модель в llama-server: имя и живость — с сервера, а не с диска.
     server = ''
     server_alive = None
+    ctx = getattr(config, 'LLM_CTX', 0)
     try:
         from infra import llm_server
         if llm_server.enabled():
             server = llm_server.url()
             server_alive = llm_server.health() is not None
-            name = (llm_server.props().get('model_path') or '')
+            props = llm_server.props()
+            name = (props.get('model_path') or '')
             if name:
                 path = name
+            # Окно — с сервера (-c в kraken-llm.service), а не из .env бота.
+            ctx = (props.get('default_generation_settings') or {}).get('n_ctx') or ctx
     except Exception:                                  # noqa: BLE001
         pass
 
@@ -1461,7 +1465,7 @@ def llm_payload(limit=40):
         'server_alive': server_alive,
         'model': os.path.basename(path) if path else '',
         'exists': (server_alive if server else (bool(path) and os.path.exists(path))),
-        'ctx': getattr(config, 'LLM_CTX', 0),
+        'ctx': ctx,
         'threads': getattr(config, 'LLM_THREADS', 0),
         'limit_tokens': getattr(config, 'LLM_MAX_TOKENS', 0),
         'stale_min': getattr(config, 'LLM_VERDICT_MAX_AGE_MIN', 0),

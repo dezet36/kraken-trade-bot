@@ -49,6 +49,12 @@ LATEST_START = 32             # позже — вопрос в следующи�
 TIMEOUT_S = 50 * 60
 MAX_TOKENS = 3300             # 16 разделов по-русски ~ 10–12 тыс. знаков
 MIN_TOKENS = 1800             # меньше места в окне — ответ обрежется: данные ужимаются
+# Мысль модели (<think>) — выключена, пока сравнение на одних вопросах не скажет
+# иное (docs/ИИ_замечания_на_проверку.md, п. 88а; research/ai_daily_think_ab.py).
+# С мыслью мысль и ответ идут одним запросом: до THINK_MAX_TOKENS на оба.
+THINK = False
+THINK_MAX_TOKENS = 6500
+THINK_MIN_TOKENS = 4500
 CTX_FALLBACK = 12288
 MAX_PAIRS = 6                 # по одному в час: шесть — уже с полуночи
 MAX_ATTEMPTS = 2              # сбой модели — ещё одна попытка в следующий час
@@ -414,41 +420,65 @@ def rr_table(parsed):
     return out
 
 
-def _raw(text):
+def _raw(text, think=False):
+    # Без мысли блок <think> закрыт в подсказке; с мыслью — открыт, как в родном шаблоне Qwen.
+    tail = '<think>\n' if think else '<think>\n\n</think>\n\n'
     return (f'<|im_start|>system\n{SYSTEM}<|im_end|>\n<|im_start|>user\n{text}<|im_end|>\n'
-            f'<|im_start|>assistant\n<think>\n\n</think>\n\n')
+            f'<|im_start|>assistant\n{tail}')
 
 
-def fit(question, count=None, ctx=None):
-    """Сколько токенов дать ответу: окно минус вопрос. Не хватает MIN_TOKENS — вопрос
-    без свечей часового графика. -> (вопрос, n_predict). Счёт недоступен — как есть."""
+def fit(question, count=None, ctx=None, think=False):
+    """Сколько токенов дать ответу (с мыслью — мысли и ответу): окно минус вопрос. Не
+    хватает минимума — вопрос без свечей часового графика. -> (вопрос, n_predict).
+    Счёт недоступен — как есть."""
     from infra import llm_server
+    most, least = (THINK_MAX_TOKENS, THINK_MIN_TOKENS) if think else (MAX_TOKENS, MIN_TOKENS)
     count = count or (lambda t: len(llm_server._tokenize(t)))
     if ctx is None:
         ctx = ((llm_server.props().get('default_generation_settings') or {}).get('n_ctx') or CTX_FALLBACK)
     try:
-        room = int(ctx) - count(_raw(question)) - 64
+        room = int(ctx) - count(_raw(question, think)) - 64
     except Exception:                                  # noqa: BLE001
-        return question, MAX_TOKENS
-    if room < MIN_TOKENS:
+        return question, most
+    if room < least:
         shorter = _cut_candles(question)
         if shorter:
             question = shorter
-            room = int(ctx) - count(_raw(question)) - 64
-    if room < MIN_TOKENS:
+            room = int(ctx) - count(_raw(question, think)) - 64
+    if room < least:
         raise RuntimeError(f'вопрос не помещается в окно модели: на ответ остаётся {room} токенов')
-    return question, min(MAX_TOKENS, room)
+    return question, min(most, room)
 
 
-def ask_model(question):
-    """Вопрос серверу модели без мысли. -> (ответ, секунды, вопрос как ушёл)."""
+def split_thought(content, think):
+    """Ответ сервера -> (мысль, ответ). С мыслью ответ — после </think>; мысль не
+    закрылась — ответа нет (лимит съела мысль)."""
+    content = content or ''
+    if not think:
+        return '', content
+    if '</think>' not in content:
+        return content.strip(), ''
+    thought, answer = content.split('</think>', 1)
+    return thought.strip(), answer.strip()
+
+
+def ask_model(question, think=None):
+    """Вопрос серверу модели. -> (ответ, секунды, вопрос как ушёл, сведения: мысль,
+    токены вопроса и ответа, почему остановился — 'limit' значит обрезан лимитом)."""
     from infra import llm_server
-    question, n_predict = fit(question)
+    think = THINK if think is None else bool(think)
+    question, n_predict = fit(question, think=think)
     started = time.time()
-    out = llm_server._completion({'prompt': _raw(question), 'n_predict': n_predict, 'temperature': 0.3,
+    out = llm_server._completion({'prompt': _raw(question, think), 'n_predict': n_predict, 'temperature': 0.3,
                                   'top_k': 20, 'top_p': 0.9, 'stop': ['<|im_end|>'], 'cache_prompt': True},
                                  TIMEOUT_S)
-    return out.get('content') or '', round(time.time() - started, 1), question
+    thought, answer = split_thought(out.get('content'), think)
+    timings = out.get('timings') or {}
+    meta = {'think': think, 'n_predict': n_predict, 'prompt_tokens': out.get('tokens_evaluated'),
+            'tokens_predicted': out.get('tokens_predicted'), 'stop_type': out.get('stop_type'),
+            'truncated': out.get('stop_type') == 'limit', 'tok_s': timings.get('predicted_per_second'),
+            'thought': thought}
+    return answer, round(time.time() - started, 1), question, meta
 
 
 def _esc(text):
@@ -512,12 +542,16 @@ def run(pair, day, question, price, ask=ask_model, idle=None, notify=True, clock
                 log(f'   ИИ: анализ дня {pair} — модель занята, перенос на следующий час')
                 return None
             pause(30)
-        text, seconds, sent = ask(question)
+        text, seconds, sent, *rest = ask(question)
+        meta = dict(rest[0]) if rest else {}
         if not text.strip():
-            raise RuntimeError('пустой ответ модели')
+            raise RuntimeError('пустой ответ модели' + (' (мысль съела лимит)' if meta.get('think') else ''))
         parsed = parse(text)
         record = {'day': day, 'pair': pair, 'price': price, 'built_at': clock().isoformat(timespec='seconds'),
-                  'seconds': seconds, 'question': sent, 'answer': text, 'parsed': parsed, 'rr': rr_table(parsed)}
+                  'seconds': seconds, 'question': sent, 'answer': text, 'parsed': parsed, 'rr': rr_table(parsed),
+                  'thought': meta.pop('thought', ''), 'meta': meta}
+        if meta.get('truncated'):
+            log(f'   ИИ: анализ дня {pair} — ответ обрезан лимитом ({meta.get("tokens_predicted")} токенов)')
         _save(path, record)
         log(f'   ИИ: анализ дня {pair} готов за {seconds:.0f} с')
         if notify:
@@ -606,6 +640,7 @@ def recent(days=7):
             break
         seen.add(rec['day'])
         rec.pop('question', None)
+        rec.pop('thought', None)
         if rec.get('answer'):
             rec['conclusion'] = conclusion(rec['answer'])
             rec['answer'] = strip_json(rec['answer'])
@@ -617,7 +652,9 @@ def export_text():
     return ('Промт ИИ «анализ дня по активу» — экспорт из Live_Bot/strategies/llm/llm_daily.py.\n'
             'Промт меняется только вместе с этим файлом: совпадение держит tests/test_llm_daily.py.\n'
             'Пересобрать (из Live_Bot): python -m strategies.llm.llm_daily export\n\n'
-            f'Модель без мысли, n_predict до {MAX_TOKENS} (сколько оставляет окно), temperature 0.3.\n'
+            + (f'Модель с мыслью, n_predict до {THINK_MAX_TOKENS} на мысль и ответ'
+               if THINK else f'Модель без мысли, n_predict до {MAX_TOKENS}')
+            + ' (сколько оставляет окно), temperature 0.3.\n'
             'Вопрос: АКТИВ + ТАЙМФРЕЙМЫ (mtf_block: 1D, 4H, 15m, USDT.D) + НАСТРОЕНИЕ РЫНКА + '
             'разметка ИИ (llm_context.build без правил торговой ИИ) + НОВОСТИ.\n\n'
             f'=== СИСТЕМА ===\n{SYSTEM}\n')

@@ -276,6 +276,40 @@ class TestRun:
         assert llm_daily.busy() == 'BTCUSDT'
 
 
+class TestThink:
+    """Мысль модели — выключена до сравнения на одних вопросах (п. 88а)."""
+
+    def test_off_in_production_until_the_comparison(self):
+        assert llm_daily.THINK is False
+        assert llm_daily._raw('Q').endswith('<think>\n\n</think>\n\n')
+        assert llm_daily._raw('Q', think=True).endswith('<|im_start|>assistant\n<think>\n')
+
+    def test_thought_and_answer_are_split(self):
+        assert llm_daily.split_thought('мысль…\n</think>\n\n1) MARKET REGIME', True) == ('мысль…', '1) MARKET REGIME')
+        assert llm_daily.split_thought('мысль без конца', True) == ('мысль без конца', ''), 'лимит съела мысль'
+        assert llm_daily.split_thought('ответ', False) == ('', 'ответ')
+
+    def test_budget_with_thought(self):
+        q = 'ДАННЫЕ'
+        assert llm_daily.fit(q, count=lambda t: 5800, ctx=16384, think=True) == (q, llm_daily.THINK_MAX_TOKENS)
+        with pytest.raises(RuntimeError, match='не помещается'):
+            llm_daily.fit(q, count=lambda t: 8000, ctx=12288, think=True)
+
+    def test_meta_is_recorded_and_thought_kept_off_the_panel(self, daily):
+        meta = {'think': True, 'tokens_predicted': 6500, 'stop_type': 'limit', 'truncated': True, 'thought': 'мысль'}
+        llm_daily.run('BTCUSDT', '2026-10-15', 'Q', 100.0, ask=lambda q: (ANSWER, 3000.0, q, meta),
+                      idle=lambda: True, clock=lambda: at(4, 40), notify=False)
+        saved = json.load(open(llm_daily.report_path('2026-10-15', 'BTCUSDT'), encoding='utf-8'))
+        assert saved['thought'] == 'мысль' and saved['meta']['truncated'] is True and 'thought' not in saved['meta']
+        assert 'thought' not in llm_daily.recent()[0]
+
+    def test_thought_that_ate_the_limit_is_a_failure(self, daily):
+        llm_daily.run('BTCUSDT', '2026-10-15', 'Q', 100.0, ask=lambda q: ('', 3000.0, q, {'think': True}),
+                      idle=lambda: True, clock=lambda: at(4, 40), notify=False)
+        saved = json.load(open(llm_daily.report_path('2026-10-15', 'BTCUSDT'), encoding='utf-8'))
+        assert 'мысль съела лимит' in saved['error'] and saved['attempts'] == 1
+
+
 class TestPanel:
     def test_recent_for_the_panel(self, daily):
         for day, pair in (('2026-10-14', 'BTCUSDT'), ('2026-10-15', 'BTCUSDT'), ('2026-10-15', 'ETHUSDT')):

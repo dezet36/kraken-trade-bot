@@ -7,7 +7,10 @@
 # -DGGML_NATIVE=ON; cmake --build build --target llama-server). MTP есть только
 # в llama-server, не в llama-cpp-python — см. шапку Live_Bot/llm_server.py.
 #
-# Флаги: -np 1 — один слот (с MTP больше нельзя); -c 12288 — окно как у бота;
+# Флаги: -np 1 — один слот (с MTP больше нельзя); -c 16384 — окно (с 15.10.2026:
+# анализ дня с мыслью — вопрос ~5.8 тыс. + мысль и ответ до 6.5 тыс.; было
+# 12288; запас ОЗУ ~1.2 ГБ при весах 17.1 ГБ в страничном кэше — п. 88а
+# docs/ИИ_замечания_на_проверку.md; при вытеснении весов — вернуть 12288);
 # --spec-type draft-mtp --spec-draft-n-max 2 — черновик из MTP-головы модели;
 # --repeat-penalty 1.05 --repeat-last-n 256 — штраф за повтор в последних 256
 # токенах (на сервере с 23.09.2026).
@@ -34,7 +37,7 @@ Environment=LD_LIBRARY_PATH=/opt/kraken/llama.cpp/build/bin
 ExecStart=/opt/kraken/llama.cpp/build/bin/llama-server \
     -m /opt/kraken/bot_data/models/Qwen3.6-35B-A3B-MTP-UD-Q3_K_M.gguf \
     --host 127.0.0.1 --port 8788 \
-    -c 12288 -t 6 -np 1 \
+    -c 16384 -t 6 -np 1 \
     --spec-type draft-mtp --spec-draft-n-max 2 \
     --temp 0.3 \
     --repeat-penalty 1.05 --repeat-last-n 256 \
