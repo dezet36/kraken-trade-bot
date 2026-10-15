@@ -47,6 +47,9 @@ DIR = 'daily_reports'
 START_WINDOW = (5, 25)        # минуты часа, когда собираются данные (тетрадь — в начале часа)
 LATEST_START = 32             # позже — вопрос в следующий час: ответ ~30 мин, к началу часа модель нужна тетради
 TIMEOUT_S = 50 * 60
+# С мыслью: вопрос ~6 тыс. токенов (~10 мин) + до 6500 токенов при ~2 ток/с
+# (замер 15.10.2026: разбор BTC без мысли — 3174 токена, 2.0 ток/с, 36 мин).
+THINK_TIMEOUT_S = 100 * 60
 MAX_TOKENS = 3300             # 16 разделов по-русски ~ 10–12 тыс. знаков
 MIN_TOKENS = 1800             # меньше места в окне — ответ обрежется: данные ужимаются
 # Мысль модели (<think>) — выключена, пока сравнение на одних вопросах не скажет
@@ -471,7 +474,7 @@ def ask_model(question, think=None):
     started = time.time()
     out = llm_server._completion({'prompt': _raw(question, think), 'n_predict': n_predict, 'temperature': 0.3,
                                   'top_k': 20, 'top_p': 0.9, 'stop': ['<|im_end|>'], 'cache_prompt': True},
-                                 TIMEOUT_S)
+                                 THINK_TIMEOUT_S if think else TIMEOUT_S)
     thought, answer = split_thought(out.get('content'), think)
     timings = out.get('timings') or {}
     meta = {'think': think, 'n_predict': n_predict, 'prompt_tokens': out.get('tokens_evaluated'),
