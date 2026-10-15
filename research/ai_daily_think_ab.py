@@ -37,10 +37,24 @@ logger.LOG_FILE = os.path.join(OUT, 'log.txt')       # не в журнал бо
 from strategies.llm import llm_daily, llm_shadow  # noqa: E402
 
 PAIRS = ('BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'XRPUSDT')
-# Задания: на каждый вопрос — оба варианта; «без мысли» у BTC и ETH уже есть из боя.
+# Задания: на каждый вопрос — оба варианта; «без мысли» у BTC, ETH и SOL уже есть из боя.
 JOBS = [(p, t) for p in PAIRS for t in (False, True)]
-WINDOW = (5, 20)          # минуты начала: тетрадь спрашивает в начале часа; с мыслью ответ ~50 мин
-SKIP_HOURS = {4, 5}       # часы разбора дня в бою (BTC, ETH к 06:00) — бой важнее
+WINDOW = (5, 20)          # минуты начала: тетрадь спрашивает в начале часа; с мыслью ответ ~60 мин
+SKIP_FALLBACK = {3, 4, 5}
+
+
+def skip_hours():
+    """Часы боевого разбора дня по настройкам DAILY (бой важнее прогона); нет настроек — запасные."""
+    try:
+        from accounts import settings_store
+        cfg = settings_store.load(force=True).get(settings_store.DAILY) or {}
+        if cfg.get('enabled') and cfg.get('pairs'):
+            return set(llm_daily.slot_hours(list(cfg['pairs'])[:llm_daily.MAX_PAIRS], cfg.get('hour_utc', 6)).values())
+    except Exception:                                  # noqa: BLE001
+        pass
+    return SKIP_FALLBACK
+
+
 SECTIONS = ('MARKET REGIME', 'HTF STRUCTURE', 'EMOTIONAL STATE', 'POSITIONING', 'LIQUIDITY MAP',
             'ALGO BEHAVIOR', 'NARRATIVE CONTEXT', 'CONTINUATION VS EXHAUSTION', 'BULLISH SCENARIO',
             'BEARISH SCENARIO', 'INVALIDATION LEVELS', 'HIGH-PROBABILITY LIQUIDITY TARGETS', 'SCORING',
@@ -114,7 +128,7 @@ def do_run():
         if not todo:
             print('всё готово'); return
         t = now()
-        ok = (WINDOW[0] <= t.minute < WINDOW[1] and t.hour not in SKIP_HOURS
+        ok = (WINDOW[0] <= t.minute < WINDOW[1] and t.hour not in skip_hours()
               and (t.date(), t.hour) != last_hour and llm_shadow.server_idle())
         if not ok:
             time.sleep(30)
