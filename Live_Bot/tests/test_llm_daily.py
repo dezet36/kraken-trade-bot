@@ -137,7 +137,15 @@ class TestStructure:
         assert '1D: структура восходящая (HH + HL)' in text
         assert '4H: последний слом — BOS вверх за 17.5, 0 баров назад.' in text
         assert 'верх 17.5, низ 14.5, equilibrium 16; цена 17 — 83% от низа (premium)' in text
-        assert 'USDT.D: 5.12%, за 24ч -0.05 п.п., за 7д +0.20 п.п.' in text
+        assert 'USDT.D: 5.12%, за сутки снижается, за 24ч -0.05 п.п., за 7д +0.20 п.п.' in text
+
+    def test_ambiguities_that_misled_the_model_are_spelled_out(self):
+        """Разбор BTC 15.10.2026: «USDT.D растёт» при −0.06, «ранг DVOL 0.95 из 100», стопы шортов
+        «под минимумами», R:R ~1:3 при 1.22 по её же ценам."""
+        assert 'за сутки растёт' in llm_daily.mtf_block(None, None, None, 1.0, {'usdt_d': 6.7, 'usdt_d_24h': 0.1})
+        assert 'по шкале 0–1' in llm_daily.mood_text({'dvol': 38.8, 'dvol_pct_30d': 0.95})
+        assert 'под минимумами — sell-side liquidity (стопы лонгов)' in llm_daily.SYSTEM
+        assert '|цель − вход| / |вход − стоп|' in llm_daily.SYSTEM
 
     def test_missing_data_is_said(self):
         text = llm_daily.mtf_block(None, None, None, 100.0, {'usdt_d': 5.0, 'stale': True})
