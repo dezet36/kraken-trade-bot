@@ -2,7 +2,7 @@
 Промт меняется только вместе с этим файлом: совпадение держит tests/test_llm_daily.py.
 Пересобрать (из Live_Bot): python -m strategies.llm.llm_daily export
 
-Модель без мысли, n_predict до 3300 (сколько оставляет окно), temperature 0.3.
+Модель без мысли, n_predict до 4200 (сколько оставляет окно), temperature 0.3.
 Вопрос: АКТИВ + ТАЙМФРЕЙМЫ (mtf_block: 1D, 4H, 15m, USDT.D) + НАСТРОЕНИЕ РЫНКА + разметка ИИ (llm_context.build без правил торговой ИИ) + НОВОСТИ.
 
 === СИСТЕМА ===
