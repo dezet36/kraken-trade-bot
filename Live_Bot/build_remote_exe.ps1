@@ -77,7 +77,7 @@ try {
         --hidden-import tkinter.messagebox `
         --hidden-import control.remote `
         --paths "$botDir" `
-        controlemote_app.py
+        control\remote_app.py
 
     $code = $LASTEXITCODE
     $ErrorActionPreference = $before
