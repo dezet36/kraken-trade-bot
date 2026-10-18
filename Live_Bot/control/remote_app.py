@@ -333,17 +333,15 @@ def painted(url, before, timeout=PAINT_TIMEOUT):
     return False
 
 
-def close_windows():
+def profile_pids():
     """
-    Закрывает браузеры, работающие С НАШИМ профилем. Возвращает, сколько нашёл.
-
-    Нужен для повтора: второй запуск chrome с тем же профилем открыл бы ВТОРОЕ
-    окно рядом с белым, а не перерисовал первое. Обычные окна человека не
-    трогаются — отбор идёт по пути профиля, который заводим мы сами.
+    PID браузеров, работающих С НАШИМ профилем окна. Обычные окна человека сюда
+    не попадают — отбор идёт по пути профиля, который заводим мы сами.
+    Спросить не вышло — пустой список.
     """
     profile = os.path.join(os.path.dirname(remote.settings_path()),
                            'window_profile')
-    killed = 0
+    pids = []
     try:
         flags = getattr(subprocess, 'CREATE_NO_WINDOW', 0)
         found = subprocess.run(
@@ -355,15 +353,53 @@ def close_windows():
             if profile.lower() not in line.lower():
                 continue
             pid = line.rstrip().rsplit(',', 1)[-1].strip()
-            if not pid.isdigit():
-                continue
+            if pid.isdigit():
+                pids.append(pid)
+    except Exception:                              # noqa: BLE001
+        return pids
+    return pids
+
+
+def close_windows():
+    """
+    Закрывает браузеры, работающие С НАШИМ профилем. Возвращает, сколько нашёл.
+
+    Нужен для повтора: второй запуск chrome с тем же профилем открыл бы ВТОРОЕ
+    окно рядом с белым, а не перерисовал первое.
+    """
+    killed = 0
+    flags = getattr(subprocess, 'CREATE_NO_WINDOW', 0)
+    for pid in profile_pids():
+        try:
             subprocess.run(['taskkill', '/F', '/PID', pid],
                            capture_output=True, timeout=20,
                            creationflags=flags)
             killed += 1
-    except Exception:                              # noqa: BLE001
-        return killed
+        except Exception:                          # noqa: BLE001
+            continue
     return killed
+
+
+def wait_window(window, alive=None, sleep=time.sleep, period=5.0):
+    """
+    Держит туннель, пока открыто окно панели.
+
+    ОКНО — НЕ ТОЛЬКО ЗАПУЩЕННЫЙ ПРОЦЕСС. 18 октября 2026 Chrome при запуске
+    применил скачанное обновление (155.0.8059.84): процесс, который запустила
+    программа, подменил файлы, перезапустил браузер и через секунды вышел.
+    Окно уже жило в новом процессе, а прежний window.wait() принял выход за
+    закрытие окна — программа сняла туннель и ушла, окно осталось «без связи»,
+    хотя бот на сервере работал. Так же выходит запуск, который Chrome отдаёт
+    уже открытому окну с тем же профилем. Поэтому после выхода запущенного
+    процесса туннель держится, пока жив хоть один браузер с нашим профилем.
+    """
+    alive = alive or (lambda: bool(profile_pids()))
+    window.wait()
+    if alive():
+        log('Окно панели живёт в другом процессе браузера (обновление Chrome или '
+            'уже открытое окно) — туннель держится, пока оно открыто.')
+    while alive():
+        sleep(period)
 
 
 def open_native_window(url, on_close):
@@ -694,7 +730,7 @@ def main():
         if engine != 'webview':
             window = show_dashboard(remote.url())
         if window is not None:
-            window.wait()               # держим туннель, пока открыто окно
+            wait_window(window)         # держим туннель, пока открыто окно
         elif not open_native_window(remote.url(), lambda: shutdown()):
             open_in_browser(remote.url())
             # ОТКАЗ ГОВОРИТСЯ ВСЛУХ. Прежде запасной путь срабатывал молча, и

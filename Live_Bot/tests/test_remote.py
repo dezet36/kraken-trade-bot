@@ -431,6 +431,49 @@ class TestTheWindowEngine:
         assert 'REMOTE_ENGINE' in inspect.getsource(remote_app.main)
 
 
+class TestTheWindowOutlivesItsFirstProcess:
+    """
+    18.10.2026 Chrome применил обновление при запуске: запущенный процесс вышел
+    через секунды, окно жило в новом — программа сняла туннель, окно осталось
+    «без связи». Туннель держится, пока жив хоть один браузер с профилем окна.
+    """
+
+    class Window:
+        def __init__(self):
+            self.waited = 0
+
+        def wait(self):
+            self.waited += 1
+
+    def test_tunnel_held_while_the_profile_lives(self, monkeypatch):
+        remote_app = __import__('importlib').import_module('control.remote_app')
+        monkeypatch.setattr(remote_app, 'log', lambda *a: None)
+        answers = iter([True, True, True, False])
+        naps = []
+        window = self.Window()
+        remote_app.wait_window(window, alive=lambda: next(answers), sleep=naps.append)
+        assert window.waited == 1 and len(naps) == 2
+
+    def test_a_closed_window_releases_at_once(self, monkeypatch):
+        remote_app = __import__('importlib').import_module('control.remote_app')
+        naps = []
+        remote_app.wait_window(self.Window(), alive=lambda: False, sleep=naps.append)
+        assert naps == []
+
+    def test_main_waits_for_the_window_not_the_process(self):
+        import inspect
+        remote_app = __import__('importlib').import_module('control.remote_app')
+        source = inspect.getsource(remote_app.main)
+        assert 'wait_window(window)' in source and 'window.wait()' not in source.replace('# ', '')
+
+    def test_close_windows_uses_the_same_profile_lookup(self, monkeypatch):
+        remote_app = __import__('importlib').import_module('control.remote_app')
+        killed = []
+        monkeypatch.setattr(remote_app, 'profile_pids', lambda: ['11', '12'])
+        monkeypatch.setattr(remote_app.subprocess, 'run', lambda cmd, **k: killed.append(cmd[-1]))
+        assert remote_app.close_windows() == 2 and killed == ['11', '12']
+
+
 class TestTheTunnelDiesWithTheApp:
     """
     Снятая принудительно программа не имеет права оставить ssh жить.
@@ -645,9 +688,11 @@ class TestOnlyOurOwnWindowsAreClosed:
 
         remote_app = __import__('importlib').import_module('control.remote_app')
 
-        source = inspect.getsource(remote_app.close_windows)
+        # Отбор — в profile_pids (с 18.10.2026 его же читает wait_window), закрытие — по нему.
+        source = inspect.getsource(remote_app.profile_pids)
         assert 'window_profile' in source
         assert 'profile.lower() not in line.lower()' in source
+        assert 'profile_pids()' in inspect.getsource(remote_app.close_windows)
 
 
 class TestTheDashboardCountsItsViewers:
