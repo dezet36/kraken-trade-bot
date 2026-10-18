@@ -28,6 +28,7 @@ from execution import core  # noqa: E402
 from test_accounts_manual import Client, T0, BAR, a_setup, bar, prop  # noqa: E402
 
 H = 3_600_000
+REAL_APPROVED_PRICES = manual._approved_prices     # фикстура подменяет; свой тест зовёт настоящую
 
 
 @pytest.fixture(autouse=True)
@@ -135,6 +136,23 @@ class TestGate:
         monkeypatch.setattr(manual, '_approved_prices', lambda client, accounts: {'BTCUSDT': 97.0})
         manual.update(Client(), now_ms=T0 + 60_000)
         assert not state(code)['pending'] and 'устарел' in sent[-1][1]['title']
+
+    def test_price_now_survives_the_loader_minimum(self, monkeypatch):
+        """Загрузчик свечей при ответе короче 10 свечей отдаёт None («Мало данных»).
+        До 18.10.2026 цена бралась из 3 свечей — не получалась никогда, и проверка
+        устаревшего сетапа молча не работала (28 предупреждений в журнале ошибок)."""
+        import pandas as pd
+        from analysis import market
+        code = prop(ai_control=True)
+        manual.offer('SMCS', a_setup(), now_ms=T0)
+        answer(code, 'BTCUSDT', take=True, conf=5, reason='ок')
+
+        def loader(timeframe, limit=500, symbol=None, client=None, since=None):
+            if limit < 10:
+                return None                       # как data/exchange.fetch_ohlcv
+            return pd.DataFrame({'close': [99.0] * (limit - 1) + [101.5]})
+        monkeypatch.setattr(market, 'fetch_ohlcv', loader)
+        assert REAL_APPROVED_PRICES(Client(), [code]) == {'BTCUSDT': 101.5}
 
     def test_same_setup_is_asked_once(self):
         """Сканер предлагает сетап каждые 5 минут; ИИ решает по нему один раз

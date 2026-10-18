@@ -299,7 +299,11 @@ def _approved_prices(client, accounts):
     for pair in pairs:
         try:
             from analysis.market import fetch_ohlcv
-            df = fetch_ohlcv('5m', limit=3, symbol=pair, client=client)
+            # Не меньше 10 свечей: загрузчик (data/exchange.fetch_ohlcv) при меньшем
+            # ответе пишет «Мало данных» и отдаёт None. До 18.10.2026 здесь было
+            # limit=3 — цена не получалась никогда, и проверка «пока ждали ИИ,
+            # цена ушла за стоп или цель» молча не работала.
+            df = fetch_ohlcv('5m', limit=20, symbol=pair, client=client)
             if df is not None and len(df):
                 out[pair] = float(df['close'].iloc[-1])
         except Exception as exc:                       # noqa: BLE001
