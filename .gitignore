@@ -121,6 +121,13 @@ research/results/smcz/*.log
 # прогоном (python -m fibz.run); текстовые итоги и карты (csv) рядом в git.
 research/results/fibz/*/
 research/results/fibz_*.log
+# Уровни и «против толпы» с нуля (research/lvlz, research/crowdz): прогоны по
+# парам — до ~1.5 ГБ pkl, пересоздаются прогоном; текстовые итоги и карты (csv)
+# рядом в git.
+research/results/lvlz/*/
+research/results/crowdz/*/
+# Служебный журнал стенда сравнения мысли (research/ai_daily_think_ab.py).
+research/results/ai_daily_ab/log.txt
 # Заявки точной симуляции (research/fibo_live_sim.py) — пересоздаются прогоном,
 # по 3–5 МБ на период; текстовые итоги рядом с ними в git.
 research/results/*.pkl
