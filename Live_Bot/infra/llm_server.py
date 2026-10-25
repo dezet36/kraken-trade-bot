@@ -117,7 +117,7 @@ def _warm_prefix(full_text, full_ids):
                                  headers={'Content-Type': 'application/json'})
     started = time.time()
     try:
-        with urllib.request.urlopen(req, timeout=CALL_TIMEOUT_SEC) as resp:
+        with urllib.request.urlopen(req, timeout=scaled(CALL_TIMEOUT_SEC)) as resp:
             resp.read()
     except Exception as exc:                       # noqa: BLE001
         log(f'   модель: прогрев префикса не удался — {exc}')
@@ -128,11 +128,30 @@ def _warm_prefix(full_text, full_ids):
     return n
 
 
+def scaled(timeout):
+    """
+    Предел ожидания ответа × LLM_TIMEOUT_SCALE (config, не меньше 1).
+
+    ЗАЧЕМ. Пределы у задач ИИ подобраны под обычную скорость модели (тетрадь
+    10 мин, допуск пропа 12, вердикт 15, обзор 25, разбор дня 60). С 23.10.2026
+    хостинг отбирает у машины 55–65% процессора (steal), модель стала в 3–5 раз
+    медленнее, и задачи бросали ответ на полпути — модель при этом дорабатывала
+    брошенный вопрос впустую. Пока машина медленная, множитель в .env (3)
+    растягивает все пределы разом; вернуть 1 — когда хостинг починят.
+    """
+    try:
+        k = float(getattr(config, 'LLM_TIMEOUT_SCALE', 1.0) or 1.0)
+    except (TypeError, ValueError):
+        k = 1.0
+    return int(timeout * max(1.0, k))
+
+
 def _completion(body, timeout):
     """POST /completion с именованными поломками. -> словарь ответа сервера."""
     data = json.dumps(body).encode('utf-8')
     req = urllib.request.Request(f'{url()}/completion', data=data,
                                  headers={'Content-Type': 'application/json'})
+    timeout = scaled(timeout)
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             return json.loads(resp.read().decode('utf-8'))
