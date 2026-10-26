@@ -1781,6 +1781,25 @@ class _Handler(BaseHTTPRequestHandler):
                 self._fail(400, str(exc))
             except Exception as exc:                   # noqa: BLE001
                 self._fail(500, f'статистика не собралась: {exc}')
+        elif path == '/api/accounts/feed':
+            # Книга одного торгового счёта для копировщика (Copier/, 27.10.2026):
+            # заявки и позиции как в книге, закрытые после since_ts (мс). Только
+            # чтение, без ключей; слышна там же, где панель, — на localhost.
+            from urllib.parse import parse_qs, urlparse
+            q = parse_qs(urlparse(self.path).query)
+            code = (q.get('id') or [''])[0]
+            try:
+                from accounts import books, live
+                rules = live.get(code)
+                if not rules:
+                    self._fail(404, f'нет счёта «{code}»')
+                    return
+                since = int(float((q.get('since_ts') or ['0'])[0] or 0))
+                self._send_json(books.feed(code, rules, since_ts=since))
+            except ValueError as exc:
+                self._fail(400, str(exc))
+            except Exception as exc:               # noqa: BLE001
+                self._fail(500, f'книга счёта недоступна: {exc}')
         elif path == '/api/accounts':
             # Торговые счета (accounts/live.py): правила и признак ключей —
             # без самих ключей.

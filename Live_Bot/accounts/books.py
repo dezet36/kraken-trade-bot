@@ -760,3 +760,52 @@ def report(code, rules, now_ms_=None):
         'recent': list(reversed(phase_rows[-8:])),
         'started': stored is not None,
     }
+
+
+# ── Для копировщика ─────────────────────────────────────────────────────────
+
+FEED_FORMAT = 1
+FEED_RULES = ('name', 'kind', 'enabled', 'strategies', 'risk_pct', 'sides', 'max_slots',
+              'max_same_direction', 'deposit', 'daily_loss_pct', 'max_drawdown_pct',
+              'profit_target_pct', 'ai_control')
+FEED_CLOSED = 200
+FEED_INSTRUCTIONS = 50
+
+
+def feed(code, rules, since_ts=0, now_ms_=None):
+    """
+    Книга счёта для копировщика (Copier/, решение владельца 27.10.2026:
+    участники повторяют сделки СЧЁТА, а не стратегии). Заявки и позиции — как
+    лежат в книге, без пересчёта: стоп после безубытка или ИИ, остаток после
+    тейка или «половины» видны в них самих. Закрытые сделки — строками журнала
+    новее since_ts (мс) с причиной выхода (SL, BE, TPn, TIME, AI, RULES…).
+    Только чтение; ключей биржи здесь нет и быть не может.
+    """
+    now = now_ms_ or now_ms()
+    with lock:
+        stored = state().get(code)
+        book = synced(copy.deepcopy(stored) if stored else blank(rules, now=now), rules)
+    pending = []
+    for pair, order in sorted(book['pending'].items()):
+        pending.append({**order, 'pair': pair, 'id': f"{pair}@{order['placed_ts']}",
+                        'stop_entry': core.stop_entry(order)})
+    positions = []
+    for pair, pos in sorted(book['positions'].items()):
+        initial = float(pos.get('initial_size') or 0)
+        positions.append({**pos, 'pair': pair,
+                          'remaining': round(float(pos['size']) / initial, 6) if initial else 1.0})
+    closed = [r for r in read_journal()
+              if r.get('account') == code and float(r.get('_t') or 0) * 1000 > since_ts]
+    space = room(rules, book, now)
+    return {
+        'format': FEED_FORMAT, 'account': code, 'at': iso(now), 'ts': now,
+        'rules': {k: rules.get(k) for k in FEED_RULES},
+        'status': book['status'], 'status_why': book['status_why'], 'status_at': book['status_at'],
+        'phase': book['phase'], 'phase_started_at': book['phase_started_at'],
+        'start_balance': round(book['start_balance'], 2), 'balance': round(book['balance'], 2),
+        'equity': round(equity(book), 2),
+        'room': {'amount': round(space[0], 2), 'rule': space[1]} if space else None,
+        'pending': pending, 'positions': positions,
+        'closed': closed[-FEED_CLOSED:],
+        'instructions': book['instructions'][-FEED_INSTRUCTIONS:],
+    }

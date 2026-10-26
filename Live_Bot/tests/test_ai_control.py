@@ -232,6 +232,30 @@ class TestActions:
         assert last['exit_reason'] == 'AI' and last['pnl_usd'] > 0
         assert not state(code)['ai_actions']
 
+    def test_copier_sees_what_the_ai_did(self, sent):
+        """Книга для копировщика (books.feed): безубыток ИИ — стоп в позиции,
+        половина — остаток 0.5, закрытие — строка с причиной AI."""
+        code = prop(ai_control=True)
+        rules = live.get(code)
+        pos = open_position(code)
+        with books.lock:
+            pos['last_price'] = 103.0
+            state(code)['ai_actions'] = [{'pair': 'BTCUSDT', 'do': 'be', 'reason': 'разворот', 'applied': False}]
+        manual.update(Client(), now_ms=T0 + 4 * BAR)
+        seen = books.feed(code, rules, now_ms_=T0 + 4 * BAR)['positions'][0]
+        assert seen['stop_loss'] == seen['entry_price'] and seen['breakeven_set']
+        with books.lock:
+            state(code)['ai_actions'] = [{'pair': 'BTCUSDT', 'do': 'half', 'reason': 'фикс', 'applied': False}]
+        manual.update(Client(), now_ms=T0 + 5 * BAR)
+        f = books.feed(code, rules, now_ms_=T0 + 5 * BAR)
+        assert f['positions'][0]['remaining'] == pytest.approx(0.5) and f['positions'][0]['ai_half']
+        assert 'ИИ' in f['instructions'][-1]['title']
+        with books.lock:
+            state(code)['ai_actions'] = [{'pair': 'BTCUSDT', 'do': 'close', 'reason': 'всё', 'applied': False}]
+        manual.update(Client(), now_ms=T0 + 6 * BAR)
+        f = books.feed(code, rules, now_ms_=T0 + 6 * BAR)
+        assert f['positions'] == [] and f['closed'][-1]['exit_reason'] == 'AI'
+
     def test_refused_action_changes_nothing(self, sent):
         code = prop(ai_control=True)
         pos = open_position(code)

@@ -562,3 +562,64 @@ class TestPanel:
         assert data['books'][code]['waiting'] == []
         status, data = self._call(f'{server}/api/accounts/act', {'id': code, 'action': 'new_phase'})
         assert status == 400 and 'закройте' in data['error']
+
+    def test_feed_for_the_copier(self, server):
+        code = prop(daily_loss_pct=5, max_drawdown_pct=10)
+        manual.offer('SMCS', a_setup())
+        status, data = self._call(f'{server}/api/accounts/feed?id={code}')
+        assert status == 200 and data['format'] == books.FEED_FORMAT and data['account'] == code
+        assert data['rules']['daily_loss_pct'] == 5 and data['rules']['max_drawdown_pct'] == 10
+        assert [o['pair'] for o in data['pending']] == ['BTCUSDT'] and data['positions'] == []
+        status, data = self._call(f'{server}/api/accounts/feed?id=nope')
+        assert status == 404
+
+
+# ── Книга для копировщика (books.feed, 27.10.2026) ──────────────────────────
+
+class TestFeed:
+    def test_order_fill_take_and_close_as_the_book_has_them(self):
+        code = prop(daily_loss_pct=5, max_drawdown_pct=10)
+        rules = live.get(code)
+        manual.offer('SMCS', a_setup(targets=(104.0, 108.0), fractions=(0.5, 0.5),
+                                     breakeven_after_tp=True), now_ms=T0)
+        f = books.feed(code, rules, now_ms_=T0)
+        order = f['pending'][0]
+        assert order['id'] == f'BTCUSDT@{T0}' and order['direction'] == 'LONG'
+        assert order['limit_price'] == 100.0 and order['stop_loss'] == 98.0
+        assert order['targets'] == [104.0, 108.0] and order['stop_entry'] is False
+        assert f['status'] == books.ACTIVE and f['room']['amount'] > 0 and f['closed'] == []
+
+        manual.update(Client({'BTCUSDT': [bar(1, 99.8, 100.4)]}), now_ms=T0 + 3 * BAR)
+        f = books.feed(code, rules, now_ms_=T0 + 3 * BAR)
+        pos = f['positions'][0]
+        assert f['pending'] == [] and pos['trade_id'] == 1 and pos['remaining'] == 1.0
+        assert pos['stop_loss'] == 98.0 and pos['initial_stop'] == 98.0
+
+        manual.update(Client({'BTCUSDT': [bar(2, 100.5, 104.5)]}), now_ms=T0 + 4 * BAR)
+        pos = books.feed(code, rules, now_ms_=T0 + 4 * BAR)['positions'][0]
+        assert pos['tp_hit'] == 1 and pos['remaining'] == pytest.approx(0.5)
+        assert pos['stop_loss'] == 100.0 and pos['breakeven_set']
+
+        manual.update(Client({'BTCUSDT': [bar(3, 99.5, 101.0)]}), now_ms=T0 + 5 * BAR)
+        f = books.feed(code, rules, now_ms_=T0 + 5 * BAR)
+        assert f['positions'] == [] and len(f['closed']) == 1
+        row = f['closed'][0]
+        assert row['trade_id'] == 1 and row['exit_reason'] == 'BE' and row['account'] == code
+        later = books.feed(code, rules, since_ts=int(row['_t'] * 1000), now_ms_=T0 + 5 * BAR)
+        assert later['closed'] == []
+        assert [i['kind'] for i in f['instructions']] == ['place', 'fill', 'target', 'exit']
+
+    def test_other_accounts_stay_out(self):
+        one = prop(name='Один')
+        two = prop(name='Два')
+        manual.offer('SMCS', a_setup(), now_ms=T0)
+        manual.update(Client({'BTCUSDT': [bar(1, 99.8, 100.4), bar(2, 97.5, 99.0)]}), now_ms=T0 + 4 * BAR)
+        rows = books.feed(one, live.get(one), now_ms_=T0 + 4 * BAR)['closed']
+        assert [r['account'] for r in rows] == [one]
+        assert [r['account'] for r in books.feed(two, live.get(two), now_ms_=T0 + 4 * BAR)['closed']] == [two]
+
+    def test_new_account_without_a_book(self):
+        code = prop()
+        f = books.feed(code, live.get(code), now_ms_=T0)
+        assert f['pending'] == [] and f['positions'] == [] and f['balance'] == 10_000
+        assert code not in books.state()
