@@ -1,0 +1,44 @@
+# Служба копировщика: лента движка → заявки на счетах участников Upscale,
+# Telegram участников, админка на 127.0.0.1:8790 (окно CopierAdmin через ssh).
+#
+#   systemctl status copier
+#   journalctl -u copier -f
+
+[Unit]
+Description=Copier (Upscale accounts of participants)
+After=network-online.target copier-engine.service
+Wants=network-online.target
+StartLimitBurst=5
+StartLimitIntervalSec=600
+
+[Service]
+Type=simple
+User=copier
+Group=copier
+WorkingDirectory=/opt/copier/code/Copier
+Environment=COPIER_DATA_DIR=/opt/copier/data
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/opt/copier/venv/bin/python -m copier.service
+Restart=always
+RestartSec=10
+
+Nice=10
+CPUQuota=25%
+MemoryMax=300M
+
+# База и ключи — только пользователю copier (copier.db, .env, состояние ленты).
+UMask=0077
+
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/opt/copier/data
+ReadOnlyPaths=/opt/copier/engine_data
+InaccessiblePaths=/opt/kraken
+
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

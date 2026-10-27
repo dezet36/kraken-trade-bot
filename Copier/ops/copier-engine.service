@@ -1,0 +1,52 @@
+# Замороженный движок стратегий для участников копировщика.
+#
+# Это копия торгового бота на ЗАКРЕПЛЁННОМ теге (/opt/copier/engine), в бумажном
+# режиме, со своей папкой данных. Торговый бот (/opt/kraken) ему недоступен
+# вовсе (InaccessiblePaths), его правки и перезапуски сюда не доходят.
+# Обновляется только скриптом ops/engine_update.sh — рукой владельца.
+#
+# Ни Telegram, ни модели, ни торговых счетов: см. engine.env.example.
+#
+# УСТАНОВКА: ops/setup_server.sh (копирует unit и включает службу).
+#   systemctl status copier-engine
+#   journalctl -u copier-engine -n 200
+
+[Unit]
+Description=Copier engine (frozen strategies for participants)
+After=network-online.target
+Wants=network-online.target
+StartLimitBurst=5
+StartLimitIntervalSec=600
+
+[Service]
+Type=simple
+User=copier
+Group=copier
+WorkingDirectory=/opt/copier/engine/Live_Bot
+Environment=BOT_DATA_DIR=/opt/copier/engine_data
+Environment=PYTHONUNBUFFERED=1
+Environment=HOME=/opt/copier/engine_data
+Environment=MPLCONFIGDIR=/opt/copier/engine_data/.mpl
+ExecStart=/opt/copier/engine_venv/bin/python bot.py
+Restart=always
+RestartSec=15
+
+# Торговый бот и модель — главные на машине: движок уступает им процессор и
+# не может съесть память, которую держит модель.
+Nice=10
+CPUQuota=60%
+MemoryMax=900M
+
+# Изоляция: писать можно только в свою папку данных, папки бота не видно.
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/opt/copier/engine_data
+InaccessiblePaths=/opt/kraken
+
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

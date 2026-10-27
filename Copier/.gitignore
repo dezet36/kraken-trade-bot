@@ -1,0 +1,23 @@
+# Данные копировщика: база участников с ЗАШИФРОВАННЫМИ ключами, журналы — только на сервере
+data/
+*.db
+*.db-wal
+*.db-shm
+.env
+*.env
+!ops/*.env.example
+
+# Ключ демо-счёта Upscale для проверки API (tools/probe.py)
+.probe_key
+probe_results/
+
+.venv/
+__pycache__/
+.pytest_cache/
+
+# Сборка CopierAdmin.exe
+desktop/build/
+desktop/dist/
+desktop/*.spec
+copier_admin.json
+copier_admin.log

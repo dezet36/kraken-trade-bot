@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="copier-build" content="{{BUILD}}">
+<title>Копировщик — админка</title>
+<link rel="stylesheet" href="/static/app.css?v={{BUILD}}">
+</head>
+<body>
+<aside class="sidebar">
+  <div class="brand">Копировщик<span>Upscale</span></div>
+  <nav id="nav">
+    <a data-page="overview" class="active">Обзор</a>
+    <a data-page="users">Участники</a>
+    <a data-page="accounts">Счета</a>
+    <a data-page="trades">Сделки</a>
+    <a data-page="source">Источник</a>
+    <a data-page="journal">Журнал</a>
+    <a data-page="system">Система</a>
+  </nav>
+  <div class="foot" id="foot">—</div>
+</aside>
+<main id="main"><div class="loading">Загрузка…</div></main>
+<div id="modal" class="modal hidden"><div class="sheet" id="sheet"></div></div>
+<div id="toast" class="toast hidden"></div>
+<script src="/static/app.js?v={{BUILD}}"></script>
+</body>
+</html>
