@@ -101,6 +101,7 @@ class FakeUpscale:
         self.markets_list = markets or [market('m-btc', 'BTC'), market('m-eth', 'ETH')]
         self.leverage_allowed = leverage_allowed      # вид счёта: выше — invalid_leverage
         self.orders = {}
+        self.history = {}                   # все ордера со статусом — GET /orders/{acc}/{asset}/history
         self.positions = {}
         self.calls = []
         self.fail_next = None
@@ -120,15 +121,22 @@ class FakeUpscale:
             return 200, list(self.orders.values()), {}
         if method == 'GET' and path.endswith('/active') and path.startswith('/positions/'):
             return 200, list(self.positions.values()), {}
+        if method == 'GET' and path.startswith('/orders/') and path.endswith('/history'):
+            asset = path.split('/')[-2]
+            ids = {m['id'] for m in self.markets_list if m['config']['baseAsset'] == asset}
+            data = [o for o in self.history.values() if o.get('market') in ids]
+            return 200, {'data': data, 'totalCount': len(data)}, {}
         if method == 'GET' and path.startswith('/positions/'):
             # Как настоящий (демо 27.10.2026): pnl до комиссий, fee отдельно, выход — exchanged*.
             return 200, {'status': 'closed', 'eventName': 'closePosition', 'pnl': fp(210), 'fee': fp(10),
-                         'funding': '0', 'exchangedQuote': fp(2200), 'exchangedBase': fp(20)}, {}
+                         'funding': '0', 'exchangedQuote': fp(2200), 'exchangedBase': fp(20),
+                         'size': fp(20), 'notional': fp(2000)}, {}
         if method == 'POST' and path == '/orders':
             if self.leverage_allowed and body.get('leverage') and int(body['leverage']) > int(fp(self.leverage_allowed)):
                 return 400, {'statusCode': 400, 'error': 'invalid_leverage', 'message': 'maxLeverage'}, {}
             oid = str(uuid.uuid4())
             order = dict(body, id=oid, market=body['marketId'], status='active')
+            self.history[oid] = order
             if body['type'] in ('limit', 'market'):
                 self.orders[oid] = order
             elif body['type'] == 'take' and body.get('triggerPrice') == '0':
@@ -148,10 +156,14 @@ class FakeUpscale:
             if oid not in self.orders:
                 return 403, {'error': 'order_not_active', 'message': 'canceled_by_update'}, {}
             new_id = str(uuid.uuid4())
-            self.orders[new_id] = dict(self.orders.pop(oid), id=new_id, triggerPrice=body['triggerPrice'])
+            old = self.orders.pop(oid)
+            self.orders[new_id] = self.history[new_id] = dict(old, id=new_id, triggerPrice=body['triggerPrice'])
+            old['status'] = 'canceled_by_update'
             return 200, self.orders[new_id], {}
         if method == 'DELETE' and path.startswith('/orders/'):
-            self.orders.pop(path.rsplit('/', 1)[-1], None)
+            gone = self.orders.pop(path.rsplit('/', 1)[-1], None)
+            if gone:
+                gone['status'] = 'canceled'
             return 204, None, {}
         if method == 'POST' and path.endswith('/close-all'):
             self.orders.clear()
@@ -163,6 +175,7 @@ class FakeUpscale:
         """Налить лимит: позиция + привязанный стоп как отдельный ордер."""
         order = self.orders.pop(order_id)
         pid = 'pos-' + order_id[:8]
+        order.update(status='executed', positionId=pid)
         # Как настоящая позиция: entryPrice нет, есть notional и size.
         entry = Decimal(str(price)) if price else Decimal(order['triggerPrice']) / Decimal(10) ** 9
         size = Decimal(order['baseSize']) / Decimal(10) ** 9
@@ -174,6 +187,11 @@ class FakeUpscale:
             self.orders[sid] = {'id': sid, 'type': 'stop', 'positionId': [pid],
                                 'market': order['marketId'], 'triggerPrice': order['stopTriggerPrice']}
         return pid
+
+
+    def fail(self, order_id, code='insufficient_reserve_at_execution'):
+        """Upscale отменил заявку при исполнении (как AVAX 27.10.2026)."""
+        self.orders.pop(order_id).update(status='canceled_by_error', errorCode=code)
 
 
 class Notes:

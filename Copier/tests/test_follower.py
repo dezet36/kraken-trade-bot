@@ -43,6 +43,8 @@ def test_full_path(tmp_path):
     assert entry[2]['type'] == 'limit'
     assert entry[2]['stopTriggerPrice'] == to_fp9(95) and 'takeTriggerPrice' not in entry[2]
     assert from_fp9(entry[2]['baseSize']) == 20          # 1% от 10 000 / 5 $
+    # Резерв = маржа 20 × 100 / 5 = 400 $ + 3% на комиссию, спред и проскальзывание (AVAX 27.10.2026).
+    assert from_fp9(entry[2]['amount']) == 412
     assert any('заявка выставлена' in text for _, text in notes.users)
 
     # Налив на Upscale → сверка: позиция, два тейка.
@@ -165,7 +167,8 @@ def test_master_cancel_cancels_follower(tmp_path):
     bot.data = book()
     pump(f, fol)
     assert not fake.orders
-    assert db.trades(account_id=acc_id)[0]['state'] == 'canceled'
+    t = db.trades(account_id=acc_id)[0]
+    assert t['state'] == 'canceled' and t['exit_reason'] == 'мастер снял заявку'
 
 
 def test_orphan_fill_closed_when_master_cancels(tmp_path):
@@ -276,3 +279,32 @@ def test_closed_market_refused(tmp_path):
     fake.markets_list = [market('m-btc', 'BTC', closed=True)]
     pump(f, fol)
     assert 'закрыт' in db.refusals()[0]['reason']
+
+
+def test_entry_canceled_on_execution_reported(tmp_path):
+    """AVAX 27.10.2026: Upscale снял заявку в момент налива — причина в сделке, участнику и админу."""
+    import time
+    db, fake, bot, f, fol, notes, acc_id = setup(tmp_path, data=book([pending()]))
+    pump(f, fol)
+    fake.fail(db.open_trades(account_id=acc_id)[0]['entry_order'])
+    fol.now = lambda: time.time() + 600                   # заявка уже не «свежая»
+    sync(db, fol, acc_id)
+    t = db.trades(account_id=acc_id)[0]
+    assert t['state'] == 'canceled' and 'insufficient_reserve_at_execution' in t['exit_reason']
+    assert any('insufficient_reserve_at_execution' in text for _, text in notes.users)
+    assert any('insufficient_reserve_at_execution' in text for text in notes.admins)
+
+
+def test_entry_filled_and_closed_between_syncs(tmp_path):
+    """Налилась и закрылась стопом Upscale до сверки: сделка закрыта с итогом, не «снята»."""
+    import time
+    db, fake, bot, f, fol, notes, acc_id = setup(tmp_path, data=book([pending()]))
+    pump(f, fol)
+    pid = fake.fill(db.open_trades(account_id=acc_id)[0]['entry_order'])
+    fake.positions.pop(pid)
+    fake.orders.clear()                                   # стоп сработал — привязанные сняты
+    fol.now = lambda: time.time() + 600
+    sync(db, fol, acc_id)
+    t = db.trades(account_id=acc_id)[0]
+    assert t['state'] == 'closed' and t['position_id'] == pid
+    assert float(t['pnl_usd']) == 200 and t['entry_price']

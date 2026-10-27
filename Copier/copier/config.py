@@ -99,6 +99,10 @@ EQUITY_SNAPSHOT_MIN = _float('COPIER_EQUITY_SNAPSHOT_MIN', 5)
 DD_BUFFER_PCT = _float('COPIER_DD_BUFFER_PCT', 0.5)
 # Плечо, если рынок его не назвал (крипта на Upscale — до x5).
 DEFAULT_MAX_LEVERAGE = _float('COPIER_DEFAULT_MAX_LEVERAGE', 5)
+# Резерв заявки сверх маржи, %: Upscale на исполнении берёт из резерва маржу по цене
+# исполнения + комиссию + спред; не хватило — canceled_by_error (AVAX 27.10.2026:
+# резерв ровно под маржу, заявка снята в момент налива). Неистраченное возвращается.
+RESERVE_EXTRA_PCT = _float('COPIER_RESERVE_EXTRA_PCT', 3)
 
 # Подтверждения в Telegram живут столько секунд (как в боте: CONFIRM_TTL_S).
 CONFIRM_TTL_S = _int('COPIER_CONFIRM_TTL_S', 600)

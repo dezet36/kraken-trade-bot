@@ -200,6 +200,11 @@ class UpscaleClient:
     async def position(self, position_id):
         return await self.call('GET', f'/positions/{position_id}')
 
+    async def order_history(self, account_id, asset, limit=50):
+        """Ордера по тикеру ({'data': [...], 'totalCount'}); ордера по id API не отдаёт."""
+        return await self.call('GET', f'/orders/{account_id}/{asset}/history',
+                               params={'limit': limit}) or {}
+
     async def create_order(self, body, idem_key):
         return await self.call('POST', '/orders', body=body, idem_key=idem_key)
 
@@ -229,13 +234,14 @@ def _retry_after(headers, payload):
 # ── тела ордеров ───────────────────────────────────────────────────────────
 
 def entry_order(account_id, market_id, direction, limit_price, base_size, leverage,
-                margin, stop=None, take=None, kind='limit'):
+                reserve, stop=None, take=None, kind='limit'):
     """
     Ордер на вход: размер в базовом активе (sizeMode=base), стоп и тейк — на нём же.
 
     amount в схеме обязателен и для ордера на увеличение означает резерв в
-    котируемой валюте; при sizeMode=base передаём оценку маржи (номинал/плечо).
-    Как сервер сочетает amount и baseSize — пункт проверки tools/probe.py.
+    котируемой валюте: из него на исполнении берутся маржа по цене исполнения,
+    комиссия и спред (демо 27.10.2026), поэтому передаётся маржа с запасом
+    (sizing.Decision.reserve), а не ровно номинал/плечо.
     """
     body = {
         'accountId': account_id,
@@ -244,7 +250,7 @@ def entry_order(account_id, market_id, direction, limit_price, base_size, levera
         'direction': direction.lower(),
         'sizeMode': 'base',
         'baseSize': to_fp9(base_size),
-        'amount': to_fp9(margin),
+        'amount': to_fp9(reserve),
         'leverage': to_fp9(leverage),
     }
     if kind != 'market':

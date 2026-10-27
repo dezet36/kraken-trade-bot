@@ -329,7 +329,7 @@ class Follower:
                     rules={'risk_pct': self.feed.master_risk_pct()},
                     open_trades=own_open, other_sides=other_sides,
                     default_leverage=config.DEFAULT_MAX_LEVERAGE, buffer_pct=config.DD_BUFFER_PCT,
-                    leverage=lev)
+                    leverage=lev, reserve_extra_pct=config.RESERVE_EXTRA_PCT)
                 if not decision.ok:
                     if trade_id is not None:
                         self.db.update_trade(trade_id, state='error', note=decision.reason[:300])
@@ -351,7 +351,7 @@ class Follower:
                     self.db.update_trade(trade_id, leverage=decision.leverage, entry_idem=idem)
                 body = entry_order(acc['upscale_id'], market['id'], rec['direction'],
                                    decision.limit_price, decision.base_size, decision.leverage,
-                                   decision.margin, stop=decision.stop, take=decision.take,
+                                   decision.reserve, stop=decision.stop, take=decision.take,
                                    kind=kind)
                 try:
                     resp = await client.create_order(body, idem) or {}
@@ -413,6 +413,8 @@ class Follower:
                 if client is None:
                     return
                 if t['state'] in ('new', 'pending'):
+                    # Причина — до сверки: сверка увидит пропавшую заявку и спросит Upscale, если причины нет.
+                    self.db.update_trade(t['id'], exit_reason='мастер снял заявку')
                     await self._cancel_entry(client, t)
                     await self._sync(acc, client)
                     t = self.db.trade(t['id'])
@@ -511,6 +513,7 @@ class Follower:
                 if client is None:
                     return
                 if t['state'] in ('new', 'pending'):
+                    self.db.update_trade(t['id'], exit_reason=reason)
                     await self._cancel_entry(client, t)
                     await self._sync(acc, client)
                     t = self.db.trade(t['id'])
@@ -669,13 +672,51 @@ class Follower:
                     await self._opened(acc, client, t, pos)
                 elif t.get('entry_order') and t['entry_order'] not in active_ids and \
                         not self._fresh(t):
-                    self.db.update_trade(t['id'], state='canceled', closed_at=now_iso(),
-                                         exit_reason=t.get('exit_reason') or 'заявка снята на Upscale')
+                    await self._entry_gone(acc, client, t)
             elif t['state'] == 'open':
                 pos = await self._position(acc, client, t, positions)
                 if pos is None:
                     await self._closed(acc, client, t)
 
+
+    async def _entry_gone(self, acc, client, t):
+        """
+        Заявка входа пропала из активных, позиции нет. Сняли сами — причина уже
+        записана. Иначе спросить Upscale: на исполнении он может отменить заявку
+        (canceled_by_error, AVAX 27.10.2026 — insufficient_reserve_at_execution) —
+        это сообщается участнику и админу, а не молча «снята».
+        """
+        if t.get('exit_reason'):
+            self.db.update_trade(t['id'], state='canceled', closed_at=now_iso())
+            return
+        order = await self._entry_order_info(acc, client, t) or {}
+        status, code = order.get('status'), order.get('errorCode')
+        if status == 'executed' and order.get('positionId'):
+            # Налилась и уже закрылась между сверками (стоп или тейк Upscale).
+            self.db.update_trade(t['id'], state='open', position_id=str(order['positionId']),
+                                 opened_at=now_iso())
+            await self._closed(acc, client, self.db.trade(t['id']))
+            return
+        if code or status == 'canceled_by_error':
+            reason = f'Upscale отменил заявку на исполнении: {code or status}'
+            await self.notify.user(acc['tg_id'], f'❗ {t["strategy"]} {t["pair"]} {_side(t)}: {reason} — '
+                                                 f'позиция не открылась')
+            await self.notify.admin(f'❗ участник {acc["tg_id"]} {t["pair"]}: {reason}')
+        else:
+            reason = 'заявка снята на Upscale' + (f' ({status})' if status else '')
+        self.db.update_trade(t['id'], state='canceled', closed_at=now_iso(), exit_reason=reason)
+
+    async def _entry_order_info(self, acc, client, t):
+        """Ордер входа из истории по тикеру: отдельного запроса ордера по id у Upscale нет."""
+        try:
+            market = (await self.markets(acc, client)).find(t['pair']) or {}
+            asset = mk.market_base(market) or mk.base_asset(t['pair'])
+            found = await client.order_history(acc['upscale_id'], asset)
+        except UpscaleError as err:
+            log(f'исполнитель: история ордеров {t["pair"]} не прочитана — {err}')
+            return None
+        items = found.get('data') if isinstance(found, dict) else found
+        return next((o for o in items or [] if str(o.get('id')) == str(t['entry_order'])), None)
 
     def _fresh(self, t):
         from copier.db import parse_iso
@@ -685,8 +726,9 @@ class Follower:
     async def _opened(self, acc, client, t, pos):
         entry = position_entry(pos)
         size = from_fp9(pick(pos, ('size', 'baseSize')))
+        # exit_reason мог быть записан под снятие заявки, которое не успело: налилась — причины выхода нет.
         self.db.update_trade(t['id'], state='open', position_id=self._position_id(pos, t),
-                             entry_price=entry, filled_size=size, opened_at=now_iso())
+                             entry_price=entry, filled_size=size, opened_at=now_iso(), exit_reason=None)
         t = self.db.trade(t['id'])
         await self.notify.user(acc['tg_id'], f'✅ {t["strategy"]} {t["pair"]} {_side(t)}: заявка '
                                              f'налилась' + (f' по {_fmt(entry)}' if entry else ''))
@@ -696,19 +738,21 @@ class Follower:
             await self._move_stop(acc, client, t, _D(t['stop']))
 
     async def _closed(self, acc, client, t):
-        pnl, exit_price = None, None
+        pnl, exit_price, entry = None, None, None
         if t.get('position_id'):
             try:
                 info = await client.position(t['position_id']) or {}
                 pnl, exit_price = closed_result(info)
+                entry = None if t.get('entry_price') else position_entry(info)
             except UpscaleError as err:
                 log(f'исполнитель: итог {t["pair"]} не прочитан — {err}')
         risk = _D(t['risk_usd'])
         r = (pnl / risk) if (pnl is not None and risk) else None
         reason = t.get('exit_reason') or 'стоп или тейк Upscale'
+        extra = {'entry_price': entry} if entry else {}
         self.db.update_trade(t['id'], state='closed', closed_at=now_iso(), pnl_usd=pnl,
                              pnl_r=None if r is None else round(r, 3), exit_price=exit_price,
-                             exit_reason=reason)
+                             exit_reason=reason, **extra)
         await self.notify.user(acc['tg_id'], self.text_closed(t, pnl, r, reason))
 
     async def _status_changes(self, acc, status):

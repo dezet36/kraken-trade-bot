@@ -37,6 +37,7 @@ class Decision:
     base_size: Decimal = ZERO
     leverage: Decimal = ZERO
     margin: Decimal = ZERO
+    reserve: Decimal = ZERO          # amount заявки: маржа + запас на комиссию, спред и проскальзывание
     risk_usd: Decimal = ZERO
     limit_price: Decimal = ZERO
     stop: Decimal = ZERO
@@ -101,7 +102,7 @@ def headroom(status, buffer_pct):
 
 
 def plan_entry(order, market, status, rules, open_trades, other_sides, default_leverage,
-               buffer_pct, leverage=None):
+               buffer_pct, leverage=None, reserve_extra_pct=0):
     """
     order       — заявка мастера: direction, limit_price, stop_loss, targets.
     market      — рынок Upscale (None — пары на Upscale нет).
@@ -159,14 +160,17 @@ def plan_entry(order, market, status, rules, open_trades, other_sides, default_l
         return refuse('размер меньше шага рынка')
     notional = base_size * limit_price
     leverage = D(leverage) or mk.max_leverage(market, default_leverage)
-    if notional > balance * leverage:
-        return refuse(f'номинал ${notional:.0f} больше баланс × плечо ${balance * leverage:.0f} '
-                      f'(стоп {dist / limit_price * 100:.2f}% — теснее, чем позволяет плечо)')
+    margin = notional / leverage
+    reserve = margin * (1 + D(reserve_extra_pct, ZERO) / HUNDRED)
+    if reserve > balance:
+        return refuse(f'номинал ${notional:.0f} с запасом резерва больше баланс × плечо '
+                      f'${balance * leverage:.0f} (стоп {dist / limit_price * 100:.2f}% — теснее, '
+                      f'чем позволяет плечо)')
 
     targets = [D(t) for t in (order.get('targets') or []) if D(t)]
     take = mk.round_price(targets[0], price_step) if len(targets) == 1 else None
     return Decision(True, '', base_size=base_size, leverage=leverage,
-                    margin=notional / leverage, risk_usd=risk_usd, limit_price=limit_price,
+                    margin=margin, reserve=reserve, risk_usd=risk_usd, limit_price=limit_price,
                     stop=stop, take=take,
                     details={'notional': float(notional), 'dist_pct': float(dist / limit_price * 100)})
 

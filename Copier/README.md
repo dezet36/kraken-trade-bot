@@ -106,7 +106,8 @@ tests/    лента, размер, клиент, исполнитель, Telegr
 
 `python tools/probe.py`, затем `python tools/probe.py --fill`. Ключ демо-счёта кладётся в `Copier/.probe_key` (на сервере — `UPSCALE_API_KEY`, вывод — `PROBE_OUT`). Пройдено на демо 27.10.2026, ответы — `/opt/copier/data/probe/20261027_045724.json`:
 
-- [x] лимит и `stop_market` принимают `stopTriggerPrice` и `takeTriggerPrice`; `sizeMode=base` + `baseSize` работает, `amount` — маржа (`amount=0` — отказ `amount_not_positive`);
+- [x] лимит и `stop_market` принимают `stopTriggerPrice` и `takeTriggerPrice`; `sizeMode=base` + `baseSize` работает, `amount` — резерв (`amount=0` — отказ `amount_not_positive`). На исполнении из резерва берутся маржа по цене исполнения + комиссия + спред; не хватило — `canceled_by_error` / `insufficient_reserve_at_execution` (AVAX 27.10.2026: резерв ровно под маржу, рынок со спредом). Поэтому резерв = маржа + `COPIER_RESERVE_EXTRA_PCT` (3%), неистраченное возвращается. Замер на ARB: потрачено = маржа по индексу × 1.00063;
+- [x] деталей одного ордера API не отдаёт — только история по тикеру `GET /orders/{acc}/{asset}/history` (`data`, `totalCount`, `errorCode`); по ней копировщик узнаёт, почему пропала заявка, и сообщает участнику и админу;
 - [x] рыночный вход со стопом на ордере: после налива появляется отдельный ордер `type:"stop"` с `positionId` (= `idx` позиции) и `parentOrderId` (= ордер входа);
 - [x] шагов цены и размера у рынков нет — цены и размеры в fp9 любой точности; плечо — `settings.maxLeverageByAccount` в fp9 по видам счёта (`{"0":5,"1":5,"2":2}`), какой вид у счёта — API не говорит, поэтому плечо перебирается сверху вниз; закрытость — `settings.isClosed/isPaused/isCloseOnly`;
 - [x] лимиты в `/accounts/with-risk-status` — обычные проценты (`"5"`), а `consistencyRuleLimit` — доля в fp9 (`"300000000"` = 30%);
