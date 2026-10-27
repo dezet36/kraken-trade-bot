@@ -44,66 +44,6 @@ DEV до издержек (комиссии и проскальзывание в
 
 средний результат до издержек по выходу: {'cont_time': -0.023, 'fade_half': 0.231, 'fade_time': 0.245}
 по ОИ: {'any': 0.152, 'oi0.5': 0.149, 'oi1.5': 0.151}
-  doi[w:] = oi_close[w:] / oi_close[:-w] - 1
-  doi[w:] = oi_close[w:] / oi_close[:-w] - 1
-  doi[w:] = oi_close[w:] / oi_close[:-w] - 1
-  doi[w:] = oi_close[w:] / oi_close[:-w] - 1
-  doi[w:] = oi_close[w:] / oi_close[:-w] - 1
-  doi[w:] = oi_close[w:] / oi_close[:-w] - 1
-  doi[w:] = oi_close[w:] / oi_close[:-w] - 1
-  doi[w:] = oi_close[w:] / oi_close[:-w] - 1
-  doi[w:] = oi_close[w:] / oi_close[:-w] - 1
-  doi[w:] = oi_close[w:] / oi_close[:-w] - 1
-  doi[w:] = oi_close[w:] / oi_close[:-w] - 1
-  doi[w:] = oi_close[w:] / oi_close[:-w] - 1
-  doi[w:] = oi_close[w:] / oi_close[:-w] - 1
-  doi[w:] = oi_close[w:] / oi_close[:-w] - 1
-  doi[w:] = oi_close[w:] / oi_close[:-w] - 1
-  doi[w:] = oi_close[w:] / oi_close[:-w] - 1
-  doi[w:] = oi_close[w:] / oi_close[:-w] - 1
-  doi[w:] = oi_close[w:] / oi_close[:-w] - 1
-  doi[w:] = oi_close[w:] / oi_close[:-w] - 1
-  doi[w:] = oi_close[w:] / oi_close[:-w] - 1
-  doi[w:] = oi_close[w:] / oi_close[:-w] - 1
-  doi[w:] = oi_close[w:] / oi_close[:-w] - 1
-  doi[w:] = oi_close[w:] / oi_close[:-w] - 1
-  doi[w:] = oi_close[w:] / oi_close[:-w] - 1
-  doi[w:] = oi_close[w:] / oi_close[:-w] - 1
-  doi[w:] = oi_close[w:] / oi_close[:-w] - 1
-  doi[w:] = oi_close[w:] / oi_close[:-w] - 1
-  doi[w:] = oi_close[w:] / oi_close[:-w] - 1
-  doi[w:] = oi_close[w:] / oi_close[:-w] - 1
-  doi[w:] = oi_close[w:] / oi_close[:-w] - 1
-  doi[w:] = oi_close[w:] / oi_close[:-w] - 1
-  doi[w:] = oi_close[w:] / oi_close[:-w] - 1
-  doi[w:] = oi_close[w:] / oi_close[:-w] - 1
-  doi[w:] = oi_close[w:] / oi_close[:-w] - 1
-  doi[w:] = oi_close[w:] / oi_close[:-w] - 1
-  doi[w:] = oi_close[w:] / oi_close[:-w] - 1
-  doi[w:] = oi_close[w:] / oi_close[:-w] - 1
-  doi[w:] = oi_close[w:] / oi_close[:-w] - 1
-  doi[w:] = oi_close[w:] / oi_close[:-w] - 1
-  doi[w:] = oi_close[w:] / oi_close[:-w] - 1
-  doi[w:] = oi_close[w:] / oi_close[:-w] - 1
-  doi[w:] = oi_close[w:] / oi_close[:-w] - 1
-  doi[w:] = oi_close[w:] / oi_close[:-w] - 1
-  doi[w:] = oi_close[w:] / oi_close[:-w] - 1
-  doi[w:] = oi_close[w:] / oi_close[:-w] - 1
-  doi[w:] = oi_close[w:] / oi_close[:-w] - 1
-  doi[w:] = oi_close[w:] / oi_close[:-w] - 1
-  doi[w:] = oi_close[w:] / oi_close[:-w] - 1
-  doi[w:] = oi_close[w:] / oi_close[:-w] - 1
-  doi[w:] = oi_close[w:] / oi_close[:-w] - 1
-  doi[w:] = oi_close[w:] / oi_close[:-w] - 1
-  doi[w:] = oi_close[w:] / oi_close[:-w] - 1
-  doi[w:] = oi_close[w:] / oi_close[:-w] - 1
-  doi[w:] = oi_close[w:] / oi_close[:-w] - 1
-  doi[w:] = oi_close[w:] / oi_close[:-w] - 1
-  doi[w:] = oi_close[w:] / oi_close[:-w] - 1
-  doi[w:] = oi_close[w:] / oi_close[:-w] - 1
-  doi[w:] = oi_close[w:] / oi_close[:-w] - 1
-  doi[w:] = oi_close[w:] / oi_close[:-w] - 1
-  doi[w:] = oi_close[w:] / oi_close[:-w] - 1
 
 fade_time h60, W5, DEV — в процентах цены (вход по рынку после свечи каскада):
   z3/любой ОИ    сделок  57691 | стоп: медиана 0.27% | ход в нашу сторону до выхода: средний +0.061%, медиана -0.169% | вход дальше экстремума на 0.17%

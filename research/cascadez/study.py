@@ -69,7 +69,8 @@ def cascades(B, oi_close, w):
     lo = pd.Series(l).rolling(w).min().to_numpy()
     hi = pd.Series(h).rolling(w).max().to_numpy()
     doi = np.full(n, np.nan)
-    doi[w:] = oi_close[w:] / oi_close[:-w] - 1
+    with np.errstate(invalid='ignore', divide='ignore'):
+        doi[w:] = oi_close[w:] / oi_close[:-w] - 1
     with np.errstate(invalid='ignore'):
         base = (np.abs(r) >= np.maximum(ZS[0] * scale, MIN_MOVE)) & (scale > 0)
     idx = np.flatnonzero(base)
