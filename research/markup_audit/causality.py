@@ -31,7 +31,20 @@ STEP_H = 9
 FROM, TO = D.minute('2025-10-01'), D.minute('2026-09-25')
 
 
+CACHE = None          # 'backtest_cache_12m' и т. п. — лёгкие свечи стенда вместо минуток
+
+
 def frames_of(pair):
+    if CACHE:
+        import backtest_smc as bt
+        bt.CACHE_DIR = os.path.join(RESEARCH, CACHE)
+        data = bt.load_pair(pair)
+        out = {}
+        for key, tf in (('bias', '1d'), ('htf', '4h'), ('poi', '1h')):
+            df = data[tf].reset_index(drop=True)
+            t = pd.DatetimeIndex(df['timestamp']).as_unit('ms').asi8 // 60_000
+            out[key] = (t.astype(np.int64), df)
+        return out
     bars = D.load(pair, tfs=('1h', '4h', '1d'), src='bybit')
     out = {}
     for key, tf in (('bias', '1d'), ('htf', '4h'), ('poi', '1h')):
@@ -97,4 +110,15 @@ def main(pairs):
 
 if __name__ == '__main__':
     sys.stdout.reconfigure(encoding='utf-8')
-    main(sys.argv[1:] or ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'DOGEUSDT'])
+    args = sys.argv[1:]
+    while args and args[0].startswith('--'):
+        name, _, value = args.pop(0)[2:].partition('=')
+        if name == 'structure':
+            from analysis.smc import params as SP
+            SP.STRUCTURE_MODE = value
+            print('структура:', SP.STRUCTURE_MODE, flush=True)
+        elif name == 'cache':
+            CACHE = value
+            FROM, TO = D.minute('2025-08-01'), D.minute('2026-07-01')
+            print('свечи:', CACHE, flush=True)
+    main(args or ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'DOGEUSDT'])

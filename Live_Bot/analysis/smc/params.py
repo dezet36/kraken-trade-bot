@@ -98,6 +98,19 @@ SWING_SOFT_RIGHT = _b('SWING_SOFT_RIGHT', False)
 BREAK_ON_CLOSE = _b('BREAK_ON_CLOSE', True)
 # Тренд подтверждён после трёх элементов подряд: HH-HL-HH или LL-LH-LL (§2.2).
 TREND_CONFIRM_LEGS = _i('TREND_CONFIRM_LEGS', 3)
+# Что считается сменой тренда на свинговой структуре (аудит 27.10.2026,
+# docs/Аудит_разметки_2026-10-27.md):
+#   'fractal'   — пробой ЛЮБОГО опубликованного свинга против тренда (как было
+#                 всегда): CHoCH ~50% сломов, тренд 1ч меняется раз в ~22 свечи;
+#   'protected' — CHoCH только при пробое ЗАЩИЩЁННОГО свинга — того, с которого
+#                 начался ход к последнему слому по тренду; пробой мелкого отката
+#                 внутри тренда событием не считается (классика смарт-мани):
+#                 CHoCH ~31%, тренд меняется раз в ~50 свечей.
+# По умолчанию — прежнее; 'protected' — для замера (research/markup_audit).
+# Замер 27.10.2026 в живой SMC (research/markup_audit/PROTOCOL_STRUCTURE.md):
+# классика хуже — сделок −15%, R на сделку +0.197 → −0.052, просадка 30R →
+# 51R; весь плюс SMC — в блоках сломов, которые классика не считает.
+STRUCTURE_MODE = _s('STRUCTURE_MODE', 'fractal')
 
 # ── Ликвидность (§3) ─────────────────────────────────────────────────────────
 # Равные вершины/низы: допуск, при котором два экстремума считаются равными.
@@ -172,7 +185,7 @@ STRUCTURAL = frozenset((
     'BIAS_MODE', 'BIAS_REQUIRE_CONFIRMED', 'MIN_HTF_BARS',
     'LOOKBACK_BIAS', 'LOOKBACK_HTF', 'LOOKBACK_POI', 'LOOKBACK_LTF',
     'SWING_N_STRUCT', 'SWING_N_MINOR', 'SWING_SOFT_RIGHT',
-    'BREAK_ON_CLOSE', 'TREND_CONFIRM_LEGS',
+    'BREAK_ON_CLOSE', 'TREND_CONFIRM_LEGS', 'STRUCTURE_MODE',
     'EQ_TOLERANCE_PCT', 'EQ_MIN_BARS_APART', 'EQ_MAX_BARS_APART',
     'SWEEP_MIN_PENETRATION_PCT', 'SWEEP_RECLAIM_BARS', 'SWEEP_FRESH_BARS',
     'FVG_MIN_SIZE_PCT', 'FVG_MITIGATED_AT', 'FVG_MAX_AGE_BARS',

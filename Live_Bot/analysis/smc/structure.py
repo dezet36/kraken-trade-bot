@@ -141,6 +141,10 @@ def build_structure(df, n=None, break_on_close=None, tier='swing'):
             trend = BEARISH
             ref_low = None
 
+    if tier == 'swing' and params.STRUCTURE_MODE == 'protected':
+        events, trend = _protected_events(by_confirm, close if break_on_close else high,
+                                          close if break_on_close else low, times, bos_tag, choch_tag)
+
     # Хронология ПОДТВЕРЖДЁННОГО тренда (§2.2: три структурных элемента
     # подряд). Нужна отдельно от событий слома: направление последнего слома
     # меняется на каждом проколе и в боковике скачет туда-сюда, а
@@ -164,6 +168,53 @@ def build_structure(df, n=None, break_on_close=None, tier='swing'):
         '_confirmed_timeline': confirmed_timeline,
         '_confirmed_index': [c[0] for c in confirmed_timeline],
     }
+
+
+def _protected_events(by_confirm, up, down, times, bos_tag, choch_tag):
+    """
+    Сломы по классике (params.STRUCTURE_MODE='protected', аудит 27.10.2026).
+
+    По тренду — как всегда: закрытие за последним опубликованным непробитым
+    свингом в сторону тренда — BOS, и защищённым становится последний свинг с
+    другой стороны (откуда начался ход к этому слому). Против тренда событие
+    одно — CHoCH, и только при пробое ЗАЩИЩЁННОГО свинга; пробой мелкого отката
+    внутри тренда — внутренняя структура, не событие. Пока тренда нет или
+    защищённого свинга ещё нет — защищённым считается последний опубликованный.
+    """
+    events = []
+    trend = NEUTRAL
+    last_high = last_low = None       # последний опубликованный непробитый свинг
+    prot_high = prot_low = None       # защищённые свинги
+
+    def event(i, kind, direction, point):
+        events.append({'index': i, 'time': times[i], 'type': kind, 'direction': direction,
+                       'level': point['price'], 'broken_index': point['index']})
+
+    for i in range(len(up)):
+        for point in by_confirm.get(i, ()):
+            if point['kind'] == 'high':
+                last_high = point
+            else:
+                last_low = point
+        if trend != BEARISH:
+            if last_high is not None and up[i] > last_high['price']:
+                event(i, bos_tag if trend == BULLISH else choch_tag, BULLISH, last_high)
+                trend, prot_low, last_high = BULLISH, last_low, None
+                continue
+            guard = (prot_low or last_low) if trend == BULLISH else last_low
+            if guard is not None and down[i] < guard['price']:
+                event(i, choch_tag, BEARISH, guard)
+                trend, prot_high, last_low, prot_low = BEARISH, last_high, None, None
+        else:
+            if last_low is not None and down[i] < last_low['price']:
+                event(i, bos_tag, BEARISH, last_low)
+                prot_high, last_low = last_high, None
+                continue
+            guard = prot_high or last_high
+            if guard is not None and up[i] > guard['price']:
+                event(i, choch_tag, BULLISH, guard)
+                trend, prot_low, last_high, prot_high = BULLISH, last_low, None, None
+    return events, trend
 
 
 def _confirmed_trend_from_labels(labels, legs=None):
