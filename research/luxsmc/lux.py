@@ -84,12 +84,14 @@ class Legs:
         return change
 
 
-def build(h, l, c, swing_size=SWING_SIZE, internal_size=INTERNAL_SIZE):
+def build(h, l, c, swing_size=SWING_SIZE, internal_size=INTERNAL_SIZE, pivots=None):
     """События сломов с ордер-блоками. Каждое событие — словарь:
     i — бар слома (известен на его закрытии), scope 'internal'|'swing',
     side ±1, tag 'BOS'|'CHoCH', ob_hi/ob_lo/ob_i — блок, swing_bias и
     internal_bias — тренды ДО этого слома, trail_top/trail_bottom — крайние
-    точки (зоны premium/discount) на закрытии бара."""
+    точки (зоны premium/discount) на закрытии бара.
+    pivots — список, куда дописываются точки ног: scope, kind (+1 вершина,
+    −1 донышко), level, pivot_i (бар точки), i (бар, на котором она известна)."""
     n = len(c)
     atr = atr_rma(h, l, c, 200)
     vol = np.where(np.isnan(atr), False, (h - l) >= 2 * atr)
@@ -107,6 +109,11 @@ def build(h, l, c, swing_size=SWING_SIZE, internal_size=INTERNAL_SIZE):
 
     def set_pivot(p, level, idx):
         p.last, p.current, p.crossed, p.index = p.current, level, False, idx
+        if pivots is not None:
+            # сравнение по тождеству: у dataclass == сравнивает поля
+            scope = 'swing' if p is sw_hi or p is sw_lo else 'internal'
+            pivots.append({'scope': scope, 'kind': 1 if p is sw_hi or p is in_hi else -1,
+                           'level': level, 'pivot_i': idx, 'i': i})
 
     def order_block(p, i, side):
         if side == BULLISH:
