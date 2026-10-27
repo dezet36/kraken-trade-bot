@@ -151,7 +151,10 @@ def build(h, l, c, swing_size=SWING_SIZE, internal_size=INTERNAL_SIZE, pivots=No
             trend[scope] = side
             ob_hi, ob_lo, ob_i = order_block(p, i, side)
             events.append({'i': i, 'scope': scope, 'side': side, 'tag': tag,
-                           'level': lvl, 'ob_hi': ob_hi, 'ob_lo': ob_lo, 'ob_i': ob_i,
+                           'level': lvl, 'pivot_i': p.index,
+                           'ob_hi': ob_hi, 'ob_lo': ob_lo, 'ob_i': ob_i,
+                           # как хранит скрипт (у волатильной свечи high и low переставлены)
+                           'ob_bar_high': ph[ob_i], 'ob_bar_low': pl[ob_i],
                            'swing_bias': bias_swing, 'internal_bias': bias_internal,
                            'trail_top': top, 'trail_bottom': bottom})
 
