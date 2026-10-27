@@ -103,11 +103,25 @@ class TestSweptPools:
         """
         target_pool = pool(115, 'EQH', 0.9)
         ctx = Ctx([target_pool, pool(130)],
-                  sweeps=[{'index': 10, 'level': 115.0, 'pool': target_pool}])
+                  sweeps=[{'index': 10, 'reclaimed_at': 12, 'level': 115.0, 'pool': target_pool}])
         out = ctx.targets(BULLISH, entry=100.0, sl_distance=10.0, at_index=50,
                           count=3, fallback=[])
 
         assert out == [130.0]
+
+    def test_sweep_is_known_only_after_the_reclaim(self):
+        """
+        Прокол на свече 48, возврат на 52: на свече 50 снятия ещё нет — цена
+        за уровнем, и чем кончится, неизвестно. Считать его снятым по свече
+        прокола значило бы знать возврат заранее (аудит 27.10.2026).
+        """
+        target_pool = pool(115, 'EQH', 0.9)
+        ctx = Ctx([target_pool, pool(130)],
+                  sweeps=[{'index': 48, 'reclaimed_at': 52, 'level': 115.0, 'pool': target_pool}])
+        out = ctx.targets(BULLISH, entry=100.0, sl_distance=10.0, at_index=50,
+                          count=3, fallback=[])
+
+        assert out == [115.0, 130.0]
 
     def test_pool_confirmed_later_is_invisible(self):
         """Уровень, ставший известным ПОЗЖЕ входа, — подглядывание в будущее."""
