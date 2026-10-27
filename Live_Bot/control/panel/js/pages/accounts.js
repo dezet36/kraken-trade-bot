@@ -75,6 +75,7 @@ function accountCard(acc, a) {
           ex ? pill(`${(a.exchange || '').toUpperCase()} · ${live ? 'реальные деньги' : 'демо'}`, live ? 'down' : 'accent') : pill(`счёт ${money(a.deposit, 0)}`),
           pill(a.enabled ? 'торгует' : 'выключен', a.enabled ? 'up' : ''),
           !ex && a.ai_control ? pill('🤖 ИИ ведёт', 'accent') : null,
+          !ex && a.api ? pill('исполняет API', 'accent') : null,
           ex ? pill(a.has_keys ? 'ключи заданы' : 'ключей нет', a.has_keys ? '' : 'warn') : null)),
       acc.writable ? h('div', { class: 'actions' },
         button('Изменить', () => accountForm(acc, a), 'gray', true),
@@ -103,6 +104,7 @@ function kpi(label, value, hint, cls = '') {
 
 function book(acc, a, b) {
   const ex = a.kind === 'exchange';
+  const api = !ex && !!a.api;      // сделки исполняет API: «Готово» не нужно, книга отдаёт waiting пустым
   const w = acc.writable;
   const q = b.quality || {};
   const out = [];
@@ -135,22 +137,23 @@ function book(acc, a, b) {
     out.push(fold(`${a.id}:wait`, `Ждут исполнения · ${b.waiting.length}`, 'что поставить или закрыть руками',
       b.waiting.map(it => instruction(a, it, w))));
   } else if (!b.started && !ex) {
-    out.push(h('div', { class: 'muted', style: { fontSize: '13px', marginTop: '14px' } },
-      'Заявок ещё не было. Когда стратегии счёта найдут сетап, инструкция придёт в Telegram и появится здесь: пара, сторона, вход, стоп, тейки, объём.'));
+    out.push(h('div', { class: 'muted', style: { fontSize: '13px', marginTop: '14px' } }, api
+      ? 'Заявок ещё не было. Когда стратегии счёта найдут сетап, он появится здесь в «Заявках» и «Позициях»; ставит и ведёт его API.'
+      : 'Заявок ещё не было. Когда стратегии счёта найдут сетап, инструкция придёт в Telegram и появится здесь: пара, сторона, вход, стоп, тейки, объём.'));
   }
   if ((b.positions || []).length) {
     out.push(h('div', { class: 'subhead' }, `Позиции · ${b.positions.length}`), table(
       ['', 'Стратегия', 'Вход', 'Стоп', 'Цели', 'Объём', 'Итог', ''],
       b.positions.map(p => [pairCell(p), strategyTitle(p.strategy), price(p.entry), price(p.stop) + (p.breakeven ? ' · б/у' : ''),
         targets(p), qty(p.size), h('span', { class: tone(p.result) }, `${signedMoney(p.result)} · ${signedR(p.result_r)}`),
-        w ? button(ex ? 'Закрыть на бирже' : 'Закрыл сам', () => act(a, 'close', null, p.pair), 'gray', true) : ''])));
+        w ? button(ex ? 'Закрыть на бирже' : api ? 'Закрыть' : 'Закрыл сам', () => act(a, 'close', null, p.pair), 'gray', true) : ''])));
   }
   if ((b.pending || []).length) {
     out.push(h('div', { class: 'subhead' }, `Заявки · ${b.pending.length}`), table(
       ['', 'Стратегия', 'Вход', 'Стоп', 'Цели', 'Объём', 'До цены', 'Снять до', ''],
       b.pending.map(o => [pairCell(o), strategyTitle(o.strategy), price(o.entry) + (o.stop_entry ? ' (стоп-заявка)' : ''),
         price(o.stop), targets(o), qty(o.size), isNum(o.distance_pct) ? pct(o.distance_pct, 2) : '—', dateTime(o.expires),
-        w ? button(ex ? 'Снять на бирже' : 'Снял сам', () => act(a, 'cancel', null, o.pair), 'gray', true) : ''])));
+        w ? button(ex ? 'Снять на бирже' : api ? 'Снять' : 'Снял сам', () => act(a, 'cancel', null, o.pair), 'gray', true) : ''])));
   }
   if ((b.recent || []).length) {
     out.push(h('div', { class: 'subhead' }, 'Последние сделки этапа'), table(
@@ -164,7 +167,7 @@ function book(acc, a, b) {
       h('span', { class: 'muted', style: { fontSize: '12px' } }, 'аварийно: позиции — по рынку, заявки — снять, счёт — выключить')));
   }
   if ((b.instructions || []).length) {
-    out.push(fold(`${a.id}:log`, `${ex ? 'События счёта' : 'Все инструкции'} · последние ${b.instructions.length}`, null,
+    out.push(fold(`${a.id}:log`, `${ex || api ? 'События счёта' : 'Все инструкции'} · последние ${b.instructions.length}`, null,
       b.instructions.map(it => instruction(a, it, false))));
   }
   return h('div', null, out);
@@ -209,18 +212,23 @@ function table(head, rows) {
 }
 
 function instruction(a, it, buttons) {
-  return h('div', { class: 'instr' + (it.action && !it.done ? ' todo' : '') },
+  const todo = it.action && !it.done && !a.api;
+  return h('div', { class: 'instr' + (todo ? ' todo' : '') },
     h('div', { class: 'instr-h' },
       h('span', null, (it.icon || '📋') + ' '), h('b', null, it.title), h('span', { class: 'muted' }, dateTime(it.at)),
       it.done ? pill(`сделано ${ago(it.done)}`, 'up') : null,
-      buttons && it.action && !it.done ? button('Готово', () => act(a, 'ack', it.id), '', true) : null),
+      buttons && todo ? button('Готово', () => act(a, 'ack', it.id), '', true) : null),
     h('div', { class: 'instr-b' }, (it.lines || []).map((l, i) => [i ? h('br') : null, l])));
 }
 
 /* ── Действия ───────────────────────────────────────────────────────── */
 const ASK = {
-  close: (p, ex) => ex ? `Закрыть позицию ${p} по рынку на бирже?` : `Позиция ${p} закрыта у вас на счёте? В записи она закроется по последней цене.`,
-  cancel: (p, ex) => ex ? `Снять заявку ${p} на бирже?` : `Заявка ${p} снята у вас на счёте? Из записи она уберётся.`,
+  close: (p, ex, api) => ex ? `Закрыть позицию ${p} по рынку на бирже?`
+    : api ? `Закрыть позицию ${p} по последней цене? Кто повторяет счёт по API, закроет её у себя.`
+    : `Позиция ${p} закрыта у вас на счёте? В записи она закроется по последней цене.`,
+  cancel: (p, ex, api) => ex ? `Снять заявку ${p} на бирже?`
+    : api ? `Снять заявку ${p}? Кто повторяет счёт по API, снимет её у себя.`
+    : `Заявка ${p} снята у вас на счёте? Из записи она уберётся.`,
   panic: () => 'Аварийная остановка: закрыть все позиции счёта по рынку, снять его заявки и выключить счёт?',
   new_phase: (p, ex) => ex ? 'Начать новый этап от текущего капитала на бирже? Итоги прошлого этапа останутся в журнале.'
     : 'Начать новый этап? Размер счёта — из правил, итоги прошлого этапа останутся в журнале.',
@@ -229,7 +237,8 @@ const DANGER = new Set(['close', 'cancel', 'panic']);
 
 async function act(a, action, item = null, pair = null) {
   const ex = a.kind === 'exchange';
-  if (ASK[action] && !(await confirmSheet(ASK[action](pair || '', ex), action === 'panic' ? 'Остановить' : 'Да', DANGER.has(action) && ex))) return;
+  const api = !ex && !!a.api;
+  if (ASK[action] && !(await confirmSheet(ASK[action](pair || '', ex, api), action === 'panic' ? 'Остановить' : 'Да', DANGER.has(action) && (ex || api)))) return;
   try {
     await postJSON('/api/accounts/act', { id: a.id, action, item, pair });
     toast('Готово', 'good');
@@ -261,7 +270,7 @@ function accountForm(acc, a) {
     const select = (id, options, value, disabled = false) => h('select', { id: `f-${id}`, disabled },
       options.map(([v, t]) => h('option', { value: v, selected: v === value }, t)));
     const only = {};
-    const kindSel = select('kind', [['manual', 'Проп по инструкциям (без API)'], ['exchange', 'Биржа (по ключам)']], base.kind, !!a);
+    const kindSel = select('kind', [['manual', 'Проп по инструкциям'], ['exchange', 'Биржа (по ключам)']], base.kind, !!a);
     const modeSel = select('mode', [['demo', 'Демо'], ['live', 'Реальные деньги']], base.mode);
     const warn = notice('bad', 'Реальные деньги', 'Сделки пойдут на настоящий счёт биржи.');
     const fields = [
@@ -286,11 +295,18 @@ function accountForm(acc, a) {
         'Сетап стратегии открывается только с согласия ИИ (нет ответа — пропуск). Раз в час ИИ смотрит позиции ' +
         'и может перевести стоп в безубыток (после +1R), подтянуть стоп, закрыть половину или всё. ' +
         'Стоп только к цене. Каждое решение — инструкция с причиной.'))));
+    // Сделки исполняет API (копировщик): инструкций «сделайте… Готово» нет, книга та же.
+    const apiBox = h('input', { type: 'checkbox', id: 'f-api', checked: !!base.api });
+    only.manual4 = h('div', { class: 'wide' }, h('label', { class: 'check' }, apiBox, h('span', null,
+      h('b', null, 'Сделки исполняет API'),
+      h('small', { class: 'muted', style: { display: 'block' } },
+        'Заявки и позиции счёта ставит и ведёт программа по API (копировщик) — инструкций «поставьте… Готово» ' +
+        'на панели и в Telegram нет, события идут журналом. Без галочки — сделки выставляете и контролируете вы.'))));
     const strategies = h('div', { class: 'checks' }, (acc.strategies || []).map(s => h('label', { class: 'check' },
       h('input', { type: 'checkbox', 'data-strat': s.code, checked: (base.strategies || []).includes(s.code) }),
       h('span', { class: 'dot', style: { background: strategyColor(s.code) } }), strategyTitle(s.code))));
     const msg = h('span', { class: 'muted', style: { fontSize: '13px' } });
-    const body = h('div', null, h('div', { class: 'form' }, fields, only.manual3),
+    const body = h('div', null, h('div', { class: 'form' }, fields, only.manual4, only.manual3),
       h('div', { class: 'field-label', style: { margin: '18px 0 8px', fontSize: '13px' } }, 'Стратегии счёта'),
       strategies,
       h('div', { class: 'muted', style: { fontSize: '12px', marginTop: '8px' } }, 'ИИ торгуется только на тесте.'),
@@ -298,7 +314,7 @@ function accountForm(acc, a) {
     const fit = () => {
       const k = kindSel.value;
       only.exchange1.hidden = only.exchange2.hidden = k !== 'exchange';
-      only.manual1.hidden = only.manual2.hidden = only.manual3.hidden = k !== 'manual';
+      only.manual1.hidden = only.manual2.hidden = only.manual3.hidden = only.manual4.hidden = k !== 'manual';
       warn.hidden = !(k === 'exchange' && modeSel.value === 'live');
     };
     kindSel.addEventListener('change', () => {
@@ -315,6 +331,7 @@ function accountForm(acc, a) {
         strategies: [...body.querySelectorAll('[data-strat]')].filter(x => x.checked).map(x => x.dataset.strat) };
       for (const f of ['exchange', 'mode']) if (shown(f)) req[f] = val(f);
       if (!only.manual3.hidden) req.ai_control = aiBox.checked;
+      if (!only.manual4.hidden) req.api = apiBox.checked;
       for (const f of ['deposit', 'risk_pct', 'max_slots', 'max_same_direction', 'profit_target_pct', 'max_drawdown_pct', 'daily_loss_pct']) {
         if (shown(f)) req[f] = Number(val(f));
       }

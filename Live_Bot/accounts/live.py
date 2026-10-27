@@ -53,6 +53,10 @@ DEFAULTS = {
     # ИИ ведёт счёт (10.10.2026, accounts/ai_control.py): допуск сделок и ведение
     # позиций раз в час. Пока — только у счёта по инструкциям.
     'ai_control': False,
+    # Сделки счёта по инструкциям исполняет API (копировщик, 27.10.2026): книга
+    # та же, но руки владельца не нужны — инструкций «сделайте… Готово» нет,
+    # события идут журналом (accounts/books.instruct).
+    'api': False,
 }
 # Новый проп-счёт: типичные правила оценочного этапа проп-компаний — ЧЕРНОВИК,
 # пока владелец не сохранит свои (поле draft на панели: «проверьте правила»).
@@ -163,6 +167,8 @@ def clean(changes, current=None):
         out['draft'] = bool(changes['draft'])
     if 'ai_control' in changes:
         out['ai_control'] = bool(changes['ai_control'])
+    if 'api' in changes:
+        out['api'] = bool(changes['api'])
     return out
 
 
@@ -235,7 +241,8 @@ def save(changes):
         _cache['key'], _cache['data'] = None, None
     _history(before, data)
     log(f"💼 торговый счёт {code}: {KINDS[account['kind']]}"
-        f"{' ' + account['exchange'] + ' ' + account['mode'] if account['kind'] == 'exchange' else ''}, "
+        f"{' ' + account['exchange'] + ' ' + account['mode'] if account['kind'] == 'exchange' else ''}"
+        f"{', исполняет API' if account['kind'] == 'manual' and account['api'] else ''}, "
         f"{'торгует' if account['enabled'] else 'выключен'}, риск {account['risk_pct']}%, "
         f"стратегии {', '.join(account['strategies']) or 'нет'}")
     return code, account

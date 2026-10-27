@@ -623,3 +623,49 @@ class TestFeed:
         f = books.feed(code, live.get(code), now_ms_=T0)
         assert f['pending'] == [] and f['positions'] == [] and f['balance'] == 10_000
         assert code not in books.state()
+
+
+# ── Сделки исполняет API (галочка api, 27.10.2026) ──────────────────────────
+
+class TestApi:
+    def test_nothing_waits_for_the_owner(self, sent):
+        code = prop(api=True)
+        manual.offer('SMCS', a_setup(targets=(104.0, 108.0), fractions=(0.5, 0.5),
+                                     breakeven_after_tp=True), now_ms=T0)
+        manual.update(Client({'BTCUSDT': [bar(1, 99.8, 100.4), bar(2, 100.5, 104.5), bar(3, 99.5, 101.0)]}),
+                      now_ms=T0 + 5 * BAR)
+        assert kinds(sent) == ['place', 'fill', 'target', 'exit']
+        assert [item['action'] for _, item in sent] == [False] * 4
+        b = book(code)
+        assert b['waiting'] == [] and len(b['instructions']) == 4
+        assert books.read_journal()[-1]['exit_reason'] == 'BE', 'книга ведётся как без галочки'
+
+    def test_switching_on_clears_what_waited(self, sent):
+        code = prop()
+        manual.offer('SMCS', a_setup(), now_ms=T0)
+        assert len(book(code)['waiting']) == 1
+        live.save({'id': code, 'api': True})
+        assert book(code)['waiting'] == []
+        assert books.feed(code, live.get(code), now_ms_=T0)['rules']['api'] is True
+        live.save({'id': code, 'api': False})
+        assert len(book(code)['waiting']) == 1, 'без галочки — снова руками'
+
+    def test_telegram_without_done_button(self, monkeypatch):
+        tg = __import__('importlib').import_module('control.telegram_notify')
+        out = []
+        monkeypatch.setattr(tg, '_send', lambda text, reply_markup=None, **kw: out.append((text, reply_markup)) or True)
+        books.notify_with(tg.account_instruction)
+        try:
+            prop(api=True)
+            manual.offer('SMCS', a_setup(), now_ms=T0)
+        finally:
+            books.notify_with(None)
+        text, markup = out[0]
+        assert 'BTCUSDT LONG' in text and markup is None and '«Готово»' not in text
+
+    def test_off_by_default_and_kept_on_edit(self):
+        code = prop()
+        assert live.get(code)['api'] is False
+        live.save({'id': code, 'api': True})
+        live.save({'id': code, 'risk_pct': 1})
+        assert live.get(code)['api'] is True

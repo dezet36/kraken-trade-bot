@@ -341,7 +341,9 @@ def notify_with(func):
 
 def instruct(code, rules, book, kind, title, lines, pair='', strategy='', action=True, now=None):
     """Инструкция (action — нужна рука владельца) или событие счёта: в книгу,
-    в журнал бота и в очередь Telegram."""
+    в журнал бота и в очередь Telegram. Сделки счёта исполняет API (rules
+    api) — руки не нужны: всё событие, без «Готово»."""
+    action = bool(action) and not rules.get('api')
     item = {'id': book['next_instruction'], 'account': code, 'at': iso(now or now_ms()),
             'kind': kind, 'icon': ICONS.get(kind, '📋'), 'title': title,
             'lines': [str(x) for x in lines], 'pair': pair, 'strategy': strategy,
@@ -752,7 +754,9 @@ def report(code, rules, now_ms_=None):
         'room': {'amount': round(space[0], 2), 'rule': space[1]} if space else None,
         'positions': [position_view(k, x) for k, x in sorted(book['positions'].items())],
         'pending': [order_view(k, x, now) for k, x in sorted(book['pending'].items())],
-        'waiting': [it for it in reversed(book['instructions']) if it['action'] and not it.get('done')][:30],
+        # У счёта по API ждать нечего — и того, что осталось до галочки.
+        'waiting': [] if rules.get('api') else
+                   [it for it in reversed(book['instructions']) if it['action'] and not it.get('done')][:30],
         'instructions': list(reversed(book['instructions'][-30:])),
         'counts': book['counts'],
         'quality': stats.quality(phase_rows),
@@ -767,7 +771,7 @@ def report(code, rules, now_ms_=None):
 FEED_FORMAT = 1
 FEED_RULES = ('name', 'kind', 'enabled', 'strategies', 'risk_pct', 'sides', 'max_slots',
               'max_same_direction', 'deposit', 'daily_loss_pct', 'max_drawdown_pct',
-              'profit_target_pct', 'ai_control')
+              'profit_target_pct', 'ai_control', 'api')
 FEED_CLOSED = 200
 FEED_INSTRUCTIONS = 50
 
