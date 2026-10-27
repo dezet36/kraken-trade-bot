@@ -430,6 +430,7 @@ STRATEGY_MODULES = {
     'LEVELS': ('strategies/levels/adapter.py',),
     'RSIBB': ('strategies/rsibb/adapter.py',),
     'SMCS': ('strategies/smcs/adapter.py',),
+    'SMCF': ('strategies/smcf/adapter.py', 'strategies/smcf/params.py'),
     'LLM': ('strategies/llm/adapter.py', 'analysis/llm_market.py', 'strategies/llm/llm_context.py',
             'strategies/llm/llm_decide.py', 'strategies/llm/llm_record.py',
             'strategies/llm/llm_urgency.py', 'strategies/llm/llm_prompt.py',
@@ -443,7 +444,7 @@ SHARED = ('analysis/market_structure.py', 'analysis/smc/context.py', 'analysis/s
           'data/exchange.py', 'analysis/market_regime.py', 'strategies/strategy_profile.py')
 # Импорт адаптера — из пакета (from strategies.smc import adapter, from
 # strategies.smc.adapter import ...) — с 09.10.2026, этап 10; адаптер ИИ — тоже.
-ADAPTERS = re.compile(r'^\s*(?:import|from)\s+strategies\.(smcs|smc|levels|rsibb|llm|fibo|fib12)'
+ADAPTERS = re.compile(r'^\s*(?:import|from)\s+strategies\.(smcs|smcf|smc|levels|rsibb|llm|fibo|fib12)'
                       r'(?:\.adapter\b|\s+import\s+adapter\b)', re.M)
 
 

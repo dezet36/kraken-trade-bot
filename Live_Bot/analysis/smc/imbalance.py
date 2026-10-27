@@ -169,3 +169,60 @@ def nearest_fvg(gaps, price, direction=None, max_distance_pct=0.02):
             best, best_dist = gap, dist
 
     return best
+
+
+def luxalgo_gaps(df, later=None):
+    """
+    Имбалансы по определению индикатора «Smart Money Concepts [LuxAlgo]»
+    (TradingView, Pine v5; CC BY-NC-SA 4.0, © LuxAlgo — правило переписано с
+    указанием автора, перенос и проверка — research/luxsmc). Добавлено 27.10.2026
+    для стратегии SMCF; find_fvg и остальное в модуле не тронуты.
+
+    Гэп на свече i (закрытой): бычий — low[i] > high[i-2] и close[i-1] >
+    high[i-2]; медвежий — high[i] < low[i-2] и close[i-1] < low[i-2]. Средняя
+    свеча должна быть сильнее порога: её тело в долях (close−open)/(open·100)
+    больше удвоенного среднего модуля тех же величин с начала окна df (как
+    «Auto Threshold» скрипта).
+
+    Возвращает список гэпов как ЦЕЛЕЙ сделки:
+        target_side  +1 — цель лонга (медвежий гэп над ценой), −1 — цель шорта;
+        edge         ближний к цене край: у медвежьего — high[i], у бычьего — low[i];
+        known_at     timestamp закрытия свечи i (с этого момента гэп известен);
+        touched      цена после известности уже касалась ближнего края — по
+                     свечам df после i и по свечам later (младший ТФ после
+                     последней свечи df: касание внутри ещё не закрытой свечи df).
+
+    Касание ближнего края — правило цели, а не скрипта: у скрипта бычий гэп
+    снимается после полного перекрытия, медвежий — при первом касании.
+    """
+    n = len(df)
+    if n < 3:
+        return []
+    o = df['open'].to_numpy(dtype=float)
+    h = df['high'].to_numpy(dtype=float)
+    l = df['low'].to_numpy(dtype=float)
+    c = df['close'].to_numpy(dtype=float)
+    ts = df['timestamp']
+    step = (ts.iloc[-1] - ts.iloc[0]) / (n - 1) if n > 1 else None
+    delta = np.full(n, np.nan)
+    delta[1:] = (c[:-1] - o[:-1]) / (o[:-1] * 100)
+    cum = np.cumsum(np.abs(np.nan_to_num(delta)))
+    lh = later['high'].to_numpy(dtype=float) if later is not None and len(later) else np.empty(0)
+    ll = later['low'].to_numpy(dtype=float) if later is not None and len(later) else np.empty(0)
+    out = []
+    for i in range(2, n):
+        thr = cum[i] / i * 2
+        found = []
+        if l[i] > h[i - 2] and c[i - 1] > h[i - 2] and delta[i] > thr:
+            found.append((-1, l[i]))
+        if h[i] < l[i - 2] and c[i - 1] < l[i - 2] and -delta[i] > thr:
+            found.append((1, h[i]))
+        for side, edge in found:
+            if side == 1:
+                touched = bool((h[i + 1:] >= edge).any() or (lh >= edge).any())
+            else:
+                touched = bool((l[i + 1:] <= edge).any() or (ll <= edge).any())
+            out.append({'target_side': side, 'edge': float(edge),
+                        'known_at': ts.iloc[i] + step if step is not None else ts.iloc[i],
+                        'touched': touched})
+    return out
