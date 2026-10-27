@@ -16,7 +16,7 @@ import re
 import time
 
 from copier import config, crypto
-from copier.db import now_iso
+from copier.db import account_name, now_iso
 from copier.log import log
 from copier.tg import screens
 from copier.tg.api import TgApi
@@ -420,7 +420,15 @@ class TgBot:
         acc_id = self.db.add_account(tg_id, key_id, item['accountId'], item.get('type'),
                                      item.get('nominal'), item.get('currentPhase'))
         if acc_id is None:
-            await self.api.send(chat_id, 'Этот счёт уже подключён другим участником.')
+            # Чей он — участнику не говорим. Владельцу — да: один ключ Upscale у двух людей
+            # (правила Upscale передачу ключа запрещают).
+            await self.api.send(chat_id, 'Этот счёт подключить нельзя. Если он ваш — напишите владельцу бота.')
+            other = self.db.q1('SELECT tg_id FROM accounts WHERE upscale_id=?', (item['accountId'],))
+            self.db.audit(tg_id, 'account_taken', {'upscale': item['accountId'],
+                                                   'owner': other and other['tg_id']})
+            await Notifier(self.api).admin(f'⚠️ Telegram {tg_id} пытался подключить счёт Upscale '
+                                           f'{item["accountId"]}, который уже подключён у '
+                                           f'{other and other["tg_id"]}: один ключ у двух людей?')
             return
         self.db.set_tg_state(tg_id, None)
         self.db.audit(tg_id, 'account_added', {'account': acc_id, 'upscale': item['accountId']})
@@ -455,9 +463,10 @@ class TgBot:
             if not acc:
                 return
             if head == 'ax':
-                text = f'Закрыть ВСЕ позиции и снять заявки на счёте #{acc["id"]}? Счёт встанет на паузу.'
+                text = (f'Закрыть ВСЕ позиции и снять заявки на счёте «{account_name(acc)}»? '
+                        f'Счёт встанет на паузу.')
             else:
-                text = (f'Отключить счёт #{acc["id"]}? Заявки будут сняты. Открытые позиции останутся '
+                text = (f'Отключить счёт «{account_name(acc)}»? Заявки будут сняты. Открытые позиции останутся '
                         f'на Upscale со своими стопами — копировщик их больше не ведёт.')
         await self.show(chat_id, screens.confirm(text, f'y:{head}:{rest}:{_stamp()}'), mid)
 
@@ -510,7 +519,7 @@ class TgBot:
             self.db.x('DELETE FROM keys WHERE id=?', (acc['key_id'],))
             self.follower.forget_client(acc['key_id'])
         self.db.audit(actor, 'account_disconnected', {'account': acc['id']})
-        return f'Счёт #{acc["id"]} отключён.'
+        return f'Счёт «{account_name(acc)}» отключён.'
 
     async def on_admin_decision(self, admin_id, chat_id, mid, data):
         head, _, rest = data.partition(':')

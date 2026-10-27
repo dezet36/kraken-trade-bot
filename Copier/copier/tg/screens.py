@@ -7,6 +7,7 @@
 import json
 
 from copier import stats
+from copier.db import account_name
 
 LEVEL_TITLES = {'observer': 'наблюдатель', 'demo': 'демо-счета', 'full': 'демо и реальные'}
 STATUS_TITLES = {'new': 'регистрируется', 'pending': 'на проверке', 'active': 'активен',
@@ -81,7 +82,8 @@ def _side(direction):
 
 def account_line(acc, status):
     c = stats.challenge(status)
-    parts = [f'#{acc["id"]} {KIND_TITLES.get(acc.get("kind"), acc.get("kind") or "")}',
+    name = account_name(acc)
+    parts = [name[:1].upper() + name[1:],
              PHASES.get(c.get('phase'), c.get('phase') or '')]
     if c.get('equity') is not None:
         parts.append(money(c['equity']))
@@ -124,7 +126,7 @@ def accounts_view(accounts, statuses, max_accounts):
     rows = []
     for acc in accounts:
         lines.append(account_line(acc, statuses.get(acc['id'], {})))
-        rows.append([(f'#{acc["id"]} подробнее', f'a:{acc["id"]}')])
+        rows.append([(f'{account_name(acc)} — подробнее', f'a:{acc["id"]}')])
     if len([a for a in accounts if a.get('enabled')]) < (max_accounts or 1):
         rows.append([('➕ Подключить счёт', 'add')])
     rows.append([('« Меню', 'm')])

@@ -248,3 +248,69 @@ def test_activation_places_waiting_master_orders(tmp_path):
     assert [c for c in fake_up.calls if c[0] == 'POST' and c[1] == '/orders']
     assert 'выставлено ждущих заявок бота: 1' in tg.last(ADMIN)[1]
     assert any(who == USER and 'заявка выставлена' in t for who, t in b.follower.notify.users)
+
+
+OTHER = 555777
+
+
+def _two_users(tmp_path):
+    """Два активных участника со своими счетами; у второго открыта сделка."""
+    from copier import crypto
+    db, b, tg, fake_up = make(tmp_path)
+    ids = {}
+    for who, upscale, nominal in ((USER, 'acc-1', 10_000), (OTHER, 'acc-other-77ab', 25_000)):
+        db.touch_user(who, f'u{who}')
+        db.set_user(who, status='active', level='full')
+        key_id = db.add_key(who, crypto.encrypt(f'usk_{who}'), crypto.fingerprint(f'usk_{who}'))
+        ids[who] = db.add_account(who, key_id, upscale, 'real', nominal, 'active_evaluation')
+    trade_id, _ = db.create_trade(account_id=ids[OTHER], tg_id=OTHER, master_key='ETHUSDT@1', strategy='SMC',
+                                  pair='ETHUSDT', market_id='m-eth', direction='SHORT', state='open',
+                                  limit_price=100, stop=105, initial_stop=105, targets=[90], fractions=[1],
+                                  base_size=1, leverage=5, risk_usd=250, entry_idem='x')
+    return db, b, tg, fake_up, ids, trade_id
+
+
+def test_participant_cannot_see_or_touch_others(tmp_path):
+    """Подделанные кнопки с чужими номерами и команды владельца — без действий и без чужих данных."""
+    db, b, tg, fake_up, ids, trade_id = _two_users(tmp_path)
+    other_acc, stamp = ids[OTHER], tgbot._stamp()
+    calls = len(fake_up.calls)
+    for data in (f'a:{other_acc}', f'ap:{other_acc}', f'ax:{other_acc}', f'ad:{other_acc}', f'tc:{trade_id}',
+                 f'y:ax:{other_acc}:{stamp}', f'y:ad:{other_acc}:{stamp}', f'y:tc:{trade_id}:{stamp}',
+                 f'ua:{USER}:full', f'ua:{OTHER}:observer', f'ub:{OTHER}', 'pk:acc-other'):
+        run(b.handle_update(press(USER, data)))
+    for cmd in ('/admin', '/requests', '/stats'):
+        run(b.handle_update(msg(USER, cmd)))
+    acc = db.account(other_acc)
+    assert acc['enabled'] == 1 and acc['paused'] == 0 and db.trade(trade_id)['state'] == 'open'
+    assert db.user(OTHER)['status'] == 'active' and db.user(OTHER)['level'] == 'full'
+    assert len(fake_up.calls) == calls                     # к Upscale — ни одного запроса
+    seen = '\n'.join(tg.texts(USER))
+    for foreign in ('acc-other', '77ab', '25 000', 'ETHUSDT', str(OTHER), 'Команды владельца', 'На проверку'):
+        assert foreign not in seen, foreign
+
+
+def test_participant_screens_hide_internal_numbers(tmp_path):
+    """Сквозной номер счёта выдаёт, сколько счетов у других: участнику — название счёта."""
+    db, b, tg, fake_up, ids, _ = _two_users(tmp_path)
+    run(b.handle_update(press(USER, 'ac')))
+    run(b.handle_update(press(USER, f'a:{ids[USER]}')))
+    run(b.handle_update(press(USER, f'ax:{ids[USER]}')))
+    texts = tg.texts(USER)
+    assert 'Реальный $10 000 ·cc-1' in texts[-3] and 'Реальный $10 000 ·cc-1' in texts[-2]
+    assert '«реальный $10 000 ·cc-1»' in texts[-1]
+    assert not any(f'#{i}' in t for t in texts for i in ids.values())
+
+
+def test_taken_account_not_revealed_owner_warned(tmp_path):
+    """Ключ к счёту, который уже подключён у другого: участнику — без подробностей, владельцу — сигнал."""
+    db, b, tg, fake_up, ids, _ = _two_users(tmp_path)
+    newbie = 424242
+    run(b.handle_update(msg(newbie, '/start')))
+    run(b.handle_update(press(newbie, 'rd')))
+    run(b.handle_update(msg(newbie, 'user-1')))
+    run(b.handle_update(msg(newbie, 'usk_shared', mid=9)))   # ключ видит acc-1 — счёт USER
+    assert 'подключить нельзя' in tg.last(newbie)[1]
+    assert not any(str(USER) in t or 'другим участником' in t for t in tg.texts(newbie))
+    assert db.account(ids[USER])['tg_id'] == USER
+    assert f'{newbie} пытался подключить' in tg.last(ADMIN)[1] and str(USER) in tg.last(ADMIN)[1]

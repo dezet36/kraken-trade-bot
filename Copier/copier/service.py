@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 
 from copier import config, stats
 from copier.admin_api import AdminApp
-from copier.db import DB
+from copier.db import DB, account_name
 from copier.feed import Feed
 from copier.follower import Follower
 from copier.log import log
@@ -59,7 +59,7 @@ async def daily_loop(db, notifier):
                 for acc in db.accounts(tg_id=u['tg_id'], enabled_only=True):
                     c = stats.challenge(db.account_status(acc))
                     if c.get('equity') is not None:
-                        lines.append(f'#{acc["id"]}: эквити {c["equity"]:,.2f} $'
+                        lines.append(f'{account_name(acc)}: эквити {c["equity"]:,.2f} $'
                                      + (f' · {c["profit_pct"]:+.2f}%' if c.get('profit_pct') is not None else ''))
                 await notifier.user(u['tg_id'], '\n'.join(lines))
         await asyncio.sleep(60)

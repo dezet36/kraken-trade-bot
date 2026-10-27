@@ -19,6 +19,21 @@ from copier import config
 # счёте; inactive — владелец отключил.
 STATUSES = ('new', 'pending', 'active', 'inactive')
 LEVELS = ('observer', 'demo', 'full')                # наблюдатель / только демо / демо и реальные
+KIND_NAMES = {'demo': 'демо', 'real': 'реальный', 'tournament': 'турнир'}
+
+
+def account_name(acc):
+    """
+    Название счёта для участника: вид, номинал и хвост его ID на Upscale. Внутренний
+    номер (#id) сквозной по всем участникам — по нему видно, сколько счетов
+    подключили другие; он только у владельца (админка, его уведомления).
+    """
+    name = KIND_NAMES.get(acc.get('kind'), acc.get('kind') or 'счёт')
+    if acc.get('nominal'):
+        name += f' ${float(acc["nominal"]):,.0f}'.replace(',', ' ')
+    if acc.get('upscale_id'):
+        name += f' ·{str(acc["upscale_id"])[-4:]}'
+    return name
 OPEN_STATES = ('new', 'pending', 'open')             # сделка ещё живёт
 TRADE_STATES = OPEN_STATES + ('closed', 'canceled', 'error')
 

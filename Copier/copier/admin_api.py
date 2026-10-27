@@ -19,7 +19,7 @@ from datetime import datetime, timedelta, timezone
 from aiohttp import web
 
 from copier import config, stats
-from copier.db import LEVELS, STATUSES
+from copier.db import LEVELS, STATUSES, account_name
 from copier.log import log
 from copier.tg import screens
 from copier.tg.bot import announce_activation
@@ -320,7 +320,7 @@ class AdminApp:
             ok, why = await self.follower.close_account(acc, 'admin')
             if not ok:
                 return _json({'error': why}, 400)
-            await self.notifier.user(acc['tg_id'], f'🛑 Владелец закрыл все позиции на счёте #{acc["id"]}, '
+            await self.notifier.user(acc['tg_id'], f'🛑 Владелец закрыл все позиции на счёте «{account_name(acc)}», '
                                                    f'счёт на паузе.')
         else:
             return _json({'error': 'неизвестное действие'}, 400)

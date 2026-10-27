@@ -28,7 +28,7 @@ from decimal import Decimal
 
 from copier import config, crypto, sizing
 from copier import markets as mk
-from copier.db import now_iso
+from copier.db import account_name, now_iso
 from copier.log import log
 from copier.upscale import (UpscaleClient, UpscaleError, close_order, entry_order, from_fp9,
                             new_idem_key)
@@ -831,9 +831,8 @@ class Follower:
                 continue
             if field in ('tradingLockReason', 'failureReason') and not new:
                 continue
-            text = f'Счёт #{acc["id"]}: {title} — {new}'
-            await self.notify.user(acc['tg_id'], '⚠️ ' + text)
-            await self.notify.admin(f'⚠️ участник {acc["tg_id"]}: {text}')
+            await self.notify.user(acc['tg_id'], f'⚠️ Счёт «{account_name(acc)}»: {title} — {new}')
+            await self.notify.admin(f'⚠️ участник {acc["tg_id"]}, счёт #{acc["id"]}: {title} — {new}')
             self.db.audit('system', 'account_change', {'account': acc['id'], field: new})
 
     def _equity_snapshot(self, acc, status):
