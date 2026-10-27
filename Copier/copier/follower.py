@@ -36,6 +36,9 @@ from copier.upscale import (UpscaleClient, UpscaleError, close_order, entry_orde
 MARKETS_TTL_S = 3600
 EXIT_REASONS = {'SL': 'стоп', 'BE': 'безубыток', 'TP': 'цель', 'TIME': 'срок удержания',
                 'AI': 'решение ИИ', 'RULES': 'правила пропа счёта', 'MANUAL': 'вручную'}
+# Upscale отклоняет триггер, уже пройденный ценой (AAVE 27.10.2026: «Trigger price must be
+# greater than current price» на шорт-лимите ниже рынка).
+ENTRY_PASSED = ('trigger_price_lt_current', 'trigger_price_gt_current')
 ORDER_GRACE_S = 90          # свежий ордер может ещё не попасть в список активных
 STATUS_FRESH_S = 30         # снимок счёта из сверки (раз в 10 с) годится для входа без нового запроса
 
@@ -80,6 +83,16 @@ def _ratio_pct(raw):
     return None if v is None else v * 100
 
 
+def position_size(pos):
+    """
+    Размер позиции в базовом активе, без знака. У шорта Upscale отдаёт size со
+    знаком минус (SUI 27.10.2026: "-17289551578190"), notional и exchangedBase —
+    без знака; закрытие и тейки принимают размер положительным.
+    """
+    size = from_fp9(pick(pos, ('size', 'baseSize')))
+    return None if size is None else abs(size)
+
+
 def position_entry(pos):
     """
     Цена входа позиции. Поля entryPrice у Upscale нет (демо 27.10.2026): есть
@@ -88,8 +101,17 @@ def position_entry(pos):
     direct = from_fp9(pick(pos, ('entryPrice', 'avgEntryPrice', 'openPrice')))
     if direct:
         return direct
-    size, notional = from_fp9(pick(pos, ('size', 'baseSize'))), from_fp9(pos.get('notional'))
-    return notional / size if size and notional else None
+    size, notional = position_size(pos), from_fp9(pos.get('notional'))
+    return abs(notional) / size if size and notional else None
+
+
+def _inside(rec, price):
+    """Цена между стопом и первой целью мастера — вход по рынку ещё та же сделка."""
+    stop = _D(rec.get('stop_loss'))
+    targets = [_D(t) for t in rec.get('targets') or [] if _D(t)]
+    if price is None or stop is None or not targets:
+        return False
+    return (stop < price < targets[0]) if rec.get('direction') == 'LONG' else (targets[0] < price < stop)
 
 
 def _still_waiting(rec, kind, price):
@@ -118,7 +140,7 @@ def closed_result(info):
     exit_price = from_fp9(pick(info, ('closePrice', 'exitPrice')))
     quote, base = from_fp9(info.get('exchangedQuote')), from_fp9(info.get('exchangedBase'))
     if exit_price is None and info.get('eventName') == 'closePosition' and quote and base:
-        exit_price = quote / base
+        exit_price = abs(quote / base)
     return net, exit_price
 
 
@@ -298,13 +320,8 @@ class Follower:
         иначе это уже не та сделка.
         """
         rec = ev['rec']
-        price, stop = _D(rec.get('last_price')), _D(rec.get('stop_loss'))
-        targets = [_D(t) for t in rec.get('targets') or [] if _D(t)]
-        if price is None or stop is None or not targets:
-            return
-        long_ = rec['direction'] == 'LONG'
-        inside = (stop < price < targets[0]) if long_ else (targets[0] < price < stop)
-        if not inside:
+        price = _D(rec.get('last_price'))
+        if not _inside(rec, price):
             log(f'исполнитель: вход по рынку {ev["key"]} пропущен — цена {price} за стопом или целью')
             return
         market_ev = dict(ev, rec=dict(rec, limit_price=float(price)))
@@ -378,60 +395,97 @@ class Follower:
                 return
             own_open = self.db.open_trades(account_id=acc['id'])
             other_sides = self._other_sides(acc, rec['pair'], market)
-            market_id = str((market or {}).get('id'))
-            options = mk.leverage_options(market or {}, config.DEFAULT_MAX_LEVERAGE)
-            known = self._leverage_ok.get((acc['id'], market_id))
-            if known is not None:
-                options = [v for v in options if v <= known] or options[-1:]
-            trade_id = None
-            for i, lev in enumerate(options):
-                decision = sizing.plan_entry(
-                    order=rec, market=market, status=status,
-                    rules={'risk_pct': self.feed.master_risk_pct()},
-                    open_trades=own_open, other_sides=other_sides,
-                    default_leverage=config.DEFAULT_MAX_LEVERAGE, buffer_pct=config.DD_BUFFER_PCT,
-                    leverage=lev, reserve_extra_pct=config.RESERVE_EXTRA_PCT)
-                if not decision.ok:
-                    if trade_id is not None:
-                        self.db.update_trade(trade_id, state='error', note=decision.reason[:300])
-                    self.db.refuse(acc['id'], acc['tg_id'], key, rec.get('strategy'), rec.get('pair'),
-                                   decision.reason)
-                    return
-                idem = new_idem_key()
-                if trade_id is None:
-                    trade_id, created = self.db.create_trade(
-                        account_id=acc['id'], tg_id=acc['tg_id'], master_key=key,
-                        strategy=rec.get('strategy'), pair=rec.get('pair'), market_id=market_id,
-                        direction=rec['direction'], state='new', limit_price=decision.limit_price,
-                        stop=decision.stop, initial_stop=decision.stop, targets=rec.get('targets'),
-                        fractions=rec.get('fractions'), base_size=decision.base_size,
-                        leverage=decision.leverage, risk_usd=decision.risk_usd, entry_idem=idem)
-                    if not created:
-                        return
-                else:
-                    self.db.update_trade(trade_id, leverage=decision.leverage, entry_idem=idem)
-                body = entry_order(acc['upscale_id'], market['id'], rec['direction'],
-                                   decision.limit_price, decision.base_size, decision.leverage,
-                                   decision.reserve, stop=decision.stop, take=decision.take,
-                                   kind=kind)
+            plan = dict(market=market, status=status, own_open=own_open, other_sides=other_sides)
+            result, trade_id = await self._place_entry(acc, client, key, rec, kind, plan)
+            if result == 'passed':
+                # Upscale не берёт лимит (и стоп-вход), чья цена уже пройдена: у мастера такая
+                # заявка наливается сразу, на бирже — исполнилась бы по рынку (AAVE 27.10.2026,
+                # trigger_price_lt_current). Входим по рынку, пока цена между стопом и первой целью.
                 try:
-                    resp = await client.create_order(body, idem) or {}
+                    fresh = mk.Markets(await client.markets(acc['upscale_id']))
+                    self._markets[acc['id']] = (fresh, self.now())
                 except UpscaleError as err:
-                    # Предел плеча зависит от вида счёта, которого Upscale не называет:
-                    # большее не подошло — пробуем следующее.
-                    if err.code == 'invalid_leverage' and i + 1 < len(options):
-                        log(f'исполнитель: счёт #{acc["id"]} {rec["pair"]}: плечо {lev:g} не принято, '
-                            f'пробую {options[i + 1]:g}')
-                        continue
-                    self.db.update_trade(trade_id, state='error', note=f'{err.code}: {err.message}'[:300])
-                    self.db.refuse(acc['id'], acc['tg_id'], key, rec.get('strategy'), rec.get('pair'),
-                                   f'Upscale отклонил заявку: {err.code}')
-                    await self._key_failed(acc, err)
+                    fresh = None
+                    log(f'исполнитель: рынки счёта #{acc["id"]} не прочитаны — {err}')
+                price = mk.index_price((fresh and fresh.find(rec['pair'])) or {})
+                if not _inside(rec, price):
+                    reason = (f'цена {price} уже за входом мастера {rec.get("limit_price")} и вне '
+                              f'«стоп — первая цель» — по рынку не входим')
+                    self.db.update_trade(trade_id, state='error', note=reason[:300])
+                    self.db.refuse(acc['id'], acc['tg_id'], key, rec.get('strategy'), rec.get('pair'), reason)
                     return
-                self._leverage_ok[(acc['id'], market_id)] = lev
-                self.db.update_trade(trade_id, state='pending', entry_order=str(resp.get('id') or ''))
-                await self.notify.user(acc['tg_id'], self.text_placed(rec, decision, kind))
-                return True
+                log(f'исполнитель: счёт #{acc["id"]} {rec["pair"]}: вход мастера уже пройден, по рынку {price}')
+                plan['market'] = fresh.find(rec['pair'])
+                result, trade_id = await self._place_entry(
+                    acc, client, key, dict(rec, limit_price=float(price)), 'market', plan, trade_id,
+                    passed_entry=rec.get('limit_price'))
+            return result == 'ok'
+
+    async def _place_entry(self, acc, client, key, rec, kind, plan, trade_id=None, passed_entry=None):
+        """
+        Размер, ворота и заявка на Upscale, с перебором плеча. → (итог, trade_id):
+        'ok' — выставлена; 'refused' — отказ (записан); 'passed' — Upscale ответил, что
+        цена входа уже пройдена (решает вызывающий).
+        """
+        market = plan['market']
+        market_id = str((market or {}).get('id'))
+        options = mk.leverage_options(market or {}, config.DEFAULT_MAX_LEVERAGE)
+        known = self._leverage_ok.get((acc['id'], market_id))
+        if known is not None:
+            options = [v for v in options if v <= known] or options[-1:]
+        for i, lev in enumerate(options):
+            decision = sizing.plan_entry(
+                order=rec, market=market, status=plan['status'],
+                rules={'risk_pct': self.feed.master_risk_pct()},
+                open_trades=plan['own_open'], other_sides=plan['other_sides'],
+                default_leverage=config.DEFAULT_MAX_LEVERAGE, buffer_pct=config.DD_BUFFER_PCT,
+                leverage=lev, reserve_extra_pct=config.RESERVE_EXTRA_PCT)
+            if not decision.ok:
+                if trade_id is not None:
+                    self.db.update_trade(trade_id, state='error', note=decision.reason[:300])
+                self.db.refuse(acc['id'], acc['tg_id'], key, rec.get('strategy'), rec.get('pair'),
+                               decision.reason)
+                return 'refused', trade_id
+            idem = new_idem_key()
+            if trade_id is None:
+                trade_id, created = self.db.create_trade(
+                    account_id=acc['id'], tg_id=acc['tg_id'], master_key=key,
+                    strategy=rec.get('strategy'), pair=rec.get('pair'), market_id=market_id,
+                    direction=rec['direction'], state='new', limit_price=decision.limit_price,
+                    stop=decision.stop, initial_stop=decision.stop, targets=rec.get('targets'),
+                    fractions=rec.get('fractions'), base_size=decision.base_size,
+                    leverage=decision.leverage, risk_usd=decision.risk_usd, entry_idem=idem)
+                if not created:
+                    return 'refused', trade_id
+            else:
+                self.db.update_trade(trade_id, state='new', note=None, limit_price=decision.limit_price,
+                                     base_size=decision.base_size, leverage=decision.leverage,
+                                     risk_usd=decision.risk_usd, entry_idem=idem)
+            body = entry_order(acc['upscale_id'], market['id'], rec['direction'],
+                               decision.limit_price, decision.base_size, decision.leverage,
+                               decision.reserve, stop=decision.stop, take=decision.take,
+                               kind=kind)
+            try:
+                resp = await client.create_order(body, idem) or {}
+            except UpscaleError as err:
+                # Предел плеча зависит от вида счёта, которого Upscale не называет:
+                # большее не подошло — пробуем следующее.
+                if err.code == 'invalid_leverage' and i + 1 < len(options):
+                    log(f'исполнитель: счёт #{acc["id"]} {rec["pair"]}: плечо {lev:g} не принято, '
+                        f'пробую {options[i + 1]:g}')
+                    continue
+                if err.code in ENTRY_PASSED and kind != 'market':
+                    return 'passed', trade_id
+                self.db.update_trade(trade_id, state='error', note=f'{err.code}: {err.message}'[:300])
+                self.db.refuse(acc['id'], acc['tg_id'], key, rec.get('strategy'), rec.get('pair'),
+                               f'Upscale отклонил заявку: {err.code}')
+                await self._key_failed(acc, err)
+                return 'refused', trade_id
+            self._leverage_ok[(acc['id'], market_id)] = lev
+            self.db.update_trade(trade_id, state='pending', entry_order=str(resp.get('id') or ''))
+            await self.notify.user(acc['tg_id'], self.text_placed(rec, decision, kind, passed_entry))
+            return 'ok', trade_id
+        return 'refused', trade_id
 
     def _recent_status(self, acc, max_age_s=STATUS_FRESH_S):
         """Снимок счёта из сверки, если он свежий: вход без лишнего запроса к Upscale."""
@@ -546,7 +600,7 @@ class Follower:
                 pos = await self._position(acc, client, t)
                 if pos is None:
                     return
-                size = from_fp9(pick(pos, ('size', 'baseSize'))) or Decimal(0)
+                size = position_size(pos) or Decimal(0)
                 filled = _D(t['filled_size']) or _D(t['base_size']) or size
                 markets = await self.markets(acc, client)
                 market = markets.find(t['pair'])
@@ -633,7 +687,7 @@ class Follower:
         if pos is None:
             await self._sync(acc, client)
             return
-        size = from_fp9(pick(pos, ('size', 'baseSize')))
+        size = position_size(pos)
         body = close_order(acc['upscale_id'], t['market_id'], t['direction'],
                            self._position_id(pos, t), size)
         try:
@@ -681,7 +735,7 @@ class Follower:
             return
         markets = await self.markets(acc, client)
         market = markets.find(t['pair']) or {}
-        size = from_fp9(pick(pos, ('size', 'baseSize'))) or _D(t['base_size'])
+        size = position_size(pos) or _D(t['base_size'])
         parts = sizing.split_targets(size, targets, json.loads(t['fractions'] or '[]'),
                                      mk.step(market, 'size'))
         placed = []
@@ -719,7 +773,7 @@ class Follower:
         await self._status_changes(acc, status)
         status['positions'] = [{'market': pick(p, ('market', 'marketId')),
                                 'direction': str(p.get('direction')).upper(),
-                                'size': str(from_fp9(pick(p, ('size', 'baseSize'))))}
+                                'size': str(position_size(p))}
                                for p in positions or []]
         self.db.set_account(acc['id'], status_json=jsonable(status), status_at=now_iso(),
                             phase=status.get('phase'), last_error=None)
@@ -786,7 +840,7 @@ class Follower:
 
     async def _opened(self, acc, client, t, pos):
         entry = position_entry(pos)
-        size = from_fp9(pick(pos, ('size', 'baseSize')))
+        size = position_size(pos)
         # exit_reason мог быть записан под снятие заявки, которое не успело: налилась — причины выхода нет.
         self.db.update_trade(t['id'], state='open', position_id=self._position_id(pos, t),
                              entry_price=entry, filled_size=size, opened_at=now_iso(), exit_reason=None)
@@ -912,9 +966,11 @@ class Follower:
 
     # ── тексты ─────────────────────────────────────────────────────────────
     @staticmethod
-    def text_placed(rec, d, kind='limit'):
+    def text_placed(rec, d, kind='limit', passed_entry=None):
         what = {'market': 'вход по рынку (ИИ одобрил)', 'stop_market': 'стоп-заявка выставлена'}.get(
             kind, 'заявка выставлена')
+        if passed_entry is not None:
+            what = f'вход по рынку (цена уже прошла вход бота {_fmt(passed_entry)})'
         lines = [f'📌 {rec.get("strategy")} {rec.get("pair")} {_side(rec)} — {what}',
                  f'вход {_fmt(d.limit_price)} · стоп {_fmt(d.stop)}',
                  'цели ' + ', '.join(_fmt(t) for t in rec.get('targets') or []),

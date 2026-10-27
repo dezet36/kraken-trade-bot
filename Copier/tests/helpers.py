@@ -105,6 +105,7 @@ class FakeUpscale:
         self.positions = {}
         self.calls = []
         self.fail_next = None
+        self.check_trigger = False          # как настоящий: пройденный ценой триггер — отказ
 
     async def send(self, method, url, headers, body):
         path = url.split('api.upscale.trade', 1)[-1].split('?')[0]
@@ -134,6 +135,19 @@ class FakeUpscale:
         if method == 'POST' and path == '/orders':
             if self.leverage_allowed and body.get('leverage') and int(body['leverage']) > int(fp(self.leverage_allowed)):
                 return 400, {'statusCode': 400, 'error': 'invalid_leverage', 'message': 'maxLeverage'}, {}
+            if int(body.get('amount') or 0) <= 0:
+                return 400, {'statusCode': 400, 'error': 'amount_not_positive', 'message': 'amount'}, {}
+            if self.check_trigger and body['type'] in ('limit', 'stop_market'):
+                # AAVE 27.10.2026: шорт-лимит ниже рынка — trigger_price_lt_current.
+                m = next(x for x in self.markets_list if x['id'] == body['marketId'])
+                index, trig = int(m['state']['indexPrice']), int(body['triggerPrice'])
+                above = (body['direction'] == 'short') == (body['type'] == 'limit')
+                if above and trig <= index:
+                    return 400, {'statusCode': 400, 'error': 'trigger_price_lt_current',
+                                 'message': 'Trigger price must be greater than current price'}, {}
+                if not above and trig >= index:
+                    return 400, {'statusCode': 400, 'error': 'trigger_price_gt_current',
+                                 'message': 'Trigger price must be less than current price'}, {}
             oid = str(uuid.uuid4())
             order = dict(body, id=oid, market=body['marketId'], status='active')
             self.history[oid] = order
@@ -142,11 +156,12 @@ class FakeUpscale:
             elif body['type'] == 'take' and body.get('triggerPrice') == '0':
                 pos = self.positions.get(body['positionId'])
                 if pos:
-                    left = int(pos['size']) - int(body['amount'])
+                    sign = -1 if int(pos['size']) < 0 else 1
+                    left = abs(int(pos['size'])) - int(body['amount'])
                     if left <= 0:
                         self.positions.pop(body['positionId'], None)
                     else:
-                        pos['size'] = str(left)
+                        pos['size'] = str(sign * left)
             else:
                 self.orders[oid] = order
             return 200, order, {}
@@ -179,8 +194,10 @@ class FakeUpscale:
         # Как настоящая позиция: entryPrice нет, есть notional и size.
         entry = Decimal(str(price)) if price else Decimal(order['triggerPrice']) / Decimal(10) ** 9
         size = Decimal(order['baseSize']) / Decimal(10) ** 9
+        # У шорта size со знаком минус (SUI 27.10.2026), notional — без знака.
+        signed = ('-' if order['direction'] == 'short' else '') + order['baseSize']
         self.positions[pid] = {'idx': pid, 'market': order['marketId'], 'status': 'open',
-                               'direction': order['direction'], 'size': order['baseSize'],
+                               'direction': order['direction'], 'size': signed,
                                'notional': fp(entry * size)}
         if order.get('stopTriggerPrice'):
             sid = 'stop-' + order_id[:8]

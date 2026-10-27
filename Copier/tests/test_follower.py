@@ -362,3 +362,66 @@ def test_catch_up_ignores_open_master_positions(tmp_path):
     db.activate(42)
     assert run(fol.catch_up_user(42)) == 0
     assert not [c for c in fake.calls if c[0] == 'POST']
+
+
+def _short(**kw):
+    return pending(direction='SHORT', stop=105.0, targets=(90.0,), **kw)
+
+
+def test_short_position_size_sign(tmp_path):
+    """SUI 27.10.2026: у шорта Upscale отдаёт size с минусом — вход, размер и закрытие без знака."""
+    o = _short()
+    db, fake, bot, f, fol, notes, acc_id = setup(tmp_path, data=book([o]))
+    pump(f, fol)
+    fake.fill(db.open_trades(account_id=acc_id)[0]['entry_order'])
+    sync(db, fol, acc_id)
+    t = db.trades(account_id=acc_id)[0]
+    assert t['state'] == 'open' and float(t['entry_price']) == 100 and float(t['filled_size']) == 20
+    bot.data = book([], [position(o)])
+    pump(f, fol)
+    bot.data = book([], [], closed=[closed_row(position(o), reason='AI')])
+    pump(f, fol)
+    close = [c for c in fake.calls if c[0] == 'POST' and c[2].get('type') == 'take' and c[2].get('triggerPrice') == '0']
+    assert close and from_fp9(close[-1][2]['amount']) == 20
+    assert not fake.positions and db.trade(t['id'])['state'] == 'closed'
+
+
+def test_open_short_does_not_block_next_entry(tmp_path):
+    """Отрицательный вход шорта давал «худший исход $32 120» и отказ по дневному лимиту (AAVE 27.10.2026)."""
+    o = _short()
+    db, fake, bot, f, fol, notes, acc_id = setup(tmp_path, data=book([o]))
+    pump(f, fol)
+    fake.fill(db.open_trades(account_id=acc_id)[0]['entry_order'])
+    sync(db, fol, acc_id)
+    bot.data = book([pending('ETHUSDT', placed_ts=2_000)], [position(o)])
+    pump(f, fol)
+    assert [t for t in db.open_trades(account_id=acc_id) if t['pair'] == 'ETHUSDT']
+    assert not db.refusals(limit=5)
+
+
+def test_limit_already_passed_enters_market(tmp_path):
+    """AAVE 27.10.2026: шорт-лимит ниже рынка Upscale не берёт — вход по рынку, риск тот же."""
+    db, fake, bot, f, fol, notes, acc_id = setup(tmp_path)
+    fake.check_trigger = True
+    _index(fake, 101)                                     # шорт от 100, цена уже выше
+    pump(f, fol)
+    bot.data = book([_short()])
+    pump(f, fol)
+    posts = [c for c in fake.calls if c[0] == 'POST']
+    assert [c[2]['type'] for c in posts] == ['limit', 'market']
+    assert from_fp9(posts[1][2]['baseSize']) == 25        # 100 $ / (105 − 101)
+    t = db.trades(account_id=acc_id)[0]
+    assert t['state'] == 'pending' and float(t['limit_price']) == 101 and float(t['risk_usd']) == 100
+    assert any('цена уже прошла вход бота' in text for _, text in notes.users)
+
+
+def test_limit_passed_beyond_stop_not_entered(tmp_path):
+    db, fake, bot, f, fol, notes, acc_id = setup(tmp_path)
+    fake.check_trigger = True
+    _index(fake, 106)                                     # уже за стопом 105
+    pump(f, fol)
+    bot.data = book([_short()])
+    pump(f, fol)
+    assert [c[2]['type'] for c in fake.calls if c[0] == 'POST'] == ['limit']
+    assert db.trades(account_id=acc_id)[0]['state'] == 'error'
+    assert 'по рынку не входим' in db.refusals(limit=1)[0]['reason']
