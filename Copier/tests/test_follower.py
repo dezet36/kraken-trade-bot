@@ -308,3 +308,57 @@ def test_entry_filled_and_closed_between_syncs(tmp_path):
     t = db.trades(account_id=acc_id)[0]
     assert t['state'] == 'closed' and t['position_id'] == pid
     assert float(t['pnl_usd']) == 200 and t['entry_price']
+
+
+def _index(fake, price):
+    for m in fake.markets_list:
+        m['state']['indexPrice'] = to_fp9(price)
+
+
+def test_catch_up_places_waiting_orders_on_activation(tmp_path):
+    """Подключился, пока у бота висят заявки без налива: после активации они выставляются и ему."""
+    db, fake, bot, f, fol, notes, acc_id = setup(tmp_path, data=book([pending(), pending('ETHUSDT', placed_ts=2_000)]))
+    db.set_user(42, status='pending')                     # ещё на проверке — заявки мастера мимо
+    pump(f, fol)
+    assert not [c for c in fake.calls if c[0] == 'POST']
+
+    _index(fake, 101)                                     # лонг-лимит 100 ещё ждёт: цена выше
+    db.activate(42)
+    assert run(fol.catch_up_user(42)) == 2
+    posts = [c for c in fake.calls if c[0] == 'POST']
+    assert len(posts) == 2 and all(c[2]['type'] == 'limit' for c in posts)
+    assert from_fp9(posts[0][2]['triggerPrice']) == 100   # по цене мастера
+    assert {t['master_key'] for t in db.open_trades(account_id=acc_id)} == {'BTCUSDT@1000', 'ETHUSDT@2000'}
+    assert run(fol.catch_up_user(42)) == 0                # повторно — не дублирует
+
+
+def test_catch_up_skips_orders_price_already_reached(tmp_path):
+    db, fake, bot, f, fol, notes, acc_id = setup(tmp_path, data=book([pending()]))
+    db.set_user(42, status='pending')
+    pump(f, fol)
+    _index(fake, 99.5)                                    # лимит 100 налился бы сразу по рынку
+    db.activate(42)
+    assert run(fol.catch_up_user(42)) == 0
+    assert not [c for c in fake.calls if c[0] == 'POST']
+    assert 'при подключении' in db.refusals(limit=5)[0]['reason']
+
+
+def test_catch_up_stop_entry_waits_below_trigger(tmp_path):
+    db, fake, bot, f, fol, notes, acc_id = setup(tmp_path, data=book([pending(stop_entry=True)]))
+    db.set_user(42, paused=1)                             # на паузе — мимо
+    pump(f, fol)
+    _index(fake, 99)                                      # стоп-вход лонг 100 ещё не пробит
+    db.set_user(42, paused=0)
+    assert run(fol.catch_up_user(42)) == 1
+    entry = next(c for c in fake.calls if c[0] == 'POST')
+    assert entry[2]['type'] == 'stop_market'
+
+
+def test_catch_up_ignores_open_master_positions(tmp_path):
+    o = pending()
+    db, fake, bot, f, fol, notes, acc_id = setup(tmp_path, data=book([], [position(o)]))
+    db.set_user(42, status='pending')
+    pump(f, fol)
+    db.activate(42)
+    assert run(fol.catch_up_user(42)) == 0
+    assert not [c for c in fake.calls if c[0] == 'POST']

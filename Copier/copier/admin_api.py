@@ -253,7 +253,8 @@ class AdminApp:
         self.db.activate(tg_id, body.get('level'))
         self.db.audit('admin', 'activate', {'user': tg_id, 'level': self.db.user(tg_id)['level']})
         await announce_activation(self.notifier, tg_id)
-        return _json({'ok': True})
+        placed = await self.follower.catch_up_user(tg_id)
+        return _json({'ok': True, 'placed': placed})
 
     async def user_deactivate(self, request):
         tg_id = int(request.match_info['tg_id'])
@@ -307,8 +308,12 @@ class AdminApp:
         action = (await request.json()).get('action')
         if action in ('pause', 'resume'):
             self.db.set_account(acc['id'], paused=1 if action == 'pause' else 0)
+            if action == 'resume':
+                await self.follower.catch_up(acc)
         elif action in ('enable', 'disable'):
             self.db.set_account(acc['id'], enabled=1 if action == 'enable' else 0)
+            if action == 'enable':
+                await self.follower.catch_up(acc)
         elif action == 'sync':
             await self.follower.sync_account(acc)
         elif action == 'close_all':
@@ -430,6 +435,8 @@ class AdminApp:
         action = body.get('action')
         if action in ('pause_entries', 'resume_entries'):
             self.db.set_setting('entries_paused', action == 'pause_entries')
+            if action == 'resume_entries':
+                await self.follower.catch_up_all()
         elif action == 'close_everyone':
             if body.get('confirm') != 'ЗАКРЫТЬ':
                 return _json({'error': 'нужно подтверждение словом ЗАКРЫТЬ'}, 400)

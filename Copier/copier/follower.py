@@ -92,6 +92,21 @@ def position_entry(pos):
     return notional / size if size and notional else None
 
 
+def _still_waiting(rec, kind, price):
+    """
+    Цена ещё по ту сторону входа, где мастер ждёт: лимит — не дошла (лонг выше,
+    шорт ниже), стоп-вход — не пробит (лонг ниже, шорт выше). Иначе заявка
+    исполнилась бы сразу по рынку — не по цене мастера.
+    """
+    entry = _D(rec.get('limit_price'))
+    if price is None or entry is None:
+        return False
+    long_ = rec.get('direction') == 'LONG'
+    if kind == 'stop_market':
+        return price < entry if long_ else price > entry
+    return price > entry if long_ else price < entry
+
+
 def closed_result(info):
     """
     Итог закрытой позиции из GET /positions/{idx} (демо 27.10.2026): pnl — до
@@ -297,7 +312,48 @@ class Follower:
         if jobs:
             await asyncio.gather(*jobs)
 
-    async def enter(self, acc, user, ev, kind='limit'):
+    async def catch_up(self, acc):
+        """
+        Счёт начал копировать (участника активировали, подключён счёт, снята пауза):
+        заявки мастера, которые ещё ждут налива, выставляются и ему — по цене мастера,
+        пока рынок Upscale по ту же сторону входа, где ждёт мастер. Открытые позиции
+        мастера не догоняются: войти в идущую сделку по рынку — другая сделка.
+        Уже выставленные (и снятые участником) повторно не ставятся — create_trade.
+        """
+        if self.db.entries_paused() or not self.feed.entries_allowed():
+            return 0
+        acc = self.db.account(acc['id']) or acc
+        user = self.db.user(acc['tg_id'])
+        if not self.eligible(acc, user):
+            return 0
+        placed = 0
+        for key, rec in self.feed.master_pending().items():
+            ev = {'kind': 'new_order', 'key': key, 'strategy': rec.get('strategy'),
+                  'pair': rec.get('pair'), 'direction': rec.get('direction'), 'rec': rec}
+            kind = 'stop_market' if rec.get('stop_entry') else 'limit'
+            try:
+                if await self.enter(acc, user, ev, kind=kind, catch_up=True):
+                    placed += 1
+            except Exception as exc:                   # noqa: BLE001 — активация и меню не должны падать
+                log(f'исполнитель: догон {key} на счёте #{acc["id"]} — {exc!r}')
+        if placed:
+            log(f'исполнитель: счёт #{acc["id"]} догнал {placed} ждущих заявок мастера')
+        return placed
+
+    async def catch_up_user(self, tg_id):
+        placed = 0
+        for acc in self.db.accounts(tg_id=tg_id, enabled_only=True):
+            placed += await self.catch_up(acc)
+        return placed
+
+    async def catch_up_all(self):
+        placed = 0
+        for acc, _ in self._entry_targets():
+            placed += await self.catch_up(acc)
+        return placed
+
+    async def enter(self, acc, user, ev, kind='limit', catch_up=False):
+        """Заявка участника по заявке мастера; True — выставлена."""
         rec, key = ev['rec'], ev['key']
         async with self.lock(acc['id']):
             client = self.client(acc)
@@ -315,6 +371,11 @@ class Follower:
                 await self._key_failed(acc, err)
                 return
             market = markets.find(rec['pair'])
+            if catch_up and market is not None and not _still_waiting(rec, kind, mk.index_price(market)):
+                self.db.refuse(acc['id'], acc['tg_id'], key, rec.get('strategy'), rec.get('pair'),
+                               f'при подключении: цена {mk.index_price(market)} уже у входа мастера '
+                               f'{rec.get("limit_price")} или за ним — заявку не догоняем')
+                return
             own_open = self.db.open_trades(account_id=acc['id'])
             other_sides = self._other_sides(acc, rec['pair'], market)
             market_id = str((market or {}).get('id'))
@@ -370,7 +431,7 @@ class Follower:
                 self._leverage_ok[(acc['id'], market_id)] = lev
                 self.db.update_trade(trade_id, state='pending', entry_order=str(resp.get('id') or ''))
                 await self.notify.user(acc['tg_id'], self.text_placed(rec, decision, kind))
-                return
+                return True
 
     def _recent_status(self, acc, max_age_s=STATUS_FRESH_S):
         """Снимок счёта из сверки, если он свежий: вход без лишнего запроса к Upscale."""

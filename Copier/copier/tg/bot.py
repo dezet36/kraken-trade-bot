@@ -343,15 +343,20 @@ class TgBot:
             self.db.set_user(tg_id, paused=0 if u.get('paused') else 1)
             self.db.audit(tg_id, 'resume' if u.get('paused') else 'pause')
             await self.show(chat_id, self.main_screen(self.db.user(tg_id)), mid)
+            if u.get('paused'):
+                await self.follower.catch_up_user(tg_id)
         elif head == 'ap':
             acc = self._own_account(u, rest)
             if acc:
                 self.db.set_account(acc['id'], paused=0 if acc.get('paused') else 1)
                 self.db.audit(tg_id, 'account_resume' if acc.get('paused') else 'account_pause',
                               {'account': acc['id']})
+                was_paused = acc.get('paused')
                 acc = self.db.account(acc['id'])
                 await self.show(chat_id, screens.account_view(acc, self.db.account_status(acc),
                                                               self._summary(acc['id']), self.feed.master_risk_pct()), mid)
+                if was_paused:
+                    await self.follower.catch_up(acc)
         elif head in ('ax', 'ad', 'tc'):
             await self.ask_confirm(u, chat_id, mid, head, rest)
         elif data == 'dx':
@@ -436,6 +441,7 @@ class TgBot:
         acc = self.db.account(acc_id)
         await self.show(chat_id, screens.account_view(acc, self.db.account_status(acc),
                                                       self._summary(acc_id), self.feed.master_risk_pct()), mid)
+        await self.follower.catch_up(acc)
 
     async def ask_confirm(self, u, chat_id, mid, head, rest):
         if head == 'tc':
@@ -522,7 +528,9 @@ class TgBot:
             level = self.db.user(target)['level']
             self.db.audit(f'tg:{admin_id}', 'activate', {'user': target, 'level': level})
             await announce_activation(Notifier(self.api), target)
-            await self.show(chat_id, (f'✅ {name}: доступ открыт ({screens.LEVEL_TITLES[level]})', []), mid)
+            placed = await self.follower.catch_up_user(target)
+            await self.show(chat_id, (f'✅ {name}: доступ открыт ({screens.LEVEL_TITLES[level]})'
+                                      + (f', выставлено ждущих заявок бота: {placed}' if placed else ''), []), mid)
         elif head == 'ub':
             was = u['status']
             self.db.deactivate(target)

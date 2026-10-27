@@ -12,7 +12,7 @@ from copier.tg import bot as tgbot
 from copier.tg import screens
 from copier.tg.api import TgApi
 from copier.upscale import UpscaleClient
-from tests.helpers import FakeBot, FakeUpscale, Notes, run
+from tests.helpers import FakeBot, FakeUpscale, Notes, book, pending, run
 
 ADMIN = 111
 USER = 42
@@ -40,12 +40,12 @@ class FakeTg:
         return [b.get('callback_data') or b.get('url') for row in kb['inline_keyboard'] for b in row]
 
 
-def make(tmp_path):
+def make(tmp_path, data=None):
     db = DB(':memory:')
     fake_up = FakeUpscale()
     tg = FakeTg()
     f = feed.Feed(account='upscale', state_path=str(tmp_path / 'source_state.json'),
-                  fetch=FakeBot().fetch)
+                  fetch=FakeBot(data).fetch)
     factory = lambda key: UpscaleClient(key, send=fake_up.send)
     fol = Follower(db, f, Notes(), client_factory=factory)
     b = tgbot.TgBot(db, fol, f, api=TgApi(token='t', send=tg.send), client_factory=factory)
@@ -229,3 +229,22 @@ def test_account_view_shows_risk_in_dollars():
                                    {'accountBalance': 25_000, 'currentEquity': 25_100},
                                    stats.summarize([]), 1.0)
     assert 'Риск на сделку: 1% от баланса = 250.00 $' in text
+
+
+def test_activation_places_waiting_master_orders(tmp_path):
+    """Владелец активировал участника, а у бота висит заявка без налива — она выставляется и ему."""
+    from copier import crypto
+    from copier.upscale import to_fp9
+    db, b, tg, fake_up = make(tmp_path, data=book([pending()]))
+    db.touch_user(USER)
+    db.set_user(USER, status='pending', upscale_uid='user-1')
+    key_id = db.add_key(USER, crypto.encrypt('usk_k'), crypto.fingerprint('usk_k'))
+    db.add_account(USER, key_id, 'acc-1', 'demo', 10_000, 'active_evaluation')
+    run(b.feed.poll())                                    # книга бота прочитана, участник ещё не активен
+    for m in fake_up.markets_list:
+        m['state']['indexPrice'] = to_fp9(101)
+    run(b.handle_update(press(ADMIN, f'ua:{USER}:auto')))
+    assert db.user(USER)['status'] == 'active'
+    assert [c for c in fake_up.calls if c[0] == 'POST' and c[1] == '/orders']
+    assert 'выставлено ждущих заявок бота: 1' in tg.last(ADMIN)[1]
+    assert any(who == USER and 'заявка выставлена' in t for who, t in b.follower.notify.users)
