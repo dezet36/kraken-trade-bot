@@ -132,7 +132,8 @@ function book(acc, a, b) {
       `В правилах размер счёта ${money(b.deposit_rules, 0)} — применится с нового этапа (этап ${b.phase} начат с ${money(b.start, 0)}).`));
   }
   if ((b.waiting || []).length) {
-    out.push(h('div', { class: 'subhead' }, `Ждут исполнения · ${b.waiting.length}`), b.waiting.map(it => instruction(a, it, w)));
+    out.push(fold(`${a.id}:wait`, `Ждут исполнения · ${b.waiting.length}`, 'что поставить или закрыть руками',
+      b.waiting.map(it => instruction(a, it, w))));
   } else if (!b.started && !ex) {
     out.push(h('div', { class: 'muted', style: { fontSize: '13px', marginTop: '14px' } },
       'Заявок ещё не было. Когда стратегии счёта найдут сетап, инструкция придёт в Telegram и появится здесь: пара, сторона, вход, стоп, тейки, объём.'));
@@ -163,10 +164,29 @@ function book(acc, a, b) {
       h('span', { class: 'muted', style: { fontSize: '12px' } }, 'аварийно: позиции — по рынку, заявки — снять, счёт — выключить')));
   }
   if ((b.instructions || []).length) {
-    out.push(h('details', { class: 'log' }, h('summary', null, `${ex ? 'События счёта' : 'Все инструкции'} · последние ${b.instructions.length}`),
+    out.push(fold(`${a.id}:log`, `${ex ? 'События счёта' : 'Все инструкции'} · последние ${b.instructions.length}`, null,
       b.instructions.map(it => instruction(a, it, false))));
   }
   return h('div', null, out);
+}
+
+/* Свёрнутые блоки инструкций. Сделки счёта может исполнять API (копировщик,
+   27.10.2026) — тогда «поставьте заявку… Готово» только мешает: блок свёрнут,
+   пока его не раскроют, и выбор помнится по счёту в этом браузере. Страница
+   перерисовывается по опросу целиком — без памяти блок раскрывался бы снова. */
+const FOLD_KEY = 'kraken.accounts.open';
+const opened = (() => {
+  try { return JSON.parse(localStorage.getItem(FOLD_KEY) || '{}') || {}; } catch (err) { return {}; }
+})();
+
+function fold(key, label, hint, body) {
+  const el = h('details', { class: 'log fold', open: opened[key] === true },
+    h('summary', null, label, hint ? h('span', { class: 'muted' }, ` · ${hint}`) : null), body);
+  el.addEventListener('toggle', () => {
+    if (el.open) opened[key] = true; else delete opened[key];
+    try { localStorage.setItem(FOLD_KEY, JSON.stringify(opened)); } catch (err) { /* без хранилища — на сеанс */ }
+  });
+  return el;
 }
 
 const pairCell = p => h('span', { style: { fontWeight: 600 } }, p.pair.replace(/USDT$/, ''), ' ',

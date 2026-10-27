@@ -448,6 +448,7 @@ dialog.sheet::backdrop { background: rgba(0, 0, 0, .32); backdrop-filter: blur(2
 .instr-b { font-size: 13px; color: var(--text-2); margin-top: 6px; line-height: 1.55; }
 details.log summary { cursor: pointer; color: var(--accent); font-size: 14px; margin-top: 14px; }
 details.log[open] summary { margin-bottom: 10px; }
+details.fold summary .muted { font-size: 13px; }
 
 .subhead { font-size: 13px; font-weight: 600; color: var(--text-3); margin: 18px 0 8px; }
 
