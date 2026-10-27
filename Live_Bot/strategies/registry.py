@@ -60,6 +60,8 @@ REGISTRY = (
     Strategy('FIB12', 'Фибо 12ч', 'Фибо 12ч', 'strategies.fib12.adapter', ('fib12',), '#a3367a', '#e07ab5'),
     # Восьмая — против толпы (10.10.2026): шорт при фандинге от +5 б.п.
     Strategy('CROWD', 'Против толпы', 'Толпа', 'strategies.crowd.adapter', ('crowd',), '#2f8a5c', '#4cc285'),
+    # Девятая — сетапы SMC с целью на имбалансе 4ч (27.10.2026), кандидат рядом с SMC.
+    Strategy('SMCF', 'SMC → имбаланс 4ч', 'SMC имб.', 'strategies.smcf.adapter', ('smcf',), '#b45309', '#f59e0b'),
 )
 
 _BY_CODE = {s.code: s for s in REGISTRY}

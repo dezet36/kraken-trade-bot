@@ -47,6 +47,8 @@ SETTINGS_FILE = os.path.join(config.DATA_DIR, 'runtime_settings.json')
 # протокола (research/fibz/PROTOCOL.md); торгуется рядом со старой ФИБО.
 # CROWD (против толпы) добавлена 10.10.2026 кандидатом: строгую приёмку VAL не
 # прошла на волосок (t 1.98), HOLD > 0 (research/crowdz/PROTOCOL.md).
+# SMCF (SMC → имбаланс 4ч) добавлена 27.10.2026 кандидатом: те же сетапы, что у
+# SMC, цель — имбаланс 4ч (research/luxsmc/PROTOCOL_GRAFT.md, вариант X5).
 # С 08.10.2026 список — из реестра стратегий (strategies/registry.py).
 from strategies import registry as _registry
 STRATEGIES = _registry.codes()
