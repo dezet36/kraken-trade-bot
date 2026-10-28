@@ -237,7 +237,8 @@ class TestTheScreens:
         env.broker.close_one('LLM', 'DOGEUSDT')
         env.broker.close_one('SMC', 'XRPUSDT')
         _t, text, _kb = env.ctl._render('st:all')
-        assert 'ИИ · 1 сд' in text and 'SMC · 1 сд' in text and 'Фибо · сделок нет' in text
+        # «Фибо V1» — короткое имя старой ФИБО с 28.10.2026 (рядом Фибоначчи V2).
+        assert 'ИИ · 1 сд' in text and 'SMC · 1 сд' in text and 'Фибо V1 · сделок нет' in text
 
     def test_the_model_text_is_escaped(self, env):
         open_position(env, why='цена < L8 & ждём')

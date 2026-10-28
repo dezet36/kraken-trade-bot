@@ -49,7 +49,9 @@ class Strategy:
 
 # Порядок — порядок обхода в цикле бота и показа на панели и в Telegram.
 REGISTRY = (
-    Strategy('FIBO', 'Фибоначчи', 'Фибо', 'strategies.fibo.adapter', ('zone_a', 'zone_b'),
+    # «V1» в имени — с 28.10.2026: рядом новая Фибоначчи V2; код FIBO прежний
+    # (счёт, журналы, копирование сделок не меняются).
+    Strategy('FIBO', 'Фибоначчи V1', 'Фибо V1', 'strategies.fibo.adapter', ('zone_a', 'zone_b'),
              '#2a78d6', '#3987e5', detect_rank=9),
     Strategy('SMC', 'Smart Money', 'SMC', 'strategies.smc.adapter', ('smc',), '#eb6834', '#d95926'),
     Strategy('LEVELS', 'Уровни', 'Уровни', 'strategies.levels.adapter', ('levels',), '#17a398', '#2bbfb2'),
@@ -62,6 +64,11 @@ REGISTRY = (
     Strategy('CROWD', 'Против толпы', 'Толпа', 'strategies.crowd.adapter', ('crowd',), '#2f8a5c', '#4cc285'),
     # Девятая — сетапы SMC с целью на имбалансе 4ч (27.10.2026), кандидат рядом с SMC.
     Strategy('SMCF', 'SMC → имбаланс 4ч', 'SMC имб.', 'strategies.smcf.adapter', ('smcf',), '#b45309', '#f59e0b'),
+    # Десятая и одиннадцатая — Фибоначчи V2 (28.10.2026): сетка на быстрый импульс,
+    # схема владельца; две версии стопа рядом — за началом импульса и 0.68.
+    Strategy('FIBV2', 'Фибоначчи V2', 'Фибо V2', 'strategies.fibv2.adapter', ('fibv2',), '#0e7490', '#22d3ee'),
+    Strategy('FIBV2L', 'Фибоначчи V2 · стоп 0.68', 'Фибо V2 0.68', 'strategies.fibv2l.adapter', ('fibv2l',),
+             '#6d28d9', '#a78bfa'),
 )
 
 _BY_CODE = {s.code: s for s in REGISTRY}

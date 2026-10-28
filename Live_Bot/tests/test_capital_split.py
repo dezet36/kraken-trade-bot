@@ -31,7 +31,8 @@ class TestCapitalSplit:
         поддавалась настройке.
         """
         assert set(config.PAPER_START_BALANCES) == {'FIBO', 'SMC', 'LEVELS',
-                                                    'RSIBB', 'LLM', 'SMCS', 'FIB12', 'CROWD', 'SMCF'}
+                                                    'RSIBB', 'LLM', 'SMCS', 'FIB12', 'CROWD', 'SMCF',
+                                                    'FIBV2', 'FIBV2L'}
 
     def test_one_strategy_budget_does_not_move_the_others(self, monkeypatch):
         """
