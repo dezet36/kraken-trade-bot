@@ -1,0 +1,138 @@
+=== ПРИЁМКА (PROTOCOL_WIDE.md) ===
+  1. R на сделку > 0 и t ≥ 2: НЕТ — 549 сд, -0.185R, t -2.00
+  2. налив насквозь: R на сделку > 0: НЕТ — -0.205R
+  3. итог R > 0 в 3 периодах из 5: НЕТ — 0 из 5
+  ИТОГ: не прошло
+
+набор по периодам: bear — DOTUSDT, XTZUSDT, AXSUSDT, AAVEUSDT, BCHUSDT, ICPUSDT, THETAUSDT, FILUSDT, ALGOUSDT, XLMUSDT, ETCUSDT, TRXUSDT, COMPUSDT; mid1 — BCHUSDT, OPUSDT, ARBUSDT, MTLUSDT, APTUSDT, INJUSDT, WAVESUSDT, STXUSDT, ETCUSDT, APEUSDT, GALAUSDT, CFXUSDT, LDOUSDT, NEARUSDT, ARPAUSDT, 1000LUNCUSDT, BLURUSDT, ATOMUSDT, SANDUSDT, SHIB1000USDT; mid2 — 1000PEPEUSDT, PEOPLEUSDT, WIFUSDT, ORDIUSDT, ONDOUSDT, 1000RATSUSDT, 1000BONKUSDT, NEARUSDT, INJUSDT, TRBUSDT, JASMYUSDT, 1000FLOKIUSDT, WLDUSDT, SHIB1000USDT, 1000TURBOUSDT, ENAUSDT, LDOUSDT, POPCATUSDT, GALAUSDT, CRVUSDT; 12m — SUIUSDT, 1000PEPEUSDT, FARTCOINUSDT, WIFUSDT, MOODENGUSDT, TRUMPUSDT, VIRTUALUSDT, HYPEUSDT, ENAUSDT, AAVEUSDT, POPCATUSDT, 1000BONKUSDT, WLDUSDT, KAITOUSDT, PNUTUSDT, ONDOUSDT, NEARUSDT, ARBUSDT, TRBUSDT, OPUSDT; fresh — HYPEUSDT, ZECUSDT, WLDUSDT, NEARUSDT, BEATUSDT, HUSDT, LABUSDT, SUIUSDT, ENAUSDT, 1000PEPEUSDT, XLMUSDT, TAOUSDT, ONDOUSDT, FARTCOINUSDT, AAVEUSDT, VELVETUSDT, ESPORTSUSDT, XPLUSDT, ALLOUSDT, TRUMPUSDT
+месяцев: bear 17.9, mid1 12.0, mid2 10.0, 12m 14.6, fresh 2.7
+bear: заявок с толпой 572, пар без фандинга 0
+mid1: заявок с толпой 509, пар без фандинга 0
+mid2: заявок с толпой 582, пар без фандинга 0
+12m: заявок с толпой 773, пар без фандинга 0
+fresh: заявок с толпой 129, пар без фандинга 0
+
+толпа, пять периодов:
+сделок              549.000
+в месяц               9.584
+плюсовых              0.155
+дошли до цели 1       0.233
+R на сделку          -0.185
+±95%                  0.181
+итог R             -101.418
+PF                    0.784
+макс. просадка R    128.387
+средний плюс R        4.323
+средний минус R      -1.011
+держали, ч           20.995
+стоп, %               1.643
+
+насквозь, пять периодов:
+сделок              545.000
+в месяц               9.514
+плюсовых              0.150
+дошли до цели 1       0.224
+R на сделку          -0.205
+±95%                  0.181
+итог R             -111.547
+PF                    0.762
+макс. просадка R    134.826
+средний плюс R        4.366
+средний минус R      -1.014
+держали, ч           20.690
+стоп, %               1.645
+
+без толпы, пять периодов:
+сделок              949.000
+в месяц              16.566
+плюсовых              0.166
+дошли до цели 1       0.244
+R на сделку          -0.103
+±95%                  0.148
+итог R              -97.359
+PF                    0.879
+макс. просадка R    138.579
+средний плюс R        4.456
+средний минус R      -1.013
+держали, ч           23.337
+стоп, %               1.799
+
+по периодам (толпа): сделок | в месяц | плюсовых | R на сделку | итог R | просадка R
+  bear    152   8.5   16% -0.198   -30.0  44.1
+  mid1     98   8.2   17% -0.058    -5.7  18.9
+  mid2    107  10.7   11% -0.476   -50.9  50.9
+  12m     155  10.6   17% -0.056    -8.6  45.0
+  fresh    37  13.6   14% -0.167    -6.2  24.0
+
+по сторонам (толпа):
+      count   mean     sum
+side                      
+лонг    131 -0.276 -36.131
+шорт    418 -0.156 -65.287
+
+по парам (толпа, все периоды): сделок, R на сделку, итог R
+               count  mean    sum
+pair                             
+ENAUSDT           19 -1.07 -20.36
+AAVEUSDT          36 -0.42 -15.26
+ONDOUSDT          18 -0.64 -11.49
+ETCUSDT           22 -0.52 -11.38
+DOTUSDT            8 -1.09  -8.68
+OPUSDT            13 -0.67  -8.68
+PEOPLEUSDT        15 -0.57  -8.56
+ALGOUSDT           9 -0.88  -7.92
+GALAUSDT           8 -0.97  -7.79
+VIRTUALUSDT        8 -0.95  -7.63
+TRUMPUSDT         12 -0.62  -7.44
+BCHUSDT           17 -0.38  -6.52
+1000TURBOUSDT      6 -1.04  -6.26
+WIFUSDT           16 -0.38  -6.00
+1000FLOKIUSDT      5 -1.09  -5.43
+FILUSDT           13 -0.41  -5.37
+1000BONKUSDT      13 -0.41  -5.31
+APEUSDT            6 -0.82  -4.92
+ARPAUSDT           4 -1.09  -4.37
+XTZUSDT           11 -0.39  -4.29
+ORDIUSDT           4 -1.07  -4.27
+INJUSDT           14 -0.30  -4.24
+SHIB1000USDT       8 -0.51  -4.07
+ICPUSDT           14 -0.24  -3.39
+TAOUSDT            3 -1.12  -3.35
+BEATUSDT           3 -1.05  -3.16
+XPLUSDT            3 -0.89  -2.68
+ATOMUSDT           2 -1.11  -2.23
+LABUSDT            2 -1.07  -2.14
+HUSDT              2 -1.05  -2.11
+APTUSDT            7 -0.30  -2.09
+VELVETUSDT         2 -1.04  -2.08
+STXUSDT            7 -0.29  -2.00
+CFXUSDT            4 -0.44  -1.76
+ARBUSDT            6 -0.23  -1.41
+ALLOUSDT           1 -1.11  -1.11
+SANDUSDT           1 -1.09  -1.09
+1000RATSUSDT       2 -0.54  -1.08
+MTLUSDT            1 -1.07  -1.07
+AXSUSDT            9 -0.11  -0.99
+POPCATUSDT        12 -0.08  -0.98
+PNUTUSDT           9 -0.11  -0.96
+ESPORTSUSDT        2  0.05   0.10
+FARTCOINUSDT       4  0.12   0.48
+COMPUSDT          15  0.07   1.05
+THETAUSDT         11  0.16   1.79
+MOODENGUSDT        6  0.34   2.01
+WLDUSDT           12  0.18   2.22
+JASMYUSDT          3  0.99   2.97
+HYPEUSDT          12  0.30   3.55
+XLMUSDT            9  0.43   3.86
+TRXUSDT           11  0.36   3.95
+WAVESUSDT          1  3.96   3.96
+KAITOUSDT          6  0.71   4.27
+SUIUSDT           12  0.45   5.35
+ZECUSDT            1  6.60   6.60
+NEARUSDT          21  0.32   6.65
+BLURUSDT          11  0.61   6.72
+LDOUSDT            6  1.21   7.25
+CRVUSDT            7  1.09   7.64
+1000PEPEUSDT       6  1.52   9.12
+TRBUSDT           10  0.92   9.20
+1000LUNCUSDT       8  2.72  21.75
