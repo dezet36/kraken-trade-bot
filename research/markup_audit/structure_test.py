@@ -1,7 +1,7 @@
 """
 Классическая структура в живой SMC (PROTOCOL_STRUCTURE.md, записан до расчёта).
 
-    python research/markup_audit/structure_test.py gen fractal|protected [pool|other] [--reverse] [--workers=N]
+    python research/markup_audit/structure_test.py gen fractal|protected [pool|other|oos|x12] [--reverse] [--workers=N]
     python research/markup_audit/structure_test.py eval [other]
 
 gen — строки стенда «глазами бота» (research/smc_lab_live._job) сегодняшним
@@ -54,15 +54,12 @@ def gen(mode, sample, reverse=False):
     import backtest_smc as bt
     import smc_lab_eval as E
     D.PERIODS['fresh'] = 'backtest_cache_fresh20'
-    if sample == 'pool':
-        pairs = list(bt.DEFAULT_PAIRS)
-    else:
-        pairs = sorted(set(E.rows('bear', 'live20').pair))
+    pairs = {p: sample_pairs(sample, p) for p in PERIODS}
     os.makedirs(os.path.join(OUT, 'parts'), exist_ok=True)
     # fresh считается только после конца 12m (раньше — уже в 12m), с запасом 2 суток
     since = {p: 0 for p in PERIODS}
     since['fresh'] = E.END_12M_MS - 2 * 86_400_000
-    jobs = [(mode, sample, p, D.PERIODS[p], pair, since[p]) for p in PERIODS for pair in pairs
+    jobs = [(mode, sample, p, D.PERIODS[p], pair, since[p]) for p in PERIODS for pair in pairs[p]
             if not os.path.exists(path(mode, sample, p)) and not os.path.exists(part(mode, sample, p, pair))]
     if reverse:
         jobs.reverse()
@@ -75,10 +72,32 @@ def gen(mode, sample, reverse=False):
             print(f'  {mode} {sample} {period:6s} {pair:13s} строк {len(rows):6d} {sec:6.0f} с '
                   f'(всего {time.time() - t0:.0f} с)', flush=True)
     for p in PERIODS:
-        files = [part(mode, sample, p, pair) for pair in pairs]
-        if not os.path.exists(path(mode, sample, p)) and all(os.path.exists(x) for x in files):
+        files = [part(mode, sample, p, pair) for pair in pairs[p]]
+        if files and not os.path.exists(path(mode, sample, p)) and all(os.path.exists(x) for x in files):
             frames = [x for x in (pd.read_pickle(x) for x in files) if len(x)]
             _save(pd.concat(frames, ignore_index=True), path(mode, sample, p))
+
+
+def sample_pairs(sample, period):
+    """Пары выборки в периоде.
+    pool  — 10 пар SMC;  other — раскладка live20 (16 пар, с пулом);
+    oos   — пары списка бота вне пула, какие есть в кэше периода (28.10.2026);
+    x12   — пары кэша 12m вне списка бота, только период 12m (как live12x)."""
+    import ai_doctrine as D
+    import backtest_smc as bt
+    import smc_lab_eval as E
+    D.PERIODS['fresh'] = 'backtest_cache_fresh20'
+    if sample == 'pool':
+        return list(bt.DEFAULT_PAIRS)
+    if sample == 'other':
+        return sorted(set(E.rows('bear', 'live20').pair))
+    cache = os.path.join(RESEARCH, D.PERIODS[period])
+    have = {f.rsplit('_', 1)[0] for f in os.listdir(cache) if f.endswith('_5m.pkl')}
+    if sample == 'oos':
+        return sorted(x for x in D.PAIRS if x in have and x not in bt.DEFAULT_PAIRS)
+    if sample == 'x12':
+        return sorted(have - set(D.PAIRS)) if period == '12m' else []
+    raise ValueError(sample)
 
 
 def path(mode, sample, period):
@@ -132,7 +151,7 @@ def stats(f, months):
 def evaluate(sample):
     import smcr_live as SL                                        # fresh → кэш 20 пар, BAR_H
     E = SL.E
-    pairs = tuple(E.POOL10) if sample == 'pool' else tuple(sorted(set(E.rows('bear', 'live20').pair)))
+    pairs = tuple(sample_pairs('pool' if sample == 'pool' else 'other', 'bear'))
     trades, funnel, months = [], [], {}
     for period in PERIODS:
         for mode in MODES:
