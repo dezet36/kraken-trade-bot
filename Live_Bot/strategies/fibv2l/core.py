@@ -10,17 +10,19 @@ from analysis import impulse
 
 
 def _passes(q, rules):
-    """Быстрый ли это импульс — или долгое движение. (да/нет, причина)."""
+    """Быстрый ли это импульс — или долгое движение. (да/нет, причина).
+    Слово «импульс» в причине — только про размер: воронка отказов
+    (strategies/scan_report) сводит такие строки к «импульс слишком мал»."""
     if q['size_pct'] < rules.MIN_IMPULSE_PCT:
         return False, f"импульс {q['size_pct']:.1f}% меньше {rules.MIN_IMPULSE_PCT:g}%"
     if not rules.MIN_BARS <= q['bars'] <= rules.MAX_BARS:
-        return False, f"импульс {q['bars']} свечей — нужно {rules.MIN_BARS}–{rules.MAX_BARS}"
+        return False, f"ход {q['bars']} свечей — нужно {rules.MIN_BARS}–{rules.MAX_BARS}"
     if q['atr_per_bar'] < rules.MIN_ATR_PER_BAR:
         return False, f"медленно: {q['atr_per_bar']:.2f} ATR за свечу"
     if q['dir_share'] < rules.MIN_DIR_SHARE:
         return False, f"свечей по ходу {q['dir_share'] * 100:.0f}%"
     if len(q['gaps']) < rules.MIN_GAPS:
-        return False, 'нет имбаланса внутри импульса'
+        return False, 'нет имбаланса внутри хода'
     return True, 'ok'
 
 
@@ -68,7 +70,7 @@ def evaluate(o, h, l, c, bar_high, bar_low, price, btc_return, rules):
     if len(c) < max(rules.START_LOOKBACK, rules.BREAKOUT_LOOKBACK_HOURS) + rules.MAX_BARS + 2:
         return None, 'мало свечей'
     atr = impulse.atr_sma(h, l, c, rules.ATR_PERIOD)
-    found, reason = [], 'импульс не зафиксирован'
+    found, reason = [], 'нет первой коррекции к 38.2%'
     for d in (1, -1):
         _, state = impulse.legs(h, l, d, rules.FIX_LEVEL, rules.START_LOOKBACK, rules.MAX_TRACK_BARS)
         if not impulse.fixed_now(h, l, d, state, rules.FIX_LEVEL, bar_high, bar_low):
@@ -85,7 +87,7 @@ def evaluate(o, h, l, c, bar_high, bar_low, price, btc_return, rules):
             reason = 'откат уже за стопом'
             continue
         if (price - q['end']) * d >= 0:
-            reason = 'цена вернулась к концу импульса'
+            reason = 'цена вернулась к концу хода'
             continue
         limit = lv['entry'] * (1 + d * rules.LIMIT_OFFSET_PCT)
         stop_pct = abs(limit - lv['stop']) / limit * 100

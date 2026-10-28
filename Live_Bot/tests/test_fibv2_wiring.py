@@ -122,7 +122,7 @@ class TestSetup:
 
     def test_nothing_before_the_first_38_correction(self):
         setup, reason = self.evaluate(drop_market(), 94.0, 91.2, 93.9)        # откат меньше 38.2%
-        assert setup is None and reason == 'импульс не зафиксирован'
+        assert setup is None and reason == 'нет первой коррекции к 38.2%'
 
     def test_slow_move_is_not_an_impulse(self):
         o, h, l, c = drop_market()
@@ -174,6 +174,16 @@ def fibv2(monkeypatch):
 
     monkeypatch.setattr(adapter, 'fetch_ohlcv', fake)
     return adapter, ts[-1] + pd.Timedelta(minutes=7)
+
+
+class TestFunnelLabels:
+    def test_only_size_refusals_read_as_small_impulse(self):
+        """Воронка сводит строки со словом «импульс» к «импульс слишком мал» —
+        остальные причины V2 этого слова не содержат."""
+        from strategies import scan_report
+        assert scan_report._label('нет первой коррекции к 38.2%') != 'импульс слишком мал'
+        assert scan_report._label('ход 12 свечей — нужно 3–8') != 'импульс слишком мал'
+        assert scan_report._label('импульс 2.1% меньше 3%') == 'импульс слишком мал'
 
 
 class TestAdapter:

@@ -72,7 +72,7 @@ def analyze_market(pair, client=None, now=None):
         return None
     key = (setup['direction'], str(df['timestamp'].iloc[setup['s']]), str(df['timestamp'].iloc[setup['e']]))
     if _signaled.get(pair) == key:
-        _last_reason[pair] = 'по этому импульсу сигнал уже был'
+        _last_reason[pair] = 'по этому ходу сигнал уже был'
         return None
     _signaled[pair] = key
     log(f"   {pair}: импульс {setup['side']} {setup['start']:.6g} → {setup['end']:.6g} "
